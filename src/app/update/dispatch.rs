@@ -1320,11 +1320,12 @@ impl OpenCADStudio {
                             let handle = crate::sys::file_dialog()
                                 .set_title(crate::t!("Select External Reference File").as_ref())
                                 .add_filter(
-                                    crate::t!("CAD Files").as_ref(),
-                                    &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"],
+                                    crate::tr!("ifc2plan", "reference-files"),
+                                    &["dwg", "dxf", "bak", "ifc", "DWG", "DXF", "BAK", "IFC"],
                                 )
                                 .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
                                 .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+                                .add_filter("IFC (*.ifc)", &["ifc", "IFC"])
                                 .add_filter(crate::t!("Backup Files").as_ref(), &["bak", "BAK"])
                                 .pick_file()
                                 .await;
@@ -1551,6 +1552,12 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AttOutSave(_, None) | Message::AttInPicked(None) => Task::none(),
+            Message::TableCellsPaste(text) => {
+                if let Some(text) = text {
+                    self.paste_into_table_cells(&text);
+                }
+                Task::none()
+            }
             Message::AttInPicked(Some(text)) => {
                 self.on_attin_text(text);
                 Task::none()
@@ -3308,6 +3315,10 @@ impl OpenCADStudio {
                 {
                     return Task::none();
                 }
+                let (cycled, moved) = self.cycle_object_snap();
+                if cycled {
+                    return Task::batch([moved, self.focus_cmd_input()]);
+                }
 
                 let i = self.active_tab;
                 let n = self.tabs[i].dyn_fields.len();
@@ -3317,7 +3328,7 @@ impl OpenCADStudio {
                     // to the constrained point now (#356).
                     self.refresh_active_cmd_preview(i);
                 }
-                self.focus_cmd_input()
+                Task::batch([moved, self.focus_cmd_input()])
             }
 
             Message::DynTabPrev => {
@@ -8655,6 +8666,23 @@ impl OpenCADStudio {
                 use super::super::PasteFocus;
                 if focus == PasteFocus::Field {
                     Task::none()
+                } else if self.mtext_editor.is_none()
+                    && self.tabs[self.active_tab].scene.table_cells.is_some()
+                {
+                    // Selected cells take the clipboard text; the command
+                    // line's own paste of it is undone.
+                    if focus == PasteFocus::CommandLine {
+                        self.command_line.input.clear();
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    return Task::perform(
+                        crate::sys::read_clipboard_text(),
+                        Message::TableCellsPaste,
+                    );
+                    #[cfg(not(target_arch = "wasm32"))]
+                    iced::clipboard::read_text().map(|result| {
+                        Message::TableCellsPaste(result.ok().map(|text| (*text).clone()))
+                    })
                 } else if !self.clipboard.is_empty() {
                     self.update(Message::Command("PASTECLIP".to_string()))
                 } else if focus == PasteFocus::CommandLine

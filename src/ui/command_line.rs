@@ -58,6 +58,9 @@ pub enum ContentKind {
     Block,
     HatchPattern,
     View,
+    TextStyle,
+    DimStyle,
+    VisualStyle,
 }
 
 impl ContentKind {
@@ -68,6 +71,9 @@ impl ContentKind {
             Self::Block => "INSERT",
             Self::HatchPattern => "HATCH",
             Self::View => "VIEW",
+            Self::TextStyle => "STYLE",
+            Self::DimStyle => "DIMSTYLE",
+            Self::VisualStyle => "VISUALSTYLES",
         }
     }
 
@@ -77,6 +83,9 @@ impl ContentKind {
             Self::Block => t!("Block"),
             Self::HatchPattern => t!("Hatch"),
             Self::View => t!("View"),
+            Self::TextStyle => t!("Text Style"),
+            Self::DimStyle => t!("Dimension Style"),
+            Self::VisualStyle => t!("Visual Style"),
         }
     }
 }
@@ -281,7 +290,7 @@ pub struct CommandLine {
     /// replace normal command-name autocomplete, allowing commands to offer
     /// drawing-specific values such as layers, blocks or styles.
     pub contextual_suggestions: Vec<crate::command::CommandSuggestion>,
-    /// Layers, blocks, hatch patterns and named views that contain
+    /// Layers, blocks, hatch patterns, named views and styles that contain
     /// `content_input`, shown under the command names while no command runs.
     content_matches: Vec<ContentMatch>,
     /// The typed text that `content_matches` were found for. When the input
@@ -1348,13 +1357,16 @@ impl CommandLine {
                         if let Some(summary) =
                             crate::command::command_summary(target.unwrap_or(cmd))
                         {
-                            label = label.push(suggestion_summary(summary, is_selected));
+                            label = label
+                                .align_y(iced::Top)
+                                .push(suggestion_summary(summary, is_selected));
                         }
                     }
 
                     let row = button(label)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
+                        .clip(true)
                         .padding(ROW_PAD)
                         .style(move |theme: &Theme, status| {
                             suggestion_row_style(theme, status, is_selected)
@@ -1757,7 +1769,8 @@ fn suggestion_summary<'a>(
 ) -> Element<'a, Message> {
     text(summary)
         .size(ui_text::UI)
-        .wrapping(iced::widget::text::Wrapping::None)
+        .width(Length::Fill)
+        .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
         .style(move |theme: &Theme| {
             let base = if is_selected {
                 crate::ui::style::chrome::strong(theme)
@@ -1799,7 +1812,7 @@ fn suggestion_row_style(theme: &Theme, status: button::Status, is_selected: bool
 
 /// The drawing names that contain `needle`, ignoring case, for the
 /// suggestion popup: names that start with it first, then by kind (layers,
-/// blocks, hatch patterns, views) and name; at most [`CONTENT_LIMIT`]. An
+/// blocks, hatch patterns, views, text, dimension and visual styles) and name; at most [`CONTENT_LIMIT`]. An
 /// AutoLISP line (`(`...) finds none.
 pub fn ranked_content<'a>(
     needle: &str,
@@ -2028,6 +2041,74 @@ mod tests {
             Some("LTSCALE"),
             "Enter must run the highlighted pre-selection"
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn long_suggestion_descriptions_wrap_inside_the_command_bar() {
+        use iced::widget::{container, text_editor};
+        use iced_test::simulator::Simulator;
+
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.command_aliases.clear();
+        let history = text_editor::Content::new();
+
+        for (command, width, must_wrap) in [
+            ("IMPORT", 340.0, true),
+            ("IMPORT", 720.0, false),
+            ("PASTESPEC", 720.0, true),
+        ] {
+            line.input = command.into();
+            let summary = crate::command::command_summary(command).unwrap();
+            let view =
+                container(line.view(true, false, &history, 600.0, false, false, false, false))
+                    .width(width);
+            let mut ui = Simulator::with_size(iced::Settings::default(), (900.0, 300.0), view);
+            let name_bounds = ui.find(command).expect("the command name").bounds();
+            let text_bounds = ui.find(summary).expect("the command description").bounds();
+            let wraps = text_bounds.height > name_bounds.height * 1.5;
+            assert!(!must_wrap || wraps, "{command} should wrap at {width}px");
+            if command == "IMPORT" {
+                let following = ui.find("IMPORTOBJ").expect("the next suggestion").bounds();
+                assert!(following.y >= text_bounds.y + text_bounds.height);
+            }
+            let folder = tempfile::tempdir().unwrap();
+            ui.snapshot(&iced::Theme::Dark)
+                .unwrap()
+                .matches_image(folder.path().join("autocomplete.png"))
+                .unwrap();
+            let png = std::fs::read_dir(folder.path())
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let pixels = image::open(png).unwrap().to_rgba8();
+            let scale = pixels.width() as f32 / 900.0;
+            let outside = (width * scale).ceil() as u32 + 2;
+            let top = (text_bounds.y * scale).floor() as u32;
+            let bottom = ((text_bounds.y + text_bounds.height) * scale).ceil() as u32;
+            for y in top..bottom {
+                let background = pixels.get_pixel(pixels.width() - 1, y);
+                assert!(
+                    (outside..pixels.width()).all(|x| pixels.get_pixel(x, y) == background),
+                    "{command} description painted past the {width}px command bar"
+                );
+            }
+            if wraps {
+                let text_left = (text_bounds.x * scale).ceil() as u32;
+                let text_right = ((text_bounds.x + text_bounds.width) * scale).floor() as u32;
+                let last_line = bottom - (name_bounds.height * scale).round() as u32;
+                assert!(
+                    (last_line..bottom).any(|y| {
+                        let background = pixels.get_pixel(text_left - 3, y);
+                        (text_left..text_right).any(|x| pixels.get_pixel(x, y) != background)
+                    }),
+                    "{command} did not draw its last line"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2308,6 +2389,25 @@ mod tests {
         assert_eq!(line.autocomplete_cursor, Some(0));
         line.autocomplete_prev();
         assert!(line.selected_content().is_some());
+    }
+
+    #[test]
+    fn each_kind_of_drawing_name_has_the_icon_of_its_command() {
+        use super::ContentKind::*;
+        for kind in [
+            Layer,
+            Block,
+            HatchPattern,
+            View,
+            TextStyle,
+            DimStyle,
+            VisualStyle,
+        ] {
+            assert!(
+                crate::modules::registry::command_icon(kind.icon_command()).is_some(),
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]

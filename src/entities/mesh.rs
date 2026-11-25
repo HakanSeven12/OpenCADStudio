@@ -849,7 +849,8 @@ fn base_refined_mesh(mesh: &Mesh) -> RefinedMesh {
         .edges
         .iter()
         .filter_map(|edge| {
-            let sharpness = edge.crease?;
+            // A negative crease ("Always") stays sharp at every level.
+            let sharpness = edge.crease.map(|c| if c < 0.0 { f64::INFINITY } else { c })?;
             (edge.start < vertices.len() && edge.end < vertices.len() && sharpness > 0.0)
                 .then_some((edge_key(edge.start, edge.end), sharpness))
         })
@@ -1040,6 +1041,15 @@ fn subdivide_catmull_clark(mesh: &RefinedMesh, blend_crease: bool) -> RefinedMes
         faces,
         creases,
     }
+}
+
+/// The cage `mesh` is drawn as at its smoothness level: vertices, face loops and the creases
+/// left (infinite for one that stays sharp).
+pub(crate) fn smoothed_cage(
+    mesh: &Mesh,
+) -> (Vec<[f64; 3]>, Vec<Vec<usize>>, std::collections::HashMap<(usize, usize), f64>) {
+    let refined = display_mesh(mesh);
+    (refined.vertices, refined.faces, refined.creases)
 }
 
 fn display_mesh(mesh: &Mesh) -> RefinedMesh {

@@ -457,6 +457,8 @@ pub struct PrimitiveCommand {
     pyramid_type: PyramidType,
     pyramid_defaults: PyramidDefaults,
     plane: WorkingPlane,
+    /// MESH BOX and the others: a mesh of the primitive's size instead of a solid.
+    mesh: bool,
 }
 
 impl PrimitiveCommand {
@@ -509,6 +511,21 @@ impl PrimitiveCommand {
             pyramid_type: pyramid_remembered.kind,
             pyramid_defaults: pyramid_remembered,
             plane: WorkingPlane::default(),
+            mesh: false,
+        }
+    }
+
+    /// The command making a mesh primitive.
+    pub fn as_mesh(mut self) -> Self {
+        self.mesh = true;
+        self
+    }
+
+    fn finish(&self, result: CmdResult) -> CmdResult {
+        if self.mesh {
+            crate::modules::mesh::mesh_instead(result)
+        } else {
+            result
         }
     }
 
@@ -742,12 +759,12 @@ impl PrimitiveCommand {
         let mut entity = Solid3D::new();
         entity.set_sat_document(&document);
         entity.wires = solid_model::edge_wires(&solid);
-        CmdResult::CommitSolid {
+        self.finish(CmdResult::CommitSolid {
             entity: EntityType::Solid3D(entity),
             solid: Box::new(solid),
             history,
             erase_source: None,
-        }
+        })
     }
 
     fn commit_cone_height(&self, height: f64) -> CmdResult {
@@ -1409,12 +1426,12 @@ impl PrimitiveCommand {
         let mut entity = Solid3D::new();
         entity.set_sat_document(&document);
         entity.wires = solid_model::edge_wires(&solid);
-        CmdResult::CommitSolid {
+        self.finish(CmdResult::CommitSolid {
             entity: EntityType::Solid3D(entity),
             solid: Box::new(solid),
             history,
             erase_source: None,
-        }
+        })
     }
 
     fn commit_pyramid_height(&self, height: f64) -> CmdResult {
@@ -2114,12 +2131,12 @@ impl PrimitiveCommand {
                         let mut entity = Solid3D::new();
                         entity.set_sat_document(&document);
                         entity.wires = solid_model::edge_wires(&placed);
-                        CmdResult::CommitSolid {
+                        self.finish(CmdResult::CommitSolid {
                             entity: EntityType::Solid3D(entity),
                             solid: Box::new(placed),
                             history,
                             erase_source: None,
-                        }
+                        })
                     }
                     None => CmdResult::Cancel,
                 }

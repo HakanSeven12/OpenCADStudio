@@ -19,4 +19,4 @@ i_overlay = "9"
 rustc-hash = "2"
 spade = { version = "=2.15.1" }
 # Solidcore's NURBS layer (NLib), which space::nurbs_tools calls.
-nlib = { package = "solidcore", git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+nlib = { package = "solidcore", git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }

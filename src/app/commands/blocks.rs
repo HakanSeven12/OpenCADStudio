@@ -76,6 +76,12 @@ impl OpenCADStudio {
                     .push_info(crate::tf!("XREF  Unloaded (skipped): \"{}\"", info.name).as_ref());
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::io::xref::ifc_slice::is_ifc(std::path::Path::new(&info.path)) {
+            for diagnostic in &info.diagnostics {
+                self.command_line.push_warning(diagnostic);
+            }
+        }
     }
 
     /// The selection as SVG on the system clipboard, so other programs

@@ -167,6 +167,21 @@ pub fn moved(entity: &EntityType, by: [f64; 2]) -> EntityType {
     result
 }
 
+/// `entity` turned by `angle` radians counter-clockwise about `centre`:
+/// the Rotate repairs.
+pub fn rotated(entity: &EntityType, centre: [f64; 2], angle: f64) -> EntityType {
+    let mut result = entity.clone();
+    EntityTypeOps::apply_transform(
+        &mut result,
+        &EntityTransform::Rotate {
+            center: DVec3::new(centre[0], centre[1], 0.0),
+            axis: DVec3::Z,
+            angle_rad: angle,
+        },
+    );
+    result
+}
+
 /// "Select objects" in the palette: a selection, then the scan.
 pub struct SelectObjects;
 

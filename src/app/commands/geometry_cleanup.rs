@@ -7,11 +7,15 @@ use crate::modules::manage::geometry_cleanup_settings::{
     clean_tolerance, CleanupSettings, MIN_TOLERANCE,
 };
 use crate::ui::dock::PanelId;
-use crate::ui::window::geometry_cleanup::{rows, Finding, Fix, GeometryCleanupMsg, Scan};
+use crate::ui::window::geometry_cleanup::{
+    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, Scan,
+};
 use crate::ui::window::geometry_cleanup_settings::SettingsDialog;
 use document::{EntityType, Handle};
 use iced::Task;
-use ocs_geom::geom2d::cleanup::{end_errors, proposed_tolerance, Tolerances};
+use ocs_geom::geom2d::cleanup::{
+    angle_errors, end_errors, proposed_tolerance, AngleTolerances, Tolerances,
+};
 use ocs_geom::geom2d::{Curve, Tolerance};
 
 /// Ends nearer than this meet: they are not an error.
@@ -81,6 +85,17 @@ impl OpenCADStudio {
             .collect()
     }
 
+    /// The direction of the UCS X axis in tab `i`, in radians from the WCS
+    /// X axis, when the UCS is turned only about Z; otherwise 0.
+    fn geometry_cleanup_x_axis(&self, i: usize) -> f64 {
+        let (_, x, _, z) = self.tabs[i].ucs_xform().axes();
+        if z.x.abs() <= 1e-9 && z.y.abs() <= 1e-9 && z.z > 0.0 {
+            x.y.atan2(x.x)
+        } else {
+            0.0
+        }
+    }
+
     /// The errors among `objects` now, each within the tolerance of its
     /// type.
     fn geometry_cleanup_findings(
@@ -88,13 +103,14 @@ impl OpenCADStudio {
         i: usize,
         objects: &[Handle],
         tolerances: Tolerances,
+        angles: &AngleTolerances,
     ) -> Vec<Finding> {
         let kept = self.geometry_cleanup_curves(i, objects);
         let curves: Vec<Curve> = kept.iter().map(|(_, curve)| curve.clone()).collect();
-        end_errors(&curves, tolerances, Tolerance::new(WELD))
+        let ends = end_errors(&curves, tolerances, Tolerance::new(WELD))
             .into_iter()
             .map(|error| Finding {
-                kind: error.kind,
+                kind: error.kind.into(),
                 handle: kept[error.end.curve].0,
                 at_start: error.end.at_start,
                 location: error.location,
@@ -104,8 +120,27 @@ impl OpenCADStudio {
                     .map(|other| (kept[other.curve].0, other.at_start)),
                 corner: error.corner,
                 deviation: error.deviation,
-            })
-            .collect()
+                angle: None,
+            });
+        let x_axis = self.geometry_cleanup_x_axis(i);
+        let lines = angle_errors(&curves, angles, x_axis, Tolerance::new(WELD))
+            .into_iter()
+            .map(|error| Finding {
+                kind: error.kind.into(),
+                handle: kept[error.curve].0,
+                at_start: false,
+                location: error.location,
+                target: error.location,
+                other: error.other.map(|other| (kept[other].0, false)),
+                corner: None,
+                deviation: error.deviation,
+                angle: Some(AngleFinding {
+                    angle: error.angle,
+                    turn: error.turn,
+                    meets: error.meets,
+                }),
+            });
+        ends.chain(lines).collect()
     }
 
     /// The objects in model space that Geometry Cleanup may read.
@@ -132,22 +167,25 @@ impl OpenCADStudio {
     }
 
     /// Scan `objects` and show what was found. A new scan (`tolerances` is
-    /// `None`) uses the saved settings, or the tolerance proposed for the
+    /// `None`) uses the saved settings, or the proposed settings for the
     /// drawing when there are none; a rescan keeps the tolerances of its
     /// scan, and the picked error if it is still there.
     pub(in crate::app) fn geometry_cleanup_scan(
         &mut self,
         i: usize,
         objects: Vec<Handle>,
-        tolerances: Option<Tolerances>,
+        tolerances: Option<(Tolerances, AngleTolerances)>,
         report: bool,
     ) {
         let rescan = tolerances.is_some();
-        let tolerances = tolerances.unwrap_or_else(|| match &self.geometry_cleanup.settings {
-            Some(settings) => settings.tolerances(),
-            None => Tolerances::all(self.geometry_cleanup_proposed(i)),
+        let (tolerances, angles) = tolerances.unwrap_or_else(|| {
+            let settings = match &self.geometry_cleanup.settings {
+                Some(settings) => settings.clone(),
+                None => CleanupSettings::proposed(self.geometry_cleanup_proposed(i)),
+            };
+            (settings.tolerances(), settings.angle_tolerances())
         });
-        let findings = self.geometry_cleanup_findings(i, &objects, tolerances);
+        let findings = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
         if report {
             self.command_line.push_output(&crate::tf!(
                 "Geometry Cleanup: {} error(s) found.",
@@ -165,6 +203,7 @@ impl OpenCADStudio {
             epoch: self.tabs[i].scene.geometry_epoch,
             objects,
             tolerances,
+            angles,
             findings,
         });
         self.geometry_cleanup.picked = picked;
@@ -186,7 +225,7 @@ impl OpenCADStudio {
         if scan.epoch == self.tabs[i].scene.geometry_epoch {
             return;
         }
-        let (objects, tolerances) = (scan.objects.clone(), scan.tolerances);
+        let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
         self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
     }
 
@@ -214,7 +253,7 @@ impl OpenCADStudio {
             }
             GeometryCleanupMsg::Rescan => {
                 if let Some(scan) = self.geometry_cleanup_scan_here(i) {
-                    let (objects, tolerances) = (scan.objects.clone(), scan.tolerances);
+                    let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
                     self.geometry_cleanup_scan(i, objects, Some(tolerances), true);
                 }
             }
@@ -246,8 +285,8 @@ impl OpenCADStudio {
                     .chain(rows[..at].iter().rev())
                     .map(|&row| scan.findings[row])
                     .collect();
-                let (objects, tolerances) = (scan.objects.clone(), scan.tolerances);
-                if !self.geometry_cleanup_fix(i, picked, fix, &objects, tolerances) {
+                let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
+                if !self.geometry_cleanup_fix(i, picked, fix, &objects, &tolerances) {
                     return Task::none();
                 }
                 self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
@@ -391,7 +430,7 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let file = dialog.file.clone();
-                let tolerances = settings.tolerances();
+                let tolerances = (settings.tolerances(), settings.angle_tolerances());
                 self.geometry_cleanup.settings = Some(settings);
                 self.geometry_cleanup.settings_file = file;
                 self.geometry_cleanup.dialog = None;
@@ -427,14 +466,38 @@ impl OpenCADStudio {
         }
     }
 
-    /// Zoom to an error and select its objects.
+    /// Zoom to an error and select its objects: round a length error by
+    /// its tolerance, round the line or lines of an angle error.
     fn geometry_cleanup_show(&mut self, i: usize, finding: Finding, tolerances: Tolerances) {
-        let tolerance = tolerances.get(finding.kind).unwrap_or(finding.deviation);
-        let reach = (tolerance * 25.0).max(finding.deviation * 5.0);
-        let [x, y] = finding.location;
+        let (low, high) = match finding.kind.end_kind() {
+            Some(kind) => {
+                let tolerance = tolerances.get(kind).unwrap_or(finding.deviation);
+                let reach = (tolerance * 25.0).max(finding.deviation * 5.0);
+                let [x, y] = finding.location;
+                ([x - reach, y - reach], [x + reach, y + reach])
+            }
+            None => {
+                let document = &self.tabs[i].scene.document;
+                let mut low = finding.location;
+                let mut high = finding.location;
+                let handles = std::iter::once(finding.handle).chain(finding.other.map(|o| o.0));
+                for p in handles
+                    .filter_map(|h| line_ends(document.get_entity(h)?))
+                    .flatten()
+                {
+                    low = [low[0].min(p[0]), low[1].min(p[1])];
+                    high = [high[0].max(p[0]), high[1].max(p[1])];
+                }
+                let margin = 0.1 * (high[0] - low[0]).max(high[1] - low[1]);
+                (
+                    [low[0] - margin, low[1] - margin],
+                    [high[0] + margin, high[1] + margin],
+                )
+            }
+        };
         self.handle_zoom_to_window(
-            glam::DVec3::new(x - reach, y - reach, 0.0),
-            glam::DVec3::new(x + reach, y + reach, 0.0),
+            glam::DVec3::new(low[0], low[1], 0.0),
+            glam::DVec3::new(high[0], high[1], 0.0),
         );
         let scene = &mut self.tabs[i].scene;
         scene.select_entity(finding.handle, true);
@@ -454,10 +517,10 @@ impl OpenCADStudio {
         picked: Finding,
         fix: Fix,
         objects: &[Handle],
-        tolerances: Tolerances,
+        (tolerances, angles): &(Tolerances, AngleTolerances),
     ) -> bool {
         let Some(finding) = self
-            .geometry_cleanup_findings(i, objects, tolerances)
+            .geometry_cleanup_findings(i, objects, *tolerances, angles)
             .into_iter()
             .find(|f| f.same_error(&picked))
         else {
@@ -502,6 +565,31 @@ impl OpenCADStudio {
                         cleanup::moved_along(entity(other)?, other_at_start, corner)?,
                     ));
                 }
+                Fix::RotateAtStart | Fix::RotateAtEnd => {
+                    let ends = line_ends(own)?;
+                    let pivot = ends[usize::from(fix == Fix::RotateAtEnd)];
+                    let turn = finding.angle?.turn;
+                    edits.push((finding.handle, cleanup::rotated(own, pivot, turn)));
+                }
+                Fix::RotateShorter | Fix::RotateLonger => {
+                    let (other, _) = finding.other?;
+                    let length = |handle| {
+                        let [a, b] = line_ends(entity(handle)?)?;
+                        Some((b[0] - a[0]).hypot(b[1] - a[1]))
+                    };
+                    // At equal lengths, the first line is the shorter.
+                    let first_shorter = length(finding.handle)? <= length(other)?;
+                    let turn = finding.angle?.turn;
+                    let (handle, turn) = if first_shorter == (fix == Fix::RotateShorter) {
+                        (finding.handle, turn)
+                    } else {
+                        (other, -turn)
+                    };
+                    edits.push((
+                        handle,
+                        cleanup::rotated(entity(handle)?, finding.location, turn),
+                    ));
+                }
             }
             Some(())
         })();
@@ -523,5 +611,18 @@ impl OpenCADStudio {
         self.refresh_selected_grips();
         self.refresh_properties();
         true
+    }
+}
+
+/// The tolerances of a scan, for a rescan.
+fn scan_tolerances(scan: &Scan) -> (Tolerances, AngleTolerances) {
+    (scan.tolerances, scan.angles.clone())
+}
+
+/// The start and the end of a LINE.
+fn line_ends(entity: &EntityType) -> Option<[[f64; 2]; 2]> {
+    match entity {
+        EntityType::Line(line) => Some([[line.start.x, line.start.y], [line.end.x, line.end.y]]),
+        _ => None,
     }
 }

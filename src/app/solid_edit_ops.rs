@@ -764,3 +764,154 @@ fn entity_curves(entity: &EntityType) -> Option<Vec<(solidcore_ops::sweep::Curve
         _ => return None,
     })
 }
+
+/// Points along an edge curve over `span`, its ends included.
+fn edge_points(curve: &r::Curve, span: [f64; 2], count: usize) -> Vec<DVec3> {
+    (0..=count)
+        .filter_map(|k| {
+            let t = span[0] + (span[1] - span[0]) * k as f64 / count as f64;
+            ocs_solid::geometry::point_on(curve, t).map(DVec3::from_array)
+        })
+        .collect()
+}
+
+fn polyline_distance(p: DVec3, points: &[DVec3]) -> f64 {
+    points
+        .windows(2)
+        .map(|w| {
+            let d = w[1] - w[0];
+            let t = if d.length_squared() > 0.0 { ((p - w[0]).dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+            p.distance(w[0] + d * t)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+impl super::OpenCADStudio {
+    /// The curves where the surfaces and solids `handles` meet one another: each edge imprinting
+    /// one on another adds, drawn in the first one's layer and colour.
+    pub(super) fn extract_intersections(&mut self, i: usize, handles: &[Handle]) -> Result<String, String> {
+        let bodies: Vec<(EntityCommon, Brep)> = handles
+            .iter()
+            .filter_map(|h| {
+                let common = fresh_common(self.tabs[i].scene.document.get_entity(*h)?.common());
+                Some((common, self.surfacing_body(i, *h)?))
+            })
+            .collect();
+        if bodies.len() < 2 {
+            return Err(crate::t!("Select at least two surfaces or solids.").into_owned());
+        }
+        let mut entities = Vec::new();
+        for a in 0..bodies.len() {
+            for b in a + 1..bodies.len() {
+                let (body, tool) = (&bodies[a].1, &bodies[b].1);
+                let Ok((imprinted, true)) = model::imprint(body, tool) else { continue };
+                let tolerance = model::size(body).max(1e-9) * 1e-6;
+                let old: Vec<Vec<DVec3>> = body
+                    .edges
+                    .iter()
+                    .filter_map(|e| ocs_solid::geometry::labelled(body, e))
+                    .map(|(c, span)| edge_points(&c, span, 64))
+                    .collect();
+                // An edge is new where its middle lies on no edge the body had.
+                let new: Vec<u32> = imprinted
+                    .edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(k, e)| {
+                        let (c, span) = ocs_solid::geometry::labelled(&imprinted, e)?;
+                        let middle = DVec3::from_array(ocs_solid::geometry::point_on(&c, (span[0] + span[1]) / 2.0)?);
+                        old.iter().all(|points| polyline_distance(middle, points) > tolerance).then_some(k as u32)
+                    })
+                    .collect();
+                entities.extend(edge_entities(&imprinted, &new, &EdgeColors::new(), &bodies[a].0, DVec3::ZERO));
+            }
+        }
+        if entities.is_empty() {
+            return Err(crate::t!("The objects do not intersect.").into_owned());
+        }
+        self.push_undo_snapshot(i, "EXTRACTINTERSECTIONS");
+        let count = self.commit_new_curves(entities);
+        Ok(crate::tf!("{count} intersection curve(s) extracted.").into_owned())
+    }
+
+    /// OFFSETEDGE: the outer edges of the planar face picked at `at` on `handle`, offset in its
+    /// plane through `through` as a closed polyline; `rounded` rounds the corners.
+    pub(super) fn offset_edge(&mut self, i: usize, handle: Handle, at: DVec3, through: DVec3, rounded: bool) -> Result<String, String> {
+        let (body, face) = self.surfacing_face(i, handle, at).ok_or_else(|| crate::t!("Select a planar face.").into_owned())?;
+        let (origin, normal) = model::face_plane(&body, face).ok_or_else(|| crate::t!("Select a planar face.").into_owned())?;
+        let node = &body.faces[face as usize];
+        let Some(r::Loop::Edges { edges }) = node.loops.first() else {
+            return Err(crate::t!("Select a planar face.").into_owned());
+        };
+        let normal = DVec3::from_array(normal);
+        let x = normal.any_orthonormal_vector();
+        let plane = ocs_geom::space::Plane::orthonormal(origin, x.to_array(), normal.to_array()).ok_or("no plane")?;
+        // The loop as straight pieces in the face's plane, curves divided finely.
+        let mut outline: Vec<[f64; 2]> = Vec::new();
+        for used in edges {
+            let edge = body.edges.get(used.edge as usize).ok_or("no edge")?;
+            let (curve, span) = ocs_solid::geometry::labelled(&body, edge).ok_or("no edge")?;
+            let count = if matches!(curve, r::Curve::Line { .. }) { 1 } else { 48 };
+            let mut points = edge_points(&curve, span, count);
+            if !used.forward {
+                points.reverse();
+            }
+            for p in points.iter().skip(usize::from(!outline.is_empty())) {
+                outline.push(plane.project(p.to_array()).ok_or("no plane")?);
+            }
+        }
+        if outline.len() > 2 && (outline[0][0] - outline[outline.len() - 1][0]).hypot(outline[0][1] - outline[outline.len() - 1][1]) < 1e-9 {
+            outline.pop();
+        }
+        use ocs_geom::geom2d::{offset_polyline_with_gap, OffsetGap, Polyline, PolylineVertex};
+        let source = Polyline {
+            vertices: outline.iter().map(|&p| PolylineVertex { position: p, bulge: 0.0 }).collect(),
+            closed: true,
+        };
+        let side = plane.project(through.to_array()).ok_or("no plane")?;
+        let points3: Vec<DVec3> = outline.iter().map(|&p| DVec3::from_array(plane.point_at(p))).collect();
+        let mut closing = points3.clone();
+        closing.push(points3[0]);
+        let distance = polyline_distance(DVec3::from_array(plane.point_at(side)), &closing);
+        let gap = if rounded { OffsetGap::Fillet } else { OffsetGap::Extend };
+        let offsets = offset_polyline_with_gap(&source, distance, side, gap);
+        if offsets.is_empty() {
+            return Err(crate::t!("The face cannot be offset that far.").into_owned());
+        }
+        let common = fresh_common(self.tabs[i].scene.document.get_entity(handle).ok_or("no object")?.common());
+        let entities: Vec<EntityType> = offsets
+            .iter()
+            .map(|polyline| {
+                // Arcs at rounded corners are divided into straight pieces.
+                let mut points = Vec::new();
+                let n = polyline.vertices.len();
+                for k in 0..n {
+                    let (a, b) = (polyline.vertices[k], polyline.vertices[(k + 1) % n]);
+                    if k + 1 == n && !polyline.closed {
+                        points.push(a.position);
+                        break;
+                    }
+                    match ocs_geom::geom2d::BulgeArc::from_bulge(a.position, b.position, a.bulge).filter(|_| a.bulge.abs() > 1e-12) {
+                        Some(arc) => points.extend((0..16).map(|s| {
+                            let angle = arc.start_angle + arc.sweep * s as f64 / 16.0;
+                            [arc.center[0] + arc.radius * angle.cos(), arc.center[1] + arc.radius * angle.sin()]
+                        })),
+                        None => points.push(a.position),
+                    }
+                }
+                let mut entity = document::entities::Polyline3D::from_points(
+                    points.iter().map(|&p| {
+                        let w = plane.point_at(p);
+                        document::types::Vector3::new(w[0], w[1], w[2])
+                    }).collect(),
+                );
+                entity.flags.closed = polyline.closed;
+                entity.common = common.clone();
+                EntityType::Polyline3D(entity)
+            })
+            .collect();
+        self.push_undo_snapshot(i, "OFFSETEDGE");
+        self.commit_new_curves(entities);
+        Ok(String::new())
+    }
+}

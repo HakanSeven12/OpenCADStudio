@@ -1,10 +1,14 @@
 //! Drawing names at the command line. While no command runs, the layers,
-//! blocks, hatch patterns and named views whose names contain the typed text
-//! show under the command names. A picked layer becomes current, a block is
-//! inserted, HATCH starts with a pattern and a view is restored.
+//! blocks, hatch patterns, named views and text, dimension and visual styles
+//! whose names contain the typed text show under the command names. A picked
+//! layer or style becomes current, a block is inserted, HATCH starts with a
+//! pattern and a view is restored.
 
 use crate::app::{Message, OpenCADStudio};
+use crate::modules::view::visual_style::{mode_for_style_name, VISUAL_STYLES};
+use crate::modules::StyleKey;
 use crate::ui::command_line::{ranked_content, ContentKind, ContentMatch};
+use document::entities::ViewportRenderMode as Mode;
 use iced::Task;
 
 impl OpenCADStudio {
@@ -33,7 +37,39 @@ impl OpenCADStudio {
                 .views
                 .iter()
                 .map(|view| (ContentKind::View, view.name.as_str(), None));
-            ranked_content(&input, layers.chain(blocks).chain(patterns).chain(views))
+            // As the ribbon's text style list: no shape files.
+            let text_styles = document
+                .text_styles
+                .iter()
+                .filter(|style| !style.is_shape_file)
+                .map(|style| (ContentKind::TextStyle, style.name.as_str(), None));
+            let dim_styles = document
+                .dim_styles
+                .iter()
+                .map(|style| (ContentKind::DimStyle, style.name.as_str(), None));
+            // The visual styles by the names the picker shows, then by
+            // the names of the drawing's own styles (Realistic, …).
+            let visual_names: Vec<String> = VISUAL_STYLES
+                .iter()
+                .map(|style| crate::t!(style.label).into_owned())
+                .chain(
+                    crate::io::visual_styles::offered(document)
+                        .into_iter()
+                        .filter(|(_, handle)| named_style_mode(document, *handle).is_some())
+                        .map(|(name, _)| name),
+                )
+                .collect();
+            let visual_styles = visual_names
+                .iter()
+                .map(|name| (ContentKind::VisualStyle, name.as_str(), None));
+            let names = layers
+                .chain(blocks)
+                .chain(patterns)
+                .chain(views)
+                .chain(text_styles)
+                .chain(dim_styles)
+                .chain(visual_styles);
+            ranked_content(&input, names)
         };
         self.command_line.set_content_matches(&input, matches);
     }
@@ -70,7 +106,50 @@ impl OpenCADStudio {
             // Restore first, so that a view named as a preset (`TOP`) is
             // restored and not the preset.
             ContentKind::View => self.dispatch_then_answer("-VIEW", &["_R", &name]),
+            // As a pick in the ribbon's text style list, in one undo step.
+            ContentKind::TextStyle => {
+                let i = self.active_tab;
+                self.push_undo_snapshot(i, "TEXTSTYLE");
+                let _ = self.on_ribbon_style_changed(StyleKey::TextStyle, name.clone());
+                self.tabs[i].dirty = true;
+                let line = crate::tr!("text-style", "now-current", name = name);
+                self.command_line.push_output(&crate::i18n::plain(line));
+                Task::none()
+            }
+            ContentKind::DimStyle => {
+                self.push_undo_snapshot(self.active_tab, "CDIMSTY");
+                self.dispatch_then_answer("CDIMSTY", &[&name])
+            }
+            // The command the ribbon's visual style list runs. A drawing style
+            // name runs the closest of the modes, as the menu bar's Realistic
+            // does. A visual style is view state: it takes no undo step.
+            ContentKind::VisualStyle => match self.visual_style_command(&name) {
+                Some(command) => self.dispatch_command(command),
+                None => Task::none(),
+            },
         }
+    }
+
+    /// The command that draws the visual style `name`: a name the picker
+    /// shows, or the name of one of the drawing's own styles.
+    fn visual_style_command(&self, name: &str) -> Option<&'static str> {
+        let mode = match VISUAL_STYLES
+            .iter()
+            .find(|style| crate::t!(style.label) == name)
+        {
+            Some(style) => style.mode,
+            None => {
+                let document = &self.tabs[self.active_tab].scene.document;
+                crate::io::visual_styles::offered(document)
+                    .into_iter()
+                    .find(|(offered, _)| offered == name)
+                    .and_then(|(_, handle)| named_style_mode(document, handle))?
+            }
+        };
+        VISUAL_STYLES
+            .iter()
+            .find(|style| style.mode == mode)
+            .map(|style| style.command)
     }
 
     /// Start `command` and answer its prompts with `answers`, each as one
@@ -84,5 +163,19 @@ impl OpenCADStudio {
             tasks.push(self.feed_active_cmd(answer));
         }
         Task::batch(tasks)
+    }
+}
+
+/// The mode that the drawing's visual style `handle` draws as, when it is a
+/// style that OCS draws.
+fn named_style_mode(
+    document: &document::Document,
+    handle: document::types::Handle,
+) -> Option<Mode> {
+    match document.objects.get(&handle) {
+        Some(document::objects::ObjectType::VisualStyle(style)) => {
+            mode_for_style_name(&style.description).map(|(mode, _)| mode)
+        }
+        _ => None,
     }
 }

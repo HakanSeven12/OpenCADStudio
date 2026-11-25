@@ -643,6 +643,17 @@ impl OpenCADStudio {
 
     pub(super) fn on_graph(&mut self, message: GraphMsg) -> Task<Message> {
         let i = self.active_tab;
+        // A press anywhere else ends a rename, keeping what was typed.
+        if let Some((renaming, _)) = &self.tabs[i].graph.renaming {
+            let elsewhere = match &message {
+                GraphMsg::Pressed | GraphMsg::NodePress(_) | GraphMsg::Links(_) => true,
+                GraphMsg::RenameStart(id) => id != renaming,
+                _ => false,
+            };
+            if elsewhere {
+                self.graph_rename(i);
+            }
+        }
         self.tabs[i].graph.update_ui(&message);
         match message {
             GraphMsg::Toggle => {
@@ -723,6 +734,16 @@ impl OpenCADStudio {
                 return self.graph_commit(i, ports);
             }
             GraphMsg::Set(port, value) => return self.graph_set(i, port, value),
+            GraphMsg::RenameStart(_) => {
+                if self.tabs[i].graph.renaming.is_some() {
+                    let id = crate::ui::node_graph::rename_id();
+                    return Task::batch([
+                        iced::widget::operation::focus(id.clone()),
+                        iced::widget::operation::select_all(id),
+                    ]);
+                }
+            }
+            GraphMsg::RenameCommit => self.graph_rename(i),
             GraphMsg::Links(links) => {
                 self.node_graph_links = links;
                 let graph = &mut self.tabs[i].graph;
@@ -901,6 +922,28 @@ impl OpenCADStudio {
         graph.created.extend(created);
         self.tabs[i].graph = graph;
         self.graph_run(i)
+    }
+
+    /// Ends the rename in progress, keeping the typed name: trimmed, and the
+    /// default back when it is empty. A changed name is one undo step; the
+    /// graph needs no new evaluation for it.
+    pub(super) fn graph_rename(&mut self, i: usize) {
+        let Some((id, typed)) = self.tabs[i].graph.renaming.take() else {
+            return;
+        };
+        let name = crate::ui::node_graph::node_name(&typed);
+        let graph = &self.tabs[i].graph;
+        if graph.ui.get(&id).is_none_or(|ui| ui.name == name) {
+            return;
+        }
+        self.push_undo_snapshot(i, "GRAPH");
+        let before = self.tabs[i].graph.undo_state();
+        if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+            pending.graph_before = Some(before);
+        }
+        if let Some(ui) = self.tabs[i].graph.ui.get_mut(&id) {
+            ui.name = name;
+        }
     }
 
     /// Links `from` into `to`; false when that would close a loop. The link

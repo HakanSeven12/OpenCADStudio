@@ -7,14 +7,28 @@
 //! ```
 //!
 //! A type that is not in the list is not scanned. The angle types
-//! (`absolute-angle`, `relative-angle`, with the angle in degrees in
-//! `subName`) are kept and written back, but not used yet.
+//! (`absolute-angle`, `relative-angle`) have a row for each standard angle,
+//! with the angle in degrees in `subName`.
 
-use ocs_geom::geom2d::cleanup::{EndErrorKind, Tolerances};
+use ocs_geom::geom2d::cleanup::{AngleTolerance, AngleTolerances, EndErrorKind, Tolerances};
 use serde::{Deserialize, Serialize};
 
 /// The smallest tolerance. A smaller value becomes this one.
 pub const MIN_TOLERANCE: f64 = 0.0001;
+
+/// The `.gcs` names of the angle types.
+const ABSOLUTE_ANGLE: &str = "absolute-angle";
+const RELATIVE_ANGLE: &str = "relative-angle";
+
+/// The angle rows of a new profile: 0° and 90° for each angle
+/// type, with a tolerance of 5°.
+const DEFAULT_ANGLES: [(&str, &str); 4] = [
+    (ABSOLUTE_ANGLE, "0"),
+    (ABSOLUTE_ANGLE, "90"),
+    (RELATIVE_ANGLE, "0"),
+    (RELATIVE_ANGLE, "90"),
+];
+const DEFAULT_ANGLE_TOLERANCE: f64 = 5.0;
 
 /// The length types, in the order of their rows.
 const LENGTH_KINDS: [EndErrorKind; 3] = [
@@ -67,9 +81,19 @@ pub fn clean_tolerance(tolerance: f64) -> Option<f64> {
 }
 
 impl CleanupSettings {
-    /// The three length types, each with `tolerance`.
+    /// The three length types, each with `tolerance`, and the default
+    /// angle rows.
     pub fn proposed(tolerance: f64) -> Self {
-        let mut settings = Self::default();
+        let mut settings = Self {
+            tolerances: DEFAULT_ANGLES
+                .iter()
+                .map(|&(name, angle)| ToleranceRow {
+                    name: name.to_string(),
+                    sub_name: angle.to_string(),
+                    tolerance: DEFAULT_ANGLE_TOLERANCE,
+                })
+                .collect(),
+        };
         for kind in LENGTH_KINDS {
             settings.set(kind, Some(tolerance));
         }
@@ -139,6 +163,33 @@ impl CleanupSettings {
             gap: self.tolerance(EndErrorKind::Gap),
             overshoot: self.tolerance(EndErrorKind::Overshoot),
             undershoot: self.tolerance(EndErrorKind::Undershoot),
+        }
+    }
+
+    /// The standard angles that the scan uses: each angle modulo 180°, a
+    /// tolerance not less than the minimum. A row whose angle is not a
+    /// number is left out, and so is a second row with the same angle.
+    pub fn angle_tolerances(&self) -> AngleTolerances {
+        let read = |name: &str| {
+            let mut standards: Vec<AngleTolerance> = Vec::new();
+            for row in self.tolerances.iter().filter(|row| row.name == name) {
+                let Ok(angle) = row.sub_name.trim().parse::<f64>() else {
+                    continue;
+                };
+                let angle = angle.rem_euclid(180.0);
+                if !angle.is_finite() || standards.iter().any(|s| s.angle == angle) {
+                    continue;
+                }
+                standards.push(AngleTolerance {
+                    angle,
+                    tolerance: row.tolerance.max(MIN_TOLERANCE),
+                });
+            }
+            standards
+        };
+        AngleTolerances {
+            absolute: read(ABSOLUTE_ANGLE),
+            relative: read(RELATIVE_ANGLE),
         }
     }
 }

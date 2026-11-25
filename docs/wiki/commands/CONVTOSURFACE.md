@@ -1,15 +1,13 @@
 ---
-summary: Converts the selected 3D solids to surface objects.
-related: THICKEN, EXTRUDE
+summary: Converts meshes, polygon meshes, polyface meshes, 3D solids and regions to surface objects.
+related: CONVTOSOLID, THICKEN, SMOOTHMESHCONVERT
 ---
 
 ## Usage
-1. Select one or more 3D solids.
-2. Run `CONVTOSURFACE`. Each solid becomes a surface, and the command line reports how many were converted.
+1. Select the objects to convert, then press Enter. Objects selected before the command are used directly.
 
 ## Notes
-- Select the solids first; the command does not ask for objects. With no solid selected it prints an error.
-- Solids on locked layers are skipped.
-- The new surfaces go on the current layer. They keep the solid's edges as their wireframe.
-- When [`DELOBJ`](DELOBJ-System-Variable) is not 0, the original solids are deleted. Otherwise they stay.
+- A mesh becomes a surface of its faces, smooth or faceted as [`SMOOTHMESHCONVERT`](SMOOTHMESHCONVERT-System-Variable) sets; open meshes convert too.
+- A solid or region becomes a surface of all its faces.
+- The surfaces keep each object's layer and colour. When [`DELOBJ`](DELOBJ-System-Variable) is not 0, the original objects are deleted.
 - You can undo the conversion in one step.

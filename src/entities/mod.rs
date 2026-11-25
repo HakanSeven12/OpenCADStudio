@@ -23,6 +23,7 @@ pub mod line;
 pub mod lwpolyline;
 pub mod match_props;
 pub mod mesh;
+pub mod mesh_edit;
 pub mod mline;
 pub mod mtext;
 pub mod multileader;

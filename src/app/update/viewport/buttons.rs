@@ -1232,7 +1232,9 @@ impl OpenCADStudio {
                         pt.z = 0.0;
                     }
                 }
-                let otrack = if axis_lock.is_none() {
+                // An object pick tests the bare cursor: tracking from the
+                // previous point would pull it off the object under it.
+                let otrack = if axis_lock.is_none() && !needs_entity_click {
                     self.active_otrack_hit(
                         i,
                         raw,
@@ -1264,6 +1266,7 @@ impl OpenCADStudio {
                     }
                 } else if axis_lock.is_none()
                     && !free_point
+                    && !needs_entity_click
                     && !uses_command_cursor_plane
                     && !snap_hit.is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
                 {

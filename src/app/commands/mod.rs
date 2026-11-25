@@ -156,6 +156,7 @@ impl OpenCADStudio {
         // accepted snaps must not leak into it.
         self.clear_accepted_snaps();
         self.snapper.clear_override();
+        self.snapper.end_cycle();
         // Starting a command restarts the right-click cycle, so its first
         // right-click acts as Enter rather than opening the context menu.
         self.tabs[i]
@@ -852,6 +853,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_ole(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_mesh(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_surface(cmd, i) {

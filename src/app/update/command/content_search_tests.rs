@@ -254,3 +254,211 @@ fn the_blocks_of_layouts_and_anonymous_blocks_are_not_suggested() {
         .collect();
     assert_eq!(blocks, ["Sheet unit"]);
 }
+
+fn add_text_style(app: &mut OpenCADStudio, name: &str, shape_file: bool) {
+    let i = app.active_tab;
+    let document = &mut app.tabs[i].scene.document;
+    let mut style = document::tables::TextStyle::new(name);
+    style.handle = document.allocate_handle();
+    style.is_shape_file = shape_file;
+    let _ = document.text_styles.add(style);
+}
+
+fn add_dim_style(app: &mut OpenCADStudio, name: &str) -> document::types::Handle {
+    let i = app.active_tab;
+    let document = &mut app.tabs[i].scene.document;
+    let mut style = document::tables::DimStyle::new(name);
+    style.handle = document.allocate_handle();
+    let handle = style.handle;
+    let _ = document.dim_styles.add(style);
+    handle
+}
+
+#[test]
+fn a_typed_text_style_name_makes_that_style_current() {
+    let mut app = fresh_app();
+    add_text_style(&mut app, "Room labels", false);
+    let i = app.active_tab;
+    app.tabs[i].dirty = false;
+
+    let _ = app.update(Message::CommandInput("labels".to_string()));
+    let rows = app.command_line.content_rows();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].kind, ContentKind::TextStyle);
+
+    let _ = app.update(Message::CommandSubmit);
+    let header = &app.tabs[i].scene.document.header;
+    assert_eq!(header.current_text_style_name, "Room labels");
+    let handle = app.tabs[i]
+        .scene
+        .document
+        .text_styles
+        .get("Room labels")
+        .map(|style| style.handle);
+    assert_eq!(Some(header.current_text_style_handle), handle);
+    assert_eq!(app.ribbon.active_text_style, "Room labels");
+    assert!(app.tabs[i].dirty);
+    assert!(active_command(&app).is_none());
+}
+
+#[test]
+fn a_shape_file_style_is_not_suggested() {
+    let mut app = fresh_app();
+    add_text_style(&mut app, "Symbols shapes", true);
+
+    let _ = app.update(Message::CommandInput("symbols".to_string()));
+    assert!(app.command_line.content_rows().is_empty());
+}
+
+#[test]
+fn a_typed_dimension_style_name_makes_that_style_current() {
+    let mut app = fresh_app();
+    let handle = add_dim_style(&mut app, "Site plan 1-100");
+
+    let _ = app.update(Message::CommandInput("site".to_string()));
+    let rows = app.command_line.content_rows();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].kind, ContentKind::DimStyle);
+
+    let _ = app.update(Message::CommandSubmit);
+    let i = app.active_tab;
+    let header = &app.tabs[i].scene.document.header;
+    assert_eq!(header.current_dimstyle_name, "Site plan 1-100");
+    assert_eq!(header.current_dimstyle_handle, handle);
+    assert_eq!(app.ribbon.active_dim_style, "Site plan 1-100");
+    assert!(active_command(&app).is_none());
+}
+
+#[test]
+fn a_typed_visual_style_name_draws_the_drawing_in_that_style() {
+    use document::entities::ViewportRenderMode;
+    let mut app = fresh_app();
+    let i = app.active_tab;
+    assert_ne!(app.tabs[i].render_mode, ViewportRenderMode::GouraudShaded);
+
+    let _ = app.update(Message::CommandInput("gouraud".to_string()));
+    let rows = app.command_line.content_rows();
+    assert!(
+        rows.iter()
+            .any(|row| row.kind == ContentKind::VisualStyle && row.name == "Gouraud Shaded"),
+        "{rows:?}"
+    );
+
+    let task = app.update(Message::CommandSubmit);
+    app.drive_headless_task(task).unwrap();
+    assert_eq!(app.tabs[i].render_mode, ViewportRenderMode::GouraudShaded);
+    assert!(active_command(&app).is_none());
+}
+
+#[test]
+fn a_clicked_visual_style_row_draws_the_drawing_in_that_style() {
+    use document::entities::ViewportRenderMode;
+    let mut app = fresh_app();
+    let _ = app.update(Message::CommandInput("flat".to_string()));
+    let row = app
+        .command_line
+        .content_rows()
+        .iter()
+        .find(|row| row.name == "Flat Shaded")
+        .cloned()
+        .expect("a visual style row");
+    assert_eq!(row.kind, ContentKind::VisualStyle);
+
+    let task = app.update(Message::ContentSuggestionPick(row));
+    app.drive_headless_task(task).unwrap();
+    let i = app.active_tab;
+    assert_eq!(app.tabs[i].render_mode, ViewportRenderMode::FlatShaded);
+}
+
+#[test]
+fn undo_takes_back_a_text_or_dimension_style_made_current_from_the_suggestions() {
+    let mut app = fresh_app();
+    add_text_style(&mut app, "Room labels", false);
+    add_dim_style(&mut app, "Site plan 1-100");
+    let i = app.active_tab;
+    let header = &app.tabs[i].scene.document.header;
+    let (text_before, dim_before) = (
+        header.current_text_style_name.clone(),
+        header.current_dimstyle_name.clone(),
+    );
+
+    type_and_enter(&mut app, "labels");
+    type_and_enter(&mut app, "site");
+    let header = &app.tabs[i].scene.document.header;
+    assert_eq!(header.current_text_style_name, "Room labels");
+    assert_eq!(header.current_dimstyle_name, "Site plan 1-100");
+
+    let _ = app.update(Message::Undo);
+    let header = &app.tabs[i].scene.document.header;
+    assert_eq!(header.current_text_style_name, "Room labels");
+    assert_eq!(header.current_dimstyle_name, dim_before);
+    let _ = app.update(Message::Undo);
+    let header = &app.tabs[i].scene.document.header;
+    assert_eq!(header.current_text_style_name, text_before);
+}
+
+#[test]
+fn a_drawing_visual_style_name_draws_the_closest_style() {
+    use document::entities::ViewportRenderMode;
+    let mut app = fresh_app();
+    let i = app.active_tab;
+    assert_ne!(app.tabs[i].render_mode, ViewportRenderMode::GouraudShaded);
+
+    let _ = app.update(Message::CommandInput("realistic".to_string()));
+    let rows = app.command_line.content_rows();
+    assert!(
+        rows.iter()
+            .any(|row| row.kind == ContentKind::VisualStyle && row.name == "Realistic"),
+        "{rows:?}"
+    );
+
+    let task = app.update(Message::CommandSubmit);
+    app.drive_headless_task(task).unwrap();
+    assert_eq!(app.tabs[i].render_mode, ViewportRenderMode::GouraudShaded);
+}
+
+#[test]
+fn the_internal_visual_styles_are_not_suggested() {
+    let mut app = fresh_app();
+
+    // `Gouraud` is an internal style of the drawing: only the picker's two
+    // Gouraud names show.
+    let _ = app.update(Message::CommandInput("gouraud".to_string()));
+    let names: Vec<&str> = app
+        .command_line
+        .content_rows()
+        .iter()
+        .filter(|row| row.kind == ContentKind::VisualStyle)
+        .map(|row| row.name.as_str())
+        .collect();
+    assert_eq!(names, ["Gouraud Shaded", "Gouraud Shaded + Edges"]);
+}
+
+#[test]
+fn a_visual_style_that_ocs_cannot_draw_is_not_suggested() {
+    use document::objects::ObjectType;
+    let mut app = fresh_app();
+    let i = app.active_tab;
+    let document = &mut app.tabs[i].scene.document;
+    let dictionary = document.header.acad_visualstyle_dict_handle;
+    let handle = document.allocate_handle();
+    let mut style = document::objects::VisualStyle::new();
+    style.handle = handle;
+    style.owner = dictionary;
+    style.description = "Blueprint".to_string();
+    document
+        .objects
+        .insert(handle, ObjectType::VisualStyle(style));
+    let Some(ObjectType::Dictionary(entries)) = document.objects.get_mut(&dictionary) else {
+        panic!("a new drawing has the visual style dictionary");
+    };
+    entries.add_entry("Blueprint", handle);
+    assert!(
+        crate::io::visual_styles::offered(&app.tabs[i].scene.document)
+            .iter()
+            .any(|(name, _)| name == "Blueprint")
+    );
+
+    let _ = app.update(Message::CommandInput("blueprint".to_string()));
+    assert!(app.command_line.content_rows().is_empty());
+}

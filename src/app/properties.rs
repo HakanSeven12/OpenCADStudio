@@ -417,6 +417,22 @@ impl OpenCADStudio {
             sections.extend(object_sections);
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(entity, document::EntityType::Dimension(_)) {
+            let document = &self.tabs[i].scene.document;
+            let count = crate::io::xref::ifc_slice::unresolved(document, Some(handle), None);
+            if count > 0 {
+                sections.push(crate::scene::model::object::PropSection {
+                    title: "IFC XREF".into(),
+                    props: vec![crate::entities::common::ro_prop(
+                        "Unresolved points",
+                        "ifc_xref_unresolved",
+                        format!("{count} (value may be stale). Use DIMREASSOCIATE."),
+                    )],
+                });
+            }
+        }
+
         {
             use crate::entities::common::ro_prop;
             let common = source_entity.common();

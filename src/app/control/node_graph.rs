@@ -364,6 +364,8 @@ impl OpenCADStudio {
                 json!({
                     "id": node.id,
                     "type": kind,
+                    // The user's name for the node, `null` while it has none.
+                    "name": ui.and_then(|ui| ui.name.as_deref()),
                     "kind": family,
                     "category": category,
                     "position": ui.map(|ui| [ui.pos.x, ui.pos.y]),
@@ -1037,6 +1039,28 @@ mod data_node_tests {
     fn output(app: &crate::app::OpenCADStudio, id: super::NodeId, field: &str) -> Value {
         let graph = &app.tabs[app.active_tab].graph.engine;
         graph.node(id).and_then(|node| node.outputs.get(field).cloned()).unwrap_or(Value::Null)
+    }
+
+    /// The automation state names a renamed node, and `null` otherwise.
+    #[test]
+    fn the_state_reports_node_names() {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let named = add(&mut app, "Range", json!({}));
+        let plain = add(&mut app, "Number", json!({}));
+        let i = app.active_tab;
+        app.tabs[i].graph.ui.get_mut(&named).unwrap().name = Some("Stations".to_owned());
+        let state = app.node_graph_state(i);
+        let name = |id: super::NodeId| {
+            state["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|node| node["id"] == json!(id))
+                .map(|node| node["name"].clone())
+        };
+        assert_eq!(name(named), Some(json!("Stations")));
+        assert_eq!(name(plain), Some(Value::Null));
     }
 
     /// A CSV written by one node reads back through another, and a

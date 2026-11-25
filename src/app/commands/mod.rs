@@ -39,6 +39,8 @@ mod geometry_cleanup;
 #[cfg(test)]
 mod geometry_cleanup_tests;
 mod ifc_plan;
+#[cfg(test)]
+mod layer_variable_tests;
 pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;
 mod dim_cmd;

@@ -7980,6 +7980,7 @@ dgn-import =
     .nothing-to-import = Mô hình DGN không có nội dung nào có thể nhập.
 
 ifc2plan =
+    .reference-files = CAD and IFC files
     .title = Mặt bằng IFC
     .choose-file = Chọn tệp IFC khác…
     .choose-storey = Chọn một tầng

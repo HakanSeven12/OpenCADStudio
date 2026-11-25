@@ -7961,6 +7961,7 @@ dgn-import =
     .nothing-to-import = The DGN model has nothing that can be imported.
 
 ifc2plan =
+    .reference-files = CAD and IFC files
     .title = IFC तल योजना
     .choose-file = दूसरी IFC फ़ाइल चुनें…
     .choose-storey = मंज़िल चुनें

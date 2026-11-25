@@ -7974,6 +7974,7 @@ dgn-import =
     .nothing-to-import = DGN modelida import qilinadigan heç narsa yöq.
 
 ifc2plan =
+    .reference-files = CAD and IFC files
     .title = IFC qavat rejasi
     .choose-file = Boşqa IFC tanlaş…
     .choose-storey = Qavatni tanlang

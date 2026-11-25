@@ -7951,6 +7951,7 @@ dgn-import =
     .nothing-to-import = A DGN-modell nem tartalmaz importálható elemet.
 
 ifc2plan =
+    .reference-files = CAD and IFC files
     .title = IFC-alaprajz
     .choose-file = Másik IFC-fájl kiválasztása…
     .choose-storey = Válasszon szintet

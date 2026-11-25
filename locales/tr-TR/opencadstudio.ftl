@@ -7896,6 +7896,7 @@ dgn-import =
     .nothing-to-import = DGN modelinde içe aktarılabilecek bir şey yok.
 
 ifc2plan =
+    .reference-files = CAD and IFC files
     .title = IFC Kat Planı
     .choose-file = Başka bir IFC dosyası seç…
     .choose-storey = Bir kat seçin

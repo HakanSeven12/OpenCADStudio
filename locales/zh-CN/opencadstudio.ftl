@@ -7956,6 +7956,7 @@ dgn-import =
     .nothing-to-import = The DGN model has nothing that can be imported.
 
 ifc2plan =
+    .reference-files = CAD and IFC files
     .title = IFC 楼层平面图
     .choose-file = 选择其他 IFC 文件…
     .choose-storey = 请选择楼层

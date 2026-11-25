@@ -316,6 +316,7 @@ impl OpenCADStudio {
                 }
                 layers.push(
                     container(self.expanded_panel(*id, side, width, tab))
+                        .width(Length::Fixed(width))
                         .height(Length::FillPortion(crate::ui::dock::portion(
                             group.weights[pos],
                         )))

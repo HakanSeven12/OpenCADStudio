@@ -11,6 +11,6 @@ web: In the web app the PDF is downloaded by the browser instead of saved to a f
 
 ## Notes
 - No plot dialog opens. The export uses the settings last chosen in the plot dialog (sheet, scale, plot style, and so on).
-- If the plot settings name an output folder, the file goes there directly and no save dialog opens.
+- If the plot settings name an output folder, the file goes there directly and no save dialog opens. When a file of that name is already there, the next free number is added (`plan-2.pdf`, `plan-3.pdf`, …), so earlier plots are kept.
 - If "open when done" is set in the plot settings, the PDF opens in your viewer afterwards.
 - Use [`PLOT`](PLOT-Command) when you want to change the settings first, and [`PUBLISH`](PUBLISH-Command) for several layouts in one PDF.

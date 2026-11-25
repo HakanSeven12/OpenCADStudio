@@ -187,7 +187,9 @@ fn spike_kernel_timings() {
             "{}",
             sm::by_matrix(
                 &boxed,
-                [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 5., 5., 5., 1.]
+                [
+                    1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 5., 5., 5., 1.
+                ]
             )
             .is_some()
         )
@@ -245,9 +247,11 @@ fn audit_python_solid3d_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let solids = |host: &HostSession<'_>| -> Vec<Handle> {
@@ -328,11 +332,13 @@ fn audit_python_solid3d_lifecycle_over_real_ipc() {
         dispatch(host, &format!("PY_EVAL {expression}"));
         last(host)
     };
-    assert!(read(
-        &mut host,
-        &format!("ocs.active_document.entities[{}].kind", list[0].value())
-    )
-    .contains("Solid3D"));
+    assert!(
+        read(
+            &mut host,
+            &format!("ocs.active_document.entities[{}].kind", list[0].value())
+        )
+        .contains("Solid3D")
+    );
 
     // E: rigid moves keep the volume and move the extent exactly.
     let box_handle = list[0];
@@ -355,7 +361,13 @@ fn audit_python_solid3d_lifecycle_over_real_ipc() {
         close(low[0], 0.0, 1e-6) && close(high[1], 8.0, 1e-6) && close(high[2], 7.0, 1e-6),
         "{low:?} {high:?}"
     );
-    dispatch(&mut host, &format!("PY_EVAL ocs.active_document.solids.rotate({}, 'z', 0.7853981633974483, (5, 5, 5)).handle", box_handle.value()));
+    dispatch(
+        &mut host,
+        &format!(
+            "PY_EVAL ocs.active_document.solids.rotate({}, 'z', 0.7853981633974483, (5, 5, 5)).handle",
+            box_handle.value()
+        ),
+    );
     dispatch(
         &mut host,
         &format!(
@@ -590,9 +602,11 @@ fn audit_python_body_transform_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let extent = |host: &HostSession<'_>| {
         let Some(EntityType::Body(b)) = host.document().get_entity(handle) else {
@@ -609,14 +623,15 @@ fn audit_python_body_transform_over_real_ipc() {
             handle.value()
         ),
     );
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("Body"));
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("Body")
+    );
     dispatch(
         &mut host,
         &format!(
@@ -673,9 +688,11 @@ fn audit_python_region_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let regions = |host: &HostSession<'_>| -> Vec<Handle> {
@@ -949,9 +966,11 @@ fn audit_python_surface_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let sorted = |mut list: Vec<Handle>| {
@@ -1339,9 +1358,11 @@ fn audit_python_boolean_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let solids_in = |document: &Document| {
@@ -1661,9 +1682,11 @@ fn audit_python_boolean_kernel_refusal_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let script =
         std::env::temp_dir().join(format!("ocs_boolean_refusal_{}.py", std::process::id()));
@@ -1689,42 +1712,68 @@ fn audit_python_boolean_kernel_refusal_over_real_ipc() {
 #[test]
 fn audit_python_section_symbol_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('SectionSymbol', symbol_scale=1.0, points=[\n",
-                "    {'point': P(0.0, 0.0, 0.0), 'label': 'A', 'label_offset': P(0.0, 2.0, 0.0)},\n",
-                "    {'point': P(40.0, 0.0, 0.0), 'label': 'A', 'label_offset': P(0.0, 2.0, 0.0)}])\n"),
-            edit: concat!(
-                "e = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit'):\n",
-                "    e.points = [{'point': P(0.0, 0.0, 0.0), 'label': 'B', 'label_offset': P(0.0, 3.0, 0.0)},\n",
-                "        {'point': P(20.0, 10.0, 0.0), 'bulge': 0.0}, {'point': P(40.0, 0.0, 0.0), 'label': 'B', 'label_offset': P(0.0, -3.0, 0.0)}]\n",
-                "    e.symbol_scale = 2.0\n",
-                "doc.selection = [e]\n"),
-            rejects: &[
-                ("'points':[{'point':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 2 points"),
-                ("'points':[{'point':{'x':float('nan'),'y':0.0,'z':0.0}},{'point':{'x':1.0,'y':0.0,'z':0.0}}]", "finite"),
-                ("'symbol_scale':0.0", "greater than zero"),
-                ("'style_handle':999999", "not an existing SectionViewStyle"),
-                ("'view_rep_handle':999999", "not an existing ViewRep"),
-                ("'raw_point_count_90':9", "read-only"),
-                ("'end_a':[1.0, 1.0]", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::SectionSymbol(_)),
-            digest: |entity| match entity {
-                EntityType::SectionSymbol(v) => format!("n{} ends {:.1},{:.1}->{:.1},{:.1} label{} tick{:.1}/{:.1} scale{:.1} counts{}/{}",
-                    v.points.len(), v.end_a[0], v.end_a[1], v.end_b[0], v.end_b[1], v.label, v.tick_a, v.tick_b,
-                    v.symbol_scale, v.raw_point_count_90, v.raw_point_record_count),
-                other => format!("wrong kind {}", format!("{other:?}").split('(').next().unwrap()),
-            },
-            reedit: |entity| if let EntityType::SectionSymbol(v) = entity { v.symbol_scale = 3.0; },
-            expect_created: "n2 ends 0.0,0.0->40.0,0.0 labelA tick2.0/2.0 scale1.0 counts2/2",
-            expect_edited: "n3 ends 0.0,0.0->40.0,0.0 labelB tick3.0/-3.0 scale2.0 counts3/3",
-            expect_reedited: "n3 ends 0.0,0.0->40.0,0.0 labelB tick3.0/-3.0 scale3.0 counts3/3",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-        });
+        create: concat!(
+            "doc.create_entity('SectionSymbol', symbol_scale=1.0, points=[\n",
+            "    {'point': P(0.0, 0.0, 0.0), 'label': 'A', 'label_offset': P(0.0, 2.0, 0.0)},\n",
+            "    {'point': P(40.0, 0.0, 0.0), 'label': 'A', 'label_offset': P(0.0, 2.0, 0.0)}])\n"
+        ),
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.points = [{'point': P(0.0, 0.0, 0.0), 'label': 'B', 'label_offset': P(0.0, 3.0, 0.0)},\n",
+            "        {'point': P(20.0, 10.0, 0.0), 'bulge': 0.0}, {'point': P(40.0, 0.0, 0.0), 'label': 'B', 'label_offset': P(0.0, -3.0, 0.0)}]\n",
+            "    e.symbol_scale = 2.0\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            (
+                "'points':[{'point':{'x':0.0,'y':0.0,'z':0.0}}]",
+                "at least 2 points",
+            ),
+            (
+                "'points':[{'point':{'x':float('nan'),'y':0.0,'z':0.0}},{'point':{'x':1.0,'y':0.0,'z':0.0}}]",
+                "finite",
+            ),
+            ("'symbol_scale':0.0", "greater than zero"),
+            ("'style_handle':999999", "not an existing SectionViewStyle"),
+            ("'view_rep_handle':999999", "not an existing ViewRep"),
+            ("'raw_point_count_90':9", "read-only"),
+            ("'end_a':[1.0, 1.0]", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::SectionSymbol(_)),
+        digest: |entity| match entity {
+            EntityType::SectionSymbol(v) => format!(
+                "n{} ends {:.1},{:.1}->{:.1},{:.1} label{} tick{:.1}/{:.1} scale{:.1} counts{}/{}",
+                v.points.len(),
+                v.end_a[0],
+                v.end_a[1],
+                v.end_b[0],
+                v.end_b[1],
+                v.label,
+                v.tick_a,
+                v.tick_b,
+                v.symbol_scale,
+                v.raw_point_count_90,
+                v.raw_point_record_count
+            ),
+            other => format!(
+                "wrong kind {}",
+                format!("{other:?}").split('(').next().unwrap()
+            ),
+        },
+        reedit: |entity| {
+            if let EntityType::SectionSymbol(v) = entity {
+                v.symbol_scale = 3.0;
+            }
+        },
+        expect_created: "n2 ends 0.0,0.0->40.0,0.0 labelA tick2.0/2.0 scale1.0 counts2/2",
+        expect_edited: "n3 ends 0.0,0.0->40.0,0.0 labelB tick3.0/-3.0 scale2.0 counts3/3",
+        expect_reedited: "n3 ends 0.0,0.0->40.0,0.0 labelB tick3.0/-3.0 scale3.0 counts3/3",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+    });
 }
 
 #[test]
@@ -1764,9 +1813,11 @@ fn audit_python_section_symbol_references_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let count = |host: &HostSession<'_>| {
@@ -1777,7 +1828,8 @@ fn audit_python_section_symbol_references_over_real_ipc() {
     };
     let create = |extra: &str| {
         format!(
-            "PY_EVAL ocs.active_document.create_entity('SectionSymbol', points=[{{'point': {{'x': 0.0, 'y': 0.0, 'z': 0.0}}}}, {{'point': {{'x': 10.0, 'y': 0.0, 'z': 0.0}}}}]{extra}).handle")
+            "PY_EVAL ocs.active_document.create_entity('SectionSymbol', points=[{{'point': {{'x': 0.0, 'y': 0.0, 'z': 0.0}}}}, {{'point': {{'x': 10.0, 'y': 0.0, 'z': 0.0}}}}]{extra}).handle"
+        )
     };
     // A symbol may reference the drawing's own style and view representation.
     dispatch(

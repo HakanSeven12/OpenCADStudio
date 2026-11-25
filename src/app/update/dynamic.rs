@@ -866,7 +866,7 @@ impl OpenCADStudio {
     ) -> Option<(Vec<crate::scene::WireModel>, Vec<document::Handle>)> {
         let tab = &mut self.tabs[i];
         let modifier = tab.active_cmd.as_ref()?;
-        if !matches!(modifier.name(), "FROM" | "MTP") {
+        if !matches!(modifier.name(), "FROM" | "MTP" | "POINTFILTER" | "TRACKING") {
             return None;
         }
         tab.suspended_cmd.as_ref()?;
@@ -1141,6 +1141,44 @@ mod tests {
                             assert!(guide.pattern_length > 0.0 && guide.pattern[1] < 0.0);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// While a point filter asks for its two points, LINE's rubber band
+    /// still follows the cursor.
+    #[test]
+    fn point_filter_keeps_the_line_preview_at_the_cursor() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut line: Box<dyn CadCommand> =
+            Box::new(crate::modules::draw::draw::line::LineCommand::new());
+        line.on_point(DVec3::new(2.0, 3.0, 0.0));
+        app.tabs[i].active_cmd = Some(line);
+        app.start_point_filter_modifier(i, crate::command::PointFilter::parse(".X").unwrap());
+        for first_point_given in [false, true] {
+            if first_point_given {
+                app.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .unwrap()
+                    .on_point(DVec3::new(30.0, 7.0, 0.0));
+            }
+            for cursor in [DVec3::new(10.0, 20.0, 0.0), DVec3::new(40.0, 50.0, 0.0)] {
+                let expected = app.tabs[i]
+                    .suspended_cmd
+                    .as_mut()
+                    .unwrap()
+                    .on_preview_wires(cursor);
+                assert!(!expected.is_empty());
+                app.tabs[i].last_cursor_world = cursor;
+                app.refresh_active_cmd_preview(i);
+                let actual = &app.tabs[i].scene.preview_wires;
+                assert_eq!(actual.len(), expected.len());
+                for (wire, expected) in actual.iter().zip(&expected) {
+                    assert_eq!(wire.points, expected.points);
                 }
             }
         }

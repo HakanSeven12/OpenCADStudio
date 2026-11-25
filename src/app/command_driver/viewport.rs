@@ -245,8 +245,18 @@ impl OpenCADStudio {
         viewport.id = 2;
         viewport.clip_boundary_handle = clip_handle;
         viewport.status.non_rectangular_clipping = !clip_handle.is_null();
-        let viewport_handle =
-            self.commit_entity_handle(document::EntityType::Viewport(Box::new(viewport)));
+        let viewport = document::EntityType::Viewport(Box::new(viewport));
+        let viewport_handle = if created_boundary {
+            self.commit_entity_handle(viewport)
+        } else {
+            // VIEWPORTLAYER is not for a viewport made from an object: it
+            // goes on the current layer.
+            let mut viewport = viewport;
+            viewport
+                .as_entity_mut()
+                .set_layer(self.tabs[i].active_layer.clone());
+            self.commit_entity_handle_preserve_layer(viewport)
+        };
         if let Some(viewport_handle) = viewport_handle {
             if !created_boundary {
                 let before = self.tabs[i]

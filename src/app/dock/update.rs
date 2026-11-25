@@ -644,6 +644,8 @@ impl OpenCADStudio {
                     }
                     PanelId::PointCloudManager => self.pc_manager.show = true,
                     PanelId::Count => self.set_count_palette(true),
+                    PanelId::GeometryCleanup => self.geometry_cleanup.show = true,
+                    PanelId::BricscadVisibility => self.set_bricscad_visibility_panel(true),
                     PanelId::SheetSetManager => self.show_sheet_set_manager(true),
                     PanelId::Layers => {
                         self.sync_ribbon_layers();
@@ -741,6 +743,8 @@ impl OpenCADStudio {
                 self.count_palette.show = false;
                 self.ribbon.set_count_palette(false);
             }
+            PanelId::GeometryCleanup => self.geometry_cleanup.show = false,
+            PanelId::BricscadVisibility => self.bricscad_visibility.show = false,
             PanelId::SheetSetManager => {
                 self.sheet_set.show = false;
                 self.ribbon.set_sheet_set(false);
@@ -892,6 +896,8 @@ impl OpenCADStudio {
             PanelId::NodeGraph => self.show_node_graph,
             PanelId::PointCloudManager => self.pc_manager.show,
             PanelId::Count => self.count_palette.show,
+            PanelId::GeometryCleanup => self.geometry_cleanup.show,
+            PanelId::BricscadVisibility => self.bricscad_visibility.show,
             PanelId::SheetSetManager => self.sheet_set.show,
             PanelId::Layers => self.show_layers,
             // The walk session is the pallet's state. While the Select Objects

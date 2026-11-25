@@ -517,11 +517,49 @@ impl OpenCADStudio {
         self.refresh_active_cmd_preview(i);
     }
 
+    pub(in crate::app) fn start_point_filter_modifier(
+        &mut self,
+        i: usize,
+        filter: crate::command::PointFilter,
+    ) {
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::PointFilterCommand::new(filter, self.last_point);
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.push_ucs_to_cmd(i);
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.sync_dyn_fields();
+        self.refresh_active_cmd_preview(i);
+    }
+
+    pub(in crate::app) fn start_tracking_modifier(&mut self, i: usize) {
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::TrackingCommand::new(self.last_point);
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.push_ucs_to_cmd(i);
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.sync_dyn_fields();
+        self.refresh_active_cmd_preview(i);
+    }
+
     pub(in crate::app) fn relative_input_base(&self, i: usize) -> Option<glam::DVec3> {
         self.tabs[i]
             .active_cmd
             .as_ref()
-            .filter(|c| c.name() == "FROM")
+            .filter(|c| matches!(c.name(), "FROM" | "TRACKING"))
             .and_then(|c| c.resolved_anchor())
             .or(self.last_point)
     }
@@ -723,6 +761,17 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
             CmdResult::CopySelected(handles, transform) => {
+                // Every further copy is placed from the base point, so ortho,
+                // polar and a typed distance measure from it, not from the
+                // copy just made (#3519).
+                let i = self.active_tab;
+                if let Some(base) = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|c| c.resolved_anchor())
+                {
+                    self.last_point = Some(base);
+                }
                 if let Some(task) = self.handle_copy_selected(handles, transform) {
                     return task;
                 }
@@ -1221,6 +1270,13 @@ impl OpenCADStudio {
             }
             CmdResult::Done => {
                 self.handle_done();
+            }
+            CmdResult::AddCogoPoint { position, description, elevation, echo, then } => {
+                self.add_created_cogo_point(position, description, elevation, echo);
+                if let Some(line) = then {
+                    self.command_line.push_output(&line);
+                }
+                let _ = self.handle_need_point();
             }
             cancel @ (CmdResult::Cancel | CmdResult::CancelForSpaceChange) => {
                 self.handle_cancel(cancel);

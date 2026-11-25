@@ -8,7 +8,7 @@ use crate::app::Message;
 use crate::ui::ribbon::CustomPanel;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::dialog_button;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
 #[derive(Debug, Clone, Default)]

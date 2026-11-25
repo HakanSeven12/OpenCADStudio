@@ -1633,6 +1633,7 @@ fn build_selection_overlay_element(
             short_arms: false,
             snap_color: None,
             snap_size: Default::default(),
+            magnet: true,
         },
         false,
         SelectionVisualOptions::default(),

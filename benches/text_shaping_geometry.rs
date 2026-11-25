@@ -246,7 +246,7 @@ fn shape_digest(runs: &[Arc<ttf_glyph::ShapedRun>]) -> String {
             points(&mut h, &g.fill_tris);
         }
     }
-    format!("{:x}", h.finalize())
+    OpenCADStudio::io::recovery::hex_digest(h.finalize())
 }
 pub(crate) fn geometry_digest(geometry: &[Geometry]) -> String {
     let mut h = Sha256::new();
@@ -257,7 +257,7 @@ pub(crate) fn geometry_digest(geometry: &[Geometry]) -> String {
         }
         points(&mut h, fill);
     }
-    format!("{:x}", h.finalize())
+    OpenCADStudio::io::recovery::hex_digest(h.finalize())
 }
 pub(crate) fn fixture_digest(texts: &[FixtureText]) -> String {
     let mut h = Sha256::new();
@@ -269,7 +269,7 @@ pub(crate) fn fixture_digest(texts: &[FixtureText]) -> String {
         }
         h.update(text.rotation.to_bits().to_le_bytes());
     }
-    format!("{:x}", h.finalize())
+    OpenCADStudio::io::recovery::hex_digest(h.finalize())
 }
 fn elapsed<T>(f: impl FnOnce() -> T) -> (f64, T) {
     let start = Instant::now();
@@ -332,7 +332,7 @@ fn main() {
         "font must resolve to the TrueType path"
     );
     let (font_hash, face_index) = sysfont::with_face_data(&font, |bytes, index| {
-        (format!("{:x}", Sha256::digest(bytes)), index)
+        (OpenCADStudio::io::recovery::hex_digest(Sha256::digest(bytes)), index)
     })
     .expect("font data must be available");
     let drawing = select_fixture(&fixture_name);

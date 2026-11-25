@@ -2,6 +2,7 @@
 // (wasm) build must handle differently or skip.
 
 pub mod clipboard_link;
+pub mod clipboard_svg;
 pub mod startup_times;
 pub mod ui_font;
 
@@ -1039,17 +1040,39 @@ pub mod crash_log {
     /// Process ids are reused, so only a report written at or after
     /// `not_before` (Unix seconds — when that run started) counts: an old
     /// report from an unrelated run that once had the same id does not.
+    ///
+    /// A panic during the unwind of another one writes a report too, so a run
+    /// can leave more than one. The first one names the cause.
     pub fn report_for_pid(pid: u32, not_before: u64) -> Option<String> {
-        let directory = directory()?;
-        let suffix = format!("-{pid}.log");
-        let entry = std::fs::read_dir(directory).ok()?.flatten().find(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            name.strip_prefix("crash-")
-                .and_then(|rest| rest.strip_suffix(suffix.as_str()))
-                .and_then(|when| when.parse::<u64>().ok())
-                .is_some_and(|when| when >= not_before)
-        })?;
-        std::fs::read_to_string(entry.path()).ok()
+        report_for_pid_in(&directory()?, pid, not_before)
+    }
+
+    fn report_for_pid_in(directory: &std::path::Path, pid: u32, not_before: u64) -> Option<String> {
+        let first = std::fs::read_dir(directory)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let order = report_order(&entry.file_name().to_string_lossy(), pid)?;
+                (order.0 >= not_before).then_some((order, entry.path()))
+            })
+            .min_by_key(|(order, _)| *order)?;
+        std::fs::read_to_string(first.1).ok()
+    }
+
+    /// The (Unix seconds, number in that second) of a report of `pid`, from
+    /// its name: `crash-<seconds>-<pid>.log`, then `crash-<seconds>-<pid>-2.log`.
+    fn report_order(name: &str, pid: u32) -> Option<(u64, u32)> {
+        let rest = name.strip_prefix("crash-")?.strip_suffix(".log")?;
+        let mut parts = rest.split('-');
+        let when = parts.next()?.parse::<u64>().ok()?;
+        if parts.next()?.parse::<u32>().ok()? != pid {
+            return None;
+        }
+        let number = match parts.next() {
+            Some(number) => number.parse::<u32>().ok()?,
+            None => 1,
+        };
+        parts.next().is_none().then_some((when, number))
     }
 
     /// Whether a report describes the graphics device giving up.
@@ -1162,20 +1185,36 @@ pub mod crash_log {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let name = format!("crash-{when}-{}.log", std::process::id());
-        let path = directory.join(name);
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        if let Ok(mut file) = options.open(&path) {
-            use std::io::Write;
-            let _ = file.write_all(report(info, when).as_bytes());
-        }
+        write_new(&directory, when, std::process::id(), &report(info, when));
         prune(&directory);
+    }
+
+    /// Writes a report to a file of its own. A panic during the unwind of
+    /// another one comes in the same second, so a second report of that
+    /// second gets `-2` and does not replace the first, which names the cause.
+    fn write_new(directory: &std::path::Path, when: u64, pid: u32, text: &str) {
+        for number in 1..=99u32 {
+            let name = match number {
+                1 => format!("crash-{when}-{pid}.log"),
+                _ => format!("crash-{when}-{pid}-{number}.log"),
+            };
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(directory.join(name)) {
+                Ok(mut file) => {
+                    use std::io::Write;
+                    let _ = file.write_all(text.as_bytes());
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return,
+            }
+        }
     }
 
     /// Keep the newest [`KEEP`] reports.
@@ -1274,6 +1313,76 @@ pub mod crash_log {
             let text = super::report_from("(no message)", "(unknown location)", 0);
             assert!(text.contains("panic: (no message)"), "{text}");
             assert!(text.contains("at: (unknown location)"), "{text}");
+        }
+
+        fn read(path: std::path::PathBuf) -> String {
+            std::fs::read_to_string(path).expect("the report")
+        }
+
+        /// A panic during the unwind of another one comes in the same second.
+        /// Its report must not replace the first, which names the cause.
+        #[test]
+        fn a_second_report_in_the_same_second_does_not_replace_the_first() {
+            let dir = tempfile::tempdir().expect("a temporary directory");
+            super::write_new(dir.path(), 50, 77, "panic: the cause");
+            super::write_new(
+                dir.path(),
+                50,
+                77,
+                "panic: in a function that cannot unwind",
+            );
+            assert_eq!(read(dir.path().join("crash-50-77.log")), "panic: the cause");
+            assert_eq!(
+                read(dir.path().join("crash-50-77-2.log")),
+                "panic: in a function that cannot unwind"
+            );
+        }
+
+        /// The GPU backend fallback asks what ended a run; the first report of
+        /// the run says it.
+        #[test]
+        fn the_report_of_a_run_is_its_first_one() {
+            let dir = tempfile::tempdir().expect("a temporary directory");
+            for (name, text) in [
+                ("crash-51-77.log", "the next second"),
+                ("crash-50-77-2.log", "the second panic"),
+                ("crash-50-77.log", "the cause"),
+                ("crash-49-78.log", "another process"),
+            ] {
+                std::fs::write(dir.path().join(name), text).expect("a report");
+            }
+            assert_eq!(
+                super::report_for_pid_in(dir.path(), 77, 0).as_deref(),
+                Some("the cause")
+            );
+        }
+
+        /// Process ids are reused: a report from before the run does not count,
+        /// and the next one of the run does.
+        #[test]
+        fn a_report_from_before_the_run_does_not_count() {
+            let dir = tempfile::tempdir().expect("a temporary directory");
+            std::fs::write(dir.path().join("crash-40-77.log"), "an old run").expect("a report");
+            std::fs::write(dir.path().join("crash-50-77-2.log"), "this run").expect("a report");
+            assert_eq!(
+                super::report_for_pid_in(dir.path(), 77, 50).as_deref(),
+                Some("this run")
+            );
+            assert_eq!(super::report_for_pid_in(dir.path(), 77, 51), None);
+        }
+
+        #[test]
+        fn a_report_name_gives_its_order_only_for_its_own_process() {
+            assert_eq!(super::report_order("crash-50-77.log", 77), Some((50, 1)));
+            assert_eq!(
+                super::report_order("crash-50-77-12.log", 77),
+                Some((50, 12))
+            );
+            assert_eq!(super::report_order("crash-50-777.log", 77), None);
+            assert_eq!(super::report_order("crash-50-7.log", 77), None);
+            assert_eq!(super::report_order("crash-50-77-x.log", 77), None);
+            assert_eq!(super::report_order("crash-50-77-2-3.log", 77), None);
+            assert_eq!(super::report_order("crash-50-77.txt", 77), None);
         }
     }
 }

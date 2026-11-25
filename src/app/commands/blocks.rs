@@ -85,8 +85,8 @@ impl OpenCADStudio {
         i: usize,
         handles: &[document::Handle],
     ) -> Task<Message> {
-        let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles)
-        else {
+        let strokes = crate::io::svg_clipboard::selection_strokes(&self.tabs[i].scene, handles);
+        let Some(svg) = crate::io::svg_clipboard::strokes_svg(&strokes) else {
             return Task::none();
         };
         #[cfg(target_arch = "wasm32")]
@@ -96,7 +96,15 @@ impl OpenCADStudio {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            iced::clipboard::write(svg).discard()
+            // Where the platform has a registered SVG format, the markup
+            // goes there as well as text, in one write; drawing programs
+            // read it from there (#2018); on Windows a metafile goes with it
+            // (#3431). Elsewhere the toolkit writes text.
+            if crate::sys::clipboard_svg::write(&svg, &strokes) {
+                Task::none()
+            } else {
+                iced::clipboard::write(svg).discard()
+            }
         }
     }
 
@@ -3389,6 +3397,83 @@ mod tests {
         assert_eq!(
             app.block_palette.source_block_epoch,
             app.tabs[other].scene.block_epoch
+        );
+    }
+}
+
+/// Ctrl+C puts the selection on the system clipboard as SVG for other
+/// programs (#2018). They look for it under the `image/svg+xml` format (a
+/// registered clipboard format on Windows, a selection target on X11);
+/// text alone is pasted as text or not at all.
+#[cfg(all(test, any(target_os = "windows", target_os = "linux")))]
+mod svg_clipboard_format_tests {
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::EntityType;
+
+    /// The clipboard writes a task leaves to the GUI toolkit, which writes
+    /// text only.
+    fn toolkit_clipboard_writes(task: iced::Task<crate::app::Message>) -> Vec<String> {
+        use iced::futures::StreamExt;
+        let mut writes = Vec::new();
+        let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+            return writes;
+        };
+        while let Some(action) = iced::futures::executor::block_on(stream.next()) {
+            if let iced_runtime::Action::Clipboard(iced_runtime::clipboard::Action::Write {
+                content,
+                ..
+            }) = action
+            {
+                writes.push(format!("{content:?}"));
+            }
+        }
+        writes
+    }
+
+    #[test]
+    fn copyclip_does_not_leave_the_svg_to_a_text_only_write() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Line(Line::from_coords(
+                0.0, 0.0, 0.0, 40.0, 20.0, 0.0,
+            )));
+        app.tabs[i].scene.select_entity(line, true);
+        let task = app.dispatch_command("COPYCLIP");
+        let writes = toolkit_clipboard_writes(task);
+        let written = crate::sys::clipboard_svg::test_record::take();
+        assert_eq!(written.len(), 1, "one write of the system clipboard");
+        let formats: Vec<&str> = written[0]
+            .iter()
+            .map(|(format, _)| format.as_ref())
+            .collect();
+        if cfg!(target_os = "windows") {
+            assert_eq!(formats, ["CF_UNICODETEXT", "image/svg+xml"]);
+        } else {
+            assert_eq!(
+                formats,
+                ["UTF8_STRING", "text/plain;charset=utf-8", "image/svg+xml"]
+            );
+        }
+        let (_, svg) = written[0]
+            .iter()
+            .find(|(format, _)| *format == "image/svg+xml")
+            .expect("the SVG format");
+        let svg = std::str::from_utf8(svg).expect("UTF-8 markup");
+        assert!(
+            svg.starts_with("<?xml") && svg.contains("<svg"),
+            "{svg:.60}"
+        );
+        assert!(
+            writes.is_empty(),
+            "the SVG went to the clipboard as text only: {:?}",
+            writes
+                .iter()
+                .map(|write| write.chars().take(60).collect::<String>())
+                .collect::<Vec<_>>()
         );
     }
 }

@@ -3,7 +3,7 @@
 //! address is stored. Used by HYPERLINK, the Properties Hyperlink row and
 //! the block definition windows.
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length, Theme};
 
 use crate::app::Message;

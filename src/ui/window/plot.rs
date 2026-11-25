@@ -14,7 +14,7 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form;
 use crate::ui::style::form::{hdivider, vseparator as vsep};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, Space,
+    Space, button, checkbox, column, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Background, Border, Element, Fit, Length, Theme};
 use std::borrow::Cow;
@@ -89,7 +89,7 @@ impl fmt::Display for PlotChoice {
 #[cfg(test)]
 mod tests {
     use super::{CustomPaperDraft, CustomPaperError, PlotChoice, PlotDialogState};
-    use crate::io::paper_catalog::{resolve, Margins, PaperUnits};
+    use crate::io::paper_catalog::{Margins, PaperUnits, resolve};
 
     #[test]
     fn non_scaling_stroke_defaults_off_and_copies_with_plot_preferences() {

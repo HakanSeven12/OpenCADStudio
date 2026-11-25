@@ -5,6 +5,9 @@
 use crate::modules::surface::command::{Filter, Opt, OptKind, Step};
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
+pub mod point_manual;
+pub mod point_object;
+
 pub struct CivilModule;
 
 macro_rules! icon {
@@ -350,7 +353,12 @@ impl CadModule for CivilModule {
                 RibbonGroup {
                     title: "Points",
                     tools: vec![
-                        tool("CREATEPOINTS", "Create Points", icon!("points")),
+                        RibbonItem::LargeTool(ToolDef {
+                            id: "CREATEPOINTS",
+                            label: "Create Points",
+                            icon: icon!("points"),
+                            event: ModuleEvent::Command(crate::ui::points_menu::OPEN_COMMAND.to_string()),
+                        }),
                         tool("CREATEPOINTGROUP", "Create Point Group", icon!("pointgroup")),
                         tool("CREATEPOINTLABELSTYLE", "Create Point Label Style", icon!("pointlabelstyle")),
                     ],

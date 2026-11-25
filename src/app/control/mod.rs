@@ -700,6 +700,17 @@ impl OpenCADStudio {
     }
 
     pub(super) fn control_request(&mut self, req: Value) -> (Value, Task<Message>) {
+        // A test build checks that a change of the drawing has an undo step.
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        let undo_guard =
+            crate::app::update::undo_record_guard::begin_request(self, "control", &req);
+        let response = self.control_request_unguarded(req);
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        crate::app::update::undo_record_guard::end(self, undo_guard);
+        response
+    }
+
+    fn control_request_unguarded(&mut self, req: Value) -> (Value, Task<Message>) {
         // First control contact marks the session automated (#1349): a
         // DonationPrompt that is still queued (not yet shown) is dropped so
         // automation never waits behind it, and `queue_startup_prompts`
@@ -6082,19 +6093,19 @@ mod tests {
         // Monochrome maps every index colour (ByLayer cyan frame, explicit
         // red) to black; the true-color line keeps its RGB by definition.
         assert!(
-            !text.contains("0 1 1 rg") && !text.contains("0 1 1 RG"),
+            !text.contains("0.0 1.0 1.0 rg") && !text.contains("0.0 1.0 1.0 RG"),
             "cyan frame must be CTB-mapped to monochrome"
         );
         assert!(
-            !text.contains("1 0 0 rg") && !text.contains("1 0 0 RG"),
+            !text.contains("1.0 0.0 0.0 rg") && !text.contains("1.0 0.0 0.0 RG"),
             "explicit red must be CTB-mapped to monochrome"
         );
         assert!(
-            text.contains("0 1 0 rg") || text.contains("0 1 0 RG"),
+            text.contains("0.0 1.0 0.0 rg") || text.contains("0.0 1.0 0.0 RG"),
             "true-color line keeps its RGB (aci 0 is not CTB-mapped)"
         );
         assert!(
-            text.contains("0 0 0 rg") || text.contains("0 0 0 RG"),
+            text.contains("0.0 0.0 0.0 rg") || text.contains("0.0 0.0 0.0 RG"),
             "monochrome strokes must plot black"
         );
 

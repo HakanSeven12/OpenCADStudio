@@ -1411,13 +1411,6 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let delta_safe = self.delta_erase_safe(i, &handles);
-                    let pending = self.begin_undo(i, "ERASE", handles.len(), delta_safe);
-                    // Stash the erased entities so OOPS can restore them.
-                    self.oops_cache = handles
-                        .iter()
-                        .filter_map(|h| self.tabs[i].scene.document.get_entity_arc(*h))
-                        .collect();
                     // Erasing an associative hatch drops its link to its boundary.
                     let associative_hatch = handles.iter().any(|h| {
                         matches!(
@@ -1425,15 +1418,10 @@ impl OpenCADStudio {
                             Some(document::EntityType::Hatch(hatch)) if hatch.is_associative
                         )
                     });
-                    self.tabs[i].scene.erase_entities(&handles);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
+                    self.erase_selected_handles(i, &handles);
                     if associative_hatch {
                         self.command_line
                             .push_output(&crate::tr!("hatch-cmd", "associativity-removed"));
-                    }
-                    if let Some(pd) = pending {
-                        self.commit_undo_delta(i, pd);
                     }
                 }
             }
@@ -3792,6 +3780,41 @@ impl OpenCADStudio {
     }
 }
 
+impl OpenCADStudio {
+    /// ERASE / Delete of `handles` as one undo step. A polyline picked by
+    /// segment (Ctrl+click) loses only those segments; the rest stays as
+    /// open polylines (#3552).
+    pub(in crate::app) fn erase_selected_handles(
+        &mut self,
+        i: usize,
+        handles: &[document::Handle],
+    ) {
+        let remains: Vec<document::EntityType> = handles
+            .iter()
+            .filter_map(|h| self.tabs[i].scene.polyline_without_picked_segments(*h))
+            .flatten()
+            .collect();
+        // Erase is delta-safe unless a target is in a group (group cleanup
+        // rewrites document.objects).
+        let delta_safe = self.delta_erase_safe(i, handles);
+        let pending = self.begin_undo(i, "ERASE", handles.len(), delta_safe);
+        // Stash the erased entities so OOPS can restore them.
+        self.oops_cache = handles
+            .iter()
+            .filter_map(|h| self.tabs[i].scene.document.get_entity_arc(*h))
+            .collect();
+        self.tabs[i].scene.erase_entities(handles);
+        for piece in remains {
+            self.tabs[i].scene.add_entity_clone(piece);
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
+    }
+}
+
 #[cfg(test)]
 mod ribbon_customize_suggestion_tests {
     use crate::app::OpenCADStudio;
@@ -3923,3 +3946,4 @@ mod ribbon_customize_suggestion_tests {
         assert_eq!(app.ribbon.custom_panels()[0].commands, vec![last]);
     }
 }
+

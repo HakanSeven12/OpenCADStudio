@@ -78,10 +78,15 @@ impl DataLinkPlaceCommand {
         }
     }
 
-    /// The same, placed from -TABLE's data Link option.
-    pub fn existing_from_table(table: Table, link: document::Handle) -> Self {
+    /// The same, placed from the data link option of TABLE or -TABLE
+    /// (`command_name`).
+    pub fn existing_from_table(
+        table: Table,
+        link: document::Handle,
+        command_name: &'static str,
+    ) -> Self {
         Self {
-            command_name: "-TABLE",
+            command_name,
             ..Self::existing(table, link)
         }
     }
@@ -220,8 +225,8 @@ impl CadCommand for DataLinkPlaceCommand {
     fn prompt(&self) -> String {
         if self.command_name == "DATALINK" {
             t!("DATALINK  Specify insertion point:").into_owned()
-        } else if self.command_name == "-TABLE" {
-            t!("%{n}  Specify insertion point:", n = "-TABLE").into_owned()
+        } else if matches!(self.command_name, "TABLE" | "-TABLE") {
+            t!("%{n}  Specify insertion point:", n = self.command_name).into_owned()
         } else {
             t!("DATAEXTRACTION  Specify insertion point:").into_owned()
         }

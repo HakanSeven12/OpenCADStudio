@@ -28,7 +28,7 @@ use windows::Win32::Foundation::{
     WIN32_ERROR,
 };
 use windows::Win32::Graphics::Gdi::{
-    CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
+    CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
 };
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl, IStream};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
@@ -75,8 +75,10 @@ struct DwgThumbProvider {
 }
 
 impl IInitializeWithStream_Impl for DwgThumbProvider_Impl {
-    fn Initialize(&self, pstream: Option<&IStream>, _grfmode: u32) -> windows::core::Result<()> {
-        let stream = pstream.ok_or(windows::core::Error::from(E_INVALIDARG))?;
+    fn Initialize(&self, pstream: windows::core::Ref<'_, IStream>, _grfmode: u32) -> windows::core::Result<()> {
+        let stream = pstream
+            .as_ref()
+            .ok_or(windows::core::Error::from(E_INVALIDARG))?;
         let mut bytes = Vec::new();
         let mut chunk = vec![0u8; 1 << 16];
         loop {
@@ -107,7 +109,8 @@ impl IThumbnailProvider_Impl for DwgThumbProvider_Impl {
         let bytes = bytes.as_deref().ok_or(windows::core::Error::from(E_FAIL))?;
         let mut img = dwg_thumbnailer::extract_bytes(bytes, cx.max(1))
             .ok_or(windows::core::Error::from(E_FAIL))?;
-        dwg_thumbnailer::badge_dwg(&mut img); // full-width "DWG" band
+        // Explorer draws the app icon on the bottom-right corner: keep "DWG" clear of it.
+        dwg_thumbnailer::badge_dwg_clear_of(&mut img, dwg_thumbnailer::WINDOWS_TYPE_OVERLAY);
         let hbmp = unsafe { rgba_to_hbitmap(&img)? };
         unsafe {
             *phbmp = hbmp;
@@ -133,7 +136,7 @@ unsafe fn rgba_to_hbitmap(img: &dwg_thumbnailer::RgbaImage) -> windows::core::Re
         ..Default::default()
     };
     let mut bits: *mut c_void = std::ptr::null_mut();
-    let hbmp = CreateDIBSection(HDC::default(), &bi, DIB_RGB_COLORS, &mut bits, None, 0)?;
+    let hbmp = CreateDIBSection(None, &bi, DIB_RGB_COLORS, &mut bits, None, 0)?;
     if bits.is_null() {
         return Err(E_FAIL.into());
     }
@@ -156,18 +159,18 @@ struct Factory;
 impl IClassFactory_Impl for Factory_Impl {
     fn CreateInstance(
         &self,
-        punkouter: Option<&IUnknown>,
+        punkouter: windows::core::Ref<'_, IUnknown>,
         riid: *const GUID,
         ppvobject: *mut *mut c_void,
     ) -> windows::core::Result<()> {
-        if punkouter.is_some() {
+        if !punkouter.is_null() {
             return Err(CLASS_E_NOAGGREGATION.into());
         }
         let provider: IUnknown = DwgThumbProvider::default().into();
         unsafe { provider.query(&*riid, ppvobject).ok() }
     }
 
-    fn LockServer(&self, _flock: windows::Win32::Foundation::BOOL) -> windows::core::Result<()> {
+    fn LockServer(&self, _flock: windows::core::BOOL) -> windows::core::Result<()> {
         Ok(())
     }
 }
@@ -216,7 +219,7 @@ extern "system" fn DllUnregisterServer() -> HRESULT {
 
 fn module_path() -> windows::core::Result<String> {
     let mut buf = [0u16; 1024];
-    let len = unsafe { GetModuleFileNameW(SELF_HMODULE, &mut buf) };
+    let len = unsafe { GetModuleFileNameW(Some(SELF_HMODULE), &mut buf) };
     if len == 0 {
         return Err(E_FAIL.into());
     }
@@ -254,7 +257,7 @@ fn set_value(sub: &str, name: Option<&str>, value: &str) -> windows::core::Resul
         RegCreateKeyExW(
             HKEY_CLASSES_ROOT,
             PCWSTR(sub_w.as_ptr()),
-            0,
+            None,
             PCWSTR::null(),
             REG_OPTION_NON_VOLATILE,
             KEY_WRITE,
@@ -275,7 +278,7 @@ fn set_value(sub: &str, name: Option<&str>, value: &str) -> windows::core::Resul
             name_w
                 .as_ref()
                 .map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr())),
-            0,
+            None,
             REG_SZ,
             Some(bytes),
         )

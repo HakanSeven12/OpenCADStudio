@@ -22,6 +22,9 @@ pub enum BlockParameterComponent {
     Angle,
     Flip,
     Visibility(u64),
+    // A BricsCAD parametric block's visibility parameter, with a hash of its
+    // name and states.
+    Bricscad(u64),
     TableRow(u64),
     LookupOutput { column: usize, revision: u64 },
 }
@@ -258,6 +261,9 @@ pub enum GripMenuAction {
     RectangleResize,
     MoveParallel,
     AddVertex,
+    /// Add a vertex beyond the start or the end of an open polyline, so the
+    /// user does not have to reverse it to extend it from its start.
+    ExtendVertex,
     RemoveVertex,
     ConvertToArc,
     /// Split the polyline at this vertex (a closed one opens here; an open

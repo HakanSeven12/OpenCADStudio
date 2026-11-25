@@ -54,7 +54,7 @@ struct VertexOut {
     @location(8) @interpolate(flat) start_angle:    f32,
     @location(9) @interpolate(flat) end_angle:      f32,
     @location(10) @interpolate(flat) is_world:     f32,
-    @location(11) @interpolate(linear) ndc:        vec2<f32>,
+    @location(11) clip_xyw:        vec3<f32>,
 }
 
 // The selection pass widens highlighted lines by `highlight_widen` pixels;
@@ -126,7 +126,8 @@ fn resolve_px_hw_base(px_hw: f32) -> f32 {
 
     var out: VertexOut;
     out.clip_pos = clip_pos;
-    out.ndc = clip_pos.xy / clip_pos.w;
+    // Divided per fragment: WebGL2 has no noperspective interpolation (#3543).
+    out.clip_xyw = vec3<f32>(clip_pos.xy, clip_pos.w);
     out.local_pos = vec2<f32>(u_val * ext, v_val * ext);
     out.radius = radius;
     out.hw_ends = vec2<f32>(hw_a, hw_b);
@@ -197,7 +198,7 @@ fn physical_per_logical(ndc: vec2<f32>) -> f32 {
 
 @fragment fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let r = length(in.local_pos);
-    let px_scale = physical_per_logical(in.ndc);
+    let px_scale = physical_per_logical(in.clip_xyw.xy / in.clip_xyw.z);
 
     // Screen-space derivative anti-aliasing:
     // Use the gradient of the monotonic radial distance `r` instead of `abs(r - radius)`.

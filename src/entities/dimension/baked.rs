@@ -1,8 +1,8 @@
-// Baked radial geometry and synthesized dimension text.
+// Baked dimension geometry and synthesized dimension text.
 
 use super::*;
 
-pub(crate) fn baked_radial_geometry(
+pub(crate) fn baked_dimension_geometry(
     dimension: &Dimension,
     document: &Document,
     annotation_scale: f64,
@@ -67,6 +67,7 @@ pub(crate) fn baked_radial_geometry(
             horizontal_text: text.horizontal,
             text_lifted: style.map(|style| style.dimtad).unwrap_or(1) != 0
                 || text_splits_at_line(dimension),
+            text_below: style.is_some_and(|style| style.dimtad == 4),
             text_movement: style.map(|style| style.dimtmove).unwrap_or(0),
             text_break: text.break_box,
             leader_anchor: stored_text_point(dimension)
@@ -95,7 +96,11 @@ pub(crate) fn baked_radial_geometry(
             add_polyline(&mut geometry.ext_lines, &points);
         }
     }
-    if style.is_some_and(|style| style.dimtmove == 1) {
+    if let Some(moved) = dimtmove_one_text(dimension, style, text_height, scale, Some(document)) {
+        for (start, end) in moved.lines {
+            add_segment(&mut geometry.dim_lines, vec3_local(start), vec3_local(end));
+        }
+    } else if style.is_some_and(|style| style.dimtmove == 1) {
         if let Some((anchor, endpoint, under_text)) = dimtmove_leader_endpoints(dimension, text) {
             if under_text || anchor.distance(endpoint) > text_height as f32 {
                 add_segment_with_text_break(
@@ -112,12 +117,14 @@ pub(crate) fn baked_radial_geometry(
         dimension.base().common.handle,
         &mut geometry.dim_lines,
         origin,
+        None,
     );
     apply_dimension_breaks(
         document,
         dimension.base().common.handle,
         &mut geometry.ext_lines,
         origin,
+        geometry.ext2_start.as_mut(),
     );
     geometry
 }
@@ -174,6 +181,22 @@ pub(crate) fn baked_dimension_text(
         .map(|s| s.dimtxt * dim_scale)
         .unwrap_or(2.5 * dim_scale);
     let gap = style.map(|s| s.dimgap.abs()).unwrap_or(0.0) * dim_scale;
+    // The angular frame uses local f32 points. Place the label in the same
+    // frame as the arc cutout before restoring the world coordinates.
+    if matches!(dim, Dimension::Angular2Ln(_)) {
+        let origin = dimension_precision_origin(dim);
+        if origin != Vector3::ZERO {
+            let local = shift_dimension(dim, origin);
+            let mut text = dimension_text_entity(&local, dim_txt, style, document, dim_scale)?;
+            crate::scene::view::dispatch::apply_transform(
+                &mut text,
+                &crate::command::EntityTransform::Translate(DVec3::new(
+                    origin.x, origin.y, origin.z,
+                )),
+            );
+            return Some((text, gap));
+        }
+    }
     Some((
         dimension_text_entity(dim, dim_txt, style, document, dim_scale)?,
         gap,

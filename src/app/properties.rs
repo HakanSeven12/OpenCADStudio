@@ -1073,6 +1073,15 @@ impl OpenCADStudio {
                     custom_properties.extend(Self::visibility_property(doc, handle));
                 }
                 custom_properties.extend(Self::visible_blocks_property(doc, handle));
+                // A BricsCAD parametric block's states, switched from a list
+                // outside the Block Editor and Test Block.
+                custom_properties.extend(Self::bricscad_visibility_properties(
+                    doc,
+                    self.tabs[i].id,
+                    handle,
+                    self.tabs[i].active_block_edit_session().is_none()
+                        && self.tabs[i].block_test.is_none(),
+                ));
                 if !custom_properties.is_empty() {
                     sections.push(crate::scene::model::object::PropSection {
                         title: t!("Custom").into_owned(),
@@ -4672,7 +4681,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             entity.as_entity_mut().set_layer(layer);
         } else if !preserve_entity_layer {
             // DIMLAYER and MLEADERLAYER put new dimensions and
-            // multileaders on their own layers.
+            // multileaders on their own layers; the other layer variables
+            // put new hatches, external references and the new objects of
+            // REVCLOUD, TABLE and MVIEW on theirs.
             let xref = match &entity {
                 document::EntityType::Insert(insert) => self.tabs[i]
                     .scene
@@ -4690,6 +4701,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 self.new_variable_layer(i, "HATCHLAYER")
             } else if xref {
                 self.new_variable_layer(i, "XREFLAYER")
+            } else if let Some(name) = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|command| super::commands::command_layer_variable(command.name()))
+            {
+                self.new_variable_layer(i, name)
             } else {
                 self.tabs[i].active_layer.clone()
             };
@@ -6008,37 +6025,7 @@ fn dim_lineweight_label(dimlwd: i16) -> String {
     crate::entities::common::lineweight_label(dimlwd)
 }
 
-/// Human-readable INSUNITS name (DXF group 70 unit codes).
-pub(crate) fn insunits_name(code: i16) -> &'static str {
-    match code {
-        1 => "Inches",
-        2 => "Feet",
-        3 => "Miles",
-        4 => "Millimeters",
-        5 => "Centimeters",
-        6 => "Meters",
-        7 => "Kilometers",
-        8 => "Microinches",
-        9 => "Mils",
-        10 => "Yards",
-        11 => "Angstroms",
-        12 => "Nanometers",
-        13 => "Microns",
-        14 => "Decimeters",
-        15 => "Decameters",
-        16 => "Hectometers",
-        17 => "Gigameters",
-        18 => "Astronomical Units",
-        19 => "Light Years",
-        20 => "Parsecs",
-        21 => "US Survey Feet",
-        22 => "US Survey Inches",
-        23 => "US Survey Yards",
-        24 => "US Survey Miles",
-        0 => "Unitless",
-        _ => "Unknown",
-    }
-}
+pub(crate) use crate::entities::units::{insunits_name, insunits_to_mm};
 
 /// Unit-conversion scale for a new INSERT.
 pub(crate) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
@@ -6058,37 +6045,6 @@ pub(in crate::app) fn format_unit_factor(factor: f64) -> String {
     } else {
         format!("{factor:.4}")
     }
-}
-
-/// Convert INSUNITS (DXF group 70) to millimetres.
-pub(crate) fn insunits_to_mm(code: i16) -> Option<f64> {
-    Some(match code {
-        1 => 25.4,                       // Inches
-        2 => 304.8,                      // Feet
-        3 => 1_609_344.0,                // Miles
-        4 => 1.0,                        // Millimeters
-        5 => 10.0,                       // Centimeters
-        6 => 1_000.0,                    // Meters
-        7 => 1_000_000.0,                // Kilometers
-        8 => 0.000_025_4,                // Microinches
-        9 => 0.025_4,                    // Mils
-        10 => 914.4,                     // Yards
-        11 => 1.0e-7,                    // Angstroms
-        12 => 1.0e-6,                    // Nanometers
-        13 => 0.001,                     // Microns
-        14 => 100.0,                     // Decimeters
-        15 => 10_000.0,                  // Decameters
-        16 => 100_000.0,                 // Hectometers
-        17 => 1.0e12,                    // Gigameters
-        18 => 1.495_978_707e14,          // Astronomical Units
-        19 => 9.460_730_472_580_8e18,    // Light Years
-        20 => 3.085_677_581_491_367e19,  // Parsecs
-        21 => 1_200_000.0 / 3_937.0,     // US Survey Feet
-        22 => 100_000.0 / 3_937.0,       // US Survey Inches
-        23 => 3_600_000.0 / 3_937.0,     // US Survey Yards
-        24 => 6_336_000_000.0 / 3_937.0, // US Survey Miles
-        _ => return None,
-    })
 }
 
 fn apply_insert_unit_scale(ins: &mut document::entities::Insert, ratio: f64) -> bool {

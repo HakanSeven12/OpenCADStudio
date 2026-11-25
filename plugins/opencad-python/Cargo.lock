@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=14f7da106cdd20fac94ffbdc238e3012bbe4a553#14f7da106cdd20fac94ffbdc238e3012bbe4a553"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=b0b768cee674c28bac63c75cbd5638b894f33f23#b0b768cee674c28bac63c75cbd5638b894f33f23"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -605,8 +605,19 @@ checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
+ "r-efi 5.3.0",
  "wasip2",
+]
+
+[[package]]
+name = "getrandom"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi 6.0.0",
 ]
 
 [[package]]
@@ -942,16 +953,6 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
-dependencies = [
- "cfg-if",
- "windows-link",
-]
-
-[[package]]
-name = "libloading"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
@@ -1258,10 +1259,10 @@ version = "0.2.1"
 dependencies = [
  "bincode",
  "cargo-lock",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "interprocess",
  "libc",
- "libloading 0.8.9",
+ "libloading",
  "memmap2",
  "opencaddocument",
  "rkyv",
@@ -1269,7 +1270,7 @@ dependencies = [
  "serde-reflection",
  "serde_bytes",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]
 
@@ -1301,7 +1302,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=663bc3a1a2075f939eadafd7fb16683de39a473f#663bc3a1a2075f939eadafd7fb16683de39a473f"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=64e872a4e16e5d7f071411fc5d76048a1a5d77fa#64e872a4e16e5d7f071411fc5d76048a1a5d77fa"
 dependencies = [
  "acadrust",
  "serde",
@@ -1558,6 +1559,12 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r-efi"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radium"
@@ -1997,7 +2004,7 @@ dependencies = [
  "junction",
  "libc",
  "libffi",
- "libloading 0.9.0",
+ "libloading",
  "log",
  "malachite-bigint",
  "memchr",
@@ -2136,9 +2143,9 @@ dependencies = [
 
 [[package]]
 name = "serde-reflection"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af0fdf9c543af37502581e3d6cf4e6cd1628d6616d6a1f8f4ca88aae3a405f5c"
+checksum = "1b5da1e701056e29fcd3508529fda5cc3df8b5299d56a89dee0deb048e733b9a"
 dependencies = [
  "erased-discriminant",
  "once_cell",

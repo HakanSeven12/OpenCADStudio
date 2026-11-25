@@ -529,13 +529,14 @@ impl OpenCADStudio {
         let mut consumed = Vec::new();
         for (handle, profile) in profiles {
             // A refused sweep reports the modeler error code, as the
-            // reference does.
-            let result = (|| -> Result<_, Option<u32>> {
+            // reference does; another modeling failure its reason (#3536).
+            let result = (|| -> Result<_, Option<Result<u32, String>>> {
                 let (path, options) = path.as_ref().zip(options).ok_or(None)?;
                 if sweep_model::spatial_profile(&profile).is_some() {
-                    let record = sweep_model::spatial_sweep_record(&profile, path, options)?;
-                    let body =
-                        ocs_solid::rebuild_sweep_with_mode(&record, true).map_err(|_| None)?;
+                    let record = sweep_model::spatial_sweep_record(&profile, path, options)
+                        .map_err(|code| code.map(Ok))?;
+                    let body = ocs_solid::rebuild_sweep_with_mode(&record, true)
+                        .map_err(|error| Some(Err(error.to_string())))?;
                     return Ok((body, record, true));
                 }
                 let mut record = sweep_model::sweep_record(&profile, path, options).ok_or(None)?;
@@ -550,22 +551,25 @@ impl OpenCADStudio {
                     ocs_solid::rebuild_sweep_with_mode(&record, surface).map_err(|error| {
                         match error {
                             ocs_solid::HistoryRebuildError::Refused(why) => {
-                                Some(sweep_model::sweep_refusal_code(why))
+                                Some(Ok(sweep_model::sweep_refusal_code(why)))
                             }
-                            _ => None,
+                            other => Some(Err(other.to_string())),
                         }
                     })?;
                 Ok((body, record, surface))
             })();
             let (body, record, surface) = match result {
                 Ok(value) => value,
-                Err(code) => {
-                    if let Some(code) = code {
+                Err(failure) => {
+                    if let Some(failure) = failure {
                         self.command_line
                             .push_output(crate::t!("Modeling Operation Error:").as_ref());
-                        self.command_line.push_output(
-                            crate::tf!("Error Code Number is {code}", code = code).as_ref(),
-                        );
+                        match failure {
+                            Ok(code) => self.command_line.push_output(
+                                crate::tf!("Error Code Number is {code}", code = code).as_ref(),
+                            ),
+                            Err(reason) => self.command_line.push_output(&reason),
+                        }
                     }
                     failed += 1;
                     continue;

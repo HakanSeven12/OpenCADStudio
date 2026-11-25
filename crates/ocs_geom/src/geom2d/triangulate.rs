@@ -423,11 +423,18 @@ fn rings_from(input: Vec<Vec<[f64; 2]>>) -> (Vec<[f64; 2]>, Vec<[usize; 3]>) {
             .copied()
             .filter(|index| depth[*index] % 2 == 0)
         {
-            let holes: Vec<Vec<[f64; 2]>> = members
+            let hole_indices: Vec<usize> = members
                 .iter()
                 .copied()
                 .filter(|index| parent[*index] == Some(outer) && depth[*index] % 2 == 1)
-                .map(|index| valid[index].points.clone())
+                .collect();
+            if holes_touch(&valid, &hole_indices) {
+                complete = false;
+                break;
+            }
+            let holes: Vec<Vec<[f64; 2]>> = hole_indices
+                .iter()
+                .map(|&index| valid[index].points.clone())
                 .collect();
             let expected = valid[outer].area
                 - holes
@@ -478,15 +485,6 @@ fn rings_from(input: Vec<Vec<[f64; 2]>>) -> (Vec<[f64; 2]>, Vec<[usize; 3]>) {
 // vertices makes thousands of thin slabs; only used when the polygon
 // triangulator gave up on a component.
 fn even_odd_slabs(rings: &[&[[f64; 2]]]) -> (Vec<[f64; 2]>, Vec<[usize; 3]>) {
-    let segments: Vec<super::curve::Line> = rings
-        .iter()
-        .flat_map(|ring| {
-            (0..ring.len()).map(move |i| super::curve::Line {
-                start: ring[i],
-                end: ring[(i + 1) % ring.len()],
-            })
-        })
-        .collect();
     let extent = rings
         .iter()
         .flat_map(|ring| ring.iter())
@@ -494,18 +492,22 @@ fn even_odd_slabs(rings: &[&[[f64; 2]]]) -> (Vec<[f64; 2]>, Vec<[usize; 3]>) {
         .fold(0.0_f64, |extent, value| extent.max(value.abs()))
         .max(1.0);
     let tolerance = extent * 1e-12;
-    let mut edges: Vec<([f64; 2], [f64; 2])> =
-        super::arrangement::split_at_crossings(&segments, tolerance)
-            .into_iter()
-            .filter(|line| (line.end[0] - line.start[0]).abs() > tolerance)
-            .map(|line| {
-                if line.start[0] < line.end[0] {
-                    (line.start, line.end)
-                } else {
-                    (line.end, line.start)
-                }
+    // Rings reaching `even_odd_slabs` from `rings_from` are already simple and
+    // non-crossing (`split_self_crossing` + `uncross` via `i_overlay`); any
+    // collinear overlap or T-junction starts/ends at an existing vertex whose X
+    // is in `xs`, and `y_at` evaluates each active edge across `[x0, x1]`.
+    let mut edges: Vec<([f64; 2], [f64; 2])> = rings
+        .iter()
+        .flat_map(|ring| {
+            let n = ring.len();
+            (0..n).filter_map(move |i| {
+                let a = ring[i];
+                let b = ring[(i + 1) % n];
+                ((b[0] - a[0]).abs() > tolerance)
+                    .then_some(if a[0] < b[0] { (a, b) } else { (b, a) })
             })
-            .collect();
+        })
+        .collect();
     edges.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
     let mut xs: Vec<f64> = edges.iter().flat_map(|(a, b)| [a[0], b[0]]).collect();
     xs.sort_by(f64::total_cmp);
@@ -665,17 +667,163 @@ fn simple(ring: &[[f64; 2]], tolerance: f64) -> bool {
     true
 }
 
-/// A point well inside a simple ring: the centre of the largest triangle of
-/// its triangulation. `None` when the ring does not triangulate.
-fn interior_sample(face: &[[f64; 2]]) -> Option<[f64; 2]> {
-    let (points, triangles) = polygon(face, &[]);
-    let corners = |t: &[usize; 3]| t.map(|vertex| Vec2::from(points[vertex]));
-    let area = |[a, b, c]: [Vec2; 3]| (b - a).cross(c - a).abs();
-    let [a, b, c] = triangles
-        .iter()
-        .map(corners)
-        .max_by(|p, q| area(*p).total_cmp(&area(*q)))?;
-    Some(((a + b + c) * (1.0 / 3.0)).to_array())
+fn holes_touch(valid: &[CheckedRing], hole_indices: &[usize]) -> bool {
+    if hole_indices.len() < 2 {
+        return false;
+    }
+    for i in 0..hole_indices.len() {
+        let a = &valid[hole_indices[i]];
+        for j in (i + 1)..hole_indices.len() {
+            let b = &valid[hole_indices[j]];
+            if a.bounds.overlaps(b.bounds) && ring_boundaries_intersect(&a.points, &b.points) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn segment_intersects_aabb_f32(a: [f32; 2], b: [f32; 2], min: [f32; 2], max: [f32; 2]) -> bool {
+    if a[0].max(b[0]) < min[0]
+        || a[0].min(b[0]) > max[0]
+        || a[1].max(b[1]) < min[1]
+        || a[1].min(b[1]) > max[1]
+    {
+        return false;
+    }
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let c0 = dx * (min[1] - a[1]) - dy * (min[0] - a[0]);
+    let c1 = dx * (min[1] - a[1]) - dy * (max[0] - a[0]);
+    let c2 = dx * (max[1] - a[1]) - dy * (min[0] - a[0]);
+    let c3 = dx * (max[1] - a[1]) - dy * (max[0] - a[0]);
+    !((c0 > 0.0 && c1 > 0.0 && c2 > 0.0 && c3 > 0.0)
+        || (c0 < 0.0 && c1 < 0.0 && c2 < 0.0 && c3 < 0.0))
+}
+
+fn point_in_ring_f32(pt: [f32; 2], poly: &[[f32; 2]]) -> bool {
+    let (x, y) = (pt[0], pt[1]);
+    let n = poly.len();
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = (poly[i][0], poly[i][1]);
+        let (xj, yj) = (poly[j][0], poly[j][1]);
+        if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Intersect each closed subject ring in `loops` against the closed polygon
+/// `clip` under the even-odd rule, returning all surviving contour rings.
+pub fn intersect_rings_even_odd_f32(
+    loops: &[&[[f32; 2]]],
+    clip: &[[f32; 2]],
+) -> Vec<Vec<[f32; 2]>> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::overlay::{FloatOverlay, OverlayOptions};
+
+    let n_clip = clip.len();
+    if n_clip < 3 || loops.is_empty() {
+        return Vec::new();
+    }
+    let mut clip_min = [f32::INFINITY; 2];
+    let mut clip_max = [f32::NEG_INFINITY; 2];
+    for p in clip {
+        clip_min[0] = clip_min[0].min(p[0]);
+        clip_min[1] = clip_min[1].min(p[1]);
+        clip_max[0] = clip_max[0].max(p[0]);
+        clip_max[1] = clip_max[1].max(p[1]);
+    }
+    let mut options = OverlayOptions::default();
+    options.clean_result = true;
+    let mut out = Vec::with_capacity(loops.len());
+    for &ring in loops {
+        let n_ring = ring.len();
+        if n_ring < 3 {
+            continue;
+        }
+        let mut rmin = [f32::INFINITY; 2];
+        let mut rmax = [f32::NEG_INFINITY; 2];
+        for p in ring {
+            rmin[0] = rmin[0].min(p[0]);
+            rmin[1] = rmin[1].min(p[1]);
+            rmax[0] = rmax[0].max(p[0]);
+            rmax[1] = rmax[1].max(p[1]);
+        }
+        if rmax[0] < clip_min[0]
+            || rmin[0] > clip_max[0]
+            || rmax[1] < clip_min[1]
+            || rmin[1] > clip_max[1]
+        {
+            continue;
+        }
+        // Fast path 1: if `ring`'s AABB does not contain `clip[0]` and no edge of
+        // `clip` intersects `ring`'s AABB, `ring` cannot cross `clip`'s boundary
+        // and is either wholly inside or wholly outside `clip`.
+        let clip0_in_rbox = clip[0][0] >= rmin[0]
+            && clip[0][0] <= rmax[0]
+            && clip[0][1] >= rmin[1]
+            && clip[0][1] <= rmax[1];
+        if !clip0_in_rbox {
+            let mut any_clip_edge_in_r = false;
+            let mut j = n_clip - 1;
+            for i in 0..n_clip {
+                let (a, b) = (clip[j], clip[i]);
+                j = i;
+                if segment_intersects_aabb_f32(a, b, rmin, rmax) {
+                    any_clip_edge_in_r = true;
+                    break;
+                }
+            }
+            if !any_clip_edge_in_r {
+                if point_in_ring_f32(ring[0], clip) {
+                    out.push(ring.to_vec());
+                }
+                continue;
+            }
+        }
+        // Fast path 2: if `clip`'s AABB does not contain `ring[0]` and no edge of
+        // `ring` intersects `clip`'s AABB, `clip` is either wholly inside or
+        // wholly outside `ring`.
+        let ring0_in_cbox = ring[0][0] >= clip_min[0]
+            && ring[0][0] <= clip_max[0]
+            && ring[0][1] >= clip_min[1]
+            && ring[0][1] <= clip_max[1];
+        if !ring0_in_cbox {
+            let mut any_ring_edge_in_c = false;
+            let mut j = n_ring - 1;
+            for i in 0..n_ring {
+                let (a, b) = (ring[j], ring[i]);
+                j = i;
+                if segment_intersects_aabb_f32(a, b, clip_min, clip_max) {
+                    any_ring_edge_in_c = true;
+                    break;
+                }
+            }
+            if !any_ring_edge_in_c {
+                if point_in_ring_f32(clip[0], ring) {
+                    out.push(clip.to_vec());
+                }
+                continue;
+            }
+        }
+        let shapes =
+            FloatOverlay::with_subj_and_clip_custom(&ring, &clip, options, Default::default())
+                .overlay(OverlayRule::Intersect, FillRule::EvenOdd);
+        for shape in shapes {
+            for contour in shape {
+                if contour.len() >= 3 {
+                    out.push(contour);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Each ring that crosses itself, replaced by the faces of its own
@@ -685,7 +833,13 @@ fn interior_sample(face: &[[f64; 2]]) -> Option<[f64; 2]> {
 /// ring whose arrangement gives no such face passes through unchanged, and
 /// so does every simple ring.
 fn split_self_crossing(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
-    use super::{bounded_faces, Line, Tolerance};
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::float::overlay::OverlayOptions;
+    use i_overlay::float::simplify::SimplifyShape;
+
+    let mut options = OverlayOptions::default();
+    options.ogc = true;
+    options.clean_result = true;
     let mut out = Vec::with_capacity(input.len());
     for raw in input {
         let ring = sanitize(raw);
@@ -699,15 +853,10 @@ fn split_self_crossing(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
             out.push(raw.clone());
             continue;
         }
-        let lines: Vec<Line> = (0..ring.len())
-            .map(|k| Line {
-                start: ring[k],
-                end: ring[(k + 1) % ring.len()],
-            })
-            .collect();
-        let faces: Vec<Vec<[f64; 2]>> = bounded_faces(&lines, Tolerance::new(extent * 1e-9))
+        let faces: Vec<Vec<[f64; 2]>> = ring
+            .simplify_shape_custom(FillRule::EvenOdd, options, Default::default())
             .into_iter()
-            .filter(|face| interior_sample(face).is_some_and(|sample| ring_contains(&ring, sample)))
+            .flatten()
             .collect();
         if faces.is_empty() {
             out.push(raw.clone());
@@ -724,7 +873,10 @@ fn split_self_crossing(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
 /// loops were stretched across each other keeps its fill instead of losing
 /// it. Other rings pass through unchanged.
 fn uncross(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
-    use super::{bounded_faces, Line, Tolerance};
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::float::overlay::OverlayOptions;
+    use i_overlay::float::simplify::SimplifyShape;
+
     let rings: Vec<Vec<[f64; 2]>> = input.iter().map(|ring| sanitize(ring)).collect();
     let bounds: Vec<Option<RingBounds>> = rings
         .iter()
@@ -761,21 +913,14 @@ fn uncross(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
         .filter(|(index, _)| members(roots[*index]).count() == 1)
         .map(|(_, ring)| ring.clone())
         .collect();
+    let mut options = OverlayOptions::default();
+    options.ogc = true;
+    options.clean_result = true;
     for root in (0..rings.len()).filter(|index| roots[*index] == *index) {
         let group: Vec<usize> = members(root).collect();
         if group.len() < 2 {
             continue;
         }
-        let lines: Vec<Line> = group
-            .iter()
-            .flat_map(|&index| {
-                let ring = &rings[index];
-                (0..ring.len()).map(move |k| Line {
-                    start: ring[k],
-                    end: ring[(k + 1) % ring.len()],
-                })
-            })
-            .collect();
         let extent = group
             .iter()
             .filter_map(|index| bounds[*index])
@@ -784,49 +929,78 @@ fn uncross(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
         if !(extent > 0.0) {
             continue;
         }
-        for face in bounded_faces(&lines, Tolerance::new(extent * 1e-9)) {
-            let Some(sample) = interior_sample(&face) else {
-                continue;
-            };
-            let cover = group
-                .iter()
-                .filter(|index| ring_contains(&rings[**index], sample))
-                .count();
-            if cover % 2 == 1 {
-                out.push(face);
-            }
-        }
+        let group_rings: Vec<Vec<[f64; 2]>> = group
+            .iter()
+            .map(|&index| rings[index].clone())
+            .collect();
+        out.extend(
+            group_rings
+                .simplify_shape_custom(FillRule::EvenOdd, options, Default::default())
+                .into_iter()
+                .flatten(),
+        );
     }
     out
 }
 
 fn ring_boundaries_intersect(first: &[[f64; 2]], second: &[[f64; 2]]) -> bool {
-    (0..first.len()).any(|a| {
-        (0..second.len()).any(|b| {
-            segments_intersect(
-                first[a],
-                first[(a + 1) % first.len()],
-                second[b],
-                second[(b + 1) % second.len()],
-            )
-        })
-    })
+    let Some(sb) = RingBounds::of(second) else {
+        return false;
+    };
+    let n1 = first.len();
+    let n2 = second.len();
+    for a in 0..n1 {
+        let p0 = first[a];
+        let p1 = first[(a + 1) % n1];
+        if p0[0].max(p1[0]) < sb.min.x
+            || p0[0].min(p1[0]) > sb.max.x
+            || p0[1].max(p1[1]) < sb.min.y
+            || p0[1].min(p1[1]) > sb.max.y
+        {
+            continue;
+        }
+        for b in 0..n2 {
+            if segments_intersect(p0, p1, second[b], second[(b + 1) % n2]) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn ring_boundaries_properly_cross(first: &[[f64; 2]], second: &[[f64; 2]]) -> bool {
-    (0..first.len()).any(|a| {
-        (0..second.len()).any(|b| {
-            segments_properly_cross(
-                first[a],
-                first[(a + 1) % first.len()],
-                second[b],
-                second[(b + 1) % second.len()],
-            )
-        })
-    })
+    let Some(sb) = RingBounds::of(second) else {
+        return false;
+    };
+    let n1 = first.len();
+    let n2 = second.len();
+    for a in 0..n1 {
+        let p0 = first[a];
+        let p1 = first[(a + 1) % n1];
+        if p0[0].max(p1[0]) < sb.min.x
+            || p0[0].min(p1[0]) > sb.max.x
+            || p0[1].max(p1[1]) < sb.min.y
+            || p0[1].min(p1[1]) > sb.max.y
+        {
+            continue;
+        }
+        for b in 0..n2 {
+            if segments_properly_cross(p0, p1, second[b], second[(b + 1) % n2]) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn segments_properly_cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    if a[0].max(b[0]) < c[0].min(d[0])
+        || c[0].max(d[0]) < a[0].min(b[0])
+        || a[1].max(b[1]) < c[1].min(d[1])
+        || c[1].max(d[1]) < a[1].min(b[1])
+    {
+        return false;
+    }
     let (a, b, c, d) = (Vec2::from(a), Vec2::from(b), Vec2::from(c), Vec2::from(d));
     let turn = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
     let values = [turn(a, b, c), turn(a, b, d), turn(c, d, a), turn(c, d, b)];
@@ -851,6 +1025,13 @@ fn segments_intersect_with_tolerance(
     d: [f64; 2],
     tolerance: f64,
 ) -> bool {
+    if a[0].max(b[0]) + tolerance < c[0].min(d[0])
+        || c[0].max(d[0]) + tolerance < a[0].min(b[0])
+        || a[1].max(b[1]) + tolerance < c[1].min(d[1])
+        || c[1].max(d[1]) + tolerance < a[1].min(b[1])
+    {
+        return false;
+    }
     let (a, b, c, d) = (Vec2::from(a), Vec2::from(b), Vec2::from(c), Vec2::from(d));
     let turn = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
     let values = [turn(a, b, c), turn(a, b, d), turn(c, d, a), turn(c, d, b)];
@@ -1038,14 +1219,23 @@ fn bridge(points: &mut Vec<Vec2>, ring: &mut Vec<usize>, hole: Vec<Vec2>) {
 
     // Out along the bridge, once round the hole, and back. The two coincident
     // edges are a slit of no width, which ear clipping then treats like any
-    // other part of the ring.
+    // other part of the ring. When the hole's rightmost corner already meets
+    // `ring[at]` (touching holes), splice directly at that vertex without
+    // emitting zero-length bridge edges.
     let mut spliced: Vec<usize> = Vec::with_capacity(ring.len() + hole.len() + 2);
     spliced.extend_from_slice(&ring[..=at]);
-    for step in 0..hole.len() {
-        spliced.push(base + (start + step) % hole.len());
+    if points[ring[at]] == from {
+        for step in 1..hole.len() {
+            spliced.push(base + (start + step) % hole.len());
+        }
+        spliced.push(ring[at]);
+    } else {
+        for step in 0..hole.len() {
+            spliced.push(base + (start + step) % hole.len());
+        }
+        spliced.push(base + start);
+        spliced.push(ring[at]);
     }
-    spliced.push(base + start);
-    spliced.push(ring[at]);
     spliced.extend_from_slice(&ring[at + 1..]);
     *ring = spliced;
 }
@@ -1376,6 +1566,7 @@ fn clip_ears_reference(points: &[Vec2], mut ring: Vec<usize>) -> Vec<[usize; 3]>
     out
 }
 
+#[cfg(test)]
 fn ear_score(points: &[Vec2], ring: &[usize], at: usize, scale: [f64; 2]) -> f64 {
     let corners = ear_corners(points, ring, at);
     (0..3)
@@ -1388,6 +1579,7 @@ fn ear_score(points: &[Vec2], ring: &[usize], at: usize, scale: [f64; 2]) -> f64
         .fold(0.0, f64::max)
 }
 
+#[cfg(test)]
 fn ear_corners(points: &[Vec2], ring: &[usize], at: usize) -> [Vec2; 3] {
     let count = ring.len();
     [
@@ -1402,6 +1594,7 @@ fn convex_corner([a, b, c]: [Vec2; 3]) -> bool {
 }
 
 /// Whether the corner at `at` can be cut off.
+#[cfg(test)]
 fn is_ear(points: &[Vec2], ring: &[usize], at: usize) -> bool {
     let count = ring.len();
     let [a, b, c] = ear_corners(points, ring, at);
@@ -2159,5 +2352,70 @@ mod tests {
         assert_eq!(triangles.len(), 62, "n − 2 triangles");
         let expected = 0.5 * 64.0 * 100.0 * (std::f64::consts::TAU / 64.0).sin();
         assert!((area(&points, &triangles) - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn touching_and_edge_sharing_holes_are_filled_cleanly() {
+        // Two square holes sharing a vertical edge inside a 20x10 outer rectangle.
+        let outer = vec![[0.0, 0.0], [20.0, 0.0], [20.0, 10.0], [0.0, 10.0]];
+        let hole_a = vec![[4.0, 2.0], [10.0, 2.0], [10.0, 8.0], [4.0, 8.0]];
+        let hole_b = vec![[10.0, 2.0], [16.0, 2.0], [16.0, 8.0], [10.0, 8.0]];
+        let (points, triangles) = rings(&[outer, hole_a, hole_b]);
+        let filled = area(&points, &triangles);
+        // 200 - 36 - 36 = 128.
+        assert!((filled - 128.0).abs() < 1e-6, "filled={filled}");
+    }
+
+    #[test]
+    fn concave_clip_intersects_rings_without_shattering_into_triangles() {
+        // L-shaped concave clip polygon (area = 100 - 36 = 64).
+        let clip: Vec<[f32; 2]> = vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 4.0],
+            [4.0, 4.0],
+            [4.0, 10.0],
+            [0.0, 10.0],
+        ];
+        let outer: Vec<[f32; 2]> = vec![[-5.0, -5.0], [15.0, -5.0], [15.0, 15.0], [-5.0, 15.0]];
+        let inside_hole: Vec<[f32; 2]> = vec![[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0]];
+        let outside_hole: Vec<[f32; 2]> = vec![[6.0, 6.0], [9.0, 6.0], [9.0, 9.0], [6.0, 9.0]];
+        let result = intersect_rings_even_odd_f32(
+            &[outer.as_slice(), inside_hole.as_slice(), outside_hole.as_slice()],
+            &clip,
+        );
+        // Should emit 1 clipped outer L-contour + 1 preserved inside hole (outside hole dropped).
+        assert_eq!(result.len(), 2, "{result:?}");
+    }
+
+    #[test]
+    fn touching_grid_holes_use_overlay_not_slabs() {
+        let mut rings = Vec::new();
+        rings.push(vec![
+            [-50.0, -50.0],
+            [450.0, -50.0],
+            [450.0, 350.0],
+            [-50.0, 350.0],
+        ]);
+        let sides = 32;
+        for row in 0..4 {
+            for col in 0..6 {
+                let cx = col as f64 * 50.0 + 25.0;
+                let cy = row as f64 * 50.0 + 25.0;
+                let r = 25.0;
+                let hole: Vec<[f64; 2]> = (0..sides)
+                    .map(|i| {
+                        let a = i as f64 / sides as f64 * std::f64::consts::TAU;
+                        [cx + r * a.cos(), cy + r * a.sin()]
+                    })
+                    .collect();
+                rings.push(hole);
+            }
+        }
+        let started = std::time::Instant::now();
+        let (pts, tris) = super::rings(&rings);
+        let elapsed = started.elapsed();
+        println!("touching_grid_holes: {} tris in {:?}", tris.len(), elapsed);
+        assert!(area(&pts, &tris) > 150_000.0);
     }
 }

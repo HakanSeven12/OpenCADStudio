@@ -452,6 +452,21 @@ pub enum PluginRequest {
         panel_id: String,
         patch: crate::scene::ScenePatch,
     },
+    /// V29 (additive): install a bounded, revision-checked page of widget
+    /// rows into the panel's widget surface atomically (all-or-nothing) —
+    /// the lazy-expansion and paging primitive (finding F4): installing
+    /// another page never replaces the whole surface.
+    PanelSurfacePage {
+        panel_id: String,
+        page: crate::widget::WidgetPage,
+    },
+    /// V29 (additive): apply a bounded, revision-checked table patch
+    /// (cell/row ops) to the panel's stored table atomically
+    /// (all-or-nothing) — the cell-edit and row-update primitive.
+    PanelSurfaceTablePatch {
+        panel_id: String,
+        patch: crate::tables::TablePatch,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -555,6 +570,21 @@ pub enum PluginResponse {
     /// foreign ownership, unknown ids, budget overflow); the stored scene
     /// never ends up partially patched.
     PanelSurfacePatchResult(Result<crate::scene::SceneRevision, crate::scene::SurfaceReject>),
+    /// V29 (additive): outcome of a widget page install — the stored
+    /// widget revision after the atomic install, or the typed refusal.
+    PanelSurfacePageResult(Result<crate::widget::WidgetRevision, crate::widget::WidgetReject>),
+    /// V29 (additive): outcome of a WIDGET surface publish — the stored
+    /// widget revision (the widget tier's independent revision space), or
+    /// the typed refusal.
+    PanelWidgetPublished(Result<crate::widget::WidgetRevision, crate::widget::WidgetReject>),
+    /// V29 (additive): outcome of a TABLE surface publish — the stored
+    /// table revision (the table tier's independent revision space), or
+    /// the typed refusal.
+    PanelTablePublished(Result<crate::tables::TableRevision, crate::tables::TableReject>),
+    /// V29 (additive): outcome of a table patch — the stored revision
+    /// after the atomic apply, or the typed refusal; the stored table
+    /// never ends up partially patched.
+    PanelTablePatchResult(Result<crate::tables::TableRevision, crate::tables::TableReject>),
 }
 
 /// Messages sent from the host to the plugin runner.
@@ -857,5 +887,47 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    /// The S05 widget tier is pinned: the surface envelope grows
+    /// `Widgets` = 1 (after `Scene` = 0), the page install is request
+    /// variant 65 (right after the patch 64), and the typed page/widget
+    /// answers are response variants 51 and 52. Appends only.
+    #[test]
+    fn panel_widget_s05_wire_tails_are_pinned() {
+        let surface = crate::widget::WidgetSurface::new(crate::widget::WidgetRevision(1));
+        assert_eq!(
+            discriminant_of(&PanelSurface::Scene(crate::scene::PanelScene {
+                revision: SceneRevision(1),
+                elements: Vec::new(),
+            })),
+            0
+        );
+        assert_eq!(discriminant_of(&PanelSurface::Widgets(surface.clone())), 1);
+        assert_eq!(
+            discriminant_of(&PluginRequest::PanelSurfacePage {
+                panel_id: "acme:tree".into(),
+                page: crate::widget::WidgetPage {
+                    base_revision: crate::widget::WidgetRevision(1),
+                    parent: None,
+                    after: None,
+                    rows: Vec::new(),
+                    next: None,
+                },
+            }),
+            65
+        );
+        assert_eq!(
+            discriminant_of(&PluginResponse::PanelSurfacePageResult(Ok(
+                crate::widget::WidgetRevision(2)
+            ))),
+            51
+        );
+        assert_eq!(
+            discriminant_of(&PluginResponse::PanelWidgetPublished(Ok(
+                crate::widget::WidgetRevision(1)
+            ))),
+            52
+        );
     }
 }

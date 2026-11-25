@@ -89,6 +89,24 @@ impl OpenCADStudio {
                         Some(document::EntityType::MultiLeader(_))
                     )
                 }),
+            single_block: tab
+                .scene
+                .selected
+                .iter()
+                .next()
+                .filter(|handle| {
+                    tab.scene.selected.len() == 1
+                        && matches!(
+                            tab.scene.document.get_entity(**handle),
+                            Some(document::EntityType::Insert(_))
+                        )
+                })
+                .map(|handle| {
+                    tab.scene
+                        .document
+                        .dynamic_definition_for_insert(*handle)
+                        .is_some()
+                }),
             selected_constraint: tab.scene.selected_constraint,
             isolation_active: tab.scene.has_hidden_objects(),
             recent_cmds: self

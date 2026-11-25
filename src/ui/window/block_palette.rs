@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use crate::app::settings::{BlockInsertOptions, PaletteBlockRef};
 use crate::app::Message;
+use crate::app::settings::{BlockInsertOptions, PaletteBlockRef};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 use crate::ui::dock::PanelId;
@@ -17,8 +17,8 @@ use crate::ui::style::{chrome, kit_metrics as km};
 use crate::ui::window::pdf_dialogs::accent_text;
 use iced::widget::canvas::{Frame, Path, Program, Stroke};
 use iced::widget::{
-    button, canvas, checkbox, column, container, image, mouse_area, pick_list, row, scrollable,
-    text, text_input, Space,
+    Space, button, canvas, checkbox, column, container, image, mouse_area, pick_list, row,
+    scrollable, text, text_input,
 };
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
@@ -69,6 +69,17 @@ pub enum Tab {
 }
 
 impl Tab {
+    const ALL: [Tab; 4] = [Tab::Current, Tab::Recent, Tab::Favorites, Tab::Libraries];
+
+    /// The tab's place in the settings (0 Current Drawing … 3 Libraries).
+    pub fn index(self) -> u8 {
+        Self::ALL.iter().position(|t| *t == self).unwrap_or(0) as u8
+    }
+
+    pub fn from_u8(v: u8) -> Self {
+        Self::ALL.get(v as usize).copied().unwrap_or_default()
+    }
+
     fn label(self) -> String {
         match self {
             Tab::Current => crate::t!("Current Drawing"),
@@ -166,6 +177,16 @@ pub enum Item {
 }
 
 impl Item {
+    /// The drawing file the item stands for: a library drawing, or a recent
+    /// or favorite drawing inserted whole.
+    pub fn drawing(&self) -> Option<PathBuf> {
+        match self {
+            Item::File(path) => Some(path.clone()),
+            Item::Ref(r) if r.drawing && !r.source.is_empty() => Some(PathBuf::from(&r.source)),
+            _ => None,
+        }
+    }
+
     pub fn name(&self) -> String {
         match self {
             Item::Current(name) => name.clone(),
@@ -206,6 +227,8 @@ pub enum MenuAction {
     Remove,
     /// List the blocks of a library drawing.
     ShowBlocks,
+    /// Open a library or recent drawing for editing.
+    OpenDrawing,
 }
 
 /// Every message the block palette emits. Wrapped in `Message::BlockPalette`.
@@ -374,6 +397,9 @@ pub struct BlockPalette {
     pub libraries: Vec<String>,
     /// The folder shown (a library root or one of its sub-folders).
     pub library_dir: Option<PathBuf>,
+    /// The folder the Libraries tab showed in the last session, shown again
+    /// when the tab first opens.
+    pub library_resume: Option<PathBuf>,
     pub library_entries: Vec<LibraryEntry>,
     /// Thumbnails of drawings recent / favorite entries point at.
     pub file_thumbs: std::collections::HashMap<String, Option<image::Handle>>,
@@ -850,6 +876,13 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
         MenuAction::Insert,
         !matches!(item, Item::Folder(_)),
     )];
+    if item.drawing().is_some() {
+        rows.push(entry(
+            crate::t!("Open Drawing").into_owned(),
+            MenuAction::OpenDrawing,
+            true,
+        ));
+    }
     if show_blocks {
         rows.push(entry(
             crate::t!("Show Blocks").into_owned(),
@@ -1528,9 +1561,9 @@ mod tests {
     /// Centre of text `label` in `element` laid out very tall: where it is
     /// in view (`visible`), or wherever it is laid out.
     fn locate(element: Element<'_, Message>, label: &str, visible: bool) -> Option<iced::Point> {
+        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::Selector;
         let _one = crate::headless_ui_lock();
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(

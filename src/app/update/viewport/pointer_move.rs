@@ -1723,7 +1723,7 @@ impl OpenCADStudio {
                 || self.tabs[i]
                     .active_cmd
                     .as_ref()
-                    .is_some_and(|cmd| matches!(cmd.name(), "FROM" | "MTP"))
+                    .is_some_and(|cmd| matches!(cmd.name(), "FROM" | "MTP" | "POINTFILTER" | "TRACKING"))
             {
                 // Rebuild only the command overlay, not the resident drawing;
                 // the full snap pass still waits for the normal dwell tick.
@@ -1930,6 +1930,10 @@ impl OpenCADStudio {
                 // Construction anchor for perpendicular and tangent snaps
                 // in full f64 precision.
                 self.snapper.from_point = self.last_point;
+                self.snapper.tangent_lines = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|c| c.tangent_to_lines());
 
                 let construction_ray = if free_point {
                     None

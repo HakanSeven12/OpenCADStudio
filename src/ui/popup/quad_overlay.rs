@@ -110,7 +110,7 @@ fn quad_grid(panel: &QuadPanel, cols: usize) -> Element<'static, Message> {
 }
 
 /// One quad cell: the item's icon at tool size on a tile, the label as a
-/// tooltip below, a press emitting `QuadMsg::Pick` (every model item is
+/// tooltip above (below it would cover the panel tabs under the last row), a press emitting `QuadMsg::Pick` (every model item is
 /// enabled — the quad only offers commands the target can run).
 fn quad_tile(item: &QuadItem, panel_id: &str, index: usize) -> Element<'static, Message> {
     let icon = container(quad_icon(&item.icon))
@@ -130,7 +130,7 @@ fn quad_tile(item: &QuadItem, panel_id: &str, index: usize) -> Element<'static, 
     iced::widget::tooltip(
         btn,
         quad_tile_tip(item),
-        iced::widget::tooltip::Position::Bottom,
+        iced::widget::tooltip::Position::Top,
     )
     .gap(4)
     .into()

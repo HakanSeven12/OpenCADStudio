@@ -9,6 +9,7 @@ src/ui/window/authoring_palettes.rs 0 0
 src/ui/window/tool_palettes.rs 0 0
 src/ui/window/parameters_manager.rs 0 0
 src/ui/window/count_palette.rs 0 17
+src/ui/window/bricscad_visibility.rs 0 0
 src/ui/window/layer_walk.rs 0 0
 src/ui/window/quick_calc/view.rs 3 44
 src/ui/window/quick_calc/variables_view.rs 0 32

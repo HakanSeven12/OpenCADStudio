@@ -212,6 +212,7 @@ pub fn export_dwf_pages(
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace DWF file: {error}"));
     }
+    super::remove_stale_save_temps(path);
     Ok(())
 }
 
@@ -2199,9 +2200,21 @@ mod tests {
                 let mut file = archive.by_index(index).expect("an entry");
                 let mut data = Vec::new();
                 file.read_to_end(&mut data).expect("inflates");
-                (file.name().to_string(), data)
+                (file.name().expect("an entry name").to_string(), data)
             })
             .collect()
+    }
+
+    #[test]
+    fn a_dwf_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        export_dwf(&page(PlotContent::default(), 297.0, 210.0), "Model", &path).unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
     }
 
     #[test]

@@ -3435,6 +3435,8 @@ fn append_custom_fill_points(
 }
 
 pub(crate) struct DimGeom {
+    /// Boundary between the angular extension lines, including when either is suppressed.
+    pub(crate) ext2_start: Option<usize>,
     pub(crate) ext_lines: Vec<[f32; 3]>,
     pub(crate) dim_lines: Vec<[f32; 3]>,
     /// Arrowhead / tick outlines of a dimension: drawn solid, never in the
@@ -3453,6 +3455,7 @@ pub(crate) struct DimGeom {
 impl DimGeom {
     pub(crate) fn new() -> Self {
         Self {
+            ext2_start: None,
             ext_lines: Vec::new(),
             dim_lines: Vec::new(),
             arrow_lines: Vec::new(),

@@ -35,3 +35,4 @@ pub mod translate;
 pub mod trim;
 pub mod txtexp;
 pub mod vertex_edit;
+pub mod visibilitystates;

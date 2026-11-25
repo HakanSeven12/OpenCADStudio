@@ -154,6 +154,8 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 
 #[cfg(test)]
 mod block_ops_tests;
+#[cfg(test)]
+mod block_palette_library_tests;
 pub(super) mod blocks_palette;
 pub(in crate::app) mod command;
 pub(crate) mod context_menu;
@@ -189,6 +191,10 @@ mod qselect;
 mod style;
 pub(in crate::app) mod table_style_cells;
 pub(crate) mod style_import;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(in crate::app) mod undo_record_guard;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod undo_record_guard_tests;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
@@ -1148,6 +1154,8 @@ impl OpenCADStudio {
         // answered move writes it. Answer the withheld position first, so the
         // order stays the order the pointer reported — the hazard
         // `on_snap_dwell_tick` documents is a replay that lands *after*.
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        let undo_guard = undo_record_guard::begin_message(self, &msg);
         let owed = self.flush_owed_pointer_move(&msg);
         let task = Task::batch([owed, self.update_inner(msg)]);
         let perf_dispatch_ms = crate::perf::elapsed_ms(perf_started);
@@ -1181,6 +1189,8 @@ impl OpenCADStudio {
         // Close the document-level first-touch transaction started by
         // push_undo_snapshot at this message boundary.
         self.finish_all_pending_history();
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        undo_record_guard::end(self, undo_guard);
         if self.tabs[self.active_tab].active_cmd.is_none() {
             self.tool_palettes.placing = None;
         }
@@ -1271,6 +1281,8 @@ impl OpenCADStudio {
         self.refresh_xref_manager_if_stale();
         // Count mode recolours its references after the drawing changes.
         self.refresh_count_if_stale();
+        // The Geometry Cleanup palette scans its objects again.
+        self.refresh_geometry_cleanup_if_stale();
         // Let V4 plugins observe selection changes that happened while handling
         // this message (picking, window select, QSELECT, SELECTALL, grip edits,
         // and plugin request draining).
@@ -1688,6 +1700,8 @@ mod prop_pointer_tests;
 
 #[cfg(test)]
 mod anno_scale_toggle_tests;
+#[cfg(test)]
+mod autosnap_magnet_tests;
 
 #[cfg(test)]
 mod dock_visibility_tests;

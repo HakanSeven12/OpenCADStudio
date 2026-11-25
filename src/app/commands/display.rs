@@ -1179,6 +1179,11 @@ impl OpenCADStudio {
             "PRINTALL" | "PUBLISH" => {
                 return Some(Task::done(Message::PrintAllOpen));
             }
+            // A sheet list PUBLISH's step between two drawings.
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::app::sheet_publish::NEXT_STEP => {
+                return Some(self.sheet_publish_step());
+            }
             // PRINTERS — what the system reports about printing, on the
             // command line: the default printer, every printer it lists (or
             // why it could not), and how a plot will reach them. The report
@@ -1259,6 +1264,13 @@ impl OpenCADStudio {
                     .split_once(char::is_whitespace)
                     .map(|(_, rest)| rest.trim())
                     .unwrap_or("");
+                // PUBLISH <list.dsd>: the sheets of a sheet list, from every
+                // drawing it names.
+                #[cfg(not(target_arch = "wasm32"))]
+                if crate::io::dsd::is_sheet_list_path(rest) {
+                    let path = std::path::PathBuf::from(rest.trim_matches('"'));
+                    return Some(self.start_sheet_publish(&path));
+                }
                 let (path_text, sheet_text) = if let Some(stripped) = rest.strip_prefix('"') {
                     match stripped.split_once('"') {
                         Some((path, tail)) => (path, tail.trim()),
@@ -2656,6 +2668,36 @@ impl OpenCADStudio {
             }
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
+            crate::ui::points_menu::OPEN_COMMAND => self.points_menu.open = !self.points_menu.open,
+            "CREATEPOINTMANUAL" | "CREATEPOINTNORTHINGEASTING" | "CREATEPOINTBEARING" | "CREATEPOINTAZIMUTH" | "CREATEPOINTANGLE" | "CREATEPOINTDEFLECTION" => {
+                use crate::modules::civil::point_manual::{CreatePointManualCommand, Mode};
+                let mode = match cmd {
+                    "CREATEPOINTNORTHINGEASTING" => Mode::NorthingEasting,
+                    "CREATEPOINTBEARING" => Mode::Bearing,
+                    "CREATEPOINTAZIMUTH" => Mode::Azimuth,
+                    "CREATEPOINTANGLE" => Mode::Angle,
+                    "CREATEPOINTDEFLECTION" => Mode::Deflection,
+                    _ => Mode::Manual,
+                };
+                let c = CreatePointManualCommand::with_mode(mode);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            // The drawing has no coordinate transformation settings, which
+            // the command needs (the reference refuses the same way).
+            "CREATEPTGEODETICDIR" => {
+                self.command_line.push_error(&crate::t!("Coordinate transformations must be enabled for this command."));
+            }
+            cmd if crate::modules::civil::point_object::Kind::of(cmd).is_some() => {
+                let kind = crate::modules::civil::point_object::Kind::of(cmd).unwrap();
+                let c = crate::modules::civil::point_object::ObjectPointCommand::new(kind);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            cmd if crate::ui::points_menu::is_pending(cmd) => {
+                self.command_line
+                    .push_info(crate::tf!("{cmd}: not yet implemented.").as_ref());
+            }
             "RECAP" | "SYNCPVIEWPORTS" => {
                 self.command_line
                     .push_info(crate::tf!("{cmd}: not yet implemented.").as_ref());

@@ -263,10 +263,12 @@ mod tests {
         assert!(acadrust_source_hash("").is_none());
         assert!(acadrust_source_hash("registry+https://crates.io").is_none());
         assert!(acadrust_source_hash("git+https://github.com/foo/bar.git#short").is_none());
-        assert!(acadrust_source_hash(
-            "git+https://github.com/foo/bar.git#gggggggggggggggggggggggggggggggggggggggg"
-        )
-        .is_none());
+        assert!(
+            acadrust_source_hash(
+                "git+https://github.com/foo/bar.git#gggggggggggggggggggggggggggggggggggggggg"
+            )
+            .is_none()
+        );
     }
 
     #[test]

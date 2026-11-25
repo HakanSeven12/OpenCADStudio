@@ -1,0 +1,95 @@
+# The messages and requests that change a drawing and make no undo step
+# (see undo_record_guard.rs). One name on each line; `#` starts a comment.
+# Remove a name when its handler gets an undo step. A new name needs a reason.
+
+# By design: the drawing is made, opened or saved. These are not edits.
+FileOpened
+SaveFinished(SaveOutcome)
+UnsavedDialogSave
+ScriptLine during EXIT
+ScriptPump
+TabNew
+automation:new
+automation:open
+automation:save
+control:new
+control:save
+
+# By design: a live edit. The entity changes while the user draws or drags,
+# and the end of the command or of the grip edit completes one undo step
+# (`finish_live_entity_history`, `push_entity_group_history`).
+CommandInput during PLINE
+CommandOptionPick during PLINE
+ContextMenuPick(Grip)
+GripMenuPick
+SetModifiers
+ViewportLeftPressAt(Point) during PLINE
+
+# By design: a cancelled command takes back what it placed, and a cancelled
+# grip edit puts back the entity that it changed.
+CommandEscape
+CommandEscape during BACTION
+
+# By design: view state. A viewport's stale saved view is corrected when
+# the viewport becomes active.
+EnterViewport(Handle) during ALIGNSPACE
+
+# No undo step when the guard was added, and known then: a layout becomes
+# current (the first use of a layout also adds its viewport).
+LayoutSwitch
+automation:run TILEMODE
+control:layout_activate
+
+# No undo step when the guard was added, and known then: a typed command or
+# the linetype manager sets the current layer, colour or linetype. (The
+# palette and the ribbon record an undo step for these.)
+CommandInput LINETYPE
+Linetype(SetCurrent)
+ScriptLine -LINETYPE
+ScriptLine during LINETYPE
+automation:run CLAYER
+automation:run COLOR
+automation:run LINETYPE
+
+# Not examined when the guard was added. Each of these changed a drawing
+# with no undo step in its own message; a later message can have completed
+# one (a style manager records at Apply, a command at its end).
+
+# Style managers and their windows.
+CloseModal
+Linetype(Copy)
+Linetype(Delete)
+Linetype(New)
+Linetype(SaveToLibrary)
+Linetype(Select)
+LinetypeLoaded(Some)
+StyleRenameCommit(Linetype)
+StyleRenameCommit(Text)
+StyleRenameStart(Text)
+TableStyleDialogOpen
+TextStyleCard(NewOk)
+TextStyleDialogCopy
+
+# The block editor opens.
+BlockEditPickerApply
+automation:run -BEDIT
+
+# Drawing variables, view state and plot settings.
+AnnoObjectScaleToggle
+DispSilhChanged
+IsolinesChanged
+LayerMenu
+OptionsCloseDiscard
+PlotDlg(Commit)
+RibbonToolClick
+SetRenderMode(FlatShaded)
+SetRenderMode(GouraudShaded)
+ShortcutPressed
+SyncViewportAnnotationScale
+TabSwitch
+automation:run INSUNITS
+automation:run MSLTSCALE
+automation:run REVCLOUD
+automation:run SETVAR
+control:plot
+control:xref_source_register

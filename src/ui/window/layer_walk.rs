@@ -17,12 +17,12 @@ use crate::t;
 use crate::ui::kit;
 use crate::ui::style::text as ui_text;
 use crate::ui::style::{chrome, kit_metrics as km};
-use document::tables::layer::Layer as DocLayer;
 use document::tables::Table;
+use document::tables::layer::Layer as DocLayer;
+use iced::Padding;
 use iced::widget::{
     button, checkbox, column, combo_box, container, mouse_area, row, scrollable, text,
 };
-use iced::Padding;
 use iced::{Background, Element, Fill, Length, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
@@ -283,11 +283,7 @@ fn sort_rows(rows: &mut [LayerWalkRow], sort: LayerWalkSort, asc: bool) {
                 .cmp(&b.count)
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
         };
-        if asc {
-            ord
-        } else {
-            ord.reverse()
-        }
+        if asc { ord } else { ord.reverse() }
     });
 }
 

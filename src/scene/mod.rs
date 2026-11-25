@@ -26,6 +26,7 @@ pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
 pub mod block_visibility;
+pub(crate) mod bricscad_parameters;
 pub mod cache;
 pub mod compare;
 pub mod convert;
@@ -66,6 +67,8 @@ mod block_definition_handles_tests;
 mod block_solid_fill_tests;
 mod boundary;
 mod camera_ops;
+#[cfg(test)]
+mod draw_guard_key_tests;
 #[cfg(test)]
 mod dwg_edit_after_open_tests;
 #[cfg(test)]
@@ -119,6 +122,8 @@ mod modify;
 mod selection_preview_tests;
 #[cfg(test)]
 mod sheet_underlay_tests;
+#[cfg(test)]
+mod sheet_paper_change_tests;
 pub(crate) mod table_content;
 pub(crate) mod table_fields;
 pub(crate) use modify::inverse_affine;

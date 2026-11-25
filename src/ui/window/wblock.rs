@@ -3,7 +3,7 @@
 use std::fmt;
 
 use document::Handle;
-use iced::widget::{button, column, combo_box, container, pick_list, row, text, text_input, Space};
+use iced::widget::{Space, button, column, combo_box, container, pick_list, row, text, text_input};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -373,11 +373,13 @@ pub fn view_window<'a>(
         .align_y(iced::Center)
         .into()
     } else {
-        row![text(crate::tf!("{count} objects selected"))
-            .size(10)
-            .style(|theme: &Theme| text::Style {
-                color: Some(theme.palette().primary.base.color),
-            }),]
+        row![
+            text(crate::tf!("{count} objects selected"))
+                .size(10)
+                .style(|theme: &Theme| text::Style {
+                    color: Some(theme.palette().primary.base.color),
+                }),
+        ]
         .spacing(5)
         .align_y(iced::Center)
         .into()

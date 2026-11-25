@@ -394,11 +394,25 @@ pub fn handle_plugin_request(
         PanelSnapshot { panel_id } => {
             PluginResponse::PanelSnapshot(host.panel_snapshot_for_plugin(plugin_id, &panel_id))
         }
-        PanelSurfacePublish { panel_id, surface } => PluginResponse::PanelSurfacePublished(
-            host.panel_surface_publish_for_plugin(plugin_id, &panel_id, surface),
-        ),
+        PanelSurfacePublish { panel_id, surface } => match surface {
+            crate::scene::PanelSurface::Scene(scene) => PluginResponse::PanelSurfacePublished(
+                host.panel_surface_publish_for_plugin(plugin_id, &panel_id, scene),
+            ),
+            crate::scene::PanelSurface::Widgets(widgets) => PluginResponse::PanelWidgetPublished(
+                host.panel_widget_publish_for_plugin(plugin_id, &panel_id, widgets),
+            ),
+            crate::scene::PanelSurface::Tables(tables) => PluginResponse::PanelTablePublished(
+                host.panel_table_publish_for_plugin(plugin_id, &panel_id, tables),
+            ),
+        },
         PanelSurfacePatch { panel_id, patch } => PluginResponse::PanelSurfacePatchResult(
             host.panel_surface_patch_for_plugin(plugin_id, &panel_id, patch),
+        ),
+        PanelSurfacePage { panel_id, page } => PluginResponse::PanelSurfacePageResult(
+            host.panel_surface_page_for_plugin(plugin_id, &panel_id, page),
+        ),
+        PanelSurfaceTablePatch { panel_id, patch } => PluginResponse::PanelTablePatchResult(
+            host.panel_surface_table_patch_for_plugin(plugin_id, &panel_id, patch),
         ),
         SetGeoLocation { location } => {
             PluginResponse::GeoLocationSet(host.set_geo_location(&location))

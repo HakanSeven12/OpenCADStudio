@@ -8,7 +8,7 @@ use crate::app::{FindReplaceState, Message};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, dialog_button_styled_opt, field_style};
 use crate::ui::window::pdf_dialogs::{card, chip, well_style};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 pub const FIND_INPUT_ID: &str = "find-replace-search";
@@ -206,7 +206,10 @@ impl FindKind {
 /// The card shown at the end of a search.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindNotice {
-    Finished { found: usize, changed: usize },
+    Finished {
+        found: usize,
+        changed: usize,
+    },
     /// The listed objects are in more than one space.
     CannotSelect,
 }
@@ -338,7 +341,11 @@ fn option_chips<'a>(state: &'a FindReplaceState, opts: &[FindOpt]) -> Element<'a
 
 /// A search option as a small toggle beside the search field, its name on
 /// hover. Whole words is off while wildcards are on.
-fn option_toggle<'a>(state: &'a FindReplaceState, opt: FindOpt, glyph: &'static str) -> Element<'a, Message> {
+fn option_toggle<'a>(
+    state: &'a FindReplaceState,
+    opt: FindOpt,
+    glyph: &'static str,
+) -> Element<'a, Message> {
     let mut options = state.options;
     let on = *opt.slot(&mut options);
     let enabled = !(opt == FindOpt::WholeWords && state.options.wildcards);
@@ -387,19 +394,21 @@ fn history_input<'a>(
     if let Some(submit) = submit {
         input = input.on_submit(msg(submit));
     }
-    let picker = crate::ui::dropdown_list::pick_list(None::<String>, history.to_vec(), |s: &String| {
-        s.clone()
-    })
-    .on_select(move |v| msg(on(v)))
-    .text_size(11)
-    .padding([6, 6])
-    .width(Length::Fixed(30.0));
+    let picker =
+        crate::ui::dropdown_list::pick_list(None::<String>, history.to_vec(), |s: &String| {
+            s.clone()
+        })
+        .on_select(move |v| msg(on(v)))
+        .text_size(11)
+        .padding([6, 6])
+        .width(Length::Fixed(30.0));
     row![input, picker].spacing(4).align_y(iced::Center).into()
 }
 
 /// A result's text with every match shaded.
 fn marked_text<'a>(value: &str, state: &FindReplaceState, selected: bool) -> Element<'a, Message> {
-    let ranges = crate::app::text_match::str_ranges(value, &state.search, &state.options.matching());
+    let ranges =
+        crate::app::text_match::str_ranges(value, &state.search, &state.options.matching());
     let mut spans: Vec<iced::widget::text::Span<'a, Message>> = Vec::new();
     let mut at = 0;
     for (start, end) in ranges {
@@ -433,7 +442,9 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
             .size(11)
             .style(muted_style)
             .width(Length::Fixed(150.0)),
-        text(crate::tr!("find", "col-text")).size(11).style(muted_style),
+        text(crate::tr!("find", "col-text"))
+            .size(11)
+            .style(muted_style),
     ]
     .spacing(8);
     let mut rows = column![].spacing(1);
@@ -443,12 +454,18 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
             text(result.location.clone())
                 .size(11)
                 .width(Length::Fixed(90.0)),
-            text(result.kind.label()).size(11).width(Length::Fixed(150.0)),
+            text(result.kind.label())
+                .size(11)
+                .width(Length::Fixed(150.0)),
             marked_text(&result.text, state, selected),
         ]
         .spacing(8);
         let b = button(line)
-            .style(if selected { button::primary } else { button::text })
+            .style(if selected {
+                button::primary
+            } else {
+                button::text
+            })
             .padding([3, 6])
             .width(Fill);
         rows = rows.push(if busy {
@@ -485,7 +502,12 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
             has_row,
             FindMsg::SelectHighlighted,
         ),
-        tool(ICON_SELECT_ALL, crate::tr!("find", "select-all"), has_any, FindMsg::SelectAll),
+        tool(
+            ICON_SELECT_ALL,
+            crate::tr!("find", "select-all"),
+            has_any,
+            FindMsg::SelectAll
+        ),
     ]
     .spacing(6)
     .align_y(iced::Center);
@@ -545,9 +567,21 @@ fn message_card<'a>(state: &'a FindReplaceState) -> Option<Element<'a, Message>>
                     crate::tr!("find", "locked-question"),
                 ],
                 vec![
-                    answer(crate::tr!("find", "locked-keep"), FindAnswer::KeepLocked, true),
-                    answer(crate::tr!("find", "locked-unlock"), FindAnswer::Unlock, false),
-                    answer(crate::tr!("find", "locked-skip"), FindAnswer::SkipLocked, false),
+                    answer(
+                        crate::tr!("find", "locked-keep"),
+                        FindAnswer::KeepLocked,
+                        true,
+                    ),
+                    answer(
+                        crate::tr!("find", "locked-unlock"),
+                        FindAnswer::Unlock,
+                        false,
+                    ),
+                    answer(
+                        crate::tr!("find", "locked-skip"),
+                        FindAnswer::SkipLocked,
+                        false,
+                    ),
                 ],
             ),
             FindPrompt::Block(name) => (
@@ -557,8 +591,16 @@ fn message_card<'a>(state: &'a FindReplaceState) -> Option<Element<'a, Message>>
                 ],
                 vec![
                     answer(crate::tr!("find", "block-all"), FindAnswer::AllBlocks, true),
-                    answer(crate::tr!("find", "block-this"), FindAnswer::ThisBlock, false),
-                    answer(crate::tr!("find", "block-skip"), FindAnswer::SkipBlock, false),
+                    answer(
+                        crate::tr!("find", "block-this"),
+                        FindAnswer::ThisBlock,
+                        false,
+                    ),
+                    answer(
+                        crate::tr!("find", "block-skip"),
+                        FindAnswer::SkipBlock,
+                        false,
+                    ),
                 ],
             ),
             FindPrompt::Xref(path) => (
@@ -620,7 +662,11 @@ fn message_card<'a>(state: &'a FindReplaceState) -> Option<Element<'a, Message>>
                 } else if changed == 1 {
                     crate::tr!("find", "changed-one")
                 } else {
-                    crate::i18n::plain(crate::tr!("find", "changed-many", count = changed.to_string()))
+                    crate::i18n::plain(crate::tr!(
+                        "find",
+                        "changed-many",
+                        count = changed.to_string()
+                    ))
                 },
             ],
         ),

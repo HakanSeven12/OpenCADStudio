@@ -1219,7 +1219,12 @@ pub(crate) fn word_runs<'t>(text: &'t str, face: &Face) -> Vec<(&'t str, bool)> 
         let mut buf = [0u8; 4];
         let shaped = requires_shaping(c.encode_utf8(&mut buf))
             || (shaped_run == Some(true)
-                && (c == LRM || unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::NSM));
+                && (c == LRM
+                    // Zero-width (non-)joiners pick a conjunct's form, so
+                    // they stay in the run they shape (Bengali `র‍্য`).
+                    || c == '\u{200C}'
+                    || c == '\u{200D}'
+                    || unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::NSM));
         match shaped_run {
             Some(prev) if prev != shaped => {
                 runs.push((&text[start..i], prev));
@@ -1976,6 +1981,9 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         indent_right: f32,
         tab_stops: Vec<TabStop>,
         is_first_in_paragraph: bool,
+        /// The character offset just past the paragraph break before this
+        /// line's paragraph: the editor's caret slot at the line's start.
+        line_start_offset: usize,
         starts_column: bool,
         /// Which column this line lives in; always 0 without a column layout.
         column: usize,
@@ -2002,6 +2010,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         if para_idx > 0 {
             doc_char_offset += 1;
         }
+        let line_start_offset = doc_char_offset;
         let mut atoms: Vec<LayoutAtom> = Vec::new();
         for run in &para.runs {
             match &run.kind {
@@ -2159,6 +2168,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 indent_right: para.indent_right,
                 tab_stops: para.tab_stops.clone(),
                 is_first_in_paragraph: idx == 0,
+                line_start_offset,
                 starts_column: idx == 0 && para.starts_column,
                 column,
                 // The gap above rides the first wrapped line; the gap below the
@@ -2182,6 +2192,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             indent_right: 0.0,
             tab_stops: Vec::new(),
             is_first_in_paragraph: true,
+            line_start_offset: 0,
             starts_column: false,
             column: 0,
             space_before: 0.0,
@@ -2199,103 +2210,89 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     // DXF code 44 — multiplier on the default 5/3-em baseline-to-baseline gap.
     let line_h = entity_h * ls_factor * (5.0 / 3.0) * base_font.line_spacing();
     let h = entity_h;
-    // How far the first line's glyphs actually reach above the baseline, when
-    // that is further than the line's own cap height.
-    //
-    // Ordinary letters stop at the cap, so this is the first line's nominal cap
-    // and nothing below moves. Two exceptions push it: a symbol font whose
-    // glyphs straddle the cap box (the diameter sign's stroke overhangs it top
-    // and bottom by design), and — the reason the floor is the *line's* cap, not
-    // the entity height — a small heading (`\H0.2x;First column`): anchoring by
-    // the full entity height opened a whole blank line above it.
-    let first_line_cap = sub_lines
-        .first()
-        .map(|line| {
-            line.atoms
-                .iter()
-                .filter_map(|a| match &a.kind {
-                    AtomKind::Word(_) => Some(a.state.height_mul * entity_h),
-                    _ => None,
-                })
-                .fold(0.0_f32, f32::max)
-        })
-        .filter(|c| *c > 0.0)
-        .unwrap_or(h);
-    let first_line_ascent = sub_lines
-        .first()
-        .map(|line| {
-            line.atoms
-                .iter()
-                .filter_map(|atom| {
-                    // A stack's numerator pushes the first baseline down too.
-                    if let AtomKind::Stack { .. } = &atom.kind {
-                        return Some(stack_top(atom, entity_h, base_wf, &base_font_name));
-                    }
-                    let AtomKind::Word(text) = &atom.kind else {
-                        return None;
-                    };
-                    let font = resolve_font(&atom.state, &base_font_name);
-                    text_local_bounds(
-                        &font,
-                        text,
-                        atom.state.height_mul * entity_h,
-                        atom.state.width_mul * base_wf.abs(),
-                        atom.state.oblique_rad,
-                    )
-                    .map(|b| b.ink_max[1])
-                })
-                .fold(first_line_cap, f32::max)
-        })
-        .unwrap_or(h);
-    // Per-line vertical advance: a varying-height MText (inline `\H`) must
-    // space each line by its own content height, not the entity height —
-    // otherwise a small line still leaves a full-height gap and the block
-    // grows several times too tall. The gap between two lines uses the taller
-    // line, so a small line between two full-height lines does not collapse
-    // both gaps and a tall line has room on both sides. Accumulated per column
-    // (columns stack independently). Uniform-height text reduces to `line_h`.
-    // A blank line (an empty `\P` paragraph) carries no glyph to size it, so it
-    // takes the height of the text around it — the last non-empty line — not the
-    // full entity height, which would blow a small-text blank line up several
-    // times too tall and shove everything below it down the page.
-    let mut last_line_h = entity_h;
-    let per_line_h: Vec<f32> = sub_lines
+    struct LineMetrics {
+        cap: f32,
+        ascent: f32,
+        advance: f32,
+        // Distance from the line top to its baseline for rules that position
+        // the baseline within a slot. Other rules specify the baseline gap.
+        baseline_depth: Option<f32>,
+    }
+    // A blank paragraph inherits the previous line's cap height.
+    let mut last_cap = entity_h;
+    let metrics: Vec<LineMetrics> = sub_lines
         .iter()
-        .map(|s| {
-            let mh = s
-                .atoms
-                .iter()
-                .filter_map(|a| match &a.kind {
-                    AtomKind::Word(_) => Some(a.state.height_mul * entity_h),
-                    _ => None,
-                })
-                .fold(0.0_f32, f32::max);
-            let mh = if mh > 0.0 {
-                last_line_h = mh;
-                mh
-            } else {
-                last_line_h
+        .enumerate()
+        .map(|(index, line)| {
+            let spacing = line.line_spacing.filter(|mode| match *mode {
+                ParaLineSpacing::Exact(n)
+                | ParaLineSpacing::Multiple(n)
+                | ParaLineSpacing::AtLeast(n) => n > 0.0,
+            });
+            // Only the first line's glyph ink places the text below the top;
+            // every other gap follows the character heights, so a line with an
+            // accented capital or a bracket keeps the same pitch as its
+            // neighbours.
+            let measure_ascent = index == 0;
+            let mut cap = 0.0_f32;
+            let mut ascent = 0.0_f32;
+            for atom in &line.atoms {
+                match &atom.kind {
+                    AtomKind::Word(text) => {
+                        let height = atom.state.height_mul * entity_h;
+                        cap = cap.max(height);
+                        if measure_ascent {
+                            let font = resolve_font(&atom.state, &base_font_name);
+                            if let Some(bounds) = text_local_bounds(
+                                &font,
+                                text,
+                                height,
+                                atom.state.width_mul * base_wf.abs(),
+                                atom.state.oblique_rad,
+                            ) {
+                                ascent = ascent.max(bounds.ink_max[1]);
+                            }
+                        }
+                    }
+                    AtomKind::Stack { .. } if measure_ascent => {
+                        ascent = ascent.max(stack_top(atom, entity_h, base_wf, &base_font_name));
+                    }
+                    _ => {}
+                }
+            }
+            if cap > 0.0 {
+                last_cap = cap;
+            }
+            let cap = last_cap;
+            // Symbols and stacked numerators can extend above the nominal cap.
+            let ascent = ascent.max(cap);
+            let font_spacing = base_font.line_spacing();
+            let (advance, baseline_depth) = match spacing {
+                Some(ParaLineSpacing::Exact(e)) => (
+                    entity_h * e * (5.0 / 3.0) * font_spacing,
+                    Some(e * entity_h),
+                ),
+                Some(ParaLineSpacing::Multiple(m)) => (cap * m * (5.0 / 3.0) * font_spacing, None),
+                Some(ParaLineSpacing::AtLeast(a)) => {
+                    ((entity_h * a).max(cap) * (5.0 / 3.0) * font_spacing, None)
+                }
+                None if opts.exact_line_spacing => (line_h, None),
+                None => {
+                    // The top-to-top pitch is the line's character height plus
+                    // one third of each of the run and entity heights as leading.
+                    let pitch = (cap + (cap + entity_h) / 3.0) * ls_factor * font_spacing;
+                    (pitch, Some(cap))
+                }
             };
-            // A paragraph's own `\psm#`/`\pse#` overrides the entity factor for
-            // its lines. Both scale the default pitch; `Exact` uses the entity
-            // height rather than the line's tallest run, and drops its baseline
-            // further into the slot (`exact_drop` below).
-            let entity_gap = entity_h * ls_factor * (5.0 / 3.0) * base_font.line_spacing();
-            match s.line_spacing {
-                Some(ParaLineSpacing::Exact(e)) if e > 0.0 => {
-                    entity_h * e * (5.0 / 3.0) * base_font.line_spacing()
-                }
-                Some(ParaLineSpacing::Multiple(m)) if m > 0.0 => {
-                    mh * m * (5.0 / 3.0) * base_font.line_spacing()
-                }
-                Some(ParaLineSpacing::AtLeast(a)) if a > 0.0 => {
-                    (entity_h * a).max(mh) * (5.0 / 3.0) * base_font.line_spacing()
-                }
-                _ if opts.exact_line_spacing => entity_gap,
-                _ => mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing(),
+            LineMetrics {
+                cap,
+                ascent,
+                advance,
+                baseline_depth,
             }
         })
         .collect();
+    let first_line_ascent = metrics.first().map_or(entity_h, |m| m.ascent);
 
     // Flow lines into the next column when the active column's configured
     // height is exhausted. An explicit `\N` already defines the dynamic flow;
@@ -2318,7 +2315,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     0.0
                 };
                 pending_after = line.space_after;
-                per_line_h.get(index).copied().unwrap_or(entity_h) + spacing
+                metrics[index].advance + spacing
             })
             .sum();
         let balanced = (total_advance / cols.count.max(1) as f32).max(entity_h);
@@ -2340,7 +2337,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     .filter(|height| *height > 0.0)
                     .unwrap_or(opts.rectangle_height)
             };
-            let line_advance = per_line_h.get(index).copied().unwrap_or(entity_h);
+            let line_advance = metrics[index].advance;
             let spacing = if line.is_first_in_paragraph {
                 line.space_before + pending_after
             } else {
@@ -2366,45 +2363,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             pending_after = line.space_after;
         }
     }
-    // Per-line text height — the tallest Word on the line, an empty line
-    // inheriting the previous line's height (same rule as `per_line_h`). Unlike
-    // `line_max_h` it has no `entity_h` floor, so it reflects the ACTUAL text
-    // size; used to size the empty-line caret slot to the surrounding text
-    // rather than the raw entity height (which can be many times the visible
-    // text when `\H…x;` runs shrink it).
-    let line_text_h: Vec<f32> = {
-        let mut last = entity_h;
-        sub_lines
-            .iter()
-            .map(|s| {
-                let mh = s
-                    .atoms
-                    .iter()
-                    .filter_map(|a| match &a.kind {
-                        AtomKind::Word(_) => Some(a.state.height_mul * entity_h),
-                        _ => None,
-                    })
-                    .fold(0.0_f32, f32::max);
-                if mh > 0.0 {
-                    last = mh;
-                    mh
-                } else {
-                    last
-                }
-            })
-            .collect()
-    };
-    // A line under `\pxse#;` sits `#` entity heights below the top of its slot
-    // (one height for every other line), so its first line drops `# - 1`
-    // heights, and the gap from or to such a line is the slot of the line above
-    // less its baseline depth, plus the depth of the line below.
-    let exact_drop: Vec<Option<f32>> = sub_lines
-        .iter()
-        .map(|s| match s.line_spacing {
-            Some(ParaLineSpacing::Exact(e)) if e > 0.0 => Some(e * entity_h),
-            _ => None,
-        })
-        .collect();
     let line_y_offset: Vec<f32> = {
         let mut col_y = vec![0.0_f32; cols.count.max(1)];
         let mut started = vec![false; cols.count.max(1)];
@@ -2417,14 +2375,14 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             .map(|(i, s)| {
                 let c = s.column.min(col_y.len().saturating_sub(1));
                 if started[c] {
-                    col_y[c] -= if exact_drop[i].is_some() || exact_drop[i - 1].is_some() {
-                        let depth_above = exact_drop[i - 1].unwrap_or(line_text_h[i - 1]);
-                        let depth = exact_drop[i].unwrap_or(line_text_h[i]);
-                        per_line_h[i - 1] - depth_above + depth
+                    let above = &metrics[i - 1];
+                    let below = &metrics[i];
+                    col_y[c] -= if above.baseline_depth.is_some() || below.baseline_depth.is_some()
+                    {
+                        above.advance - above.baseline_depth.unwrap_or(above.cap)
+                            + below.baseline_depth.unwrap_or(below.cap)
                     } else {
-                        // AtLeast/multiple spacing must fit both lines around
-                        // this baseline gap, not just the line below it.
-                        per_line_h[i - 1].max(per_line_h[i])
+                        above.advance.max(below.advance)
                     };
                     if s.is_first_in_paragraph {
                         col_y[c] -= s.space_before + pending_after[c];
@@ -2435,8 +2393,10 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     // a top margin — that gap is the entity's own `\p…b#;`, not a
                     // heuristic, so the heading sits where the drawing places it.
                     col_y[c] -= s.space_before;
-                    if let Some(depth) = exact_drop[i] {
-                        col_y[c] -= depth - line_text_h[i];
+                    if let Some(ParaLineSpacing::Exact(e)) = s.line_spacing {
+                        if e > 0.0 {
+                            col_y[c] -= e * entity_h - metrics[i].cap;
+                        }
                     }
                 }
                 pending_after[c] = s.space_after;
@@ -2569,7 +2529,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     let mut v_col: usize = 0;
     let mut line_widths: Vec<f32> = Vec::with_capacity(sub_lines.len());
     let mut glyph_boxes: Vec<GlyphBox> = Vec::new();
-    let mut vis: usize = 0;
     // Transform an entity-local point to world space (mirrors the stroke
     // origin maths) so glyph boxes line up with the drawn glyphs.
     let to_world = |line_base_x: f32, line_base_y: f32, lx: f32, ly: f32| -> (f32, f32) {
@@ -2700,11 +2659,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         // height — otherwise a blank line's caret is entity-tall, which is many
         // times the visible text when `\H…x;` runs shrink it.
         if opts.want_glyph_boxes && i > 0 && sub.is_first_in_paragraph {
-            let caret_h = line_text_h.get(i).copied().unwrap_or(entity_h);
+            let caret_h = metrics[i].cap;
             let (ax, ay) = to_world(line_base_x, line_base_y, cursor_start, 0.0);
             let (_, by) = to_world(line_base_x, line_base_y, cursor_start, caret_h);
             glyph_boxes.push(GlyphBox {
-                vis,
+                vis: sub.line_start_offset,
                 xmin: ax,
                 xmax: ax,
                 ymin: ay.min(by),
@@ -2717,7 +2676,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     line_ly + caret_h,
                 ],
             });
-            vis += 1;
         }
 
         // Justify / distribute fill the line to the content width. `qj` spreads
@@ -2882,7 +2840,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     local: [gx, line_ly + ly, gx + run_h, line_ly + ly + cell],
                                 });
                             }
-                            vis += 1;
                             cursor_x += cell;
                         }
                         continue;
@@ -4152,7 +4109,7 @@ mod v_anchor_tests {
 
     /// Baseline of each line, as a multiple of the text height, for a
     /// top-left MTEXT at the origin.
-    fn baselines_in_heights(value: &str, height: f32, exact: bool) -> Vec<f32> {
+    fn baselines_in_heights(value: &str, height: f32, exact: bool, factor: f32) -> Vec<f32> {
         use crate::entities::text_support::{
             layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
         };
@@ -4175,7 +4132,7 @@ mod v_anchor_tests {
             style: &style,
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
-            line_spacing_factor: 1.0,
+            line_spacing_factor: factor,
             exact_line_spacing: exact,
             rectangle_height: 0.0,
             vertical_text: false,
@@ -4201,7 +4158,7 @@ mod v_anchor_tests {
 
     fn assert_baselines_with_style(value: &str, exact: bool, expected: &[f32]) {
         for height in [2.0, 10.0] {
-            let got = baselines_in_heights(value, height, exact);
+            let got = baselines_in_heights(value, height, exact, 1.0);
             assert_eq!(got.len(), expected.len(), "{value} at h {height}: {got:?}");
             for (g, e) in got.iter().zip(expected) {
                 assert!(
@@ -4227,14 +4184,17 @@ mod v_anchor_tests {
         assert_baselines(r"AAA\P\pxb2;BBB\PCCC", &[-1.0, -4.667, -8.333]);
     }
 
-    /// AtLeast uses the taller run next to each baseline gap. Uniform inline
-    /// shrinking shortens the whole block; an interior size change does not
-    /// collapse a gap that still has to fit its full-height neighbour.
+    /// Baselines from decomposing synthetic MTEXT to single-line TEXT in ODA.
     #[test]
     fn at_least_line_spacing_follows_both_adjacent_line_heights() {
-        assert_baselines(r"\H0.5x;AAA\PBBB\PCCC", &[-0.5, -1.333, -2.167]);
-        assert_baselines(r"AAA\P\H0.5x;BBB\P\H2x;CCC", &[-1.0, -2.667, -4.333]);
-        assert_baselines(r"AAA\P\H2x;BBB\P\H0.5x;CCC", &[-1.0, -4.333, -7.667]);
+        assert_baselines(r"\H0.5x;AAA\PBBB\PCCC", &[-0.5, -1.5, -2.5]);
+        assert_baselines(r"AAA\P\H0.5x;BBB\P\H2x;CCC", &[-1.0, -2.167, -3.667]);
+        assert_baselines(r"AAA\P\H2x;BBB\P\H0.5x;CCC", &[-1.0, -3.667, -5.667]);
+        assert_baselines(r"AAA\P\P\H0.5x;BBB", &[-1.0, -3.833]);
+        for (factor, baseline) in [(0.5, -1.333), (1.5, -3.0)] {
+            let got = baselines_in_heights(r"AAA\P\H0.5x;BBB", 2.0, false, factor);
+            assert!((got[1] - baseline).abs() < 0.02, "factor {factor}: {got:?}");
+        }
     }
 
     /// Exactly keeps the entity-height pitch even when every run is smaller.
@@ -4669,3 +4629,4 @@ mod font_style_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

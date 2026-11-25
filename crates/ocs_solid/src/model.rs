@@ -21,6 +21,14 @@ pub fn open(brep: &Brep) -> Result<(Body, Order), Error> {
 pub fn record(body: &Body) -> Result<Brep, Error> {
     let (mut record, _) = body.to_record()?;
     for face in &mut record.faces {
+        // Solidcore records some planes with axes off square (by 1e-15 to 1e-12) and refuses them
+        // when it reads them back. Made square, no point moves by anything near its tolerance.
+        if let r::Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            let off = dot(*u_axis, *v_axis) / dot(*u_axis, *u_axis);
+            if off != 0.0 && off.abs() < 1e-9 {
+                *v_axis = crate::geometry::sub(*v_axis, scale(*u_axis, off));
+            }
+        }
         if face.nurbs.is_none() {
             if let Some(quadric) = crate::geometry::quadric_of(&face.surface, face.domain) {
                 face.nurbs = Some(std::mem::replace(&mut face.surface, quadric));

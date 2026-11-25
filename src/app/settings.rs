@@ -855,6 +855,9 @@ pub struct UserSettings {
     pub pick_box: i32,
     /// APERTURE: object-snap capture radius in screen pixels.
     pub aperture: f32,
+    /// The Magnet of AUTOSNAP (bit 4): while an object snap marker shows,
+    /// the crosshairs are drawn on the snap point, not at the pointer.
+    pub autosnap_magnet: bool,
     /// HPASSOC: new hatches follow their boundary objects.
     pub hatch_associative: bool,
     /// HPGAPTOL: largest boundary gap HATCH/BOUNDARY picks treat as closed.
@@ -1273,6 +1276,14 @@ pub struct UserSettings {
     /// 4 details, 5 list.
     #[serde(default = "default_block_view")]
     pub block_palette_view: u8,
+    /// Blocks palette: the tab it was left on (0 Current Drawing, 1 Recent,
+    /// 2 Favorites, 3 Libraries).
+    #[serde(default)]
+    pub block_palette_tab: u8,
+    /// Blocks palette: the library folder the Libraries tab showed last; it
+    /// opens there again unless BLOCKNAVIGATE names a folder.
+    #[serde(default)]
+    pub block_library_folder: String,
     /// Blocks palette insertion options.
     #[serde(default)]
     pub block_insert: BlockInsertOptions,
@@ -1524,6 +1535,8 @@ impl Default for UserSettings {
             cursor_size: 5,
             pick_box: 3,
             aperture: crate::snap::DEFAULT_OSNAP_RADIUS_PX,
+            // On, as in the initial AUTOSNAP value 63.
+            autosnap_magnet: true,
             hatch_associative: true,
             hatch_gap_tolerance: 0.0,
             hatch_start_method: 0,
@@ -1681,6 +1694,8 @@ impl Default for UserSettings {
             block_favorites: Vec::new(),
             block_libraries: Vec::new(),
             block_palette_view: 1,
+            block_palette_tab: 0,
+            block_library_folder: String::new(),
             block_insert: BlockInsertOptions::default(),
             block_mru_list: 50,
             block_redefine_mode: 1,
@@ -1954,6 +1969,19 @@ mod tests {
             let back: UserSettings = serde_json::from_str(&json).unwrap();
             assert_eq!(back.node_graph_links, links);
         }
+    }
+
+    #[test]
+    fn the_autosnap_magnet_defaults_to_on_and_round_trips() {
+        let old: UserSettings = serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        assert!(old.autosnap_magnet);
+        let settings = UserSettings {
+            autosnap_magnet: false,
+            ..UserSettings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: UserSettings = serde_json::from_str(&json).unwrap();
+        assert!(!back.autosnap_magnet);
     }
 
     #[test]

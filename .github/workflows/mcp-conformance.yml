@@ -80,12 +80,13 @@ jobs:
             --method resources/list --format json 2>/dev/null | jq -e '
             (.result.resources | type == "array")'
 
-      - name: resources/templates/list (tile and snapshot templates)
+      - name: resources/templates/list (tile, layout tile and snapshot templates)
         run: |
           npx -y @modelcontextprotocol/inspector --cli \
             --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
             --method resources/templates/list --format json 2>/dev/null | jq -e '
             ([.result.resourceTemplates[].uriTemplate] | sort) == [
+              "cad://session/{session_id}/layout/{layout}/tile/{level}/{x}/{y}.png",
               "cad://session/{session_id}/snapshot/{hash}.png",
               "cad://session/{session_id}/tile/{level}/{x}/{y}.png"
             ]'

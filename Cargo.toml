@@ -29,10 +29,10 @@ winresource = "0.1"
 [dependencies]
 serde_json = "1"
 # Offline validation of the same contracts published to automation clients.
-jsonschema = { version = "0.49", default-features = false }
+jsonschema = { version = "0.63", default-features = false }
 serde = { version = "1", features = ["derive"] }
 calamine = "0.38.0"
-base64 = "0.22"
+base64 = "0.23"
 semver = "1"
 url = "2"
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
@@ -40,13 +40,13 @@ iced_runtime = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent/fix-iced-fonts", features = ["menu", "context_menu", "drop_down", "number_input"] }
 bytemuck = { version = "1.25", features = ["derive"] }
-glam = { version = "0.33", features = ["bytemuck"] }
-rfd = "0.17"
+glam = { version = "0.34", features = ["bytemuck"] }
+rfd = "0.18"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "663bc3a1a2075f939eadafd7fb16683de39a473f", features = ["serde"] }
+svgtypes = "0.16"
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "64e872a4e16e5d7f071411fc5d76048a1a5d77fa", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -79,21 +79,21 @@ kurbo = "0.13"
 proj4rs = { version = "0.3", default-features = false, features = ["crs-definitions", "wasm-strict"] }
 crs-definitions = "0.6"
 # DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
-zip = { version = "8", default-features = false, features = ["deflate"] }
-roxmltree = "0.20"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+roxmltree = "0.21"
 encoding_rs = "0.8"
 tiny-skia = "0.11"
 # PDF writer shared by desktop export and the web export/preview/print path.
-printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
+printpdf = { version = "0.12", default-features = false, features = ["images"] }
 # Direct access to the page dictionaries and classic-xref serializer used for
 # opt-in, full-precision GeoPDF metadata (same version printpdf already uses).
-lopdf = { version = "0.39.0", default-features = false }
-# TrueType subsetting for searchable PDF text (same version printpdf itself
-# uses, so no new binary enters the lockfile). Same feature set as printpdf's
-# own allsorts use (pure-Rust flate backend) — the defaults would drag in the
-# libz-sys C dependency. Pure Rust, so the web build embeds
+lopdf = { version = "0.47.0", default-features = false }
+# TrueType subsetting for searchable PDF text: allsorts-azul, the allsorts
+# build printpdf itself uses, so no new binary enters the lockfile. Same
+# feature set as printpdf's own use (pure-Rust flate backend) — the defaults
+# would drag in the libz-sys C dependency. Pure Rust, so the web build embeds
 # the same subsets.
-allsorts = { version = "0.16", default-features = false, features = ["flate2_rust"] }
+allsorts = { package = "allsorts-azul", version = "0.17.4", default-features = false, features = ["flate2_rust"] }
 # Rasterises SVG assets and off-screen captures via tiny-skia, including embedded
 # raster images (`gif`, `image-webp`, `zune-jpeg`, and PNG via `tiny-skia`).
 resvg = { version = "0.45", default-features = false, features = ["raster-images"] }
@@ -102,39 +102,41 @@ i18n-embed-fl = "0.10"
 rust-embed = "8"
 inventory = "0.3"
 rustc-hash = "2"
-sha2 = "0.10"
-ifc-lite-core = "=25.0.1"
-ifc-lite-geometry = "=25.0.1"
-ifc-lite-processing = "=25.0.1"
+sha2 = "0.11"
+ifc-lite-core = "=30.0.0"
+ifc-lite-geometry = "=30.0.0"
+ifc-lite-processing = "=30.0.0"
 # Encrypted PDF owner-password checks (already in the tree through other crates).
-md-5 = "0.10"
-aes = "0.8"
+md-5 = "0.11"
+aes = "0.9"
 fontdb = "0.23"
 ttf-parser = "0.25"
 # TrueType interpreter for hint-reliant ("tricky") fonts such as DFKai-SB and
 # MingLiU, whose raw outlines are missing strokes. Already in the tree (hayro).
-skrifa = "0.42.1"
-cosmic-text = "0.15"
+skrifa = "0.50"
+cosmic-text = "0.19"
 unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
-pollster = "0.4"
-lru = { version = "0.16.4", default-features = false }
+pollster = "1"
+lru = { version = "0.19", default-features = false }
 
 [dev-dependencies]
 fluent-syntax = "0.12"
 iced_test = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-naga = { version = "27", features = ["wgsl-in"] }
+naga = { version = "29", features = ["wgsl-in"] }
 pretty_assertions = "1.4"
 rstest = "0.29"
 serial_test = "4.0"
 tempfile = "3.27"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-libloading = "0.8"
+libloading = "0.9"
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Globalization", "Win32_Security_Authentication_Identity", "Win32_UI_Controls_Dialogs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "settings", "wayland"] }
+# The X11 CLIPBOARD selection, for the SVG a copy puts there (#2018).
+x11rb = "0.14"
+ashpd = { version = "0.14.3", default-features = false, features = ["async-io", "settings", "wayland"] }
 
 # For `src/bin/ocs_launcher.rs` only (the .app's real CFBundleExecutable,
 # see that file for why) — already in the tree transitively via winit, pinned
@@ -148,37 +150,39 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 
 # The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
 # layer did not advance the index offset, so every later mesh in that layer
 # was drawn with the wrong indices (stale glyph outlines left across the top
 # of the window by rotated canvas text, #3063), and upstream b54f2c59: the
-# event loop no longer spins on a stale redraw deadline (#3418). Drop when iced
-# is bumped past both.
+# event loop no longer spins on a stale redraw deadline (#3418); upstream
+# bc9182e6/be79a169 (fix-strict-gles): no arrays in the triangle gradient
+# shader, which strict GLES drivers and WebGL on Mali rejected (#2608, #3587).
+# Drop when iced is bumped past all of them.
 [patch."https://github.com/iced-rs/iced.git"]
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
-getrandom = "0.3"
+getrandom = "0.4"
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }
 bincode = "1.3"
-meshopt = "0.6.2"
+meshopt = "0.7"
 i18n-embed = { version = "0.16", features = ["desktop-requester"] }
 rayon = "1"
 open = "5"
@@ -196,7 +200,7 @@ ocs_plugin_api = { path = "crates/ocs_plugin_api" }
 i18n-embed = { version = "0.16", features = ["web-sys-requester"] }
 rust-embed = { version = "8", features = ["debug-embed"] }
 console_error_panic_hook = "0.1"
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

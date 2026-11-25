@@ -12,6 +12,8 @@ pub mod edit_lock;
 // inside is wasm-only.
 pub mod brep_build;
 pub mod crs;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod dsd;
 pub mod dwf_export;
 pub mod fbx;
 pub mod file_association;
@@ -29,7 +31,10 @@ pub mod obj;
 pub mod ole_embed;
 pub mod paper_catalog;
 pub mod patterns;
+pub mod pdf_compact;
 pub mod pdf_export;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pdf_publish;
 pub mod picture_import;
 pub mod plot;
 pub mod plot_device;
@@ -91,6 +96,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 
+// Phase encoding for OpenProgress.phase atomic. Updated from the background
+// loader thread, read by the UI overlay on every frame.
+pub const OPEN_PHASE_READING: u8 = 0;
+pub const OPEN_PHASE_PARSING: u8 = 1;
+pub const OPEN_PHASE_XREF: u8 = 2;
+pub const OPEN_PHASE_CACHING: u8 = 3;
+pub const OPEN_PHASE_FINALIZING: u8 = 4;
+
 /// Thread-safe state shared by the native loader and the open overlay.
 ///
 /// `basis_points` is monotonic in 0..=10000. `completed/total` describe the
@@ -136,11 +149,11 @@ impl OpenProgressState {
 
 pub fn open_phase_name(phase: u8) -> &'static str {
     match phase {
-        crate::app::OPEN_PHASE_READING => "reading",
-        crate::app::OPEN_PHASE_PARSING => "parsing",
-        crate::app::OPEN_PHASE_XREF => "references",
-        crate::app::OPEN_PHASE_CACHING => "derived-caches",
-        crate::app::OPEN_PHASE_FINALIZING => "finalizing",
+        OPEN_PHASE_READING => "reading",
+        OPEN_PHASE_PARSING => "parsing",
+        OPEN_PHASE_XREF => "references",
+        OPEN_PHASE_CACHING => "derived-caches",
+        OPEN_PHASE_FINALIZING => "finalizing",
         _ => "unknown",
     }
 }
@@ -485,13 +498,13 @@ async fn open_path_with_phase_attempt(
             let attempted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 (|| -> Result<_, OpenAttemptFailure> {
                     use iced::time::Instant;
-                    progress2.set(crate::app::OPEN_PHASE_PARSING, 200, 0, 1000);
+                    progress2.set(OPEN_PHASE_PARSING, 200, 0, 1000);
                     let t_parse = Instant::now();
                     let parser_progress = {
                         let progress = Arc::clone(&progress2);
                         let callback: Arc<dyn Fn(u16) + Send + Sync> = Arc::new(move |value| {
                             progress.set_fraction(
-                                crate::app::OPEN_PHASE_PARSING,
+                                OPEN_PHASE_PARSING,
                                 200,
                                 5600,
                                 value as usize,
@@ -537,7 +550,7 @@ async fn open_path_with_phase_attempt(
                     let read_stats = outcome.stats;
                     let mut doc = outcome.document;
                     let parse_ms = t_parse.elapsed().as_millis() as u32;
-                    progress2.set(crate::app::OPEN_PHASE_PARSING, 5800, 1000, 1000);
+                    progress2.set(OPEN_PHASE_PARSING, 5800, 1000, 1000);
                     let t_purge = Instant::now();
                     if matches!(attempt, OpenAttempt::Recovery(..)) {
                         repair_drawing(&mut doc);
@@ -548,7 +561,7 @@ async fn open_path_with_phase_attempt(
                     // the first view drawn without their shapes. None is added:
                     // the drawing keeps exactly its own linetypes (#1826).
                     crate::io::linetypes::repair_document(&mut doc);
-                    progress2.set(crate::app::OPEN_PHASE_XREF, 6000, 0, 1);
+                    progress2.set(OPEN_PHASE_XREF, 6000, 0, 1);
                     let t_xref = Instant::now();
                     let xref_infos = if let Some(base_dir) = path2.parent() {
                         let xref_progress = {
@@ -556,7 +569,7 @@ async fn open_path_with_phase_attempt(
                             let callback: Arc<dyn Fn(usize, usize) + Send + Sync> =
                                 Arc::new(move |completed, total| {
                                     progress.set_fraction(
-                                        crate::app::OPEN_PHASE_XREF,
+                                        OPEN_PHASE_XREF,
                                         6000,
                                         1400,
                                         completed,
@@ -576,11 +589,11 @@ async fn open_path_with_phase_attempt(
                         Vec::new()
                     };
                     let xref_ms = t_xref.elapsed().as_millis() as u32;
-                    progress2.set(crate::app::OPEN_PHASE_CACHING, 7400, 0, 10000);
+                    progress2.set(OPEN_PHASE_CACHING, 7400, 0, 10000);
                     let t_caches = Instant::now();
                     let cache_progress = |value: u16| {
                         progress2.set_fraction(
-                            crate::app::OPEN_PHASE_CACHING,
+                            OPEN_PHASE_CACHING,
                             7400,
                             2200,
                             value as usize,
@@ -606,14 +619,14 @@ async fn open_path_with_phase_attempt(
                         caches.source_sha256 =
                             stable_sha256_file(&path2, initial_fingerprint.as_ref());
                     }
-                    progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9600, 0, 1);
+                    progress2.set(OPEN_PHASE_FINALIZING, 9600, 0, 1);
                     let t_finalize = Instant::now();
                     let (prepared_doc, prepared_geometry) =
                         crate::scene::prepare_open_geometry(doc, &mut caches, model_bg);
                     caches.timings.finalize_ms = t_finalize.elapsed().as_millis() as u32;
                     doc = prepared_doc;
                     caches.prepared_geometry = Some(prepared_geometry);
-                    progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9950, 1, 1);
+                    progress2.set(OPEN_PHASE_FINALIZING, 9950, 1, 1);
                     crate::perf_record!(
                     "[perf] open-phases parse={}ms purge={}ms xref={}ms caches={}ms finalize={}ms",
                     caches.timings.parse_ms,
@@ -728,7 +741,7 @@ pub async fn pick_and_load_web(progress: Arc<OpenProgressState>) -> WebOpenOutco
         };
     };
     let name = handle.file_name();
-    progress.set(crate::app::OPEN_PHASE_READING, 500, 1, 2);
+    progress.set(OPEN_PHASE_READING, 500, 1, 2);
     let bytes: Arc<[u8]> = Arc::from(handle.read().await);
     open_bytes_web(name, bytes, progress).await
 }
@@ -815,12 +828,7 @@ async fn open_recent_web_attempt(
             };
         }
     };
-    progress.set(
-        crate::app::OPEN_PHASE_READING,
-        1000,
-        bytes.len(),
-        bytes.len(),
-    );
+    progress.set(OPEN_PHASE_READING, 1000, bytes.len(), bytes.len());
     let result = load_web_bytes(&name, &bytes, progress, recovery_mode, &initial_error, None).await;
     // A recent reopened from OPFS registers like a picked or dropped file,
     // so it can serve as another drawing's xref in this session.
@@ -850,7 +858,7 @@ async fn load_web_bytes(
     initial_error: &str,
     mut initial_stats: Option<document::ReadStats>,
 ) -> Result<OpenedDrawing, OpenLoadError> {
-    progress.set(crate::app::OPEN_PHASE_PARSING, 1000, 0, 1);
+    progress.set(OPEN_PHASE_PARSING, 1000, 0, 1);
     let is_ifccad = is_ifccad_path(Path::new(name), Some(bytes));
     let (outcome, mut source_sha256, ifccad_session) = if is_ifccad {
         let (outcome, session) =
@@ -901,7 +909,7 @@ async fn load_web_bytes(
     // Opening is a field evaluation event (FIELDEVAL bit 1), as on the
     // native open: object-property fields show the drawing's own state.
     crate::entities::field::update_fields(&mut doc, 1, None);
-    progress.set(crate::app::OPEN_PHASE_CACHING, 7000, 0, 1);
+    progress.set(OPEN_PHASE_CACHING, 7000, 0, 1);
     if recovery_mode {
         repair_drawing(&mut doc);
     }
@@ -917,7 +925,7 @@ async fn load_web_bytes(
         source_sha256 = web_worker::sha256_document(bytes).await.ok();
     }
     caches.source_sha256 = source_sha256;
-    progress.set(crate::app::OPEN_PHASE_FINALIZING, 9900, 1, 1);
+    progress.set(OPEN_PHASE_FINALIZING, 9900, 1, 1);
     let path = PathBuf::from(name);
     Ok((name.to_string(), path, doc, caches, ifccad_session))
 }
@@ -997,7 +1005,7 @@ async fn resolve_web_xrefs(
         .collect();
     let total = pending.len().max(1);
     for (index, raw_path) in pending.iter().enumerate() {
-        progress.set(crate::app::OPEN_PHASE_XREF, 5900, index, total);
+        progress.set(OPEN_PHASE_XREF, 5900, index, total);
         let Some(key) = crate::io::xref::find_registered_source(raw_path) else {
             continue;
         };
@@ -1011,13 +1019,13 @@ async fn resolve_web_xrefs(
             crate::io::xref::register_parsed(&key, outcome);
         }
     }
-    progress.set(crate::app::OPEN_PHASE_XREF, 5900, total, total);
+    progress.set(OPEN_PHASE_XREF, 5900, total, total);
     // `set_fraction` is native-only; the web phase reports completed/total
     // directly, which the open overlay surfaces alongside the fixed weight.
     let xref_progress: Arc<dyn Fn(usize, usize) + Send + Sync> = {
         let progress = Arc::clone(&progress);
         Arc::new(move |completed, total| {
-            progress.set(crate::app::OPEN_PHASE_XREF, 5900, completed, total);
+            progress.set(OPEN_PHASE_XREF, 5900, completed, total);
         })
     };
     crate::io::xref::resolve_xrefs_with_progress_in_session(
@@ -2132,6 +2140,8 @@ pub fn mtext_losses_on_save(
 
 #[cfg(test)]
 mod mtext_save_loss_tests;
+#[cfg(test)]
+mod open_phase_tests;
 
 mod backup;
 pub use backup::write_backup;
@@ -2236,6 +2246,51 @@ fn windows_replace_error_is_file_in_use(raw_os_error: Option<i32>) -> bool {
 mod save_failure_tests {
     use super::{save_as_version, windows_replace_error_is_file_in_use};
 
+    /// A recovery copy (`.sv$`) and a backup (`.bak`) with a cut end or a
+    /// changed byte give a drawing or an error, not a panic.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn damaged_recovery_copies_open_without_a_panic() {
+        let folder = std::env::temp_dir().join(format!("ocs-damaged-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut doc = document::Document::new();
+        let _ = doc.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::new(0.0, 0.0, 0.0),
+                document::types::Vector3::new(10.0, 5.0, 0.0),
+            ),
+        ));
+        let mut cases = 0;
+        for (drawing, copy) in [("plan.dxf", "plan.sv$"), ("plan.dwg", "plan.bak")] {
+            let drawing = folder.join(drawing);
+            save_as_version(&doc, &drawing, document::DxfVersion::AC1032).unwrap();
+            let bytes = std::fs::read(&drawing).unwrap();
+            let copy = folder.join(copy);
+            std::fs::write(&copy, &bytes).unwrap();
+            assert!(super::load_file(&copy).is_ok(), "the whole copy opens");
+            let mut check = |damaged: &[u8]| {
+                cases += 1;
+                std::fs::write(&copy, damaged).unwrap();
+                let _ = super::load_file(&copy);
+            };
+            let step = bytes.len() / 150;
+            for end in (0..bytes.len()).step_by(step) {
+                check(&bytes[..end]);
+            }
+            let mut damaged = bytes.clone();
+            for at in (0..bytes.len()).step_by(step) {
+                for value in [0x00, 0xFF, bytes[at] ^ 0x80] {
+                    damaged[at] = value;
+                    check(&damaged);
+                }
+                damaged[at] = bytes[at];
+            }
+        }
+        assert!(cases > 1_000, "{cases} damaged copies");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     #[test]
     fn issue_498_recognizes_windows_file_sharing_errors() {
         assert!(windows_replace_error_is_file_in_use(Some(32)));
@@ -2301,6 +2356,98 @@ mod save_failure_tests {
         assert!(error.externally_modified);
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
         let _ = std::fs::remove_file(path);
+    }
+
+    /// A save with backup into `folder`, which holds the drawing `name`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_over(
+        folder: &std::path::Path,
+        name: &str,
+        expected: Option<super::edit_lock::FileFingerprint>,
+    ) -> Result<(), super::SaveFailure> {
+        super::save_owned_as_version_atomic(
+            document::Document::new(),
+            &folder.join(name),
+            document::DxfVersion::AC1032,
+            true,
+            expected,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn names_in(folder: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The check before the replace fails: the drawing stays as it was, and
+    /// the folder has no temporary file and no backup.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_save_refused_before_the_replace_leaves_only_the_drawing() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwg");
+        std::fs::write(&path, b"old").unwrap();
+        let expected = super::edit_lock::FileFingerprint::capture(&path).unwrap();
+        std::fs::write(&path, b"changed by another program").unwrap();
+
+        let error = save_over(folder.path(), "plan.dwg", Some(expected)).unwrap_err();
+
+        assert!(error.externally_modified);
+        assert_eq!(std::fs::read(&path).unwrap(), b"changed by another program");
+        assert_eq!(names_in(folder.path()), ["plan.dwg"]);
+    }
+
+    /// The replace fails, because the name of the drawing is a folder with a
+    /// file in it: the folder stays as it was, and no temporary file stays.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_save_whose_replace_fails_leaves_no_temporary_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwg");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("kept.txt"), b"kept").unwrap();
+
+        let error = save_over(folder.path(), "plan.dwg", None).unwrap_err();
+
+        assert!(!error.externally_modified);
+        assert!(error.message.starts_with("replace "), "{}", error.message);
+        assert_eq!(std::fs::read(path.join("kept.txt")).unwrap(), b"kept");
+        assert_eq!(names_in(folder.path()), ["plan.dwg"]);
+    }
+
+    /// The write fails, because the folder refuses a new file: the drawing
+    /// stays as it was.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_whose_write_fails_leaves_the_drawing() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwg");
+        std::fs::write(&path, b"old").unwrap();
+        let read_only = std::fs::Permissions::from_mode(0o555);
+        std::fs::set_permissions(folder.path(), read_only).unwrap();
+        if std::fs::write(folder.path().join("probe"), b"").is_ok() {
+            // This user (root) can write to a read-only folder.
+            let _ = std::fs::remove_file(folder.path().join("probe"));
+            return;
+        }
+
+        let result = save_over(folder.path(), "plan.dwg", None);
+
+        std::fs::set_permissions(folder.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        assert_eq!(names_in(folder.path()), ["plan.dwg"]);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2376,6 +2523,62 @@ mod save_failure_tests {
         );
         assert!(!path.with_extension("bak").exists());
         let _ = std::fs::remove_file(path);
+    }
+
+    /// A save that the system stopped leaves its temporary file beside the
+    /// drawing. The next save of the drawing removes such a file when
+    /// nothing has written to it for an hour, and no other file.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_save_removes_the_temporary_files_of_stopped_saves() {
+        let folder = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        let minutes = |count: u64| now - std::time::Duration::from_secs(count * 60);
+        let file = |name: &str, modified: std::time::SystemTime| {
+            let path = folder.path().join(name);
+            std::fs::write(&path, b"part of a drawing").unwrap();
+            let file = std::fs::File::options().write(true).open(&path).unwrap();
+            file.set_modified(modified).unwrap();
+        };
+        // Removed: the files of two stopped saves.
+        file(".plan.ocs-save-4242-1.dwg", minutes(120));
+        file(".plan.ocs-save-17-305.dwg", minutes(61));
+        // Kept: a save that can still run, another drawing, other names.
+        file(".plan.ocs-save-4242-2.dwg", minutes(50));
+        file(".other.ocs-save-4242-1.dwg", minutes(120));
+        file(".plan.ocs-save-4242-1.dxf", minutes(120));
+        file(".plan.ocs-save-4242-1.dwg.bak", minutes(120));
+        file(".plan.ocs-save-4242.dwg", minutes(120));
+        file(".plan.ocs-save-x-1.dwg", minutes(120));
+        file("plan.ocs-save-4242-1.dwg", minutes(120));
+
+        save_over(folder.path(), "plan.dwg", None).unwrap();
+
+        assert_eq!(
+            names_in(folder.path()),
+            [
+                ".other.ocs-save-4242-1.dwg",
+                ".plan.ocs-save-4242-1.dwg.bak",
+                ".plan.ocs-save-4242-1.dxf",
+                ".plan.ocs-save-4242-2.dwg",
+                ".plan.ocs-save-4242.dwg",
+                ".plan.ocs-save-x-1.dwg",
+                "plan.dwg",
+                "plan.ocs-save-4242-1.dwg",
+            ]
+        );
+    }
+
+    /// A bare file name is in the current folder: a path typed at SAVEAS
+    /// can be one.
+    #[test]
+    fn the_folder_of_a_bare_file_name_is_the_current_folder() {
+        let folder = std::path::Path::new("drawings");
+        assert_eq!(super::save_folder(&folder.join("plan.dwg")), folder);
+        assert_eq!(
+            super::save_folder(std::path::Path::new("plan.dwg")),
+            std::path::Path::new(".")
+        );
     }
 }
 
@@ -2715,6 +2918,7 @@ where
     let perf = crate::perf::enabled();
     let total_started = iced::time::Instant::now();
     doc.version = version;
+    list_layout_viewports(&mut doc);
     let styles_started = iced::time::Instant::now();
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
@@ -2775,6 +2979,7 @@ where
         }
         return Err(SaveFailure::replacing(path, error));
     }
+    remove_stale_save_temps(path);
     if perf {
         crate::perf_record!(
             "[perf] save total={:.1}ms clone={:.1} styles={:.1} dimensions={:.1} write={:.1} entities={} objects={} path={}",
@@ -2794,6 +2999,22 @@ where
 fn save_temp_path(path: &Path) -> PathBuf {
     static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (start, end) = save_temp_name_parts(path);
+    let name = format!("{start}{}-{serial}{end}", std::process::id());
+    save_folder(path).join(name)
+}
+
+/// The folder of `path`: `.` for a bare file name such as `plan.dwg`.
+fn save_folder(path: &Path) -> &Path {
+    match path.parent() {
+        Some(folder) if !folder.as_os_str().is_empty() => folder,
+        _ => Path::new("."),
+    }
+}
+
+/// The name of a temporary file of a save of `path` without its middle
+/// part, `<process id>-<serial>`: `(".plan.ocs-save-", ".dwg")`.
+fn save_temp_name_parts(path: &Path) -> (String, String) {
     let stem = path
         .file_stem()
         .map(|value| value.to_string_lossy().into_owned())
@@ -2802,11 +3023,57 @@ fn save_temp_path(path: &Path) -> PathBuf {
         .extension()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| "dwg".to_string());
-    let name = format!(
-        ".{stem}.ocs-save-{}-{serial}.{extension}",
-        std::process::id()
-    );
-    path.parent().unwrap_or_else(|| Path::new(".")).join(name)
+    (format!(".{stem}.ocs-save-"), format!(".{extension}"))
+}
+
+/// Removes the temporary files of saves and exports of `path` that the
+/// system stopped before their replace. A save that runs writes to its file
+/// all the time, so a file that nothing wrote to for an hour is not a
+/// running save of another instance.
+fn remove_stale_save_temps(path: &Path) {
+    const STALE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+    let Ok(entries) = std::fs::read_dir(save_folder(path)) else {
+        return;
+    };
+    let (start, end) = save_temp_name_parts(path);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(middle) = name
+            .strip_prefix(start.as_str())
+            .and_then(|rest| rest.strip_suffix(end.as_str()))
+        else {
+            continue;
+        };
+        let Some((process, serial)) = middle.split_once('-') else {
+            continue;
+        };
+        let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+        if !digits(process) || !digits(serial) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= STALE);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Writes the temporary file that a save or export of `path`, stopped two
+/// hours ago, leaves beside it. Returns the file's path.
+#[cfg(test)]
+pub(crate) fn stopped_save_temp(path: &Path) -> PathBuf {
+    let (start, end) = save_temp_name_parts(path);
+    let temp_path = save_folder(path).join(format!("{start}4242-1{end}"));
+    let file = std::fs::File::create(&temp_path).unwrap();
+    let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+    file.set_modified(modified).unwrap();
+    temp_path
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -3032,6 +3299,7 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
     for layout in without_sheet {
         crate::scene::Scene::ensure_layout_sheet_viewport(&mut doc, &layout);
     }
+    list_layout_viewports(&mut doc);
     let styles_started = perf.then(iced::time::Instant::now);
     sync_current_styles_on_save(&mut doc);
     let styles_ms = crate::perf::elapsed_ms(styles_started);
@@ -3086,6 +3354,44 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
         );
     }
     doc
+}
+
+/// A layout lists its viewports, and a viewport missing from that list opens
+/// switched off in other programs (#3514). Viewports a copy, a paste or an
+/// undo put on a sheet went past the list, so every viewport the layout's
+/// block holds is added to it, behind the ones listed.
+fn list_layout_viewports(doc: &mut Document) {
+    use document::objects::ObjectType;
+    let missing: Vec<(document::Handle, Vec<document::Handle>)> = doc
+        .objects
+        .iter()
+        .filter_map(|(handle, object)| {
+            let ObjectType::Layout(layout) = object else {
+                return None;
+            };
+            if layout.name.eq_ignore_ascii_case("Model") {
+                return None;
+            }
+            let unlisted: Vec<document::Handle> = doc
+                .entities()
+                .filter_map(|entity| match entity {
+                    document::EntityType::Viewport(viewport)
+                        if viewport.common.owner_handle == layout.block_record
+                            && !layout.viewports.contains(&viewport.common.handle) =>
+                    {
+                        Some(viewport.common.handle)
+                    }
+                    _ => None,
+                })
+                .collect();
+            (!unlisted.is_empty()).then_some((*handle, unlisted))
+        })
+        .collect();
+    for (handle, unlisted) in missing {
+        if let Some(ObjectType::Layout(layout)) = doc.objects.get_mut(&handle) {
+            layout.viewports.extend(unlisted);
+        }
+    }
 }
 
 /// A justified TEXT is drawn from its alignment point, but readers that do not

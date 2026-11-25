@@ -24,6 +24,7 @@
   <summary xml:lang="pt-BR">Aplicativo CAD 2D/3D para desenhos DWG e DXF</summary>
   <summary xml:lang="ru-RU">Приложение 2D/3D CAD для чертежей DWG и DXF</summary>
   <summary xml:lang="tr-TR">DWG ve DXF çizimleri için 2D/3D CAD uygulaması</summary>
+  <summary xml:lang="uz-UZ">DWG va DXF çizmalari uçun 2D/3D CAD dasturi</summary>
   <summary xml:lang="vi-VN">Ứng dụng CAD 2D/3D cho bản vẽ DWG và DXF</summary>
   <summary xml:lang="zh-CN">用于 DWG 和 DXF 图形的 2D/3D CAD 应用程序</summary>
   <summary xml:lang="zh-TW">用於 DWG 與 DXF 圖面的 2D/3D CAD 應用程式</summary>
@@ -48,6 +49,7 @@
     <p xml:lang="pt-BR">Crie e edite desenhos técnicos nos formatos DWG e DXF.</p>
     <p xml:lang="ru-RU">Создавайте и редактируйте технические чертежи в форматах DWG и DXF.</p>
     <p xml:lang="tr-TR">DWG ve DXF biçimlerinde teknik çizimler oluşturun ve düzenleyin.</p>
+    <p xml:lang="uz-UZ">DWG va DXF formatlarida texnik çizmalarni yarating va tahrirlang.</p>
     <p xml:lang="vi-VN">Tạo và chỉnh sửa bản vẽ kỹ thuật ở định dạng DWG và DXF.</p>
     <p xml:lang="zh-CN">创建和编辑 DWG 与 DXF 格式的技术图形。</p>
     <p xml:lang="zh-TW">建立及編輯 DWG 與 DXF 格式的技術圖面。</p>
@@ -62,9 +64,9 @@
     <keyword xml:lang="bg-BG">Чертеж</keyword>
     <keyword xml:lang="bg-BG">Проектиране</keyword>
     <keyword xml:lang="bg-BG">Инженерен</keyword>
-    <keyword xml:lang="cs-CZ">Kreslení</keyword>
+    <keyword xml:lang="cs-CZ">Výkres</keyword>
     <keyword xml:lang="cs-CZ">Návrh</keyword>
-    <keyword xml:lang="cs-CZ">Strojírenství</keyword>
+    <keyword xml:lang="cs-CZ">Inženýrské</keyword>
     <keyword xml:lang="de-DE">Zeichnung</keyword>
     <keyword xml:lang="de-DE">Konstruktion</keyword>
     <keyword xml:lang="de-DE">Technisch</keyword>
@@ -86,9 +88,9 @@
     <keyword xml:lang="hi-IN">ड्रॉइंग</keyword>
     <keyword xml:lang="hi-IN">डिज़ाइन</keyword>
     <keyword xml:lang="hi-IN">इंजीनियरिंग</keyword>
-    <keyword xml:lang="hu-HU">Rajzolás</keyword>
+    <keyword xml:lang="hu-HU">Rajz</keyword>
     <keyword xml:lang="hu-HU">Tervezés</keyword>
-    <keyword xml:lang="hu-HU">Mérnöki</keyword>
+    <keyword xml:lang="hu-HU">Angolszász (tizedes)</keyword>
     <keyword xml:lang="it-IT">Disegno</keyword>
     <keyword xml:lang="it-IT">Progettazione</keyword>
     <keyword xml:lang="it-IT">Ingegneria</keyword>
@@ -116,15 +118,18 @@
     <keyword xml:lang="tr-TR">Çizim</keyword>
     <keyword xml:lang="tr-TR">Tasarım</keyword>
     <keyword xml:lang="tr-TR">Mühendislik</keyword>
+    <keyword xml:lang="uz-UZ">Çizma</keyword>
+    <keyword xml:lang="uz-UZ">Loyihalaş</keyword>
+    <keyword xml:lang="uz-UZ">Muhandislik</keyword>
     <keyword xml:lang="vi-VN">Bản vẽ</keyword>
     <keyword xml:lang="vi-VN">Thiết kế</keyword>
     <keyword xml:lang="vi-VN">Kỹ thuật</keyword>
     <keyword xml:lang="zh-CN">绘图</keyword>
     <keyword xml:lang="zh-CN">设计</keyword>
     <keyword xml:lang="zh-CN">工程学</keyword>
-    <keyword xml:lang="zh-TW">繪圖</keyword>
+    <keyword xml:lang="zh-TW">圖面</keyword>
     <keyword xml:lang="zh-TW">設計</keyword>
-    <keyword xml:lang="zh-TW">工程學</keyword>
+    <keyword xml:lang="zh-TW">工程</keyword>
   </keywords>
   <launchable type="desktop-id">io.github.HakanSeven12.OpenCadStudio.desktop</launchable>
   <categories>

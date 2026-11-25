@@ -1367,6 +1367,7 @@ impl OpenCADStudio {
                             .set_title(&title)
                             .set_file_name("block.dwg")
                             .add_filter(crate::t!("DWG Files").as_ref(), &["dwg"])
+                            .add_filter(crate::t!("DXF Files").as_ref(), &["dxf"])
                             .save_file()
                             .await
                             .map(|h| crate::sys::handle_path(&h));
@@ -1943,6 +1944,8 @@ impl OpenCADStudio {
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::Count(message) => self.on_count(message),
+            Message::GeometryCleanup(message) => self.on_geometry_cleanup(message),
+            Message::BricscadVisibility(message) => self.on_bricscad_visibility(message),
             Message::Laywalk(message) => self.on_layer_walk(message),
             Message::QuickCalc(message) => self.on_quick_calc(message),
             Message::Assistant(message) => self.on_assistant(message),
@@ -2070,6 +2073,10 @@ impl OpenCADStudio {
                 follow.map_or_else(Task::none, Task::done)
             }
 
+            Message::PointsMenu(msg) => {
+                self.points_menu.update(msg);
+                Task::none()
+            }
             Message::RibbonToolClick { tool_id, event } => {
                 // A tool clicked in a minimized ribbon's popup closes it.
                 self.ribbon.close_popup();
@@ -2115,6 +2122,116 @@ impl OpenCADStudio {
                 }
                 #[cfg(target_arch = "wasm32")]
                 let _ = (owner, routed);
+                Task::none()
+            }
+
+            Message::PanelWidgetNodeActivated {
+                owner,
+                panel,
+                node,
+            } => {
+                // Activation is the one widget gesture the plugin needs:
+                // best-effort, owner-targeted, sequence-identified.
+                let routed = self.panel_event_router.on_node_activated(&panel, node);
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin::v4_support::publish_surface_event_to_plugin(
+                    &owner, routed.panel_id, routed.sequence, routed.event,
+                );
+                #[cfg(target_arch = "wasm32")]
+                let _ = (owner, routed);
+                Task::none()
+            }
+            Message::PanelWidgetExpandToggled {
+                owner,
+                panel,
+                node,
+            } => {
+                // Host-local toggle; ONLY expanding an `Unloaded` row
+                // notifies the plugin — it is the data source for those
+                // children (lazy expansion, finding F4).
+                let children = self
+                    .panel_surfaces
+                    .widget(&owner, &panel)
+                    .and_then(|surface| surface.rows.get(&node))
+                    .map(|row| row.children.clone());
+                let ui = self.panel_widget_ui.entry(panel.clone()).or_default();
+                let notify = match children.as_ref() {
+                    Some(children) => ui.toggle_expanded(node, children),
+                    None => false,
+                };
+                if notify {
+                    let routed = self.panel_event_router.on_node_expanded(&panel, node);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::plugin::v4_support::publish_surface_event_to_plugin(
+                        &owner, routed.panel_id, routed.sequence, routed.event,
+                    );
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = routed;
+                }
+                Task::none()
+            }
+
+            Message::PanelTableCellDraft {
+                owner,
+                panel,
+                row,
+                column,
+                text,
+            } => {
+                // Host-local draft state; the stored table is untouched.
+                self.panel_table_ui
+                    .entry(panel.clone())
+                    .or_default()
+                    .set_draft(row, column, text);
+                let _ = owner;
+                Task::none()
+            }
+            Message::PanelTableCellSelected { owner, panel, row, column } => {
+                self.panel_table_ui
+                    .entry(panel.clone())
+                    .or_default()
+                    .select((row, column));
+                let _ = owner;
+                Task::none()
+            }
+            Message::PanelTableCellCommitted {
+                owner,
+                panel,
+                row,
+                column,
+            } => {
+                // Typed-commit rule: the edited value takes the existing
+                // cell's type; a failed parse keeps the draft. A commit
+                // notifies the plugin (best-effort, owner-targeted) — the
+                // plugin stays the data authority and canonicalizes with
+                // its own table patch.
+                let stored = self
+                    .panel_surfaces
+                    .table(&owner, &panel)
+                    .and_then(|surface| {
+                        let index = surface.columns.iter().position(|c| c.id == column)?;
+                        surface
+                            .rows
+                            .get(&row)
+                            .and_then(|cells| cells.get(index))
+                            .cloned()
+                    });
+                let value = self
+                    .panel_table_ui
+                    .entry(panel.clone())
+                    .or_default()
+                    .commit_draft(row, column, stored.as_ref());
+                if let Ok(value) = value {
+                    let routed = self
+                        .panel_event_router
+                        .on_cell_edited(&panel, row, column, value);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::plugin::v4_support::publish_surface_event_to_plugin(
+                        &owner, routed.panel_id, routed.sequence, routed.event,
+                    );
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = routed;
+                }
                 Task::none()
             }
 
@@ -2950,6 +3067,13 @@ impl OpenCADStudio {
             }
 
             Message::DocTabSaveAll => self.dispatch_command("SAVEALL"),
+            Message::RetryWindowView(window_id) => {
+                self.failed_views
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .retain(|failed| *failed != window_id);
+                Task::none()
+            }
 
             // Both close-* variants resolve ids against the live tab list at
             // handling time (like `TabClose` above), so a batch that closed
@@ -3127,6 +3251,7 @@ impl OpenCADStudio {
                         };
 
                     self.command_line.set_contextual_suggestions(suggestions);
+                    self.refresh_content_suggestions();
 
                     if should_update {
                         self.command_line.set_step_options(opts);
@@ -3592,6 +3717,11 @@ impl OpenCADStudio {
                 self.command_line.input.clear();
                 self.command_line.autocomplete_cursor = None;
                 self.dispatch_command(&value)
+            }
+
+            Message::ContentSuggestionPick(item) => {
+                self.command_line.close_history();
+                self.run_content_suggestion(item)
             }
 
             Message::CommandOptionPick(kw) => {
@@ -7968,21 +8098,7 @@ impl OpenCADStudio {
                 }
                 let handles: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if !handles.is_empty() {
-                    // Erase is delta-safe unless a target is in a group (group
-                    // cleanup rewrites document.objects).
-                    let delta_safe = self.delta_erase_safe(i, &handles);
-                    let pending = self.begin_undo(i, "ERASE", handles.len(), delta_safe);
-                    // Stash the erased entities so OOPS can restore them.
-                    self.oops_cache = handles
-                        .iter()
-                        .filter_map(|h| self.tabs[i].scene.document.get_entity_arc(*h))
-                        .collect();
-                    self.tabs[i].scene.erase_entities(&handles);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                    if let Some(pd) = pending {
-                        self.commit_undo_delta(i, pd);
-                    }
+                    self.erase_selected_handles(i, &handles);
                 }
                 Task::none()
             }
@@ -9083,14 +9199,9 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
                 if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    self.tabs[i].scene.document.header.current_line_weight = lw.value();
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_lineweight = lw;
+                    let task = self.on_ribbon_lineweight_changed(lw);
                     self.refresh_properties();
-                    return Task::none();
+                    return task;
                 }
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                     if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
@@ -10491,6 +10602,9 @@ impl OpenCADStudio {
                 if key == "ESCAPE" && self.cancel_layer_manager_edit() {
                     return Task::none();
                 }
+                if self.mtext_navigation_key(&key) {
+                    return Task::none();
+                }
                 if let Some(task) = self.layer_manager_key(&key) {
                     return task;
                 }
@@ -11277,6 +11391,12 @@ impl OpenCADStudio {
 
             Message::SnapMarkerSizeChanged(size) => {
                 self.model_space.snap_marker_size = size.clamp(1, 20);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::AutoSnapMagnetChanged(on) => {
+                self.autosnap_magnet = on;
                 self.persist_settings_if_changed();
                 Task::none()
             }

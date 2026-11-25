@@ -4,8 +4,9 @@
 //! limit, and give the reason on that line.
 
 use crate::app::{Message, OpenCADStudio};
+use crate::scene::annotative::INSERT_FLAG_LOOKUPS;
 use crate::scene::view::camera::Camera;
-use document::entities::Line;
+use document::entities::{Insert, Line};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 
@@ -43,9 +44,47 @@ const LIMITS: &[(&str, Work)] = &[
     ("end the selection of all lines in MOVE", limit(0, 0, 1, 0)),
     ("pointer move in MOVE of all lines", limit(0, 0, 0, 0)),
     ("move all lines", limit(0, 1, 0, 0)),
+    // The mixed drawing: block references, text, hatches and dimensions.
+    ("pointer move in the mixed drawing", limit(0, 0, 0, 0)),
+    // The prompts of -INSERT take 7 contexts, on a drawing of any size. The
+    // settings keep the blocks that were used last: one write.
+    ("add one block reference", limit(0, 1, 7, 1)),
+    ("add one dimension", limit(0, 1, 0, 0)),
+    ("erase one dimension", limit(0, 1, 0, 0)),
+    (
+        "end the selection of the mixed drawing in MOVE",
+        limit(0, 0, 1, 0),
+    ),
+    (
+        "pointer move in MOVE of the mixed drawing",
+        limit(0, 0, 0, 0),
+    ),
+    ("move the mixed drawing", limit(0, 1, 0, 0)),
+    ("regenerate the mixed drawing", limit(1, 0, 0, 0)),
     // One write for the new value, and none for the events after it (#3392).
     ("change a setting", limit(0, 0, 0, 1)),
     ("pointer move after a changed setting", limit(0, 0, 0, 0)),
+    ("copy all lines", limit(0, 1, 1, 0)),
+    ("undo the copy of all lines", limit(0, 1, 0, 0)),
+    ("rotate all lines", limit(0, 1, 1, 0)),
+    ("select all lines", limit(0, 0, 0, 0)),
+    ("pointer move with all lines selected", limit(0, 0, 0, 0)),
+    ("pan with the middle button", limit(0, 0, 0, 0)),
+    ("zoom with the wheel", limit(0, 0, 0, 0)),
+    // A step that changes which entities the display holds can assemble
+    // the set one time.
+    ("regenerate the drawing", limit(1, 0, 0, 0)),
+    ("erase all lines", limit(1, 0, 0, 0)),
+    ("turn off the layer of all lines", limit(1, 0, 0, 0)),
+    ("turn on the layer of all lines", limit(0, 1, 0, 0)),
+    ("freeze the layer of all lines", limit(1, 0, 0, 0)),
+    ("thaw the layer of all lines", limit(0, 1, 0, 0)),
+    (
+        "change the colour of the layer of all lines",
+        limit(0, 1, 0, 0),
+    ),
+    ("switch to a paper layout", limit(1, 1, 0, 0)),
+    ("switch back to model space", limit(0, 1, 0, 0)),
 ];
 
 const fn limit(full_builds: u64, patches: u64, contexts: u64, settings_writes: u64) -> Work {
@@ -59,18 +98,24 @@ const fn limit(full_builds: u64, patches: u64, contexts: u64, settings_writes: u
 
 /// An app with a drawing of [`LINES`] lines that was drawn one time.
 fn large_drawing() -> OpenCADStudio {
+    large_drawing_on("0")
+}
+
+/// [`large_drawing`] with its lines on `layer`.
+fn large_drawing_on(layer: &str) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     let _ = app.automation_op(r#"{"op":"new"}"#);
+    if layer != "0" {
+        script(&mut app, &format!("-LAYER N {layer}  "));
+    }
     let tab = app.active_tab;
     for i in 0..LINES {
         let x = (i % 100) as f64 * 10.0;
         let y = (i / 100) as f64 * 10.0;
-        app.tabs[tab]
-            .scene
-            .add_entity(EntityType::Line(Line::from_points(
-                Vector3::new(x, y, 0.0),
-                Vector3::new(x + 5.0, y + 5.0, 0.0),
-            )));
+        let mut line =
+            Line::from_points(Vector3::new(x, y, 0.0), Vector3::new(x + 5.0, y + 5.0, 0.0));
+        line.common.layer = layer.to_string();
+        app.tabs[tab].scene.add_entity(EntityType::Line(line));
     }
     let before = work(&app);
     assert_eq!(draw(&app), LINES, "one wire for each line");
@@ -264,6 +309,48 @@ fn a_new_layer_and_a_zoom_do_no_work() {
     });
 }
 
+/// The end of a selection asks each entity for its scale representation.
+/// For a block reference with none, that must not search for its
+/// definition (#3467).
+#[test]
+fn the_end_of_a_selection_does_not_search_for_the_definition_of_each_reference() {
+    const REFERENCES: usize = 1_000;
+    let mut app = large_drawing();
+    let tab = app.active_tab;
+    let scene = &mut app.tabs[tab].scene;
+    scene.define_block_raw(
+        "PART",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(4.0, 0.0, 0.0),
+        ))],
+    );
+    for i in 0..REFERENCES {
+        let at = Vector3::new(
+            (i % 100) as f64 * 10.0,
+            -10.0 - (i / 100) as f64 * 10.0,
+            0.0,
+        );
+        scene.add_entity(EntityType::Insert(Insert::new("PART", at)));
+    }
+    draw(&app);
+
+    INSERT_FLAG_LOOKUPS.with(|count| count.set(0));
+    script(&mut app, "MOVE ALL  ");
+    assert!(
+        prompt(&app).contains("base point"),
+        "MOVE has its selection and asks for the base point: {}",
+        prompt(&app)
+    );
+    let lookups = INSERT_FLAG_LOOKUPS.with(|count| count.get());
+    assert_eq!(
+        lookups, 0,
+        "the selection searched for a block definition {lookups} times, on a drawing of \
+         {REFERENCES} block references"
+    );
+}
+
 #[test]
 fn a_move_of_all_lines_does_no_work_for_each_line_until_its_second_point() {
     let mut app = large_drawing();
@@ -292,6 +379,131 @@ fn a_move_of_all_lines_does_no_work_for_each_line_until_its_second_point() {
     assert_eq!(draw(&app), LINES, "the display shows each line");
 }
 
+/// How many times [`mixed_drawing`] copies its entities: 5 entities
+/// become 5,120.
+const DOUBLINGS: u32 = 10;
+
+/// An app with a drawing of block references, text, hatched circles and
+/// dimensions, that was drawn one time.
+fn mixed_drawing() -> OpenCADStudio {
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let tab = app.active_tab;
+    app.tabs[tab].scene.define_block_raw(
+        "PART",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(4.0, 0.0, 0.0),
+        ))],
+    );
+    for line in [
+        "-INSERT PART 1,1 1 1 0",
+        "TEXT 1,3 1 0 Hello",
+        "CIRCLE 7,3 2",
+        "HATCH 7,3",
+        "DIMLINEAR 0,6 9,6 5,8",
+    ] {
+        command(&mut app, line);
+    }
+    // TEXT waits for a next line of text: an empty line ends it.
+    script(&mut app, "");
+    assert!(app.text_inline.is_none(), "the text editor is closed");
+    // The line of the block definition is the sixth entity.
+    assert_eq!(entities(&app), 6, "one entity of each kind");
+    for doubling in 0..DOUBLINGS {
+        let step = 12 << (doubling / 2);
+        let to = if doubling % 2 == 0 {
+            format!("{step},0")
+        } else {
+            format!("0,{step}")
+        };
+        command(&mut app, &format!("COPY ALL ENTER 0,0 {to} ENTER"));
+    }
+    assert_eq!(entities(&app), (5 << DOUBLINGS) + 1);
+    assert!(draw(&app) >= entities(&app), "each entity has a wire");
+    app
+}
+
+/// One whole command line.
+fn command(app: &mut OpenCADStudio, line: &str) {
+    let _ = app.run_command_line(line);
+}
+
+fn count(app: &OpenCADStudio, is_kind: fn(&EntityType) -> bool) -> usize {
+    let document = &app.tabs[app.active_tab].scene.document;
+    document.entities().filter(|entity| is_kind(entity)).count()
+}
+
+#[test]
+fn a_new_entity_of_the_mixed_drawing_is_patched_into_the_display() {
+    let mut app = mixed_drawing();
+    let is_insert = |entity: &EntityType| matches!(entity, EntityType::Insert(_));
+    let is_dimension = |entity: &EntityType| matches!(entity, EntityType::Dimension(_));
+    let (inserts, dimensions) = (count(&app, is_insert), count(&app, is_dimension));
+
+    within_limit(&mut app, "pointer move in the mixed drawing", |app| {
+        pointer_to(app, 400.0, 300.0);
+        pointer_to(app, 410.0, 305.0);
+    });
+
+    within_limit(&mut app, "add one block reference", |app| {
+        command(app, "-INSERT PART 1,-5 1 1 0");
+        // The next event writes the changed settings.
+        pointer_to(app, 420.0, 300.0);
+    });
+    assert_eq!(count(&app, is_insert), inserts + 1);
+
+    within_limit(&mut app, "add one dimension", |app| {
+        command(app, "DIMLINEAR 0,-12 9,-12 5,-10");
+    });
+    assert_eq!(count(&app, is_dimension), dimensions + 1);
+
+    within_limit(&mut app, "erase one dimension", |app| {
+        script(app, "ERASE L ");
+    });
+    assert_eq!(count(&app, is_dimension), dimensions);
+}
+
+#[test]
+fn a_move_and_a_regen_of_the_mixed_drawing_are_one_pass() {
+    let mut app = mixed_drawing();
+    let all = entities(&app);
+    within_limit(
+        &mut app,
+        "end the selection of the mixed drawing in MOVE",
+        |app| {
+            script(app, "MOVE ALL  ");
+        },
+    );
+    assert!(
+        prompt(&app).contains("base point"),
+        "MOVE has its selection and asks for the base point: {}",
+        prompt(&app)
+    );
+
+    script(&mut app, "0,0 ");
+    within_limit(
+        &mut app,
+        "pointer move in MOVE of the mixed drawing",
+        |app| {
+            pointer_to(app, 410.0, 300.0);
+            pointer_to(app, 420.0, 310.0);
+        },
+    );
+
+    within_limit(&mut app, "move the mixed drawing", |app| {
+        script(app, "5,5 ");
+    });
+    assert_eq!(prompt(&app), "", "MOVE ended");
+
+    within_limit(&mut app, "regenerate the mixed drawing", |app| {
+        script(app, "REGEN ");
+    });
+    assert_eq!(entities(&app), all);
+    assert!(draw(&app) >= all, "the display shows each entity");
+}
+
 #[test]
 fn a_changed_setting_is_written_one_time_and_not_again() {
     let mut app = large_drawing();
@@ -309,4 +521,157 @@ fn a_changed_setting_is_written_one_time_and_not_again() {
         pointer_to(app, 400.0, 300.0);
         pointer_to(app, 410.0, 305.0);
     });
+}
+
+/// The wires that the display shows, and how many of them are red.
+fn shown(app: &OpenCADStudio) -> (usize, usize) {
+    let scene = &app.tabs[app.active_tab].scene;
+    let wires = scene.model_tile_wires_arc(0, &Camera::default(), 1.0, 1.0);
+    let shown = wires.iter().filter(|wire| wire.display_visible);
+    let red = shown
+        .clone()
+        .filter(|wire| wire.color[0] > 0.9 && wire.color[1] < 0.1)
+        .count();
+    (shown.count(), red)
+}
+
+/// Where the view looks, and from how far.
+fn view(app: &OpenCADStudio) -> (glam::DVec3, f32) {
+    let camera = app.tabs[app.active_tab].scene.camera.borrow();
+    (camera.target, camera.distance)
+}
+
+#[test]
+fn a_copy_of_all_lines_and_its_undo_are_one_pass() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "copy all lines", |app| {
+        script(app, "COPY ALL  ");
+        script(app, "0,0 ");
+        script(app, "3,3 ");
+        script(app, " ");
+    });
+    assert_eq!(entities(&app), 2 * LINES);
+
+    within_limit(&mut app, "undo the copy of all lines", |app| {
+        let _ = app.update(Message::Undo);
+    });
+    assert_eq!(entities(&app), LINES);
+}
+
+#[test]
+fn a_rotation_of_all_lines_is_one_pass() {
+    let mut app = large_drawing();
+    let line = last_line(&app);
+    let (x, y) = start_of(&app, line);
+    within_limit(&mut app, "rotate all lines", |app| {
+        script(app, "ROTATE ALL  ");
+        script(app, "0,0 ");
+        script(app, "90 ");
+    });
+    let (rotated_x, rotated_y) = start_of(&app, line);
+    assert!(
+        (rotated_x + y).abs() < 1e-6 && (rotated_y - x).abs() < 1e-6,
+        "the lines turned: ({x}, {y}) to ({rotated_x}, {rotated_y})"
+    );
+}
+
+#[test]
+fn a_selection_of_all_lines_does_no_work() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "select all lines", |app| {
+        let _ = app.update(Message::SelectAllShortcut);
+    });
+    assert_eq!(
+        app.tabs[app.active_tab].scene.selected_entities().len(),
+        LINES
+    );
+
+    within_limit(&mut app, "pointer move with all lines selected", |app| {
+        pointer_to(app, 400.0, 300.0);
+        pointer_to(app, 410.0, 305.0);
+    });
+}
+
+#[test]
+fn a_pan_and_a_wheel_zoom_do_no_work() {
+    let mut app = large_drawing();
+    let before = view(&app);
+    within_limit(&mut app, "pan with the middle button", |app| {
+        pointer_to(app, 400.0, 300.0);
+        let _ = app.update(Message::ViewportMiddlePress);
+        pointer_to(app, 450.0, 320.0);
+        pointer_to(app, 470.0, 330.0);
+        let _ = app.update(Message::ViewportMiddleRelease);
+    });
+    let panned = view(&app);
+    assert_ne!(panned.0, before.0, "the view moved");
+
+    within_limit(&mut app, "zoom with the wheel", |app| {
+        let _ = app.update(Message::ViewportScroll(iced::mouse::ScrollDelta::Lines {
+            x: 0.0,
+            y: 1.0,
+        }));
+    });
+    assert_ne!(view(&app).1, panned.1, "the view zoomed");
+}
+
+#[test]
+fn a_regen_and_an_erase_of_all_lines_assemble_the_display_one_time() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "regenerate the drawing", |app| {
+        script(app, "REGEN ");
+    });
+    assert_eq!(shown(&app).0, LINES);
+
+    within_limit(&mut app, "erase all lines", |app| {
+        script(app, "ERASE ALL  ");
+    });
+    assert_eq!(entities(&app), 0);
+    assert_eq!(shown(&app).0, 0, "the display is empty");
+}
+
+#[test]
+fn a_change_of_the_layer_of_all_lines_is_one_pass() {
+    let mut app = large_drawing_on("WORK");
+    within_limit(&mut app, "turn off the layer of all lines", |app| {
+        script(app, "-LAYER OFF WORK  ");
+    });
+    assert_eq!(shown(&app).0, 0, "a layer that is off shows nothing");
+    within_limit(&mut app, "turn on the layer of all lines", |app| {
+        script(app, "-LAYER ON WORK  ");
+    });
+    assert_eq!(shown(&app).0, LINES);
+
+    within_limit(&mut app, "freeze the layer of all lines", |app| {
+        script(app, "-LAYER F WORK  ");
+    });
+    assert_eq!(shown(&app).0, 0, "a frozen layer shows nothing");
+    within_limit(&mut app, "thaw the layer of all lines", |app| {
+        script(app, "-LAYER T WORK  ");
+    });
+    assert_eq!(shown(&app).0, LINES);
+
+    within_limit(
+        &mut app,
+        "change the colour of the layer of all lines",
+        |app| {
+            script(app, "-LAYER C 1 WORK  ");
+        },
+    );
+    assert_eq!(shown(&app), (LINES, LINES), "each line is red");
+}
+
+#[test]
+fn a_layout_switch_assembles_the_display_one_time() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "switch to a paper layout", |app| {
+        let _ = app.update(Message::LayoutSwitch("Layout1".to_string()));
+    });
+    assert_eq!(app.tabs[app.active_tab].scene.current_layout, "Layout1");
+
+    within_limit(&mut app, "switch back to model space", |app| {
+        let _ = app.update(Message::LayoutSwitch("Model".to_string()));
+    });
+    assert_eq!(app.tabs[app.active_tab].scene.current_layout, "Model");
+    assert_eq!(shown(&app).0, LINES);
 }

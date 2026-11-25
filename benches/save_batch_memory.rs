@@ -98,7 +98,7 @@ fn measure(strategy: &str, flow: &str) -> Report {
             serde_json::to_writer(&mut fixture, entity).unwrap();
         }
     }
-    let fixture_sha256 = format!("{:x}", fixture.0.finalize());
+    let fixture_sha256 = OpenCADStudio::io::recovery::hex_digest(fixture.0.finalize());
     let snapshots: Vec<_> = live_documents
         .iter()
         .enumerate()

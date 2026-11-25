@@ -190,6 +190,7 @@ pub(crate) fn component_id(component: &Component) -> String {
         Component::Angle => "Angle".to_owned(),
         Component::Flip => "Flip".to_owned(),
         Component::Visibility(_) => "Visibility".to_owned(),
+        Component::Bricscad(_) => "BricscadVisibility".to_owned(),
         Component::TableRow(_) => "TableRow".to_owned(),
         Component::LookupOutput { column, .. } => format!("Lookup{column}"),
     }
@@ -376,6 +377,7 @@ pub(crate) fn evaluate(
                 }
                 Component::Flip
                 | Component::Visibility(_)
+                | Component::Bricscad(_)
                 | Component::TableRow(_)
                 | Component::LookupOutput { .. } => unreachable!(),
             }

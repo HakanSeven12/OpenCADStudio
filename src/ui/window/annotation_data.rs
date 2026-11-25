@@ -10,7 +10,7 @@ use std::fmt;
 
 use document::types::Handle;
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
+    Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
 };
 use iced::{Border, Element, Fill, Length, Theme};
 
@@ -580,8 +580,8 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<iced::widget::canvas::Geometry> {
-        use iced::widget::canvas::{Frame, Path, Stroke, Text};
         use iced::Point;
+        use iced::widget::canvas::{Frame, Path, Stroke, Text};
         let mut frame = Frame::new(renderer, bounds.size());
         let ink = theme.palette().background.base.text;
         frame.fill(

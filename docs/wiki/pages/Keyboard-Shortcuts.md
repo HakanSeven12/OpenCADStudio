@@ -59,6 +59,8 @@ These are the default shortcuts. Change them under `CUI` › **Keyboard Shortcut
 | Ctrl+9 | Command line on/off |
 | Ctrl+0 | Clean screen |
 | Ctrl+R | Next viewport |
+| Ctrl+PgDn | Next layout tab |
+| Ctrl+PgUp | Previous layout tab |
 | Alt | Ribbon key tips |
 
 ## At the command line

@@ -23,7 +23,7 @@ impl fmt::Display for PlotLineweightItem {
 
 fn plot_lineweight_options() -> Vec<PlotLineweightItem> {
     let mut options = vec![PlotLineweightItem {
-        index: 255,
+        index: 0,
         label: t!("Use object lineweight").into_owned(),
     }];
 
@@ -31,8 +31,9 @@ fn plot_lineweight_options() -> Vec<PlotLineweightItem> {
         crate::io::plot_style::LW_TABLE
             .iter()
             .enumerate()
+            // A style's number is one more than its entry: 0 is "object".
             .map(|(index, lw)| PlotLineweightItem {
-                index: index as u8,
+                index: index as u8 + 1,
                 label: format!("{lw:.2} mm"),
             }),
     );
@@ -158,14 +159,14 @@ pub fn view_window<'a>(
                 crate::ui::properties::acad_color_display(document::types::Color::Index(aci));
             let has_override = table
                 .and_then(|t| t.aci_entries.get(aci as usize))
-                .map(|e| e.color.is_some() || e.lineweight != 255 || e.screening != 100)
+                .map(|e| e.color.is_some() || !matches!(e.lineweight, 0 | 255) || e.screening != 100)
                 .unwrap_or(false);
             let lw_str = table
                 .and_then(|t| t.aci_entries.get(aci as usize))
                 .and_then(|e| {
-                    if e.lineweight != 255 {
+                    if !matches!(e.lineweight, 0 | 255) {
                         crate::io::plot_style::LW_TABLE
-                            .get(e.lineweight as usize)
+                            .get(e.lineweight as usize - 1)
                             .map(|lw| format!("{lw:.2}mm"))
                     } else {
                         None
@@ -274,11 +275,11 @@ pub fn view_window<'a>(
         .unwrap_or_else(|| t!("(none)").into());
     let cur_lw = entry
         .map(|e| {
-            if e.lineweight == 255 {
+            if matches!(e.lineweight, 0 | 255) {
                 t!("object").into()
             } else {
                 crate::io::plot_style::LW_TABLE
-                    .get(e.lineweight as usize)
+                    .get(e.lineweight as usize - 1)
                     .map(|lw| crate::tf!("{lw:.2}mm (idx {})", e.lineweight).into_owned())
                     .unwrap_or_else(|| crate::tf!("idx {}", e.lineweight).into_owned())
             }
@@ -291,7 +292,10 @@ pub fn view_window<'a>(
     let lbl = |s: Cow<'static, str>| text(s).size(11).style(muted_style);
     let lw_items = plot_lineweight_options();
 
-    let current_lw_index = lw_buf.trim().parse::<u8>().unwrap_or(255);
+    let current_lw_index = match lw_buf.trim().parse::<u8>() {
+        Ok(255) | Err(_) => 0,
+        Ok(n) => n,
+    };
 
     let current_lw = lw_items
         .iter()

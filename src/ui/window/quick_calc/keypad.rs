@@ -155,11 +155,7 @@ fn paren(o: &str) -> String {
 
 /// Drop one bracket pair that a function call's own brackets make redundant.
 fn strip(o: &str) -> &str {
-    if wrapped(o) {
-        &o[1..o.len() - 1]
-    } else {
-        o
-    }
+    if wrapped(o) { &o[1..o.len() - 1] } else { o }
 }
 
 /// The input as `head` + last operand, or `None` when it has no operand.
@@ -252,7 +248,7 @@ impl QuickCalcPalette {
             Key::Eval => {}
             Key::Postfix(suffix) => return self.on_operand(|o| paren(o) + suffix, None),
             Key::Prefix(prefix) => {
-                return self.on_operand(|o| format!("{prefix}{}", paren(o)), Some(prefix))
+                return self.on_operand(|o| format!("{prefix}{}", paren(o)), Some(prefix));
             }
             Key::Func(name) => return self.on_operand(call(name), Some(&format!("{name}("))),
             Key::Trig { name, hyp } => {
@@ -263,7 +259,7 @@ impl QuickCalcPalette {
                 return self.on_operand(
                     |o| format!("{name}({}, ", strip(o)),
                     Some(&format!("{name}(")),
-                )
+                );
             }
             Key::Negate => {
                 return self.on_operand(
@@ -272,7 +268,7 @@ impl QuickCalcPalette {
                         None => format!("(-{o})"),
                     },
                     Some("(-"),
-                )
+                );
             }
             Key::Second => self.second ^= true,
             Key::Hyp => self.hyp ^= true,

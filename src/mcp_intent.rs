@@ -1,7 +1,7 @@
 //! Transport-neutral descriptors and generated schemas for curated MCP intent tools.
 
 use crate::mcp_ops::{self, OpDef};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum IntentKind {
@@ -64,6 +64,11 @@ pub static DESCRIPTORS: &[IntentDescriptor] = &[
     read("ocs_audit", "Audit OCS document", &mcp_ops::AUDIT),
     read("ocs_commands", "List OCS commands", &mcp_ops::COMMANDS),
     read("ocs_measure", "Measure OCS entities", &mcp_ops::MEASURE),
+    read(
+        "ocs_panels",
+        "Inspect OCS plugin panels",
+        &mcp_ops::PLUGIN_PANELS,
+    ),
     IntentDescriptor {
         name: "ocs_render",
         title: "Render OCS viewport",
@@ -93,6 +98,13 @@ pub static DESCRIPTORS: &[IntentDescriptor] = &[
         "ocs_select",
         "Select OCS entities",
         &mcp_ops::SELECT,
+        &[],
+        false,
+    ),
+    execute(
+        "ocs_panel_action",
+        "Activate OCS panel element",
+        &mcp_ops::PLUGIN_PANEL_ACTION,
         &[],
         false,
     ),
@@ -233,11 +245,13 @@ fn operation_schema(descriptor: &IntentDescriptor) -> Value {
         .filter(|name| name != "op")
         .map(|name| {
             let name = name.as_str().expect("string required parameter");
-            json!(descriptor
-                .aliases
-                .iter()
-                .find(|alias| alias.backing == name)
-                .map_or(name, |alias| alias.public))
+            json!(
+                descriptor
+                    .aliases
+                    .iter()
+                    .find(|alias| alias.backing == name)
+                    .map_or(name, |alias| alias.public)
+            )
         })
         .collect();
     required.dedup();
@@ -306,8 +320,8 @@ pub fn tool_definitions() -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{facade_arguments, find_descriptor, tool_definitions, IntentKind, DESCRIPTORS};
-    use serde_json::{json, Value};
+    use super::{DESCRIPTORS, IntentKind, facade_arguments, find_descriptor, tool_definitions};
+    use serde_json::{Value, json};
     use std::collections::HashSet;
 
     const NAMES: &[&str] = &[
@@ -317,6 +331,7 @@ mod tests {
         "ocs_audit",
         "ocs_commands",
         "ocs_measure",
+        "ocs_panels",
         "ocs_render",
         "ocs_run",
         "ocs_new",
@@ -324,6 +339,7 @@ mod tests {
         "ocs_save",
         "ocs_save_verified",
         "ocs_select",
+        "ocs_panel_action",
         "ocs_cancel",
         "ocs_undo",
         "ocs_redo",
@@ -457,12 +473,14 @@ mod tests {
         );
 
         let schema = &generated("ocs_render")["inputSchema"];
-        assert!(crate::schema_validation::validate_shape(
-            schema,
-            &json!({"layout":"Sheet1","aspect_fit":true,"renderer":"gpu"}),
-            ""
-        )
-        .is_ok());
+        assert!(
+            crate::schema_validation::validate_shape(
+                schema,
+                &json!({"layout":"Sheet1","aspect_fit":true,"renderer":"gpu"}),
+                ""
+            )
+            .is_ok()
+        );
         assert!(
             crate::schema_validation::validate_shape(schema, &json!({"layout":42}), "").is_err()
         );
@@ -487,7 +505,7 @@ mod tests {
             .map(|descriptor| descriptor.name)
             .collect();
         assert_eq!(names, NAMES);
-        assert_eq!(names.iter().copied().collect::<HashSet<_>>().len(), 16);
+        assert_eq!(names.iter().copied().collect::<HashSet<_>>().len(), 18);
         for name in NAMES {
             let descriptor = find_descriptor(name).expect("descriptor lookup succeeds");
             assert_eq!(descriptor.name, *name);
@@ -531,7 +549,7 @@ mod tests {
     #[test]
     fn generated_schemas_expose_public_arguments_without_required_envelopes() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 18);
         for tool in &tools {
             let schema = &tool["inputSchema"];
             assert_eq!(schema["type"], "object");
@@ -592,18 +610,22 @@ mod tests {
             match descriptor.kind {
                 IntentKind::Execute => {
                     assert_eq!(schema["properties"]["request_id"]["type"], "string");
-                    assert!(schema["required"]
-                        .as_array()
-                        .is_none_or(|required| { !required.contains(&json!("request_id")) }));
+                    assert!(
+                        schema["required"]
+                            .as_array()
+                            .is_none_or(|required| { !required.contains(&json!("request_id")) })
+                    );
                 }
                 IntentKind::Read | IntentKind::Capture => {
                     assert!(schema["properties"].get("request_id").is_none());
-                    assert!(crate::schema_validation::validate_shape(
-                        &schema,
-                        &json!({"request_id":"not-an-execute-intent"}),
-                        ""
-                    )
-                    .is_err());
+                    assert!(
+                        crate::schema_validation::validate_shape(
+                            &schema,
+                            &json!({"request_id":"not-an-execute-intent"}),
+                            ""
+                        )
+                        .is_err()
+                    );
                 }
             }
         }
@@ -764,10 +786,12 @@ mod tests {
         let properties = tool["inputSchema"]["properties"].as_object().unwrap();
         assert!(properties.contains_key("name"));
         assert!(!properties.contains_key("search"));
-        assert!(tool["description"]
-            .as_str()
-            .unwrap()
-            .contains(r#"{"name":"LINE"}"#));
+        assert!(
+            tool["description"]
+                .as_str()
+                .unwrap()
+                .contains(r#"{"name":"LINE"}"#)
+        );
     }
 
     #[test]
@@ -793,7 +817,10 @@ mod tests {
             assert!(render_properties.contains_key(name), "render lacks {name}");
         }
         assert!(render_properties.contains_key("layout"));
-        assert_eq!(schema["properties"]["layout"], facade["properties"]["layout"]);
+        assert_eq!(
+            schema["properties"]["layout"],
+            facade["properties"]["layout"]
+        );
         for (name, default) in [
             ("scope", json!("viewport")),
             ("max_dimension", json!(1600)),
@@ -812,9 +839,11 @@ mod tests {
         assert_eq!(facade["properties"]["view"]["default"], "current");
         assert_eq!(schema["properties"]["view"]["default"], "extents");
         assert_eq!(schema["additionalProperties"], false);
-        assert!(schema["required"]
-            .as_array()
-            .is_none_or(|required| required.is_empty()));
+        assert!(
+            schema["required"]
+                .as_array()
+                .is_none_or(|required| required.is_empty())
+        );
         assert_eq!(render["annotations"]["readOnlyHint"], false);
         assert_eq!(render["annotations"]["destructiveHint"], false);
     }
@@ -882,10 +911,10 @@ mod tests {
     }
 
     #[test]
-    fn all_tools_keep_facades_first_and_append_sixteen_intents() {
+    fn all_tools_keep_facades_first_and_append_eighteen_intents() {
         let tools = crate::mcp::tool_definitions();
         let tools = tools.as_array().unwrap();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 22);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())

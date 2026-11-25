@@ -1,11 +1,30 @@
-//! HATCHLAYER and XREFLAYER: the layer new hatches and new external
-//! references go on. Kept in the drawing's variable dictionary; "." (or
+//! HATCHLAYER, XREFLAYER, REVCLOUDLAYER, TABLELAYER and VIEWPORTLAYER: the
+//! layer new hatches, external references, revision clouds, tables and
+//! viewports go on. Kept in the drawing's variable dictionary; "." (or
 //! empty) means the current layer.
 
 use crate::app::{Message, OpenCADStudio};
 use iced::Task;
 
-const NAMES: &[&str] = &["HATCHLAYER", "XREFLAYER"];
+const NAMES: &[&str] = &[
+    "HATCHLAYER",
+    "XREFLAYER",
+    "REVCLOUDLAYER",
+    "TABLELAYER",
+    "VIEWPORTLAYER",
+];
+
+/// The layer variable for the new objects of the running command `command`:
+/// REVCLOUD, TABLE and MVIEW (which also places the VPORTS arrangements of a
+/// layout).
+pub(crate) fn command_layer_variable(command: &str) -> Option<&'static str> {
+    match command {
+        "REVCLOUD" => Some("REVCLOUDLAYER"),
+        "TABLE" | "-TABLE" => Some("TABLELAYER"),
+        "MVIEW" => Some("VIEWPORTLAYER"),
+        _ => None,
+    }
+}
 
 impl OpenCADStudio {
     /// The layer variable `name` of drawing `i`, `None` for the current layer.
@@ -32,7 +51,8 @@ impl OpenCADStudio {
         }
     }
 
-    /// `HATCHLAYER [value]`, `XREFLAYER [value]` and their `SETVAR` forms.
+    /// `HATCHLAYER [value]` and the other names of `NAMES`, and their
+    /// `SETVAR` forms.
     pub(super) fn dispatch_layer_variable(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
         let (typed, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));

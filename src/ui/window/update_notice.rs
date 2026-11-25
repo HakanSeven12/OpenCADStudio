@@ -1,7 +1,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Background, Border, Element, Theme};
 use std::borrow::Cow;
 

@@ -116,7 +116,7 @@ fn main() {
         "font must resolve to TrueType"
     );
     let (font_hash, face_index) = sysfont::with_face_data(&font, |bytes, index| {
-        (format!("{:x}", Sha256::digest(bytes)), index)
+        (OpenCADStudio::io::recovery::hex_digest(Sha256::digest(bytes)), index)
     })
     .expect("font data");
     let fixture = workload::select_fixture(&fixture_name);

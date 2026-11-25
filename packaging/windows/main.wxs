@@ -20,8 +20,13 @@
       InstallScope='perMachine'
       SummaryCodepage='1252' />
 
+    <!-- The previous version is removed after the new one is installed, so
+         components that stay (the executable with its Start menu shortcut)
+         are kept instead of being deleted and recreated; a shortcut deleted
+         and recreated during one upgrade drops out of the Start menu (#3593).
+         Component GUIDs must therefore stay the same across releases. -->
     <MajorUpgrade
-      Schedule='afterInstallInitialize'
+      Schedule='afterInstallExecute'
       DowngradeErrorMessage='!(loc.DowngradeError)' />
 
     <Media Id='1' Cabinet='product.cab' EmbedCab='yes' />

@@ -697,8 +697,7 @@ pub fn clip_hatch_boundary(
         .iter()
         .map(|p| [(p[0] - world_origin[0]) as f32, (p[1] - world_origin[1]) as f32])
         .collect();
-    let pieces = convex_pieces(&local);
-    let mut out: Vec<[f32; 2]> = Vec::new();
+    let mut loops: Vec<&[[f32; 2]]> = Vec::new();
     let mut i = 0;
     while i < boundary.len() {
         if !boundary[i][0].is_finite() || !boundary[i][1].is_finite() {
@@ -709,10 +708,14 @@ pub fn clip_hatch_boundary(
         while i < boundary.len() && boundary[i][0].is_finite() && boundary[i][1].is_finite() {
             i += 1;
         }
-        // A concave clip is cut into convex pieces with disjoint interiors, so
-        // the even-odd count of every point still comes from one piece.
-        for piece in &pieces {
-            let clipped = clip_polygon_2d(&boundary[start..i], piece);
+        if i - start >= 3 {
+            loops.push(&boundary[start..i]);
+        }
+    }
+    let mut out: Vec<[f32; 2]> = Vec::new();
+    if is_convex_2d(&local) {
+        for ring in loops {
+            let clipped = clip_polygon_2d(ring, &local);
             if clipped.len() >= 3 {
                 if !out.is_empty() {
                     out.push([f32::NAN, f32::NAN]);
@@ -720,8 +723,33 @@ pub fn clip_hatch_boundary(
                 out.extend(clipped);
             }
         }
+    } else {
+        for clipped in ocs_geom::geom2d::intersect_rings_even_odd_f32(&loops, &local) {
+            if !out.is_empty() {
+                out.push([f32::NAN, f32::NAN]);
+            }
+            out.extend(clipped);
+        }
     }
     out
+}
+
+fn is_convex_2d(poly: &[[f32; 2]]) -> bool {
+    let n = poly.len();
+    if n < 3 {
+        return false;
+    }
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let area2: f32 = (0..n)
+        .map(|i| {
+            let (a, b) = (poly[i], poly[(i + 1) % n]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    let sign = if area2 >= 0.0 { 1.0 } else { -1.0 };
+    (0..n).all(|i| sign * cross(poly[(i + n - 1) % n], poly[i], poly[(i + 1) % n]) >= 0.0)
 }
 
 /// Split a closed ring into convex pieces with disjoint interiors: the ring

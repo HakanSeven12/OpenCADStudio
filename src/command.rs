@@ -1094,6 +1094,216 @@ impl CadCommand for FromPointCommand {
 
 inventory::submit!(CommandRegistration { names: &["FROM"] });
 
+/// A point filter typed at a point prompt: `.X`, `.Y`, `.Z`, `.XY`, `.XZ` or
+/// `.YZ`. It names the UCS axes taken from the first point; the second point
+/// gives the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PointFilter {
+    take: [bool; 3],
+}
+
+impl PointFilter {
+    pub fn parse(token: &str) -> Option<Self> {
+        let take = match token
+            .trim()
+            .strip_prefix('.')?
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "X" => [true, false, false],
+            "Y" => [false, true, false],
+            "Z" => [false, false, true],
+            "XY" => [true, true, false],
+            "XZ" => [true, false, true],
+            "YZ" => [false, true, true],
+            _ => return None,
+        };
+        Some(Self { take })
+    }
+
+    /// The axes taken from the first point (`taken`), or the others.
+    fn axes(self, taken: bool) -> String {
+        "XYZ"
+            .chars()
+            .zip(self.take)
+            .filter_map(|(axis, take)| (take == taken).then_some(axis))
+            .collect()
+    }
+}
+
+/// Point-entry modifier for a point filter: asks for the point to take the
+/// filtered axes from, then for the point that gives the others, and returns
+/// the combined point to the parked command.
+#[derive(Debug)]
+pub struct PointFilterCommand {
+    filter: PointFilter,
+    first: Option<DVec3>,
+    plane: WorkingPlane,
+    previous_point: Option<DVec3>,
+}
+
+impl PointFilterCommand {
+    pub fn new(filter: PointFilter, previous_point: Option<DVec3>) -> Self {
+        Self {
+            filter,
+            first: None,
+            plane: WorkingPlane::default(),
+            previous_point,
+        }
+    }
+}
+
+impl CadCommand for PointFilterCommand {
+    fn name(&self) -> &'static str {
+        "POINTFILTER"
+    }
+
+    fn prompt(&self) -> String {
+        if self.first.is_none() {
+            let filter = format!(".{}", self.filter.axes(true));
+            crate::t!("%{filter} of:", filter = filter).into_owned()
+        } else {
+            crate::t!("(need %{axes}):", axes = self.filter.axes(false)).into_owned()
+        }
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.plane = plane;
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        let Some(first) = self.first else {
+            self.first = Some(pt);
+            return CmdResult::NeedPoint;
+        };
+        let (first, second) = (self.plane.to_local(first), self.plane.to_local(pt));
+        let mut local = second;
+        for axis in 0..3 {
+            if self.filter.take[axis] {
+                local[axis] = first[axis];
+            }
+        }
+        CmdResult::ReturnPoint(self.plane.to_world(local))
+    }
+
+    fn modifier_restore_point(&self) -> Option<Option<DVec3>> {
+        Some(self.previous_point)
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
+
+/// `TK`, `TRACK` or `TRACKING` typed at a point prompt.
+pub fn is_tracking_token(token: &str) -> bool {
+    matches!(
+        token.trim().trim_start_matches('_').to_ascii_uppercase().as_str(),
+        "TK" | "TRACK" | "TRACKING"
+    )
+}
+
+/// Point-entry modifier for tracking: a first tracking point, then any number
+/// of next points, each kept on the plane axis through the previous one that
+/// it lies nearest. Enter returns the last tracking point to the parked command.
+#[derive(Debug)]
+pub struct TrackingCommand {
+    last: Option<DVec3>,
+    plane: WorkingPlane,
+    previous_point: Option<DVec3>,
+}
+
+impl TrackingCommand {
+    pub fn new(previous_point: Option<DVec3>) -> Self {
+        Self {
+            last: None,
+            plane: WorkingPlane::default(),
+            previous_point,
+        }
+    }
+
+    /// `pt` moved onto the plane X or Y axis through the last tracking point,
+    /// whichever it is nearer.
+    pub fn orthogonal(&self, pt: DVec3) -> DVec3 {
+        let Some(last) = self.last else {
+            return pt;
+        };
+        let (base, mut local) = (self.plane.to_local(last), self.plane.to_local(pt));
+        if (local.x - base.x).abs() >= (local.y - base.y).abs() {
+            local.y = base.y;
+        } else {
+            local.x = base.x;
+        }
+        local.z = base.z;
+        self.plane.to_world(local)
+    }
+}
+
+impl CadCommand for TrackingCommand {
+    fn name(&self) -> &'static str {
+        "TRACKING"
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!(if self.last.is_none() {
+            "First tracking point:"
+        } else {
+            "Next point (Press ENTER to end tracking):"
+        })
+        .into_owned()
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.plane = plane;
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        self.last = Some(self.orthogonal(pt));
+        CmdResult::NeedPoint
+    }
+
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        self.last
+    }
+
+    fn modifier_restore_point(&self) -> Option<Option<DVec3>> {
+        Some(self.previous_point)
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        match self.last {
+            Some(pt) => CmdResult::ReturnPoint(pt),
+            None => CmdResult::Cancel,
+        }
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let Some(last) = self.last else {
+            return Vec::new();
+        };
+        let mut guide = WireModel::solid_f64(
+            "tracking_guide".to_string(),
+            vec![last.to_array(), self.orthogonal(pt).to_array()],
+            [0.2, 0.9, 0.5, 1.0],
+            false,
+        );
+        let [dash, gap] = crate::ui::overlay::TRACKING_DASH_PX;
+        guide.pattern_length = dash + gap;
+        guide.pattern = [dash, -gap, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        guide.dash_from_start = true;
+        guide.set_fixed_screen_width(1.5);
+        vec![guide]
+    }
+}
+
 /// Generic interactive front-end for a keyword command that operates on the
 /// current selection (CHPROP, ADJUST, XDATA, UNDERLAY, DRAWORDER…). If nothing
 /// is selected when it starts it first gathers a selection (Enter confirms),
@@ -1871,6 +2081,17 @@ pub enum CmdResult {
     },
     /// Command is still waiting for the next point; show updated prompt.
     NeedPoint,
+    /// Write a COGO point as the point creation commands do (`None`
+    /// elevation: the point has none) and keep the command running.
+    AddCogoPoint {
+        position: DVec3,
+        description: Option<String>,
+        elevation: Option<f64>,
+        /// Echo the point's northing and easting (the manual commands do).
+        echo: bool,
+        /// A line shown before the command's next prompt.
+        then: Option<String>,
+    },
     /// Update the committed-segment wire (normal colour) and keep collecting points.
     InterimWire(WireModel),
     /// Update the in-progress (cyan) preview wire in the viewport.
@@ -4045,6 +4266,13 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// Whether a Tangent snap lands on straight lines too: the command takes
+    /// the touched object of a pick (`on_point_with_tangent`), not only a
+    /// tangent point from the last one.
+    fn tangent_to_lines(&self) -> bool {
+        false
+    }
+
     /// The command's current anchor (rubber-band origin) after a commit, so the
     /// host can sync `last_point` when the command replaced the picked
     /// coordinate — e.g. LINE resolving a deferred tangent to the true tangent
@@ -4280,6 +4508,76 @@ mod tests {
         // Second point
         let res = cmd.on_point(DVec3::new(30.0, 40.0, 0.0));
         assert!(matches!(res, CmdResult::ReturnPoint(mid) if mid == DVec3::new(20.0, 30.0, 0.0)));
+    }
+
+    #[test]
+    fn point_filter_parses_the_six_filters_only() {
+        for token in [".X", ".y", " .Z ", ".XY", ".xz", ".YZ"] {
+            assert!(PointFilter::parse(token).is_some(), "{token}");
+        }
+        for token in ["X", ".", ".5", ".W", ".XX", ".YX", ".XYZ", "..X", ""] {
+            assert!(PointFilter::parse(token).is_none(), "{token}");
+        }
+    }
+
+    /// The filtered axes come from the first point and the others from the
+    /// second, both in the command's plane: a UCS turned 30° about Z, with
+    /// its origin away from the WCS origin.
+    #[test]
+    fn point_filter_command_combines_the_points_in_its_plane() {
+        let (sin, cos) = 30f64.to_radians().sin_cos();
+        let plane = WorkingPlane::new(
+            DVec3::new(3.0, -2.0, 1.5),
+            DVec3::new(cos, sin, 0.0),
+            DVec3::new(-sin, cos, 0.0),
+        );
+        let first = DVec3::new(1.0, 2.0, 3.0);
+        let second = DVec3::new(7.0, 11.0, 13.0);
+        for (filter, need, expected) in [
+            (".X", "(need YZ):", DVec3::new(1.0, 11.0, 13.0)),
+            (".XZ", "(need Y):", DVec3::new(1.0, 11.0, 3.0)),
+            (".YZ", "(need X):", DVec3::new(7.0, 2.0, 3.0)),
+        ] {
+            let mut cmd = PointFilterCommand::new(PointFilter::parse(filter).unwrap(), None);
+            cmd.set_working_plane(plane);
+            assert_eq!(cmd.prompt(), format!("{filter} of:"));
+            assert!(matches!(
+                cmd.on_point(plane.to_world(first)),
+                CmdResult::NeedPoint
+            ));
+            assert_eq!(cmd.prompt(), need);
+            let CmdResult::ReturnPoint(point) = cmd.on_point(plane.to_world(second)) else {
+                panic!("{filter}: no point returned");
+            };
+            assert!(
+                plane.to_local(point).abs_diff_eq(expected, 1e-9),
+                "{filter}: {:?}",
+                plane.to_local(point)
+            );
+        }
+    }
+
+    #[test]
+    fn tracking_keeps_each_point_on_an_axis_of_the_previous() {
+        assert!(is_tracking_token("tk") && is_tracking_token("_TRACKING"));
+        let mut cmd = TrackingCommand::new(None);
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
+        let mut cmd = TrackingCommand::new(None);
+        cmd.on_point(DVec3::new(1.0, 2.0, 0.0));
+        cmd.on_point(DVec3::new(11.0, 3.0, 0.0));
+        cmd.on_point(DVec3::new(10.0, 7.0, 0.0));
+        assert!(
+            matches!(cmd.on_enter(), CmdResult::ReturnPoint(p) if p == DVec3::new(11.0, 7.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn point_filter_cancel_restores_the_previous_point() {
+        let previous = Some(DVec3::new(4.0, 5.0, 6.0));
+        let mut cmd = PointFilterCommand::new(PointFilter::parse(".X").unwrap(), previous);
+        assert_eq!(cmd.modifier_restore_point(), Some(previous));
+        assert!(matches!(cmd.on_escape(), CmdResult::Cancel));
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
     }
 
     #[test]

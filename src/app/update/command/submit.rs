@@ -414,6 +414,10 @@ impl OpenCADStudio {
                 self.command_line.push_command(&command);
                 return self.dispatch_command(&command);
             }
+            if let Some(item) = self.command_line.selected_content() {
+                self.command_line.push_command(&item.name);
+                return self.run_content_suggestion(item);
+            }
         } else if self.command_line.has_contextual_suggestions() {
             // During an active command Enter accepts the highlighted
             // contextual value instead of the user's partial search.
@@ -487,6 +491,18 @@ impl OpenCADStudio {
             if is_mtp && self.point_modifier_step(i) {
                 self.command_line.input.clear();
                 self.start_mtp_modifier(i);
+                return self.focus_cmd_input();
+            }
+            if crate::command::is_tracking_token(&raw) && self.point_modifier_step(i) {
+                self.command_line.input.clear();
+                self.start_tracking_modifier(i);
+                return self.focus_cmd_input();
+            }
+            if let Some(filter) =
+                crate::command::PointFilter::parse(&raw).filter(|_| self.point_modifier_step(i))
+            {
+                self.command_line.input.clear();
+                self.start_point_filter_modifier(i, filter);
                 return self.focus_cmd_input();
             }
             if let Some(kind) = self.typed_snap_override(i, &raw) {

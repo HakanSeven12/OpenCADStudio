@@ -456,7 +456,7 @@ pub(in crate::app) fn rows_from_entries(
                             "parameter {:?} of class {:?} is declared a Real; the record row \
                              carries {other:?}",
                             row.name, binding.class_id
-                        ))
+                        ));
                     }
                 },
                 PluginClassParameterKind::Integer => match &value_entry.value {
@@ -468,7 +468,7 @@ pub(in crate::app) fn rows_from_entries(
                             "parameter {:?} of class {:?} is declared an Integer; the record \
                              row carries {other:?}",
                             row.name, binding.class_id
-                        ))
+                        ));
                     }
                 },
                 PluginClassParameterKind::Text => match &value_entry.value {
@@ -478,7 +478,7 @@ pub(in crate::app) fn rows_from_entries(
                             "parameter {:?} of class {:?} is declared Text; the record row \
                              carries {other:?}",
                             row.name, binding.class_id
-                        ))
+                        ));
                     }
                 },
             };

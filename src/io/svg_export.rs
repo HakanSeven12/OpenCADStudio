@@ -109,6 +109,7 @@ fn write_svg_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace SVG file: {error}"));
     }
+    super::remove_stale_save_temps(path);
     Ok(())
 }
 
@@ -1528,6 +1529,18 @@ mod tests {
             plot_style: None,
             geopdf: None,
         }
+    }
+
+    #[test]
+    fn an_svg_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.svg");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        export_svg(&page_with(Default::default(), 210.0, 297.0), &path).unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
     }
 
     #[test]

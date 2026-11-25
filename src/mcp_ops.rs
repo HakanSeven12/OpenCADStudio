@@ -1,7 +1,7 @@
 //! Declarative description of every MCP op. Single source of truth for the
 //! advertised JSON Schema, the pre-dispatch validator, and test examples.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 pub const TARGET_VERSIONS: &[&str] = &[
     "R14", "2000", "2004", "2007", "2010", "2013", "2018", "AC1014", "AC1015", "AC1018", "AC1021",
@@ -153,8 +153,7 @@ pub static SWITCH_DOCUMENT: OpDef = OpDef {
 
 pub static RUN: OpDef = OpDef {
     name: "run",
-    doc:
-        "Execute a command string with prompt answers separated by spaces (e.g. 'LINE 0,0 10,10').",
+    doc: "Execute a command string with prompt answers separated by spaces (e.g. 'LINE 0,0 10,10').",
     batchable: true,
     params: &[req("cmd", Ty::Str, "Command name and arguments.")],
     rules: &[],
@@ -270,10 +269,28 @@ pub static SELECT: OpDef = OpDef {
         opt("handles", Ty::Handles, "Explicit entity handles to select."),
         opt("type", Ty::Str, "Entity type filter."),
         opt("layer", Ty::Str, "Layer name filter."),
-        opt("window", Ty::Raw(r#"{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4}"#), "World XY box [x1, y1, x2, y2]: selects what lies inside it, as a viewport window does."),
-        opt("crossing", Ty::Bool, "With window: also select what the box crosses."),
-        opt("clear", Ty::Bool, "Clear existing selection before applying."),
-        opt("where", Ty::ArrayOf(&Ty::Raw(r#"{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string"},"value":{}},"required":["path"]}"#)), "Property filter predicates."),
+        opt(
+            "window",
+            Ty::Raw(r#"{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4}"#),
+            "World XY box [x1, y1, x2, y2]: selects what lies inside it, as a viewport window does.",
+        ),
+        opt(
+            "crossing",
+            Ty::Bool,
+            "With window: also select what the box crosses.",
+        ),
+        opt(
+            "clear",
+            Ty::Bool,
+            "Clear existing selection before applying.",
+        ),
+        opt(
+            "where",
+            Ty::ArrayOf(&Ty::Raw(
+                r#"{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string"},"value":{}},"required":["path"]}"#,
+            )),
+            "Property filter predicates.",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"select","clear":true}"#,
@@ -300,10 +317,26 @@ pub static GRIP_DRAG: OpDef = OpDef {
     doc: "Drag one grip to a world point the way a grip pick-and-place in the viewport does. Built-ins: supply handle (read grips for the ids); object snaps, ortho and polar are off for the move. Plugin-declared custom grips (API v11): supply plugin (the owner id from the grips read's plugin_grips) instead of a handle — the drag routes to the owning plugin (begin, move, settle), whose settle writes are its own single undo step.",
     batchable: true,
     params: &[
-        opt("handle", Ty::Handle, "Entity whose grip moves (built-in grips)."),
-        req("grip_id", Ty::Int, "Grip id from the grips read (entity grip id, or the plugin grip's id for custom grips)."),
-        req("point", Ty::Point, "World point [x, y, z] the grip moves to."),
-        opt("plugin", Ty::Str, "Owner plugin id when dragging a plugin-declared custom grip (from the grips read's plugin_grips); omit for built-in entity grips."),
+        opt(
+            "handle",
+            Ty::Handle,
+            "Entity whose grip moves (built-in grips).",
+        ),
+        req(
+            "grip_id",
+            Ty::Int,
+            "Grip id from the grips read (entity grip id, or the plugin grip's id for custom grips).",
+        ),
+        req(
+            "point",
+            Ty::Point,
+            "World point [x, y, z] the grip moves to.",
+        ),
+        opt(
+            "plugin",
+            Ty::Str,
+            "Owner plugin id when dragging a plugin-declared custom grip (from the grips read's plugin_grips); omit for built-in entity grips.",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"grip_drag","plugin":"opencad.civil_ifc","grip_id":7,"point":[10,0,0]}"#,
@@ -315,7 +348,11 @@ pub static CLICK: OpDef = OpDef {
     batchable: true,
     params: &[
         req("point", Ty::Point, "World point [x, y, z] to click on."),
-        opt("modifiers", Ty::Str, "Keys held during the click: \"ctrl\", \"shift\" or \"ctrl+shift\"."),
+        opt(
+            "modifiers",
+            Ty::Str,
+            "Keys held during the click: \"ctrl\", \"shift\" or \"ctrl+shift\".",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"click","point":[10,0,0],"modifiers":"ctrl"}"#,
@@ -328,10 +365,16 @@ pub static POINTER: OpDef = OpDef {
     params: &[
         req(
             "events",
-            Ty::ArrayOf(&Ty::Raw(r#"{"type":"object","properties":{"move":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},"move_world":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"press":{"type":"string","enum":["left","right","middle"]},"release":{"type":"string","enum":["left","right","middle"]},"wheel":{"type":"number"}}}"#)),
+            Ty::ArrayOf(&Ty::Raw(
+                r#"{"type":"object","properties":{"move":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},"move_world":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"press":{"type":"string","enum":["left","right","middle"]},"release":{"type":"string","enum":["left","right","middle"]},"wheel":{"type":"number"}}}"#,
+            )),
             "Events in order; each holds one of move, move_world, press, release, wheel (lines, positive zooms in) or leave (true: the pointer leaves the canvas).",
         ),
-        opt("modifiers", Ty::Str, "Keys held throughout: \"ctrl\", \"shift\" or \"ctrl+shift\"."),
+        opt(
+            "modifiers",
+            Ty::Str,
+            "Keys held throughout: \"ctrl\", \"shift\" or \"ctrl+shift\".",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"pointer","events":[{"move_world":[10,0,0]},{"press":"left"},{"release":"left"},{"move_world":[12,3,0]},{"press":"left"},{"release":"left"}]}"#,
@@ -361,6 +404,61 @@ pub static SET_PROPERTIES: OpDef = OpDef {
     example: r#"{"op":"set_properties","collection":"layers","name":"Walls","updates":[{"path":"/color","value":3}]}"#,
 };
 
+pub static PLUGIN_PANELS: OpDef = OpDef {
+    name: "plugin_panels",
+    doc: "Inspect the plugin panel SURFACES (api v29): the declarative scene, native widget tree/list, and typed-table tiers the host renders. Without panel_id: a bounded overview (per panel: owner and per-tier revision + element/row counts). With panel_id: one tier's detail — scene tier returns counts only; widget rows and table rows return as keyed pages (after-cursor + next continuation), never materializing more than the page.",
+    batchable: false,
+    params: &[
+        opt(
+            "panel_id",
+            Ty::Str,
+            "One panel's surface detail instead of the overview.",
+        ),
+        opt(
+            "tier",
+            Ty::EnumCi(&["scene", "widgets", "tables"]),
+            "Which surface tier to read for panel_id (defaults to the panel's first published tier).",
+        ),
+        opt(
+            "rows",
+            Ty::Int,
+            "Page size for widget/table row pages (default 50, capped at 200).",
+        ),
+        opt(
+            "after",
+            Ty::Int,
+            "Keyed-page cursor: the last row id of the previous page; the next page starts strictly after it.",
+        ),
+    ],
+    rules: &[],
+    example: r#"{"op":"plugin_panels"}"#,
+};
+
+pub static PLUGIN_PANEL_ACTION: OpDef = OpDef {
+    name: "plugin_panel_action",
+    doc: "Activate one element of a plugin panel SURFACE (api v29) — the semantic action an agent can drive exactly like the user's gesture: `node_activated` for a widget row (a button row carries its action name to the plugin), `element_clicked` for a scene element. Delivers the owner-targeted, sequence-identified surface event the GUI path delivers; records, geometry and undo stay untouched.",
+    batchable: false,
+    params: &[
+        req(
+            "panel_id",
+            Ty::Str,
+            "Panel id the surface is published under.",
+        ),
+        req(
+            "element",
+            Ty::Int,
+            "The element's stable id (StableId) as shown by the plugin_panels read.",
+        ),
+        opt(
+            "kind",
+            Ty::EnumCi(&["node_activated", "element_clicked"]),
+            "Defaults to node_activated when the panel has a widget surface, element_clicked otherwise.",
+        ),
+    ],
+    rules: &[],
+    example: r#"{"op":"plugin_panel_action","panel_id":"acme:tree","element":7,"kind":"node_activated"}"#,
+};
+
 pub static PANEL_INPUT: OpDef = OpDef {
     name: "panel_input",
     doc: "Edit one native dock-panel field. Changes only the UI draft; records and geometry are not written.",
@@ -368,7 +466,11 @@ pub static PANEL_INPUT: OpDef = OpDef {
     params: &[
         req("panel_id", Ty::Str, "Registered native panel id."),
         req("control_id", Ty::Str, "Field id declared by that panel."),
-        opt("text", Ty::Str, "Exact draft text (preferred for Number fields)."),
+        opt(
+            "text",
+            Ty::Str,
+            "Exact draft text (preferred for Number fields).",
+        ),
         opt("value", Ty::Num, "Finite numeric draft converted to text."),
     ],
     rules: &[],
@@ -381,7 +483,11 @@ pub static PANEL_BUTTON: OpDef = OpDef {
     batchable: false,
     params: &[
         req("panel_id", Ty::Str, "Registered native panel id."),
-        req("control_id", Ty::Str, "Button id declared by that panel, or reset."),
+        req(
+            "control_id",
+            Ty::Str,
+            "Button id declared by that panel, or reset.",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"panel_button","panel_id":"cvifc.ifc_h_properties","control_id":"apply"}"#,
@@ -401,7 +507,9 @@ pub static PANEL_ACTION: OpDef = OpDef {
         ),
         opt(
             "value",
-            Ty::Raw(r#"{"oneOf":[{"type":"boolean"},{"type":"number"},{"type":"string"},{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index"]}]}"#),
+            Ty::Raw(
+                r#"{"oneOf":[{"type":"boolean"},{"type":"number"},{"type":"string"},{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index"]}]}"#,
+            ),
             "Typed draft for change: booleans, numbers, strings, or {index, text} choices. Choice text defaults to options[index] when omitted.",
         ),
     ],
@@ -430,12 +538,38 @@ pub static EMBED_IMAGE: OpDef = OpDef {
         req("path", Ty::Str, "Path to the image file."),
         opt("at", Ty::Point, "Lower-left corner [x, y] or [x, y, z]."),
         opt("width", Ty::Num, "World width of the image."),
-        opt("linked", Ty::Bool, "Store as path-linked RasterImage instead of embedded OLE2FRAME."),
-        opt("calibrate", Ty::Raw(r#"{"type":"object","description":"Automatic 2-point reference calibration: {point_a:[px1,py1], point_b:[px2,py2], distance:650.0, align_to:[0,0]}"}"#), "Automatic 2-point reference calibration: {point_a:[px1,py1], point_b:[px2,py2], distance:650.0, align_to:[0,0]}."),
-        opt("layer", Ty::Str, "Layer name to place the image on (auto-created if missing, e.g. '_XREF')."),
-        opt("lock_layer", Ty::Bool, "Lock the target layer after attaching."),
-        opt("source_points", Ty::ArrayOf(&Ty::Point), "Pixel points in image [[px1,py1],[px2,py2]] for 2-point alignment."),
-        opt("target_points", Ty::ArrayOf(&Ty::Point), "CAD world points [[x1,y1],[x2,y2]] for 2-point alignment."),
+        opt(
+            "linked",
+            Ty::Bool,
+            "Store as path-linked RasterImage instead of embedded OLE2FRAME.",
+        ),
+        opt(
+            "calibrate",
+            Ty::Raw(
+                r#"{"type":"object","description":"Automatic 2-point reference calibration: {point_a:[px1,py1], point_b:[px2,py2], distance:650.0, align_to:[0,0]}"}"#,
+            ),
+            "Automatic 2-point reference calibration: {point_a:[px1,py1], point_b:[px2,py2], distance:650.0, align_to:[0,0]}.",
+        ),
+        opt(
+            "layer",
+            Ty::Str,
+            "Layer name to place the image on (auto-created if missing, e.g. '_XREF').",
+        ),
+        opt(
+            "lock_layer",
+            Ty::Bool,
+            "Lock the target layer after attaching.",
+        ),
+        opt(
+            "source_points",
+            Ty::ArrayOf(&Ty::Point),
+            "Pixel points in image [[px1,py1],[px2,py2]] for 2-point alignment.",
+        ),
+        opt(
+            "target_points",
+            Ty::ArrayOf(&Ty::Point),
+            "CAD world points [[x1,y1],[x2,y2]] for 2-point alignment.",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"embed_image","path":"plan.png","linked":true,"calibrate":{"point_a":[52,910],"point_b":[450,910],"distance":6500},"layer":"_XREF","lock_layer":true}"#,
@@ -447,10 +581,26 @@ pub static DGN_IMPORT: OpDef = OpDef {
     batchable: true,
     params: &[
         req("path", Ty::Str, "DGN source file path."),
-        opt("model", Ty::Str, "Design model name (case-insensitive; omitted uses the first)."),
-        opt("units", Ty::EnumCi(&["Master", "Sub"]), "DGN unit conversion (Master or Sub)."),
-        opt("mapping", Ty::Str, "Conversion mapping; Standard, optionally with ;codepage=N."),
-        opt("codepage", Ty::Int, "V7 text code page; 0/1252 select the default; explicit value overrides mapping suffix."),
+        opt(
+            "model",
+            Ty::Str,
+            "Design model name (case-insensitive; omitted uses the first).",
+        ),
+        opt(
+            "units",
+            Ty::EnumCi(&["Master", "Sub"]),
+            "DGN unit conversion (Master or Sub).",
+        ),
+        opt(
+            "mapping",
+            Ty::Str,
+            "Conversion mapping; Standard, optionally with ;codepage=N.",
+        ),
+        opt(
+            "codepage",
+            Ty::Int,
+            "V7 text code page; 0/1252 select the default; explicit value overrides mapping suffix.",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"dgn_import","path":"cadastral.dgn","model":"Default","units":"Master","mapping":"Standard","codepage":1250}"#,
@@ -484,33 +634,109 @@ pub static PLOT: OpDef = OpDef {
     doc: "Plot layouts to a PDF or SVG file. scale (e.g. \"1:100\") overrides fit; fit defaults to true when scale is omitted.",
     batchable: true,
     params: &[
-        req("path", Ty::Str, "Output PDF or SVG file path (selected by extension)."),
-        opt("layout", Ty::Str, "Target layout name or 'all' (defaults to 'Model')."),
-        opt("area", Ty::EnumCi(&["extents", "display", "limits", "layout", "window"]), "Plot area (defaults to extents)."),
-        opt("window", Ty::Window, "World [x0, y0, x1, y1] rectangle; required when area=window."),
-        opt("paper", Ty::Str, "Canonical paper size name from paper catalog."),
-        opt("orientation", Ty::EnumCi(&["Portrait", "Landscape"]), "Sheet orientation."),
-        opt("shade", Ty::EnumCi(crate::io::plot::SHADE_PLOT_MODES), "Shaded viewport plot mode."),
-        opt("fit", Ty::Bool, "Fit drawing to sheet (defaults to true if scale omitted)."),
-        opt("scale", Ty::Str, "Plot scale as paper:drawing ratio (e.g. \"1:100\")."),
-        opt("center", Ty::Bool, "Center plot on sheet (defaults to true)."),
+        req(
+            "path",
+            Ty::Str,
+            "Output PDF or SVG file path (selected by extension).",
+        ),
+        opt(
+            "layout",
+            Ty::Str,
+            "Target layout name or 'all' (defaults to 'Model').",
+        ),
+        opt(
+            "area",
+            Ty::EnumCi(&["extents", "display", "limits", "layout", "window"]),
+            "Plot area (defaults to extents).",
+        ),
+        opt(
+            "window",
+            Ty::Window,
+            "World [x0, y0, x1, y1] rectangle; required when area=window.",
+        ),
+        opt(
+            "paper",
+            Ty::Str,
+            "Canonical paper size name from paper catalog.",
+        ),
+        opt(
+            "orientation",
+            Ty::EnumCi(&["Portrait", "Landscape"]),
+            "Sheet orientation.",
+        ),
+        opt(
+            "shade",
+            Ty::EnumCi(crate::io::plot::SHADE_PLOT_MODES),
+            "Shaded viewport plot mode.",
+        ),
+        opt(
+            "fit",
+            Ty::Bool,
+            "Fit drawing to sheet (defaults to true if scale omitted).",
+        ),
+        opt(
+            "scale",
+            Ty::Str,
+            "Plot scale as paper:drawing ratio (e.g. \"1:100\").",
+        ),
+        opt(
+            "center",
+            Ty::Bool,
+            "Center plot on sheet (defaults to true).",
+        ),
         opt("offset_x", Ty::Num, "Plot offset X in mm."),
         opt("offset_y", Ty::Num, "Plot offset Y in mm."),
         opt("upside_down", Ty::Bool, "Rotate content 180 degrees."),
-        opt("plot_style", Ty::Str, "CTB file path or named plot style table."),
+        opt(
+            "plot_style",
+            Ty::Str,
+            "CTB file path or named plot style table.",
+        ),
         opt("transparency", Ty::Bool, "Honor transparency settings."),
         opt("lineweights", Ty::Bool, "Honor lineweight settings."),
-        opt("scale_lineweights", Ty::Bool, "Scale lineweights with a non-fit plot scale."),
-        opt("paperspace_last", Ty::Bool, "Plot model-space objects before paper-space objects."),
-        opt("apply_plot_styles", Ty::Bool, "Enable/disable the selected or requested plot style; explicit false wins."),
+        opt(
+            "scale_lineweights",
+            Ty::Bool,
+            "Scale lineweights with a non-fit plot scale.",
+        ),
+        opt(
+            "paperspace_last",
+            Ty::Bool,
+            "Plot model-space objects before paper-space objects.",
+        ),
+        opt(
+            "apply_plot_styles",
+            Ty::Bool,
+            "Enable/disable the selected or requested plot style; explicit false wins.",
+        ),
         opt("merge_lines", Ty::Bool, "Merge overlapping lines."),
-        opt("text_as_outlines", Ty::Bool, "SVG only: emit font-independent glyph paths instead of text elements."),
-        opt("layer_attributes", Ty::Bool, "SVG only: tag each drawn item with its drawing layer as data-layer groups the consumer can toggle."),
-        opt("non_scaling_stroke", Ty::Bool, "SVG only: keep stroke widths constant under downstream SVG transforms (web maps)."),
+        opt(
+            "text_as_outlines",
+            Ty::Bool,
+            "SVG only: emit font-independent glyph paths instead of text elements.",
+        ),
+        opt(
+            "layer_attributes",
+            Ty::Bool,
+            "SVG only: tag each drawn item with its drawing layer as data-layer groups the consumer can toggle.",
+        ),
+        opt(
+            "non_scaling_stroke",
+            Ty::Bool,
+            "SVG only: keep stroke widths constant under downstream SVG transforms (web maps).",
+        ),
         opt("stamp", Ty::Bool, "Print plot stamp."),
-        opt("per_page", Ty::Bool, "When layout='all', write one output file per layout as <stem>-<Layout>.<ext>."),
+        opt(
+            "per_page",
+            Ty::Bool,
+            "When layout='all', write one output file per layout as <stem>-<Layout>.<ext>.",
+        ),
     ],
-    rules: &[Rule::RequiredWhen { key: "area", equals: "window", then: &["window"] }],
+    rules: &[Rule::RequiredWhen {
+        key: "area",
+        equals: "window",
+        then: &["window"],
+    }],
     example: r#"{"op":"plot","path":"out.pdf","area":"extents","scale":"1:100"}"#,
 };
 
@@ -532,12 +758,32 @@ pub static ENTITIES_SET: OpDef = OpDef {
     doc: "Atomically apply shared common-property writes to any number of entity handles in one undo step.",
     batchable: true,
     params: &[
-        req("handles", Ty::Handles, "Non-empty unique entity handle list."),
-        opt("layer", Ty::Str, "Existing target layer name; omitted leaves layers unchanged."),
-        opt("color", Ty::Raw(COLOR_SCHEMA), "ByLayer/ByBlock, ACI 0..256, {Index:N}, {Rgb:{r,g,b}}, or {rgb:[r,g,b]}."),
-        opt("linetype", Ty::Str, "Existing linetype name, ByLayer, or ByBlock."),
+        req(
+            "handles",
+            Ty::Handles,
+            "Non-empty unique entity handle list.",
+        ),
+        opt(
+            "layer",
+            Ty::Str,
+            "Existing target layer name; omitted leaves layers unchanged.",
+        ),
+        opt(
+            "color",
+            Ty::Raw(COLOR_SCHEMA),
+            "ByLayer/ByBlock, ACI 0..256, {Index:N}, {Rgb:{r,g,b}}, or {rgb:[r,g,b]}.",
+        ),
+        opt(
+            "linetype",
+            Ty::Str,
+            "Existing linetype name, ByLayer, or ByBlock.",
+        ),
         opt("linetype_scale", Ty::Num, "Finite positive linetype scale."),
-        opt("invisible", Ty::Bool, "Exact visibility state (false = visible)."),
+        opt(
+            "invisible",
+            Ty::Bool,
+            "Exact visibility state (false = visible).",
+        ),
         opt("label", Ty::Str, "Optional non-empty undo-history label."),
     ],
     rules: &[
@@ -619,20 +865,48 @@ pub static TEXT_REPLACE: OpDef = OpDef {
     batchable: true,
     params: &[
         opt("find", Ty::Str, "Text to find."),
-        opt("replace", Ty::Str, "Replacement text. Defaults to empty string (deletes the match)."),
-        opt("pairs", Ty::ArrayOf(&Ty::Raw(
-            r#"{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find"]}"#
-        )), "Several find/replace pairs applied in order."),
+        opt(
+            "replace",
+            Ty::Str,
+            "Replacement text. Defaults to empty string (deletes the match).",
+        ),
+        opt(
+            "pairs",
+            Ty::ArrayOf(&Ty::Raw(
+                r#"{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find"]}"#,
+            )),
+            "Several find/replace pairs applied in order.",
+        ),
         opt("match_case", Ty::Bool, "Case-sensitive search."),
         opt("whole_word", Ty::Bool, "Match only whole words."),
-        opt("ignore_accents", Ty::Bool, "Ignore accents/diacritics (defaults to true when match_case is false)."),
-        opt("dry_run", Ty::Bool, "Report matches without changing anything."),
-        opt("replace_all", Ty::Bool, "Replace all occurrences within matching entities (defaults to true)."),
-        opt("scope", Ty::Enum(&["all", "active_space", "model_space", "blocks"]), "Search scope."),
+        opt(
+            "ignore_accents",
+            Ty::Bool,
+            "Ignore accents/diacritics (defaults to true when match_case is false).",
+        ),
+        opt(
+            "dry_run",
+            Ty::Bool,
+            "Report matches without changing anything.",
+        ),
+        opt(
+            "replace_all",
+            Ty::Bool,
+            "Replace all occurrences within matching entities (defaults to true).",
+        ),
+        opt(
+            "scope",
+            Ty::Enum(&["all", "active_space", "model_space", "blocks"]),
+            "Search scope.",
+        ),
         opt("layer", Ty::Str, "Optional layer name filter."),
         opt("handles", Ty::Handles, "Optional handles filter."),
         opt("type", Ty::Str, "Optional entity type filter."),
-        opt("bounds", Ty::Window, "Optional bounding box filter [min_x, min_y, max_x, max_y]."),
+        opt(
+            "bounds",
+            Ty::Window,
+            "Optional bounding box filter [min_x, min_y, max_x, max_y].",
+        ),
     ],
     rules: &[Rule::AnyOf(&["find", "pairs"])],
     example: r#"{"op":"text_replace","find":"OLD","replace":"NEW"}"#,
@@ -705,7 +979,9 @@ pub static PLUGIN_CALL: OpDef = OpDef {
         req("tool", Ty::Str, "Tool name within that plugin."),
         opt(
             "arguments",
-            Ty::Raw(r#"{"type":"object","description":"Tool arguments matching its input_schema"}"#),
+            Ty::Raw(
+                r#"{"type":"object","description":"Tool arguments matching its input_schema"}"#,
+            ),
             "Arguments object, checked against the tool's input_schema.",
         ),
     ],
@@ -967,8 +1243,7 @@ pub static XREF_UNLOAD: OpDef = OpDef {
 
 pub static XREF_DETACH: OpDef = OpDef {
     name: "xref_detach",
-    doc:
-        "Detach one direct reference, its insertion, and owned dependent records in one undo step.",
+    doc: "Detach one direct reference, its insertion, and owned dependent records in one undo step.",
     batchable: true,
     params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
     rules: &[Rule::RejectUnknown],
@@ -1107,9 +1382,11 @@ pub static BATCH: OpDef = OpDef {
     name: "batch",
     doc: "Execute sequential operations with fresh state and step idempotency keys. Stops on first error.",
     batchable: false,
-    params: &[
-        req("steps", Ty::BatchSteps, "List of batch steps to execute."),
-    ],
+    params: &[req(
+        "steps",
+        Ty::BatchSteps,
+        "List of batch steps to execute.",
+    )],
     rules: &[],
     example: r#"{"op":"batch","steps":[{"op":"run","cmd":"LINE 0,0 10,0"}]}"#,
 };
@@ -1273,12 +1550,28 @@ pub static NODE_GRAPH: OpDef = OpDef {
         opt(
             "action",
             Ty::EnumCi(&[
-                "library", "state", "show", "hide", "add", "remove", "connect", "disconnect",
-                "set", "toggle", "clear", "run", "save", "load",
+                "library",
+                "state",
+                "show",
+                "hide",
+                "add",
+                "remove",
+                "connect",
+                "disconnect",
+                "set",
+                "toggle",
+                "clear",
+                "run",
+                "save",
+                "load",
             ]),
             "What to do; defaults to state.",
         ),
-        opt("type", Ty::Str, "Node type to add, as listed by action library (e.g. Line, Point, Move, Selected Objects)."),
+        opt(
+            "type",
+            Ty::Str,
+            "Node type to add, as listed by action library (e.g. Line, Point, Move, Selected Objects).",
+        ),
         opt(
             "kind",
             Ty::EnumCi(&["object", "operation"]),
@@ -1290,21 +1583,71 @@ pub static NODE_GRAPH: OpDef = OpDef {
             Ty::Str,
             "Port field for set and toggle: a row (start_x), a coordinate group (start_x|start_y|start_z, value a point) or a section port (section:color, value an object of fields). toggle also takes a section title.",
         ),
-        opt("value", Ty::Raw(r#"{"description":"Any JSON value: number, text, boolean, point {x,y,z}, object {handle} or list"}"#), "Value for set."),
-        opt("from", Ty::Raw(r#"{"type":"object","properties":{"node":{"type":"integer","minimum":1},"field":{"type":"string"}},"required":["node","field"],"additionalProperties":false}"#), "Output port {node, field} for connect."),
-        opt("to", Ty::Raw(r#"{"type":"object","properties":{"node":{"type":"integer","minimum":1},"field":{"type":"string"}},"required":["node","field"],"additionalProperties":false}"#), "Input port {node, field} for connect and disconnect."),
+        opt(
+            "value",
+            Ty::Raw(
+                r#"{"description":"Any JSON value: number, text, boolean, point {x,y,z}, object {handle} or list"}"#,
+            ),
+            "Value for set.",
+        ),
+        opt(
+            "from",
+            Ty::Raw(
+                r#"{"type":"object","properties":{"node":{"type":"integer","minimum":1},"field":{"type":"string"}},"required":["node","field"],"additionalProperties":false}"#,
+            ),
+            "Output port {node, field} for connect.",
+        ),
+        opt(
+            "to",
+            Ty::Raw(
+                r#"{"type":"object","properties":{"node":{"type":"integer","minimum":1},"field":{"type":"string"}},"required":["node","field"],"additionalProperties":false}"#,
+            ),
+            "Input port {node, field} for connect and disconnect.",
+        ),
         opt("position", Ty::Point, "Canvas position of an added node."),
         opt("path", Ty::Str, "Absolute .ocg path for save and load."),
     ],
     rules: &[
-        Rule::RequiredWhen { key: "action", equals: "add", then: &["type"] },
-        Rule::RequiredWhen { key: "action", equals: "remove", then: &["node"] },
-        Rule::RequiredWhen { key: "action", equals: "connect", then: &["from", "to"] },
-        Rule::RequiredWhen { key: "action", equals: "disconnect", then: &["to"] },
-        Rule::RequiredWhen { key: "action", equals: "set", then: &["node", "field", "value"] },
-        Rule::RequiredWhen { key: "action", equals: "toggle", then: &["node", "field"] },
-        Rule::RequiredWhen { key: "action", equals: "save", then: &["path"] },
-        Rule::RequiredWhen { key: "action", equals: "load", then: &["path"] },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "add",
+            then: &["type"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "remove",
+            then: &["node"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "connect",
+            then: &["from", "to"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "disconnect",
+            then: &["to"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "set",
+            then: &["node", "field", "value"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "toggle",
+            then: &["node", "field"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "save",
+            then: &["path"],
+        },
+        Rule::RequiredWhen {
+            key: "action",
+            equals: "load",
+            then: &["path"],
+        },
     ],
     example: r#"{"op":"node_graph","action":"add","type":"Line"}"#,
 };
@@ -1329,6 +1672,7 @@ pub static OPS: &[&OpDef] = &[
     &PANEL_INPUT,
     &PANEL_BUTTON,
     &PANEL_ACTION,
+    &PLUGIN_PANEL_ACTION,
     &ACTION,
     &EMBED_IMAGE,
     &DGN_IMPORT,

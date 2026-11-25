@@ -1466,7 +1466,7 @@ const ASSOC_CLASSES: &[(&str, &str, i32)] = &[
     ),
 ];
 
-fn ensure_associative_classes_registered(document: &mut Document) {
+pub(super) fn ensure_associative_classes_registered(document: &mut Document) {
     for (dxf_name, cpp_class_name, maintenance_version) in ASSOC_CLASSES {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
@@ -4194,38 +4194,7 @@ impl Scene {
     }
 
     pub(crate) fn load_named_parameters_from_document(&mut self) {
-        self.named_parameters = ParameterTable::new();
-        let mut variables: Vec<_> = self
-            .document
-            .objects
-            .values()
-            .filter_map(|object| match object {
-                ObjectType::Associative(AssociativeObject {
-                    handle,
-                    data: AssociativeData::Variable(variable),
-                    ..
-                }) => Some((*handle, variable)),
-                _ => None,
-            })
-            .collect();
-        variables.sort_by_key(|(handle, _)| handle.value());
-        let model_network = native_scope_network_handle(
-            &self.document,
-            self.document.header.model_space_block_handle,
-        );
-        for (_, variable) in variables {
-            if model_network.is_none_or(|network| variable.action.owning_network != network) {
-                continue;
-            }
-            let source = if variable.expression.trim().is_empty() {
-                numeric_value(&variable.value).map(|value| value.to_string())
-            } else {
-                Some(variable.expression.clone())
-            };
-            if let Some(source) = source {
-                let _ = self.named_parameters.set(&variable.name, &source);
-            }
-        }
+        self.named_parameters = model_network_parameters(&self.document);
     }
 
     pub(crate) fn load_parametric_constraints_from_document(&mut self) {
@@ -4300,6 +4269,8 @@ impl Scene {
                 .map(|&owner| native_scope_network_handle(&self.document, owner).is_some())
                 .collect()
         };
+        let raw_dependents = networks_raw_objects_depend_on(&self.document);
+        let mut kept_networks = Vec::new();
         let mut scopes = Vec::new();
         for (owner, existing) in owners.into_iter().zip(existing_networks) {
             let runtime = self
@@ -4307,6 +4278,18 @@ impl Scene {
                 .iter()
                 .find(|set| set.scope.owner_handle(&self.document) == owner)
                 .cloned();
+            if existing {
+                if let Some(network) = stored_network_to_keep(
+                    &self.document,
+                    owner,
+                    runtime.as_ref(),
+                    &self.named_parameters,
+                    &raw_dependents,
+                ) {
+                    kept_networks.push(network);
+                    continue;
+                }
+            }
             let set = match runtime {
                 Some(set) => Some(set),
                 None if existing => {
@@ -4355,6 +4338,7 @@ impl Scene {
         );
         let root_network_handle = self.document.allocate_handle();
         let mut child_networks = Vec::new();
+        let rebuilt_scopes = scopes.len();
         for (index, (owner, set, variables, groups, foreign)) in scopes.into_iter().enumerate() {
             let parameters = if set.local_parameters.is_empty() {
                 &self.named_parameters
@@ -4374,6 +4358,19 @@ impl Scene {
                 owner == model_owner,
             ) {
                 child_networks.push(handle);
+            }
+        }
+        // The kept networks go under the new root after the rebuilt ones,
+        // unchanged apart from where they sit in it.
+        for (offset, network) in kept_networks.into_iter().enumerate() {
+            if let Some(ObjectType::Associative(AssociativeObject {
+                data: AssociativeData::Network(kept),
+                ..
+            })) = self.document.objects.get_mut(&network)
+            {
+                kept.action.owning_network = root_network_handle;
+                kept.action.action_index = (rebuilt_scopes + offset) as i32 + 1;
+                child_networks.push(network);
             }
         }
         if child_networks.is_empty() {
@@ -4431,63 +4428,189 @@ impl Scene {
         let mut hasher = DefaultHasher::new();
         hash_parameter_table(&self.named_parameters, &mut hasher);
         for set in &self.parametric_constraints {
-            set.scope.hash(&mut hasher);
-            for constraint in &set.constraints {
-                constraint.id.hash(&mut hasher);
-                (constraint.kind as u16).hash(&mut hasher);
-                constraint.refs.hash(&mut hasher);
-                match &constraint.driving_param {
-                    None => 0u8.hash(&mut hasher),
-                    Some(DrivingValue::Literal(value)) => {
-                        1u8.hash(&mut hasher);
-                        value.to_bits().hash(&mut hasher);
-                    }
-                    Some(DrivingValue::Named(name)) => {
-                        2u8.hash(&mut hasher);
-                        name.hash(&mut hasher);
-                    }
-                }
-                constraint.enabled.hash(&mut hasher);
-                match constraint.native_origin {
-                    None => 0u8.hash(&mut hasher),
-                    Some(origin) => {
-                        1u8.hash(&mut hasher);
-                        origin.group.hash(&mut hasher);
-                        origin.node.hash(&mut hasher);
-                    }
-                }
-                constraint.rigid_points.len().hash(&mut hasher);
-                for (reference, point) in &constraint.rigid_points {
-                    reference.hash(&mut hasher);
-                    hash_vector(point, &mut hasher);
-                }
-                constraint.distance_direction_type.hash(&mut hasher);
-                match constraint.distance_direction {
-                    None => 0u8.hash(&mut hasher),
-                    Some(direction) => {
-                        1u8.hash(&mut hasher);
-                        hash_vector(&direction, &mut hasher);
-                    }
-                }
-                match constraint.axis_direction {
-                    None => 0u8.hash(&mut hasher),
-                    Some(direction) => {
-                        1u8.hash(&mut hasher);
-                        hash_vector(&direction, &mut hasher);
-                    }
-                }
-                constraint.angle_sector.hash(&mut hasher);
-            }
-            hash_parameter_table(&set.local_parameters, &mut hasher);
-            set.dimensions.len().hash(&mut hasher);
-            for (id, dimension) in &set.dimensions {
-                id.hash(&mut hasher);
-                dimension.hash(&mut hasher);
-            }
-            set.retained_standard_groups.hash(&mut hasher);
+            hash_constraint_set(set, &mut hasher);
         }
         hasher.finish()
     }
+}
+
+/// Hashes one scope's share of the model `constraint_model_fingerprint`
+/// covers. Dimension links are hashed in id order, so two sets with the same
+/// links hash alike whatever order their maps hold them in.
+fn hash_constraint_set(set: &ParametricConstraintSet, hasher: &mut DefaultHasher) {
+    set.scope.hash(hasher);
+    for constraint in &set.constraints {
+        constraint.id.hash(hasher);
+        (constraint.kind as u16).hash(hasher);
+        constraint.refs.hash(hasher);
+        match &constraint.driving_param {
+            None => 0u8.hash(hasher),
+            Some(DrivingValue::Literal(value)) => {
+                1u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            }
+            Some(DrivingValue::Named(name)) => {
+                2u8.hash(hasher);
+                name.hash(hasher);
+            }
+        }
+        constraint.enabled.hash(hasher);
+        match constraint.native_origin {
+            None => 0u8.hash(hasher),
+            Some(origin) => {
+                1u8.hash(hasher);
+                origin.group.hash(hasher);
+                origin.node.hash(hasher);
+            }
+        }
+        constraint.rigid_points.len().hash(hasher);
+        for (reference, point) in &constraint.rigid_points {
+            reference.hash(hasher);
+            hash_vector(point, hasher);
+        }
+        constraint.distance_direction_type.hash(hasher);
+        match constraint.distance_direction {
+            None => 0u8.hash(hasher),
+            Some(direction) => {
+                1u8.hash(hasher);
+                hash_vector(&direction, hasher);
+            }
+        }
+        match constraint.axis_direction {
+            None => 0u8.hash(hasher),
+            Some(direction) => {
+                1u8.hash(hasher);
+                hash_vector(&direction, hasher);
+            }
+        }
+        constraint.angle_sector.hash(hasher);
+    }
+    hash_parameter_table(&set.local_parameters, hasher);
+    let mut dimensions: Vec<_> = set.dimensions.iter().collect();
+    dimensions.sort_unstable_by_key(|(id, _)| **id);
+    dimensions.len().hash(hasher);
+    for (id, dimension) in dimensions {
+        id.hash(hasher);
+        dimension.hash(hasher);
+    }
+    set.retained_standard_groups.hash(hasher);
+}
+
+fn constraint_set_hash(set: &ParametricConstraintSet) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_constraint_set(set, &mut hasher);
+    hasher.finish()
+}
+
+/// The networks whose variables an object kept only as its raw record lists
+/// as a reactor. Such an object reaches the variables by handle and cannot be
+/// re-pointed, so rebuilding the network under new handles would leave it
+/// pointing at erased objects. BricsCAD keeps the visibility states and other
+/// parameters of its parametric blocks this way: its own objects, which this
+/// program reads as raw records, read and drive the block's variables.
+fn networks_raw_objects_depend_on(document: &Document) -> FxHashSet<Handle> {
+    document
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            ObjectType::Associative(AssociativeObject {
+                reactors,
+                data: AssociativeData::Variable(variable),
+                ..
+            }) if reactors.iter().any(|reactor| {
+                matches!(
+                    document.objects.get(reactor),
+                    Some(ObjectType::Unknown { .. })
+                )
+            }) =>
+            {
+                Some(variable.action.owning_network)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The stored network of `owner` when it is written back as it was read: raw
+/// objects depend on it (see `networks_raw_objects_depend_on`) and the
+/// editor's model of the scope still equals the one the network holds. For
+/// model space that includes the drawing's parameter table, which is read
+/// from the model-space network. A scope the user changed is rebuilt as
+/// before.
+fn stored_network_to_keep(
+    document: &Document,
+    owner: Handle,
+    runtime: Option<&ParametricConstraintSet>,
+    named_parameters: &ParameterTable,
+    raw_dependents: &FxHashSet<Handle>,
+) -> Option<Handle> {
+    if raw_dependents.is_empty() {
+        return None;
+    }
+    let network = native_scope_network_handle(document, owner)?;
+    if !raw_dependents.contains(&network) {
+        return None;
+    }
+    let mut parameters = if owner == document.header.model_space_block_handle {
+        let loaded = loaded_named_parameters(document);
+        if has_pending_surfaces(document) || *named_parameters != loaded {
+            return None;
+        }
+        loaded
+    } else {
+        // A block scope reads its parameters into a table of its own.
+        ParameterTable::new()
+    };
+    let Some(runtime) = runtime else {
+        return Some(network);
+    };
+    let stored = native_constraint_set(document, owner, &mut parameters)?;
+    (constraint_set_hash(runtime) == constraint_set_hash(&stored)).then_some(network)
+}
+
+/// The drawing's parameter table as opening the drawing builds it: the
+/// variables of the model-space network, then whatever reading each scope's
+/// constraints adopts into it.
+fn loaded_named_parameters(document: &Document) -> ParameterTable {
+    let mut parameters = model_network_parameters(document);
+    for record in document.block_records.iter() {
+        native_constraint_set(document, record.handle, &mut parameters);
+    }
+    parameters
+}
+
+/// The named variables of the model-space network as a parameter table.
+fn model_network_parameters(document: &Document) -> ParameterTable {
+    let mut parameters = ParameterTable::new();
+    let Some(model_network) =
+        native_scope_network_handle(document, document.header.model_space_block_handle)
+    else {
+        return parameters;
+    };
+    let mut variables: Vec<_> = document
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            ObjectType::Associative(AssociativeObject {
+                handle,
+                data: AssociativeData::Variable(variable),
+                ..
+            }) if variable.action.owning_network == model_network => Some((*handle, variable)),
+            _ => None,
+        })
+        .collect();
+    variables.sort_by_key(|(handle, _)| handle.value());
+    for (_, variable) in variables {
+        let source = if variable.expression.trim().is_empty() {
+            numeric_value(&variable.value).map(|value| value.to_string())
+        } else {
+            Some(variable.expression.clone())
+        };
+        if let Some(source) = source {
+            let _ = parameters.set(&variable.name, &source);
+        }
+    }
+    parameters
 }
 
 /// Hashes a parameter table in insertion order: each parameter's name,
@@ -4507,6 +4630,9 @@ fn hash_vector(vector: &Vector3, hasher: &mut DefaultHasher) {
     vector.y.to_bits().hash(hasher);
     vector.z.to_bits().hash(hasher);
 }
+
+#[cfg(test)]
+mod raw_dependents_tests;
 
 #[cfg(test)]
 mod tests {

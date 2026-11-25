@@ -209,7 +209,7 @@ pub(crate) fn load_model(bytes: &[u8]) -> Result<PlanModel, String> {
         anchor,
         storeys,
         project_global_id,
-        revision: format!("{:x}", Sha256::digest(bytes)),
+        revision: crate::io::recovery::hex_digest(Sha256::digest(bytes)),
         sources,
     })
 }

@@ -11,7 +11,7 @@ use crate::plugin::external::{ExternalPlugin, RegistryEntry, ReleaseInfo};
 use crate::t;
 use crate::ui::style::common::muted_style;
 use iced::widget::{
-    button, canvas, column, container, markdown, row, rule, scrollable, text, text_input, Space,
+    Space, button, canvas, column, container, markdown, row, rule, scrollable, text, text_input,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -411,9 +411,9 @@ fn progress_action<'a>(m: &MarketView, repo: &str) -> Option<Element<'a, Message
                 .into(),
         );
     }
-    m.installed_now.contains_key(repo).then(|| {
-        pill_button(t!("Restart"), Message::PluginRestart, button::primary)
-    })
+    m.installed_now
+        .contains_key(repo)
+        .then(|| pill_button(t!("Restart"), Message::PluginRestart, button::primary))
 }
 
 /// Whether this build can install `release`.
@@ -553,13 +553,11 @@ fn install_controls<'a>(
             .into()
     };
     let action = match selected_release {
-        Some(release) if release_compatible(release) => {
-            pill_button(
-                t!("Install"),
-                Message::PluginInstall(repo_s.clone()),
-                button::success,
-            )
-        }
+        Some(release) if release_compatible(release) => pill_button(
+            t!("Install"),
+            Message::PluginInstall(repo_s.clone()),
+            button::success,
+        ),
         Some(_) => status_badge(t!("Incompatible"), StatusKind::Danger),
         None => status_badge(t!("Unavailable"), StatusKind::Muted),
     };
@@ -781,7 +779,14 @@ fn marketplace_section<'a>(
             .on_press(Message::PluginReadmeSelect(e.repo.clone()));
         let actions = row![
             Space::new().width(Fill),
-            install_controls(m, &e.repo, tags, selected, false, progress_action(m, &e.repo)),
+            install_controls(
+                m,
+                &e.repo,
+                tags,
+                selected,
+                false,
+                progress_action(m, &e.repo)
+            ),
         ]
         .align_y(iced::Center);
         let card = market_card(

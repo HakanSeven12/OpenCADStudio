@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// The civil Create Points menu at the canvas's right edge.
+    PointsMenu(crate::ui::points_menu::PointsMenuMsg),
     GraphicAttributes(crate::ui::window::graphic_attributes::GraphicAttributesMsg),
     SpaceMouseWake,
     SpaceMouseFrame(iced::time::Instant),
@@ -292,6 +294,8 @@ pub enum Message {
     GripSizeChanged(u8),
     /// Change the object-snap marker size in pixels (1–20, SNAPMARKERSIZE).
     SnapMarkerSizeChanged(u8),
+    /// Turn the AutoSnap Magnet on or off (the crosshairs lock onto a snap point).
+    AutoSnapMagnetChanged(bool),
     /// Change Unselected Grip color ACI index (0 = Theme Primary, 1..=255 = ACI, GRIPCOLOR).
     GripColorChanged(u8),
     /// Change Selected/Hot Grip color ACI index (0 = Theme Danger, 1..=255 = ACI, GRIPHOT).
@@ -537,6 +541,43 @@ pub enum Message {
         element: Option<ocs_plugin_api::scene::StableId>,
         pos: ocs_plugin_api::scene::Vec2,
     },
+    /// A widget row was ACTIVATED on a plugin widget surface (api v29).
+    PanelWidgetNodeActivated {
+        owner: String,
+        panel: String,
+        node: ocs_plugin_api::scene::StableId,
+    },
+    /// An expand affordance was toggled on a plugin widget surface; the
+    /// dispatch decides host-local toggle vs `NodeExpanded` notification
+    /// (only expanding an `Unloaded` row needs the plugin).
+    PanelWidgetExpandToggled {
+        owner: String,
+        panel: String,
+        node: ocs_plugin_api::scene::StableId,
+    },
+    /// A keystroke in a table cell editor: host-local draft state only.
+    PanelTableCellDraft {
+        owner: String,
+        panel: String,
+        row: ocs_plugin_api::scene::StableId,
+        column: ocs_plugin_api::scene::StableId,
+        text: String,
+    },
+    /// A table cell editor was submitted: the typed-commit rule runs and
+    /// a successful commit notifies `SurfaceEvent::CellEdited`.
+    PanelTableCellCommitted {
+        owner: String,
+        panel: String,
+        row: ocs_plugin_api::scene::StableId,
+        column: ocs_plugin_api::scene::StableId,
+    },
+    /// A table cell editor gained focus: host-local selection.
+    PanelTableCellSelected {
+        owner: String,
+        panel: String,
+        row: ocs_plugin_api::scene::StableId,
+        column: ocs_plugin_api::scene::StableId,
+    },
     /// Checkbox toggle in a plugin modal dialog control.
     PluginDialogBoolToggle(String, bool),
     /// Dropdown choice selection in a plugin modal dialog control.
@@ -609,6 +650,8 @@ pub enum Message {
     TabClose(u64),
     /// Save every drawing that already has a file path.
     DocTabSaveAll,
+    /// Draw again a window whose view panicked.
+    RetryWindowView(window::Id),
     /// Close every non-Start drawing tab.
     DocTabCloseAll,
     /// Close every non-Start drawing tab except the given one.
@@ -931,6 +974,9 @@ pub enum Message {
     /// User clicked an autocomplete suggestion — fill the input with
     /// the chosen command name and dispatch it.
     CommandSuggestionPick(String),
+    /// User clicked a drawing name in the suggestions: make the layer
+    /// current, insert the block, hatch with the pattern or restore the view.
+    ContentSuggestionPick(crate::ui::command_line::ContentMatch),
     /// User clicked a command-line option button — feed its keyword to the
     /// active command as if typed (empty keyword = Enter). (#304)
     CommandOptionPick(String),
@@ -2662,6 +2708,10 @@ pub enum Message {
     /// A click or search in the Point Cloud Manager.
     PcManager(crate::ui::window::pc_manager::PcManagerMsg),
     Count(crate::ui::window::count_palette::CountMsg),
+    /// The Geometry Cleanup palette.
+    GeometryCleanup(crate::ui::window::geometry_cleanup::GeometryCleanupMsg),
+    /// The Visibility States palette of a BricsCAD parametric block.
+    BricscadVisibility(crate::ui::window::bricscad_visibility::VisMsg),
     /// The LayerWalk pallet (LAYWALK).
     Laywalk(crate::ui::window::layer_walk::LayerWalkMsg),
     /// The QuickCalc pallet.

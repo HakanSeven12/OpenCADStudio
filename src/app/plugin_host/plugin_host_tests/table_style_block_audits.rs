@@ -34,9 +34,11 @@ fn audit_python_layer_table_over_real_ipc() {
                 "    accepted.append('SCRIPTERROR_' + ''.join(c if c.isalnum() else '_' for c in str(error))[:120])\n",
                 "L.create('REPORT ' + ' '.join(refused) + ' ~ ' + ' '.join(accepted))\n",
             ), body = body.lines().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n"))).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (Vec<String>, Vec<String>) {
@@ -236,9 +238,11 @@ fn audit_python_text_and_dim_styles_over_real_ipc() {
                 "    accepted.append('SCRIPTERROR_' + ''.join(c if c.isalnum() else '_' for c in str(error))[:120])\n",
                 "L.create('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(accepted))\n",
             ), body = body.lines().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n"))).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (usize, Vec<String>) {
@@ -472,9 +476,11 @@ fn audit_python_blocks_over_real_ipc() {
                 "    accepted.append('SCRIPTERROR_' + ''.join(c if c.isalnum() else '_' for c in str(error))[:120])\n",
                 "L.create('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(accepted))\n",
             ), body = body.lines().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n"))).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (usize, Vec<String>) {
@@ -737,9 +743,11 @@ fn audit_python_block_contents_over_real_ipc() {
                 "    accepted.append('SCRIPTERROR_' + ''.join(c if c.isalnum() else '_' for c in str(error))[:120])\n",
                 "L.create('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(accepted))\n",
             ), body = body.lines().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n"))).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (usize, Vec<String>) {
@@ -940,9 +948,11 @@ fn audit_python_linetypes_and_layouts_over_real_ipc() {
                 "    accepted.append('SCRIPTERROR_' + ''.join(c if c.isalnum() else '_' for c in str(error))[:120])\n",
                 "L.create('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(accepted))\n",
             ), body = body.lines().map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n"))).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (usize, Vec<String>) {

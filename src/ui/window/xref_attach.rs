@@ -5,7 +5,7 @@
 use std::fmt;
 
 use iced::widget::{
-    button, column, combo_box, container, image, pick_list, row, text, text_input, Space,
+    Space, button, column, combo_box, container, image, pick_list, row, text, text_input,
 };
 use iced::{Element, Fill, Length, Theme};
 
@@ -13,7 +13,7 @@ use crate::app::Message;
 use crate::io::xref_model::Pathtype;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio, LABEL_WIDTH};
+use crate::ui::style::form::{LABEL_WIDTH, button_style, dialog_button, field_style, form_radio};
 use crate::ui::window::block_definition::{group, labeled_checkbox};
 
 /// What the read for an attach's placement ghost found in a file: its

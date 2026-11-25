@@ -3,14 +3,14 @@
 
 use iced::widget::text::Span;
 use iced::widget::{
-    button, column, container, mouse_area, opaque, rich_text, row, scrollable, stack, text, Space,
+    Space, button, column, container, mouse_area, opaque, rich_text, row, scrollable, stack, text,
 };
-use iced::{font, mouse, Background, Border, Color, Element, Fill, Font, Padding, Shadow, Theme};
+use iced::{Background, Border, Color, Element, Fill, Font, Padding, Shadow, Theme, font, mouse};
 
-use super::view::{icon, m, mix, muted, strong, tip, tokens, POINT, STRONG};
+use super::view::{POINT, STRONG, icon, m, mix, muted, strong, tip, tokens};
 use super::{Flyout, Key, KeypadMode, MemoryOp, QuickCalcMsg, QuickCalcPalette};
-use crate::app::calc::Value;
 use crate::app::Message;
+use crate::app::calc::Value;
 use crate::ui::icons::TRI_DOWN;
 
 const BACKSPACE: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/backspace.svg");

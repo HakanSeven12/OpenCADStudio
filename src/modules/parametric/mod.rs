@@ -180,6 +180,12 @@ impl CadModule for ParametricModule {
                             "Parameters Manager",
                             include_bytes!("../../../assets/icons/constrain/parameters.svg"),
                         )),
+                        // The visibility states of a BricsCAD parametric block.
+                        RibbonItem::LargeTool(command(
+                            "VISIBILITYSTATESPANELOPEN",
+                            "Visibility States",
+                            crate::ui::icons::EYE,
+                        )),
                     ],
                 },
             ]
@@ -278,7 +284,7 @@ mod tests {
         );
         assert_eq!(
             groups[2].tools.iter().map(item_id).collect::<Vec<_>>(),
-            ["DELCONSTRAINT", "PARAMETERS"]
+            ["DELCONSTRAINT", "PARAMETERS", "VISIBILITYSTATESPANELOPEN"]
         );
 
         let RibbonItem::LargeDropdown { items, default, .. } = &groups[1].tools[0] else {

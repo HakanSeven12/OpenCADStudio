@@ -282,6 +282,62 @@ fn position_section(prefix: &str, p: &document::types::Vector3) -> PropSection {
     }
 }
 
+/// MASSPROP for a region: area, perimeter and the centroid's X and Y.
+pub(crate) fn region_mass_props(region: &Region) -> crate::entities::traits::MassProps {
+    let (area, perimeter) = region_area_perimeter(region);
+    // The centroid of the decoded loops, sampled finely in the region's own
+    // plane (Green's theorem over each sampled chain); the loops close, so
+    // the chains' moments sum to the region's.
+    let centroid = (|| {
+        let (plane, loops, true) = crate::scene::model::presspull_model::profile_geometry(
+            &EntityType::Region(region.clone()),
+        )?
+        else {
+            return None;
+        };
+        let unit = ocs_geom::space::Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
+        let transform = ocs_geom::geom2d::Transform {
+            origin: unit.project(plane.origin)?.into(),
+            x_axis: unit.project_vector(plane.x_axis)?.into(),
+            y_axis: unit.project_vector(plane.y_axis)?.into(),
+        };
+        let (mut twice_area, mut mx, mut my) = (0.0, 0.0, 0.0);
+        for curve in loops.iter().flatten() {
+            let points = curve.transformed(&transform)?.tessellate(64.0);
+            for pair in points.windows(2) {
+                let ([x0, y0], [x1, y1]) = (pair[0], pair[1]);
+                let cross = x0 * y1 - x1 * y0;
+                twice_area += cross;
+                mx += (x0 + x1) * cross;
+                my += (y0 + y1) * cross;
+            }
+        }
+        if twice_area.abs() < 1e-12 {
+            return None;
+        }
+        let uv = [mx / (3.0 * twice_area), my / (3.0 * twice_area)];
+        let point = unit.point_at(uv);
+        point.iter().all(|v| v.is_finite()).then_some(point)
+    })()
+    // ponytail: wire-only regions report their wires' mean point.
+    .or_else(|| {
+        let points: Vec<_> = region.wires.iter().flat_map(|wire| &wire.points).collect();
+        let n = points.len().max(1) as f64;
+        Some([
+            points.iter().map(|p| p.x).sum::<f64>() / n,
+            points.iter().map(|p| p.y).sum::<f64>() / n,
+            0.0,
+        ])
+    })
+    .unwrap_or_default();
+    crate::entities::traits::MassProps {
+        area,
+        perimeter,
+        cx: centroid[0],
+        cy: centroid[1],
+    }
+}
+
 /// Measure decoded planar curves in a unit frame, retaining legacy wire-only input.
 fn region_area_perimeter(region: &Region) -> (f64, f64) {
     let exact = (|| {

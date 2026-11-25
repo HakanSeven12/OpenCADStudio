@@ -1417,6 +1417,12 @@ fn place_converted(
         }
         entity
     };
+    // The definitions are invalidated together once they are all in: one
+    // pass per definition walked the whole drawing each time, which made a
+    // file with thousands of cells take minutes (#3596).
+    let mut added: Vec<(document::Handle, crate::scene::ChangeKind)> = Vec::new();
+    let mut records = Vec::new();
+    let mut names = Vec::new();
     for (name, entities) in converted.blocks {
         let target = &blocks[&name];
         if scene.document.block_records.get(target).is_some() {
@@ -1426,11 +1432,17 @@ fn place_converted(
             .into_iter()
             .map(|e| placed_dimension_text(&scene.document, fix(e)))
             .collect();
-        if let Ok(handles) =
-            scene.define_block_from_owned_entities(entities, target, glam::DVec3::ZERO)
+        if let Ok((record, handles)) =
+            scene.define_block_from_owned_entities_unbumped(entities, target, glam::DVec3::ZERO)
         {
             scene.bind_outline_hatches(&handles);
+            added.extend(handles.into_iter().map(|h| (h, crate::scene::ChangeKind::Added)));
+            records.push(record);
+            names.push(target.clone());
         }
+    }
+    if !records.is_empty() {
+        scene.bump_entities_restyled_with_block_deps(&added, &records, &names);
     }
     let mut handles = Vec::new();
     for entity in converted.entities {

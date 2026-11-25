@@ -36,6 +36,10 @@ mod block_test;
 #[cfg(test)]
 mod block_test_tests;
 mod block_visibility;
+#[cfg(test)]
+mod bricscad_visibility_tests;
+#[cfg(test)]
+mod visibilitystates_tests;
 pub(crate) mod calc;
 mod command_driver;
 mod extraction_catalog;
@@ -72,6 +76,8 @@ pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod text_match;
 mod geographic_location;
+#[cfg(not(target_arch = "wasm32"))]
+mod sheet_publish;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -484,13 +490,10 @@ pub(super) const DRAG_START_FAST_PX2: f32 = 144.0;
 pub(super) const VARIES_LABEL: &str = "*VARIES*";
 
 // ── File-open progress ─────────────────────────────────────────────────────
-// Phase encoding for OpenProgress.phase atomic. Updated from the background
-// loader thread, read by the UI overlay on every frame.
-pub const OPEN_PHASE_READING: u8 = 0;
-pub const OPEN_PHASE_PARSING: u8 = 1;
-pub const OPEN_PHASE_XREF: u8 = 2;
-pub const OPEN_PHASE_CACHING: u8 = 3;
-pub const OPEN_PHASE_FINALIZING: u8 = 4;
+pub use crate::io::{
+    OPEN_PHASE_CACHING, OPEN_PHASE_FINALIZING, OPEN_PHASE_PARSING, OPEN_PHASE_READING,
+    OPEN_PHASE_XREF,
+};
 
 #[derive(Debug, Clone)]
 pub struct OpenProgress {
@@ -941,6 +944,8 @@ pub(super) struct OpenCADStudio {
     cursor_size: i32,
     /// Selection-box size setting (PICKBOX, 0..=50).
     pick_box: i32,
+    /// The AutoSnap Magnet: the crosshairs lock onto an object snap point.
+    autosnap_magnet: bool,
     /// HPASSOC: new hatches follow their boundary objects.
     hatch_associative: bool,
     /// The Hatch panel's numbers as typed.
@@ -1433,6 +1438,8 @@ pub(super) struct OpenCADStudio {
     show_graphic_attributes: bool,
     /// The Command History pallet is open.
     pub(crate) show_command_history: bool,
+    /// The civil Create Points menu (open, and its folded-open group).
+    pub(crate) points_menu: crate::ui::points_menu::PointsMenu,
     graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
@@ -1462,6 +1469,9 @@ pub(super) struct OpenCADStudio {
     /// Point Cloud Manager palette (POINTCLOUDMANAGER).
     pub(crate) pc_manager: crate::ui::window::pc_manager::PcManager,
     pub(crate) count_palette: crate::ui::window::count_palette::CountPalette,
+    /// The Geometry Cleanup palette (GEOMETRYCLEANUPOPEN).
+    pub(crate) geometry_cleanup: crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
+    pub(crate) bricscad_visibility: crate::ui::window::bricscad_visibility::VisibilityPanel,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
     /// The Assistant pallet (ASSISTANT): chat with an external AI agent about this drawing.
@@ -1648,6 +1658,19 @@ pub(super) struct OpenCADStudio {
     /// drag, move coalescing, settle/cancel; per-surface event identity.
     pub(crate) panel_event_router:
         crate::app::panel_events::PanelEventRouter,
+    /// Host-local widget view state per panel id (api v29): expansion and
+    /// selection stay host-local (finding F2's host-local law) — nothing
+    /// here is authoritative about the data.
+    pub(crate) panel_widget_ui: std::collections::BTreeMap<
+        String,
+        crate::ui::window::plugin_widgets::WidgetUiState,
+    >,
+    /// Host-local EDITING session per panel id (api v29): draft cells
+    /// and selection. The plugin stays the data authority.
+    pub(crate) panel_table_ui: std::collections::BTreeMap<
+        String,
+        crate::ui::window::plugin_tables::TableUiState,
+    >,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -2078,6 +2101,9 @@ pub(super) struct OpenCADStudio {
     /// (`update/panic_guard.rs`).
     #[cfg(not(target_arch = "wasm32"))]
     caught_panics: u32,
+    /// Windows whose view panicked; each shows a fallback until the user
+    /// asks to try again (`view/mod.rs`).
+    failed_views: std::sync::Mutex<Vec<iced::window::Id>>,
 
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// Complete editable key → command/action table.
@@ -2274,6 +2300,16 @@ pub(super) struct OpenCADStudio {
     /// cannot mark a newer document state clean or redirect its path.
     #[cfg(not(target_arch = "wasm32"))]
     active_save_jobs: std::collections::HashMap<u64, u64>,
+    /// The jobs of `active_save_jobs` that are autosaves.
+    #[cfg(not(target_arch = "wasm32"))]
+    autosave_jobs: std::collections::HashSet<u64>,
+    /// A save asked for during an autosave of the same drawing, by stable
+    /// tab id. It starts when the autosave ends.
+    #[cfg(not(target_arch = "wasm32"))]
+    saves_after_autosave: std::collections::HashMap<u64, PendingNativeThumbnailSave>,
+    /// The sheet list PUBLISH is working through, between its script steps.
+    #[cfg(not(target_arch = "wasm32"))]
+    sheet_publish: Option<Box<sheet_publish::SheetPublish>>,
     #[cfg(not(target_arch = "wasm32"))]
     save_job_serial: u64,
     /// Destination leases held while Save As workers are active.
@@ -2649,6 +2685,7 @@ pub enum ModalKind {
     FindReplace,
     /// OVERKILL settings for the selected objects.
     Overkill,
+    GeometryCleanupSettings,
     AecDropWarning,
     /// A converter would drop part of the drawing on save.
     ConversionLoss,
@@ -2962,6 +2999,7 @@ impl OpenCADStudio {
             zoom_factor_input: 60.to_string(),
             cursor_size: 5,
             pick_box: 3,
+            autosnap_magnet: true,
             hatch_associative: true,
             hatch_drafts: Default::default(),
             context_menu_custom: Default::default(),
@@ -3162,6 +3200,7 @@ impl OpenCADStudio {
             show_layers: false,
             show_graphic_attributes: false,
             show_command_history: false,
+            points_menu: Default::default(),
             graphic_attributes: Default::default(),
             show_block_palette: false,
             show_tool_palettes: false,
@@ -3177,6 +3216,8 @@ impl OpenCADStudio {
             show_browser: false,
             pc_manager: Default::default(),
             count_palette: Default::default(),
+            geometry_cleanup: Default::default(),
+            bricscad_visibility: Default::default(),
             quick_calc: Default::default(),
             assistant: Default::default(),
             sheet_set: Default::default(),
@@ -3256,6 +3297,8 @@ impl OpenCADStudio {
                 crate::app::panel_surfaces::PanelSurfaceStore::default(),
             panel_event_router:
                 crate::app::panel_events::PanelEventRouter::new(),
+            panel_widget_ui: std::collections::BTreeMap::new(),
+            panel_table_ui: std::collections::BTreeMap::new(),
             plugin_panel_ids: std::collections::HashMap::new(),
             plugin_panel_by_num: std::collections::HashMap::new(),
             hyperlink_editor_handles: Vec::new(),
@@ -3409,6 +3452,12 @@ impl OpenCADStudio {
             #[cfg(not(target_arch = "wasm32"))]
             active_save_jobs: std::collections::HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
+            autosave_jobs: std::collections::HashSet::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            saves_after_autosave: std::collections::HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            sheet_publish: None,
+            #[cfg(not(target_arch = "wasm32"))]
             save_job_serial: 0,
             #[cfg(not(target_arch = "wasm32"))]
             pending_save_leases: std::collections::HashMap::new(),
@@ -3445,6 +3494,7 @@ impl OpenCADStudio {
             saved_custom_palette: None,
             #[cfg(not(target_arch = "wasm32"))]
             caught_panics: 0,
+            failed_views: Default::default(),
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),

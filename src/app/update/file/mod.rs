@@ -324,6 +324,8 @@ impl OpenCADStudio {
 
 #[cfg(test)]
 mod plot_paper_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod plot_link_tests;
 
 #[cfg(test)]
 mod plot_device_persistence_tests;
@@ -368,6 +370,9 @@ mod external_change_reload_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod minimized_save_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod save_failure_session_tests;
 
 /// Folder of the session locks, one per running editor.
 #[cfg(not(target_arch = "wasm32"))]

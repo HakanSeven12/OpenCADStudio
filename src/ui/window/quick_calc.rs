@@ -473,7 +473,7 @@ mod variables_view;
 mod view;
 pub use keypad::{Flyout, Key, KeypadMode, MemoryOp};
 pub use variables::{FormMsg, StoredValue, VarForm, VarKind, VarMsg, Variable};
-pub use view::{float_height, view, Inputs, ICON};
+pub use view::{ICON, Inputs, float_height, view};
 
 #[cfg(test)]
 mod tests;

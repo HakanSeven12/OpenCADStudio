@@ -2,8 +2,8 @@ use crate::app::Message;
 use crate::scene::block_properties_table::{Column, TableView};
 use document::Handle;
 use iced::{
-    widget::{button, column, container, pick_list, row, scrollable, text, text_input, Space},
     Element, Fill,
+    widget::{Space, button, column, container, pick_list, row, scrollable, text, text_input},
 };
 
 #[derive(Debug, Clone)]

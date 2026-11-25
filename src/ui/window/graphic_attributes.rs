@@ -12,7 +12,7 @@ use document::entities::{EntityCommon, Hatch, HatchGradientPattern};
 use document::types::{Color as AcadColor, LineWeight, Transparency};
 use document::{Document, EntityType, Handle};
 use iced::widget::{
-    button, column, combo_box, container, image, row, slider, text, text_input, Space,
+    Space, button, column, combo_box, container, image, row, slider, text, text_input,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};

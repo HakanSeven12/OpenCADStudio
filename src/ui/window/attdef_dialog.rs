@@ -2,13 +2,13 @@
 //! cards with accent headings, a help button on the left and the named
 //! action on the right, like the other drawing dialogs.
 
-use iced::widget::{button, checkbox, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{Space, button, checkbox, column, container, pick_list, row, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
 use crate::modules::draw::draw::attdef::{
-    Justify, AFLAG_CONSTANT, AFLAG_INVISIBLE, AFLAG_LOCK, AFLAG_MULTILINE, AFLAG_PRESET,
-    AFLAG_VERIFY,
+    AFLAG_CONSTANT, AFLAG_INVISIBLE, AFLAG_LOCK, AFLAG_MULTILINE, AFLAG_PRESET, AFLAG_VERIFY,
+    Justify,
 };
 use crate::t;
 use crate::ui::style::common::muted_style;
@@ -569,9 +569,9 @@ mod tests {
 
     /// Whether `label` is laid out and in view in the dialog.
     fn shows(state: &AttdefDialogState, label: &str) -> bool {
+        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::Selector;
         let _one = crate::headless_ui_lock();
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(

@@ -12,4 +12,4 @@ web: In the web app the SVG is downloaded by the browser instead of saved to a f
 ## Notes
 - No plot dialog opens. The export uses the settings last chosen in the plot dialog (sheet, scale, plot style, and so on).
 - `EXPORTSVG` also makes SVG the output choice for later [`EXPORT`](EXPORT-Command) runs.
-- If the plot settings name an output folder, the file goes there directly and no save dialog opens.
+- If the plot settings name an output folder, the file goes there directly and no save dialog opens. When a file of that name is already there, the next free number is added (`plan-2.pdf`, `plan-3.pdf`, …), so earlier plots are kept.

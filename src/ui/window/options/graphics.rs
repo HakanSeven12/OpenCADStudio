@@ -6,7 +6,7 @@
 
 use crate::app::Message;
 use crate::gpu_backend::{ActiveGpu, BackendChoice, GraphicsPrefs};
-use iced::widget::{checkbox, column, pick_list, row, text, Space};
+use iced::widget::{Space, checkbox, column, pick_list, row, text};
 use iced::{Element, Fill};
 
 fn current_row(label: std::borrow::Cow<'static, str>, value: String) -> Element<'static, Message> {

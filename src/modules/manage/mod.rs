@@ -7,6 +7,8 @@ pub mod gapcheck;
 mod cui_export;
 mod cui_import;
 mod find_nonpurgeable;
+pub mod geometry_cleanup;
+pub mod geometry_cleanup_settings;
 mod options;
 mod overkill;
 mod purge;
@@ -75,6 +77,7 @@ impl CadModule for ManageModule {
                         RibbonItem::LargeTool(find_nonpurgeable::tool()),
                         RibbonItem::Tool(purge::tool()),
                         RibbonItem::Tool(overkill::tool()),
+                        RibbonItem::Tool(geometry_cleanup::tool()),
                         RibbonItem::Tool(audit::tool()),
                     ],
                 },

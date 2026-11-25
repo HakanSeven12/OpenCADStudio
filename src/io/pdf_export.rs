@@ -130,6 +130,7 @@ fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace PDF file: {error}"));
     }
+    super::remove_stale_save_temps(path);
     Ok(())
 }
 
@@ -500,6 +501,33 @@ fn render_pdf_bytes_impl(
     plot_style: Option<&PlotStyleTable>,
     include_geopdf: bool,
 ) -> Result<Vec<u8>, String> {
+    let mut lo = render_pdf_document(pages, plot_style, FontEmbedding::Subset)?;
+    let precise = if include_geopdf {
+        crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
+    } else {
+        Vec::new()
+    };
+    crate::io::geopdf_export::save_document(&mut lo, &precise)
+}
+
+/// How the faces embedded-font text is drawn with go into the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FontEmbedding {
+    /// Each face reduced to the glyphs the pages use: the smallest single file.
+    Subset,
+    /// A plain TrueType face of up to 4 MB whole, its glyph ids unchanged:
+    /// every drawing of a published set then embeds the same program, which
+    /// the set writes once instead of a subset per drawing.
+    Whole,
+}
+
+/// Render pages to a PDF document not yet serialised, without geospatial
+/// metadata: the sheet-list PUBLISH appends it to the set it is writing.
+pub(crate) fn render_pdf_document(
+    pages: &[PdfPageInput],
+    plot_style: Option<&PlotStyleTable>,
+    fonts_as: FontEmbedding,
+) -> Result<lopdf::Document, String> {
     // A style the table lacks plots with Normal here; the automation export
     // checks `validate_plot_styles` up front and refuses instead.
     let mut doc = PdfDocument::new("Open CAD Studio Export");
@@ -512,12 +540,15 @@ fn render_pdf_bytes_impl(
     let mut text_fonts = TextFonts::default();
     // One optional-content group per drawing layer, shared by every page.
     let mut layer_ids = std::collections::HashMap::new();
+    let mut shadings = GradientShadings::default();
     for (index, page) in pages.iter().enumerate() {
+        shadings.page = index;
         append_pdf_page(
             &mut doc,
             &mut image_resources,
             &mut text_fonts,
             &mut layer_ids,
+            &mut shadings,
             page,
             plot_style,
             &fonts,
@@ -526,13 +557,19 @@ fn render_pdf_bytes_impl(
     }
     // Subset and embed the TrueType faces the text was drawn with, now that
     // every page has recorded which glyphs it uses.
-    text_fonts.install(&mut doc);
+    text_fonts.install(&mut doc, fonts_as);
     let mut warnings = Vec::new();
     // printpdf 0.9's `optimize` is a no-op (its `doc.compress()` is commented
     // out), so every page's content stream — megabytes of vector operators
     // for a CAD sheet — went out uncompressed: a 16-sheet set weighed 280 MB.
     // Serialise through lopdf ourselves and Flate-compress the streams.
-    let mut lo = printpdf::to_lopdf_doc(&doc, &PdfSaveOptions::default(), &mut warnings);
+    // Gradient fills paint with `sh`, which printpdf has no operation for:
+    // they go out as custom operations, which its default "secure" mode drops.
+    let save_options = PdfSaveOptions {
+        secure: false,
+        ..PdfSaveOptions::default()
+    };
+    let mut lo = printpdf::to_lopdf_doc(&doc, &save_options, &mut warnings);
     // printpdf writes page boxes rounded to whole points (an A3 sheet came
     // out 1191 x 842 instead of 1190.55 x 841.89); write the exact size.
     for (page, id) in pages.iter().zip(lo.get_pages().into_values()) {
@@ -553,12 +590,315 @@ fn render_pdf_bytes_impl(
             }
         }
     }
-    let precise = if include_geopdf {
-        crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
-    } else {
-        Vec::new()
+    // Every page as compact as it draws the same.
+    crate::io::pdf_compact::compact_document(&mut lo);
+    shadings.install(&mut lo);
+    compress_font_programs(&mut lo);
+    let annotations = pages
+        .iter()
+        .enumerate()
+        .flat_map(|(index, page)| {
+            page_link_annotations(page)
+                .into_iter()
+                .map(move |(rect, action)| (index, rect, action))
+        })
+        .collect();
+    let destinations = pages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, page)| Some((index, page.content.destination.clone()?)))
+        .collect();
+    install_links(&mut lo, annotations, destinations);
+    Ok(lo)
+}
+
+/// printpdf embeds the font programs uncompressed, tens of kilobytes a face
+/// in every PDF; let them be Flate-compressed with the content streams. A
+/// TrueType program records its decoded length (`/Length1`), as the format
+/// asks of it.
+fn compress_font_programs(doc: &mut lopdf::Document) {
+    fn collect(object: &lopdf::Object, programs: &mut Vec<(lopdf::ObjectId, bool)>) {
+        match object {
+            lopdf::Object::Dictionary(dict) => {
+                for (key, value) in dict.iter() {
+                    match (key.as_slice(), value) {
+                        (b"FontFile2", lopdf::Object::Reference(id)) => {
+                            programs.push((*id, true))
+                        }
+                        (b"FontFile3", lopdf::Object::Reference(id)) => {
+                            programs.push((*id, false))
+                        }
+                        _ => collect(value, programs),
+                    }
+                }
+            }
+            lopdf::Object::Array(items) => {
+                for item in items {
+                    collect(item, programs);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut programs = Vec::new();
+    for object in doc.objects.values() {
+        collect(object, &mut programs);
+    }
+    for (id, truetype) in programs {
+        if let Ok(stream) = doc
+            .get_object_mut(id)
+            .and_then(lopdf::Object::as_stream_mut)
+        {
+            if truetype && !stream.dict.has(b"Length1") {
+                let length = stream.content.len() as i64;
+                stream.dict.set("Length1", lopdf::Object::Integer(length));
+            }
+            stream.allows_compression = true;
+        }
+    }
+}
+
+/// What a link annotation opens.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum LinkAction {
+    /// A page of the same file, by its destination name.
+    Destination(String),
+    /// An address the viewer opens.
+    Uri(String),
+}
+
+/// The link annotations of a page: the area each linked object covers on
+/// the page, in points (`[x0, y0, x1, y1]`), and what it opens. The area is
+/// the object's plotted ink, or its own bounds where it plots none, mapped
+/// to the page as the page draws it and cut to the plot window and sheet.
+pub(crate) fn page_link_annotations(page: &PdfPageInput) -> Vec<([f32; 4], LinkAction)> {
+    let content = &page.content;
+    if content.links.is_empty() {
+        return Vec::new();
+    }
+    let (ox, oy) = (page.offset_x, page.offset_y);
+    let s = page.scale as f64;
+    if !(s.is_finite() && s > 0.0) {
+        return Vec::new();
+    }
+    let marker_h = page.paper_h / s;
+    let wanted: std::collections::HashSet<document::Handle> = content
+        .links
+        .iter()
+        .filter_map(|link| link.entity)
+        .collect();
+    let mut areas: std::collections::HashMap<document::Handle, [f64; 4]> =
+        std::collections::HashMap::new();
+    let mut add = |handle: document::Handle, [x0, y0, x1, y1]: [f64; 4]| {
+        let area = areas.entry(handle).or_insert([x0, y0, x1, y1]);
+        *area = [
+            area[0].min(x0),
+            area[1].min(y0),
+            area[2].max(x1),
+            area[3].max(y1),
+        ];
     };
-    crate::io::geopdf_export::save_document(&mut lo, &precise)
+    for wire in content.wires.iter() {
+        let Some(handle) = crate::scene::Scene::handle_from_wire_name(&wire.wire.name) else {
+            continue;
+        };
+        if wanted.contains(&handle) {
+            if let Some(bounds) = wire_sheet_bounds(&wire.wire, ox, oy, marker_h) {
+                add(handle, bounds);
+            }
+        }
+    }
+    for hatch in content.hatches.iter().chain(&content.wipeouts) {
+        if let Some(handle) = hatch.entity.filter(|handle| wanted.contains(handle)) {
+            if let Some(bounds) = hatch_sheet_bounds(hatch, ox, oy) {
+                add(handle, bounds);
+            }
+        }
+    }
+    // The page's own mapping: content turn, then page rotation and scale.
+    let (paper_w, paper_h) = (page.paper_w, page.paper_h);
+    let (cos, sin, tx, ty) = match page.rotation_deg {
+        90 => (0.0, 1.0, paper_w, 0.0),
+        180 => (-1.0, 0.0, paper_w, paper_h),
+        270 => (0.0, -1.0, 0.0, paper_h),
+        _ => (1.0, 0.0, 0.0, 0.0),
+    };
+    let k = MM_TO_PT as f64;
+    let clip = page
+        .clip
+        .map(|(cx, cy, cw, ch)| [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64]);
+    let mut annotations = Vec::new();
+    for link in &content.links {
+        let area = link
+            .entity
+            .and_then(|handle| areas.get(&handle).copied())
+            .or_else(|| {
+                link.bounds
+                    .map(|[x0, y0, x1, y1]| [x0 + ox, y0 + oy, x1 + ox, y1 + oy])
+            });
+        let Some(area) = area else {
+            continue;
+        };
+        let action = match (&link.destination, link.url.trim()) {
+            (Some(name), _) => LinkAction::Destination(name.clone()),
+            (None, "") => continue,
+            (None, url) => LinkAction::Uri(link_uri(url, link.is_web())),
+        };
+        let mut turned = crate::io::plot::turned_bounds(page.content_rotation, area);
+        if let Some(window) = clip {
+            turned = [
+                turned[0].max(window[0]),
+                turned[1].max(window[1]),
+                turned[2].min(window[2]),
+                turned[3].min(window[3]),
+            ];
+            if turned[2] <= turned[0] || turned[3] <= turned[1] {
+                continue;
+            }
+        }
+        let mut rect = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for (x, y) in [
+            (turned[0], turned[1]),
+            (turned[2], turned[1]),
+            (turned[2], turned[3]),
+            (turned[0], turned[3]),
+        ] {
+            let px = (cos * s * x - sin * s * y + tx) * k;
+            let py = (sin * s * x + cos * s * y + ty) * k;
+            rect = [
+                rect[0].min(px),
+                rect[1].min(py),
+                rect[2].max(px),
+                rect[3].max(py),
+            ];
+        }
+        let rect = [
+            rect[0].max(0.0),
+            rect[1].max(0.0),
+            rect[2].min(paper_w * k),
+            rect[3].min(paper_h * k),
+        ];
+        // Less than a point across is nothing to click.
+        if !(rect[2] - rect[0] >= 1.0 && rect[3] - rect[1] >= 1.0) {
+            continue;
+        }
+        annotations.push((rect.map(|v| v as f32), action));
+    }
+    annotations
+}
+
+/// A link address as a URI: a web address as it is, a file as a relative
+/// reference or a `file:` URI, with what a URI cannot hold %-escaped.
+fn link_uri(url: &str, web: bool) -> String {
+    let url = if web {
+        url.to_string()
+    } else {
+        let path = url.replace('\\', "/");
+        if path.starts_with('/') {
+            format!("file://{path}")
+        } else if path.as_bytes().get(1) == Some(&b':') {
+            // A Windows drive.
+            format!("file:///{path}")
+        } else {
+            path
+        }
+    };
+    let mut out = String::with_capacity(url.len());
+    for byte in url.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=%".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Put the link annotations on their pages, and name the pages links reach
+/// in the catalog's destination name tree.
+pub(crate) fn install_links(
+    doc: &mut lopdf::Document,
+    annotations: Vec<(usize, [f32; 4], LinkAction)>,
+    destinations: Vec<(usize, String)>,
+) {
+    use lopdf::{Dictionary, Object, StringFormat};
+    let pages: Vec<lopdf::ObjectId> = doc.get_pages().into_values().collect();
+    for (page, rect, action) in annotations {
+        let Some(&page_id) = pages.get(page) else {
+            continue;
+        };
+        let annotation = doc.add_object(link_annotation(rect, &action));
+        if let Ok(page) = doc.get_dictionary_mut(page_id) {
+            if !matches!(page.get(b"Annots"), Ok(Object::Array(_))) {
+                page.set("Annots", Object::Array(Vec::new()));
+            }
+            if let Ok(Object::Array(list)) = page.get_mut(b"Annots") {
+                list.push(Object::Reference(annotation));
+            }
+        }
+    }
+    let mut names: Vec<(String, lopdf::ObjectId)> = destinations
+        .into_iter()
+        .filter_map(|(page, name)| Some((name, *pages.get(page)?)))
+        .collect();
+    if names.is_empty() {
+        return;
+    }
+    // A name tree lists its keys in order.
+    names.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    names.dedup_by(|a, b| a.0 == b.0);
+    let mut list = Vec::with_capacity(names.len() * 2);
+    for (name, page) in names {
+        list.push(Object::String(name.into_bytes(), StringFormat::Literal));
+        list.push(Object::Array(vec![
+            Object::Reference(page),
+            Object::Name(b"Fit".to_vec()),
+        ]));
+    }
+    let tree = Dictionary::from_iter([("Names", Object::Array(list))]);
+    if let Ok(catalog) = doc.catalog_mut() {
+        catalog.set(
+            "Names",
+            Dictionary::from_iter([("Dests", Object::Dictionary(tree))]),
+        );
+    }
+}
+
+/// A link annotation over `rect` (points) without a border, opening `action`.
+pub(crate) fn link_annotation(rect: [f32; 4], action: &LinkAction) -> lopdf::Dictionary {
+    use lopdf::{Dictionary, Object, StringFormat};
+    let action = match action {
+        LinkAction::Destination(name) => Dictionary::from_iter([
+            ("S", Object::Name(b"GoTo".to_vec())),
+            (
+                "D",
+                Object::String(name.clone().into_bytes(), StringFormat::Literal),
+            ),
+        ]),
+        LinkAction::Uri(uri) => Dictionary::from_iter([
+            ("S", Object::Name(b"URI".to_vec())),
+            (
+                "URI",
+                Object::String(uri.clone().into_bytes(), StringFormat::Literal),
+            ),
+        ]),
+    };
+    Dictionary::from_iter([
+        ("Type", Object::Name(b"Annot".to_vec())),
+        ("Subtype", Object::Name(b"Link".to_vec())),
+        (
+            "Rect",
+            Object::Array(rect.iter().map(|&v| Object::Real(v)).collect()),
+        ),
+        ("Border", Object::Array(vec![0.into(), 0.into(), 0.into()])),
+        ("H", Object::Name(b"I".to_vec())),
+        ("A", Object::Dictionary(action)),
+    ])
 }
 
 fn append_pdf_page(
@@ -566,6 +906,7 @@ fn append_pdf_page(
     image_resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
     text_fonts: &mut TextFonts,
     layer_ids: &mut std::collections::HashMap<String, printpdf::LayerInternalId>,
+    shadings: &mut GradientShadings,
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
     fonts: &SearchableFontSet,
@@ -589,6 +930,7 @@ fn append_pdf_page(
         group_splits,
         entity_layers,
         entity_plot_styles,
+        ..
     } = &page.content;
     let (paper_w, paper_h) = (page.paper_w as f32, page.paper_h as f32);
     let (ox, oy) = (page.offset_x, page.offset_y);
@@ -936,6 +1278,7 @@ fn append_pdf_page(
                 DrawItem::WireFill(wire) => {
                     emit_wire_fills(
                         &mut ops,
+                        shadings,
                         std::slice::from_ref(&wire.wire),
                         wire.draw_depth,
                         ox,
@@ -953,6 +1296,7 @@ fn append_pdf_page(
                 DrawItem::Hatch(hatch) => {
                     emit_hatch(
                         &mut ops,
+                        shadings,
                         hatch,
                         ox,
                         oy,
@@ -1209,7 +1553,8 @@ fn append_pdf_page(
                 let dash = if dash_arr.is_empty() {
                     LineDashPattern::default()
                 } else {
-                    LineDashPattern::from_array(&dash_arr, 0)
+                    let pattern: Vec<f32> = dash_arr.iter().map(|&d| d as f32).collect();
+                    LineDashPattern::new(0.0, &pattern)
                 };
                 ops.push(Op::SetLineDashPattern { dash });
                 last_dash = Some(dash_arr.clone());
@@ -1686,6 +2031,7 @@ fn plotted_color(rgb: [f32; 3], _alpha: f32, screening: f32, _options: PdfPlotOp
 
 fn emit_wire_fills(
     ops: &mut Vec<Op>,
+    shadings: &mut GradientShadings,
     wires: &[WireModel],
     wire_depth: f32,
     ox: f64,
@@ -1752,6 +2098,7 @@ fn emit_wire_fills(
                 };
                 emit_hatch(
                     ops,
+                    shadings,
                     &hatch,
                     ox,
                     oy,
@@ -1862,13 +2209,193 @@ fn emit_plot_stamp(ops: &mut Vec<Op>) {
     ]);
 }
 
+/// The gradient fills of the pages being rendered, each a PDF shading named
+/// `OcsSh<n>` in its page's resources.
+#[derive(Default)]
+struct GradientShadings {
+    /// The page being rendered.
+    page: usize,
+    /// The page and the shading of each gradient, by its number.
+    entries: Vec<(usize, lopdf::Object)>,
+}
+
+impl GradientShadings {
+    /// Add a shading of the current page; returns its resource name.
+    fn add(&mut self, shading: lopdf::Object) -> String {
+        self.entries.push((self.page, shading));
+        format!("OcsSh{}", self.entries.len() - 1)
+    }
+
+    /// Name each shading in its page's resources. The names are unique in
+    /// the document, so pages sharing one resource dictionary are fine.
+    fn install(self, doc: &mut lopdf::Document) {
+        use lopdf::{Dictionary, Object};
+        let pages: Vec<lopdf::ObjectId> = doc.get_pages().into_values().collect();
+        for (number, (page, shading)) in self.entries.into_iter().enumerate() {
+            let Some(&page_id) = pages.get(page) else {
+                continue;
+            };
+            // A mesh shading is a stream, which has to be an object of its own.
+            let shading = match shading {
+                Object::Stream(stream) => Object::Reference(doc.add_object(stream)),
+                other => other,
+            };
+            let shared = match doc
+                .get_dictionary(page_id)
+                .and_then(|page| page.get(b"Resources"))
+            {
+                Ok(Object::Reference(id)) => Some(*id),
+                _ => None,
+            };
+            let resources = match shared {
+                Some(id) => doc.get_dictionary_mut(id).ok(),
+                None => doc.get_dictionary_mut(page_id).ok().and_then(|page| {
+                    if !page.has(b"Resources") {
+                        page.set("Resources", Dictionary::new());
+                    }
+                    page.get_mut(b"Resources").ok()?.as_dict_mut().ok()
+                }),
+            };
+            let Some(resources) = resources else {
+                continue;
+            };
+            if !resources.has(b"Shading") {
+                resources.set("Shading", Dictionary::new());
+            }
+            let name = format!("OcsSh{number}");
+            // printpdf writes the page's shading names as an object of
+            // their own, referenced from the resources.
+            match resources.get_mut(b"Shading") {
+                Ok(Object::Dictionary(names)) => names.set(name, shading),
+                Ok(Object::Reference(id)) => {
+                    let id = *id;
+                    if let Ok(names) = doc.get_dictionary_mut(id) {
+                        names.set(name, shading);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The PDF shading of a gradient fill from `color1` to `color2`, shaped as
+/// [`GradientBox::mix`](crate::scene::model::hatch_model::GradientBox::mix)
+/// says: a linear one as an axial shading, the others as a lattice of 25×25
+/// colours across the fill's frame that the viewer blends between (a type 5
+/// shading). `None` when the boundary gives no frame to shade across.
+#[allow(clippy::too_many_arguments)]
+fn gradient_shading(
+    hatch: &HatchModel,
+    angle_deg: f32,
+    kind: crate::scene::model::hatch_model::GradientKind,
+    invert: bool,
+    shift: f32,
+    color1: [f32; 3],
+    color2: [f32; 3],
+    ox: f64,
+    oy: f64,
+) -> Option<lopdf::Object> {
+    use crate::scene::model::hatch_model::GradientKind;
+    use lopdf::{Dictionary, Object};
+    const LATTICE: usize = 25;
+    let frame = hatch.gradient_box(angle_deg)?;
+    // The frame is in the boundary's local coordinates, as the boundary is.
+    let page = |[x, y]: [f64; 2]| {
+        [
+            (x + hatch.world_origin[0] + ox) * MM_TO_PT as f64,
+            (y + hatch.world_origin[1] + oy) * MM_TO_PT as f64,
+        ]
+    };
+    let color = |t: f64| -> [f32; 3] {
+        let t = t.clamp(0.0, 1.0) as f32;
+        std::array::from_fn(|i| color1[i] + (color2[i] - color1[i]) * t)
+    };
+    let rgb = |c: [f32; 3]| Object::Array(c.iter().map(|&v| Object::Real(v)).collect());
+    if kind == GradientKind::Linear {
+        let a = frame.half_u;
+        let [x0, y0] = page(frame.local(-a, 0.0));
+        let [x1, y1] = page(frame.local(a, 0.0));
+        let function = Dictionary::from_iter([
+            ("FunctionType", Object::Integer(2)),
+            ("Domain", Object::Array(vec![0.into(), 1.into()])),
+            ("C0", rgb(color(frame.mix(kind, invert, shift, -a, 0.0)))),
+            ("C1", rgb(color(frame.mix(kind, invert, shift, a, 0.0)))),
+            ("N", Object::Integer(1)),
+        ]);
+        return Some(Object::Dictionary(Dictionary::from_iter([
+            ("ShadingType", Object::Integer(2)),
+            ("ColorSpace", Object::Name(b"DeviceRGB".to_vec())),
+            (
+                "Coords",
+                Object::Array([x0, y0, x1, y1].map(|v| Object::Real(v as f32)).to_vec()),
+            ),
+            ("Function", Object::Dictionary(function)),
+            (
+                "Extend",
+                Object::Array(vec![Object::Boolean(true), Object::Boolean(true)]),
+            ),
+        ])));
+    }
+    // A little past the boundary's extent, so arcs that bulge between their
+    // points stay covered.
+    let (reach_u, reach_w) = (frame.half_u * 1.02, frame.half_w * 1.02);
+    let step = |i: usize, reach: f64| -reach + 2.0 * reach * i as f64 / (LATTICE - 1) as f64;
+    let mut vertices = Vec::with_capacity(LATTICE * LATTICE);
+    for row in 0..LATTICE {
+        let w = step(row, reach_w);
+        for column in 0..LATTICE {
+            let u = step(column, reach_u);
+            vertices.push((
+                page(frame.local(u, w)),
+                color(frame.mix(kind, invert, shift, u, w)),
+            ));
+        }
+    }
+    let extent = |axis: usize| {
+        vertices
+            .iter()
+            .fold([f64::INFINITY, f64::NEG_INFINITY], |[low, high], (p, _)| {
+                [low.min(p[axis]), high.max(p[axis])]
+            })
+    };
+    let (xs, ys) = (extent(0), extent(1));
+    if !(xs[1] > xs[0] && ys[1] > ys[0]) {
+        return None;
+    }
+    let quantize =
+        |v: f64, [low, high]: [f64; 2]| ((v - low) / (high - low) * u32::MAX as f64).round() as u32;
+    let mut data = Vec::with_capacity(vertices.len() * 11);
+    for ([x, y], c) in &vertices {
+        data.extend_from_slice(&quantize(*x, xs).to_be_bytes());
+        data.extend_from_slice(&quantize(*y, ys).to_be_bytes());
+        data.extend(c.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+    }
+    let decode = [xs[0], xs[1], ys[0], ys[1]]
+        .map(|v| Object::Real(v as f32))
+        .into_iter()
+        .chain([0, 1, 0, 1, 0, 1].map(Object::Integer))
+        .collect();
+    let dict = Dictionary::from_iter([
+        ("ShadingType", Object::Integer(5)),
+        ("ColorSpace", Object::Name(b"DeviceRGB".to_vec())),
+        ("BitsPerCoordinate", Object::Integer(32)),
+        ("BitsPerComponent", Object::Integer(8)),
+        ("VerticesPerRow", Object::Integer(LATTICE as i64)),
+        ("Decode", Object::Array(decode)),
+    ]);
+    Some(Object::Stream(lopdf::Stream::new(dict, data)))
+}
+
 /// Emit a single hatch / wipeout as a filled (or stroked, for pattern fills)
 /// polygon. NaN sentinels in `hatch.boundary` split the path into multiple
 /// rings so islands and holes render correctly under the even-odd rule.
-/// Mirrors `scene::paper_canvas::draw_hatch`: solid → fill, pattern → outline,
-/// gradient → solid fill of the averaged colour.
+/// Mirrors `scene::paper_canvas::draw_hatch`: solid → fill, pattern → outline;
+/// a gradient paints its shading clipped to the boundary, as the screen draws
+/// it.
 fn emit_hatch(
     ops: &mut Vec<Op>,
+    shadings: &mut GradientShadings,
     hatch: &HatchModel,
     ox: f64,
     oy: f64,
@@ -1906,9 +2433,13 @@ fn emit_hatch(
     let mut screening = 1.0;
     let mut lw_override = None;
     let mut color_overridden = false;
+    // A gradient's colours are true colours, which a colour-dependent table
+    // does not map, as it maps no true colour here; BricsCAD plots them so.
+    let own_colors = matches!(hatch.pattern, HatchPattern::Gradient { .. })
+        && plot_style.is_some_and(|table| !table.is_stb);
     if !is_wipeout {
         if let Some(table) = plot_style {
-            if hatch.aci > 0 {
+            if hatch.aci > 0 && !own_colors {
                 if let Some([cr, cg, cb]) = table.resolve_style_color(hatch.aci) {
                     r = cr;
                     g = cg;
@@ -1933,6 +2464,8 @@ fn emit_hatch(
         // indexed colours meant for the dark screen are adapted. (#1417)
         && hatch.aci != 0
         && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
+        // A gradient's stops are true colours: its white plots white.
+        && !matches!(hatch.pattern, HatchPattern::Gradient { .. })
     {
         [r, g, b] = adapt_to_paper([r, g, b]);
     }
@@ -1976,25 +2509,64 @@ fn emit_hatch(
             // the fill.
             (PaintMode::Clip, [r, g, b]) // sentinel — handled below
         }
-        HatchPattern::Gradient { color2, .. } => {
-            // PDF gradients are stored in resource dictionaries; for the
-            // fast path we average the two colours, matching paper_canvas.
-            let second = if color_overridden {
-                [r, g, b]
+        HatchPattern::Gradient {
+            angle_deg,
+            color2,
+            kind,
+            invert,
+            shift,
+        } => {
+            // A plot style colour paints the whole fill.
+            if color_overridden {
+                (PaintMode::Fill, [r, g, b])
             } else {
-                plotted_color(
-                    adapt_to_paper([color2[0], color2[1], color2[2]]),
+                let second = plotted_color(
+                    [color2[0], color2[1], color2[2]],
                     color2[3],
                     screening,
                     options,
-                )
-            };
-            let avg = [
-                (r + second[0]) * 0.5,
-                (g + second[1]) * 0.5,
-                (b + second[2]) * 0.5,
-            ];
-            (PaintMode::Fill, avg)
+                );
+                let shading = gradient_shading(
+                    hatch,
+                    *angle_deg,
+                    *kind,
+                    *invert,
+                    *shift,
+                    [r, g, b],
+                    second,
+                    ox,
+                    oy,
+                );
+                match shading {
+                    Some(shading) => {
+                        let name = shadings.add(shading);
+                        ops.push(Op::SaveGraphicsState);
+                        ops.push(Op::DrawPolygon {
+                            polygon: Polygon {
+                                rings,
+                                mode: PaintMode::Clip,
+                                winding_order: WindingOrder::EvenOdd,
+                            },
+                        });
+                        ops.push(Op::Unknown {
+                            key: "sh".into(),
+                            value: vec![printpdf::DictItem::Name(name.into_bytes())],
+                        });
+                        ops.push(Op::RestoreGraphicsState);
+                        return;
+                    }
+                    // No frame to shade across (a degenerate boundary): the
+                    // middle colour.
+                    None => (
+                        PaintMode::Fill,
+                        [
+                            (r + second[0]) * 0.5,
+                            (g + second[1]) * 0.5,
+                            (b + second[2]) * 0.5,
+                        ],
+                    ),
+                }
+            }
         }
     };
 
@@ -2798,7 +3370,7 @@ impl TextFonts {
             Some(slot) => *slot,
             None => {
                 let parses =
-                    ParsedFont::from_bytes(&source.font.data, source.font.index, &mut Vec::new())
+                    ParsedFont::from_bytes(&source.font.data, source.font.index as usize, &mut Vec::new())
                         .is_some();
                 let slot = parses.then(|| {
                     self.fonts.push(EmbeddedFont {
@@ -2849,10 +3421,24 @@ impl TextFonts {
     /// Subset each face to its used glyphs, renumber those glyphs in the page
     /// streams, and register the fonts under the ids the pages already use.
     /// A face that fails to subset is embedded whole, ids unchanged.
-    fn install(self, doc: &mut PdfDocument) {
+    fn install(self, doc: &mut PdfDocument, fonts_as: FontEmbedding) {
         // A face only probed by `embeds_all` for a run that kept its outlines
         // draws nothing.
         for font in self.fonts.into_iter().filter(|font| !font.used.is_empty()) {
+            // A collection cannot be embedded as it is; a big face is subset.
+            let plain_truetype = font.blob.index == 0
+                && font.blob.data.len() <= 4 << 20
+                && (font.blob.data.starts_with(&[0, 1, 0, 0])
+                    || font.blob.data.starts_with(b"true"));
+            if fonts_as == FontEmbedding::Whole && plain_truetype {
+                if let Some(parsed) = parsed_with_widths(font.blob.data.clone(), 0) {
+                    doc.resources
+                        .fonts
+                        .map
+                        .insert(font.id, PdfFont::new(parsed));
+                    continue;
+                }
+            }
             // `.notdef` must stay glyph 0; the subset numbers glyphs in list order.
             let gids: Vec<u16> = std::iter::once(0)
                 .chain(font.used.keys().copied().filter(|&gid| gid != 0))
@@ -3125,6 +3711,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::scene::model::hatch_model::GradientKind;
 
     #[test]
     fn only_colour_7_adapts_to_the_white_sheet() {
@@ -3373,7 +3960,8 @@ mod tests {
                 .windows(3)
                 .filter_map(|items| (items[2] == "l").then(|| items[0].parse().unwrap()))
                 .collect();
-            if ends.len() != 1 || (ends[0] - 12.0 * MM_TO_PT).abs() >= 0.001 {
+            // Coordinates are written to 0.01 pt (`pdf_compact`).
+            if ends.len() != 1 || (ends[0] - 12.0 * MM_TO_PT).abs() > 0.005 {
                 missing.push((stationed, ends));
             }
         }
@@ -3405,7 +3993,8 @@ mod tests {
             .filter_map(|items| (items[2] == "l").then(|| items[0].parse().unwrap()))
             .collect();
         assert_eq!(ends.len(), 1);
-        assert!((ends[0] - 10.25 * MM_TO_PT).abs() < 0.001);
+        // Coordinates are written to 0.01 pt (`pdf_compact`).
+        assert!((ends[0] - 10.25 * MM_TO_PT).abs() <= 0.005);
     }
 
     #[test]
@@ -3443,6 +4032,18 @@ mod tests {
 
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_pdf_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.pdf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        write_pdf_atomically(&path, b"new").unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
     }
 
     #[test]
@@ -3490,7 +4091,7 @@ mod tests {
             "alpha state missing"
         );
         assert!(
-            on.contains("1 0 0 RG"),
+            on.contains("1.0 0.0 0.0 RG"),
             "colour must not be blended towards white"
         );
         let off = pdf_stream_text(&render_pdf_bytes(&[make_page(false)], None).unwrap());
@@ -3498,7 +4099,7 @@ mod tests {
             !off.contains("/ca ") && !off.contains("/CA "),
             "no alpha without transparency"
         );
-        assert!(off.contains("1 0 0 RG"), "opaque red without transparency");
+        assert!(off.contains("1.0 0.0 0.0 RG"), "opaque red without transparency");
     }
 
     #[test]
@@ -3543,11 +4144,11 @@ mod tests {
         let styled = pdf_stream_text(&render_pdf_bytes(&[make_page()], Some(&monochrome)).unwrap());
 
         assert!(
-            unstyled.contains("1 0 0 rg") || unstyled.contains("1 0 0 RG"),
+            unstyled.contains("1.0 0.0 0.0 rg") || unstyled.contains("1.0 0.0 0.0 RG"),
             "unstyled export should keep the wire's RGB color"
         );
         assert!(
-            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            !styled.contains("1.0 0.0 0.0 rg") && !styled.contains("1.0 0.0 0.0 RG"),
             "monochrome fallback must recolor the wire"
         );
     }
@@ -3601,7 +4202,7 @@ mod tests {
         named.named_entries.insert("Normal".to_string(), normal);
         let styled = pdf_stream_text(&render_pdf_bytes(&[make_page()], Some(&named)).unwrap());
         assert!(
-            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            !styled.contains("1.0 0.0 0.0 rg") && !styled.contains("1.0 0.0 0.0 RG"),
             "STB Normal (black) must recolor the wire"
         );
     }
@@ -3647,12 +4248,12 @@ mod tests {
         let text =
             pdf_stream_text(&render_pdf_bytes(std::slice::from_ref(&page), Some(&named)).unwrap());
         assert!(
-            text.contains("0 0 1 RG"),
+            text.contains("0.0 0.0 1.0 RG"),
             "named style Blue applies: {text}"
         );
-        assert!(text.contains("0 1 0 RG"), "explicit Normal applies");
+        assert!(text.contains("0.0 1.0 0.0 RG"), "explicit Normal applies");
         assert!(
-            !text.contains("1 0 0 RG"),
+            !text.contains("1.0 0.0 0.0 RG"),
             "no wire keeps its object colour"
         );
         page.content
@@ -3664,7 +4265,7 @@ mod tests {
             "{error}"
         );
         let text = pdf_stream_text(&render_pdf_bytes(&[page], Some(&named)).unwrap());
-        assert!(text.contains("0 1 0 RG"), "a missing style plots with Normal");
+        assert!(text.contains("0.0 1.0 0.0 RG"), "a missing style plots with Normal");
     }
 
     #[test]
@@ -4058,12 +4659,313 @@ mod tests {
             !stream.contains("/Helvetica"),
             "own-family run must not fall back to Helvetica"
         );
+        // The program is Flate-compressed and inflates to the length it records.
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let program = doc
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find_map(|dict| {
+                dict.get(b"FontFile2")
+                    .and_then(lopdf::Object::as_reference)
+                    .ok()
+            })
+            .expect("a font descriptor names the program");
+        let program = doc.get_object(program).unwrap().as_stream().unwrap();
+        assert_eq!(
+            program.dict.get(b"Filter").unwrap().as_name().unwrap(),
+            b"FlateDecode"
+        );
+        assert_eq!(
+            program.decompressed_content().unwrap().len() as i64,
+            program.dict.get(b"Length1").unwrap().as_i64().unwrap()
+        );
         assert!(
             bytes.len() < full_len,
             "subset PDF ({} bytes) must be lighter than the full font ({} bytes)",
             bytes.len(),
             full_len
         );
+    }
+
+    /// A page with one gradient fill over the square (20, 20)–(40, 40) mm.
+    fn gradient_page(
+        kind: GradientKind,
+        color: [f32; 4],
+        color2: [f32; 4],
+        aci: u8,
+    ) -> PdfPageInput {
+        let mut page = test_page(Vec::new());
+        page.content.hatches = vec![HatchModel {
+            entity: None,
+            effective_layer: None,
+            pattern_origin: None,
+            render_instance: None,
+            world_origin: [0.0, 0.0],
+            boundary: std::sync::Arc::new(vec![
+                [20.0, 20.0],
+                [40.0, 20.0],
+                [40.0, 40.0],
+                [20.0, 40.0],
+            ]),
+            boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: document::entities::HatchStyleType::Normal,
+            pattern: HatchPattern::Gradient {
+                angle_deg: 0.0,
+                color2,
+                kind,
+                invert: false,
+                shift: 0.0,
+            },
+            name: "GRADIENT".into(),
+            color,
+            aci,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: 0.0,
+        }];
+        page
+    }
+
+    /// The shadings the first page names in its resources.
+    fn page_shadings(doc: &lopdf::Document) -> Vec<lopdf::Object> {
+        let page = doc.get_pages().into_values().next().unwrap();
+        let page = doc.get_dictionary(page).unwrap();
+        let resources = match page.get(b"Resources").unwrap() {
+            lopdf::Object::Reference(id) => doc.get_dictionary(*id).unwrap(),
+            other => other.as_dict().unwrap(),
+        };
+        let names = match resources.get(b"Shading") {
+            Ok(lopdf::Object::Reference(id)) => doc.get_dictionary(*id).ok(),
+            Ok(other) => other.as_dict().ok(),
+            Err(_) => None,
+        };
+        let Some(names) = names else {
+            return Vec::new();
+        };
+        names
+            .iter()
+            .map(|(_, value)| match value {
+                lopdf::Object::Reference(id) => doc.get_object(*id).unwrap().clone(),
+                other => other.clone(),
+            })
+            .collect()
+    }
+
+    /// A curved blue-to-white fill of colour 252 under a table that plots
+    /// 252 grey shades from blue at the top to white at the bottom, as
+    /// BricsCAD plots it; before, it went out as one grey fill.
+    #[test]
+    fn a_gradient_shades_in_its_own_colours_under_a_colour_table() {
+        let mut table = PlotStyleTable::identity("Display.ctb");
+        table.aci_entries[252].color = Some([132, 132, 132]);
+        let page = gradient_page(GradientKind::Curved, [0.0, 0.5, 1.0, 1.0], [1.0; 4], 252);
+        let bytes = render_pdf_bytes(&[page], Some(&table)).unwrap();
+        assert!(
+            pdf_stream_text(&bytes).contains("/OcsSh0 sh"),
+            "the fill paints its shading"
+        );
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let shadings = page_shadings(&doc);
+        assert_eq!(shadings.len(), 1);
+        let mesh = shadings[0].as_stream().unwrap();
+        assert_eq!(mesh.dict.get(b"ShadingType").unwrap().as_i64().unwrap(), 5);
+        let per_row = mesh.dict.get(b"VerticesPerRow").unwrap().as_i64().unwrap() as usize;
+        let data = mesh.decompressed_content().unwrap();
+        let color = |row: usize, column: usize| {
+            let at = (row * per_row + column) * 11 + 8;
+            [data[at], data[at + 1], data[at + 2]]
+        };
+        let middle = per_row / 2;
+        // Rows run from the bottom up.
+        let bottom = color(0, middle);
+        let top = color(data.len() / 11 / per_row - 1, middle);
+        assert!(
+            bottom.iter().all(|&c| c > 245),
+            "white at the bottom: {bottom:?}"
+        );
+        assert!(top[0] < 80 && top[2] == 255, "blue at the top: {top:?}");
+        assert!(
+            !(0..per_row).any(|c| color(per_row / 2, c) == [132, 132, 132]),
+            "the table's grey does not paint the fill"
+        );
+    }
+
+    /// A linear fill is an axial shading from its first colour at one edge
+    /// to its second at the other; a white end stays white on paper.
+    #[test]
+    fn a_linear_gradient_is_an_axial_shading_across_the_fill() {
+        let page = gradient_page(GradientKind::Linear, [1.0, 0.0, 0.0, 1.0], [1.0; 4], 1);
+        let bytes = render_pdf_bytes(&[page], None).unwrap();
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let shadings = page_shadings(&doc);
+        let axial = shadings[0].as_dict().unwrap();
+        assert_eq!(axial.get(b"ShadingType").unwrap().as_i64().unwrap(), 2);
+        let numbers = |object: &lopdf::Object| -> Vec<f32> {
+            object
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_float().unwrap())
+                .collect()
+        };
+        let coords = numbers(axial.get(b"Coords").unwrap());
+        let expected = [20.0, 30.0, 40.0, 30.0].map(|mm| mm * MM_TO_PT);
+        for (got, want) in coords.iter().zip(expected) {
+            assert!((got - want).abs() < 0.01, "{coords:?}");
+        }
+        let function = axial.get(b"Function").unwrap().as_dict().unwrap();
+        assert_eq!(numbers(function.get(b"C0").unwrap()), vec![1.0, 0.0, 0.0]);
+        assert_eq!(numbers(function.get(b"C1").unwrap()), vec![1.0, 1.0, 1.0]);
+    }
+
+    /// A page with a 20 × 10 mm rectangle plotted for object 31, at (30, 40).
+    fn linked_page() -> PdfPageInput {
+        let wire = PlotWire {
+            wire: WireModel::solid(
+                "31".into(),
+                vec![
+                    [30.0, 40.0, 0.0],
+                    [50.0, 40.0, 0.0],
+                    [50.0, 50.0, 0.0],
+                    [30.0, 50.0, 0.0],
+                    [30.0, 40.0, 0.0],
+                ],
+                [0.0, 0.0, 0.0, 1.0],
+                false,
+            ),
+            draw_depth: 0.0,
+        };
+        let mut page = test_page(vec![wire]);
+        page.content.links = vec![
+            crate::io::plot::PlotLink {
+                entity: Some(document::Handle::new(31)),
+                url: "https://example.org/a b".into(),
+                ..Default::default()
+            },
+            // Plots nothing: its own area, opening a page of the file.
+            crate::io::plot::PlotLink {
+                entity: Some(document::Handle::new(32)),
+                bounds: Some([100.0, 100.0, 140.0, 110.0]),
+                url: "sheets/b.dwg".into(),
+                location: "A1".into(),
+                destination: Some("Sheet B".into()),
+                ..Default::default()
+            },
+            // An address naming nothing and no page to open: no link.
+            crate::io::plot::PlotLink {
+                bounds: Some([0.0, 0.0, 10.0, 10.0]),
+                ..Default::default()
+            },
+        ];
+        page
+    }
+
+    fn near(rect: [f32; 4], mm: [f64; 4]) -> bool {
+        rect.iter()
+            .zip(mm)
+            .all(|(got, mm)| (*got as f64 - mm * MM_TO_PT as f64).abs() < 0.01)
+    }
+
+    /// A link covers its object's plotted ink, or its own area where it
+    /// plots none, and opens its address or a page of the file.
+    #[test]
+    fn links_cover_their_objects_and_open_their_targets() {
+        let annotations = page_link_annotations(&linked_page());
+        assert_eq!(annotations.len(), 2);
+        assert!(
+            near(annotations[0].0, [30.0, 40.0, 50.0, 50.0]),
+            "{annotations:?}"
+        );
+        assert_eq!(
+            annotations[0].1,
+            LinkAction::Uri("https://example.org/a%20b".into())
+        );
+        assert!(near(annotations[1].0, [100.0, 100.0, 140.0, 110.0]));
+        assert_eq!(annotations[1].1, LinkAction::Destination("Sheet B".into()));
+
+        // A page turned a quarter: x' = width - y, y' = x.
+        let mut turned = linked_page();
+        turned.rotation_deg = 90;
+        let annotations = page_link_annotations(&turned);
+        assert!(near(
+            annotations[0].0,
+            [210.0 - 50.0, 30.0, 210.0 - 40.0, 50.0]
+        ));
+        // A plot window leaves only what lies in it.
+        let mut windowed = linked_page();
+        windowed.clip = Some((0.0, 0.0, 40.0, 297.0));
+        let annotations = page_link_annotations(&windowed);
+        assert_eq!(annotations.len(), 1);
+        assert!(near(annotations[0].0, [30.0, 40.0, 40.0, 50.0]));
+    }
+
+    /// The PDF carries the links as annotations, and names the pages links
+    /// reach.
+    #[test]
+    fn links_become_annotations_and_named_pages() {
+        let mut target = test_page(Vec::new());
+        target.content.destination = Some("Sheet B".into());
+        let bytes = render_pdf_bytes(&[linked_page(), target], None).unwrap();
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let pages: Vec<lopdf::ObjectId> = doc.get_pages().into_values().collect();
+        let page = doc.get_dictionary(pages[0]).unwrap();
+        let annotations: Vec<&lopdf::Dictionary> = page
+            .get(b"Annots")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| doc.get_dictionary(a.as_reference().unwrap()).unwrap())
+            .collect();
+        assert_eq!(annotations.len(), 2);
+        let action = |index: usize| annotations[index].get(b"A").unwrap().as_dict().unwrap();
+        assert_eq!(action(0).get(b"S").unwrap().as_name().unwrap(), b"URI");
+        assert_eq!(
+            action(0).get(b"URI").unwrap().as_str().unwrap(),
+            b"https://example.org/a%20b"
+        );
+        assert_eq!(action(1).get(b"S").unwrap().as_name().unwrap(), b"GoTo");
+        assert_eq!(action(1).get(b"D").unwrap().as_str().unwrap(), b"Sheet B");
+        let names = doc
+            .catalog()
+            .unwrap()
+            .get(b"Names")
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        let list = names
+            .get(b"Dests")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"Names")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(list[0].as_str().unwrap(), b"Sheet B");
+        assert_eq!(
+            list[1].as_array().unwrap()[0].as_reference().unwrap(),
+            pages[1]
+        );
+        // A page without links carries no annotations.
+        let annots = doc.get_dictionary(pages[1]).unwrap().get(b"Annots");
+        assert!(annots.is_err() || annots.unwrap().as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn link_addresses_become_uris() {
+        assert_eq!(link_uri("Blätter/a b.dwg", false), "Bl%C3%A4tter/a%20b.dwg");
+        assert_eq!(link_uri("..\\x\\y.dwg", false), "../x/y.dwg");
+        assert_eq!(link_uri("C:\\p\\y.dwg", false), "file:///C:/p/y.dwg");
+        assert_eq!(link_uri("/p/y.dwg", false), "file:///p/y.dwg");
+        assert_eq!(link_uri("mailto:a@b.de", true), "mailto:a@b.de");
     }
 
     // Runs fully outside the export window never reach the content stream.
@@ -4091,7 +4993,12 @@ mod tests {
         use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas, sysfont};
 
         // Any installed TrueType family that draws 'H'; hosts without fonts skip.
+        // Names starting with a dot are macOS's hidden system faces, whose
+        // subset can fail and fall back to outlines.
         let Some((family, source)) = sysfont::families().iter().find_map(|family| {
+            if family.starts_with('.') {
+                return None;
+            }
             let face = Face::resolve(family);
             matches!(face, Face::Ttf { .. })
                 .then(|| face.glyph_source('H'))
@@ -4105,7 +5012,7 @@ mod tests {
         // or unfill them concurrently; a change between laying the quads out
         // and exporting them invalidates their tile keys, so retry until one
         // export runs against a stable, filled atlas.
-        let (bytes, text) = (0..20)
+        let (bytes, text, whole) = (0..20)
             .find_map(|_| {
                 let generation = sdf_atlas::generation();
                 if !sdf_atlas::textfill() {
@@ -4136,19 +5043,22 @@ mod tests {
                     },
                     draw_depth: 0.0,
                 };
-                let bytes = render_pdf_bytes(&[test_page(vec![wire])], None).unwrap();
+                let pages = [test_page(vec![wire])];
+                let bytes = render_pdf_bytes(&pages, None).unwrap();
+                let whole = render_pdf_document(&pages, None, FontEmbedding::Whole).unwrap();
                 let stable = sdf_atlas::generation() == generation && sdf_atlas::textfill();
                 stable.then(|| {
                     let text = pdf_stream_text(&bytes);
-                    (bytes, text)
+                    (bytes, text, whole)
                 })
             })
             .expect("the shared glyph atlas never held still for one export");
         assert!(text.contains(" Tf"), "glyphs drawn as text in a font");
+        assert_eq!(text.matches(" TJ").count(), 3, "each glyph shown once");
         assert_eq!(
-            text.matches(" Tm").count(),
-            3,
-            "one positioned text object per glyph"
+            text.matches("BT").count(),
+            1,
+            "the glyphs of a run share one text object"
         );
         assert!(
             String::from_utf8_lossy(&bytes).contains("/FontFile2"),
@@ -4161,5 +5071,41 @@ mod tests {
             bytes.len(),
             source.font.data.len()
         );
+        // For a published set a plain TrueType face goes in whole, so every
+        // drawing embeds the same program; the glyphs keep their ids.
+        let programs: Vec<Vec<u8>> = whole
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .filter_map(|dict| dict.get(b"FontFile2").ok()?.as_reference().ok())
+            .map(|id| {
+                let stream = whole.get_object(id).unwrap().as_stream().unwrap();
+                stream
+                    .decompressed_content()
+                    .unwrap_or(stream.content.clone())
+            })
+            .collect();
+        assert_eq!(programs.len(), 1, "one face embedded");
+        let font = &source.font;
+        let plain_truetype = font.index == 0
+            && font.data.len() <= 4 << 20
+            && (font.data.starts_with(&[0, 1, 0, 0]) || font.data.starts_with(b"true"));
+        if plain_truetype {
+            assert!(programs[0] == font.data, "the face is embedded whole");
+            let gid = source.gid;
+            let shown = format!("<{gid:04X}>");
+            let page = whole.get_pages().into_values().next().unwrap();
+            let content =
+                String::from_utf8_lossy(&whole.get_page_content(page)).into_owned();
+            assert!(
+                content.contains(&shown),
+                "glyph {gid} keeps its id in {content}"
+            );
+        } else {
+            assert!(
+                programs[0].len() < font.data.len(),
+                "a collection or a big face is subset"
+            );
+        }
     }
 }

@@ -5,22 +5,21 @@
 //! and data tables, integrated with OpenCADStudio's docking system.
 
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
+    Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
 };
 use iced::{Element, Fill, Length, Padding, Theme};
 use ocs_plugin_api::dialog::{
-    DialogControl, DialogValue, HorizontalAlign, PanelDef, PanelSnapshot, PanelStyle,
-    VerticalAlign,
+    DialogControl, DialogValue, HorizontalAlign, PanelDef, PanelSnapshot, PanelStyle, VerticalAlign,
 };
 use std::collections::{HashMap, HashSet};
 
 use crate::app::Message;
-use crate::ui::dock::{title_bar, Chrome, PanelId};
+use crate::ui::dock::{Chrome, PanelId, title_bar};
 use crate::ui::kit;
 use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use crate::ui::window::plugin_dialog::{
-    apply_control_value_updates, collect_svg_handles, find_choice_option_in_controls, styled_text,
-    svg_image, ChoiceOption, FormControlView,
+    ChoiceOption, FormControlView, apply_control_value_updates, collect_svg_handles,
+    find_choice_option_in_controls, styled_text, svg_image,
 };
 
 /// Height cap of a table's scroll box in a dock panel.
@@ -1424,10 +1423,12 @@ mod tests {
                 !snapshot.values.contains_key(id),
                 "unexpected value for {id}"
             );
-            assert!(snapshot
-                .errors
-                .iter()
-                .any(|error| error.contains(&format!("control id '{id}'"))));
+            assert!(
+                snapshot
+                    .errors
+                    .iter()
+                    .any(|error| error.contains(&format!("control id '{id}'")))
+            );
         }
         assert_eq!(
             snapshot.values.get("valid"),
@@ -1544,14 +1545,18 @@ mod tests {
 
         assert_eq!(first.errors, second.errors);
         assert!(first.errors.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert!(first
-            .errors
-            .iter()
-            .any(|error| error == "duplicate control id 'duplicate'"));
-        assert!(first
-            .errors
-            .iter()
-            .any(|error| error == "control has a missing id"));
+        assert!(
+            first
+                .errors
+                .iter()
+                .any(|error| error == "duplicate control id 'duplicate'")
+        );
+        assert!(
+            first
+                .errors
+                .iter()
+                .any(|error| error == "control has a missing id")
+        );
         assert_eq!(
             first.raw_text.get("").map(String::as_str),
             Some("current unnamed")
@@ -1649,6 +1654,9 @@ mod tests {
         let palette_state = PluginPanelState::from_def(palette_def);
         let _ = palette_state.view(2, TEST_PANEL_W, Chrome::default());
 
-        assert_eq!(form_state.snapshot(1).values, palette_state.snapshot(1).values);
+        assert_eq!(
+            form_state.snapshot(1).values,
+            palette_state.snapshot(1).values
+        );
     }
 }

@@ -236,6 +236,13 @@ impl CadCommand for CopyCommand {
         }
     }
 
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        match self.step {
+            Step::Placing(base) => Some(base),
+            _ => None,
+        }
+    }
+
     fn on_enter(&mut self) -> CmdResult {
         if self.moving_layer_copies {
             return match self.step {

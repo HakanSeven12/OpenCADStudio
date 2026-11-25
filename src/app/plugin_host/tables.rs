@@ -561,7 +561,9 @@ impl<'a> HostSession<'a> {
                     Some(180) => Some(document::objects::PlotRotation::Degrees180),
                     Some(270) => Some(document::objects::PlotRotation::Degrees270),
                     Some(_) => {
-                        return Err("the plot rotation must be 0, 90, 180 or 270 degrees".to_owned())
+                        return Err(
+                            "the plot rotation must be 0, 90, 180 or 270 degrees".to_owned()
+                        );
                     }
                 };
                 if let Some([numerator, denominator]) = scale {

@@ -25,6 +25,7 @@ fn unzip(bytes: &[u8]) -> Option<HashMap<String, Vec<u8>>> {
         let file = archive.by_index(i).ok()?;
         let name = file
             .name()
+            .ok()?
             .replace('\\', "/")
             .trim_start_matches('/')
             .to_string();

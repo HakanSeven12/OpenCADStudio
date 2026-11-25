@@ -477,6 +477,7 @@ const CODES: &[(&str, &str, &str)] = &[
     ("parametric", "DCHIDEALL", "HD"),
     ("parametric", "DELCONSTRAINT", "DE"),
     ("parametric", "PARAMETERS", "PM"),
+    ("parametric", "VISIBILITYSTATESPANELOPEN", "VS"),
     // Model (the reference Solid tab).
     ("model", "MODEL_PRIMITIVES", "SS"),
     ("MODEL_PRIMITIVES", "BOX", "BO"),

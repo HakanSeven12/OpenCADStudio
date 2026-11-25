@@ -1744,4 +1744,220 @@ mod tests {
             assert!(outcome.is_ok(), "case {case} panicked; edits {edits:?}");
         }
     }
+
+    /// `base` with `data` added at the end of its DATA section.
+    fn with_data(base: &[u8], data: &str) -> String {
+        let text = String::from_utf8_lossy(base).into_owned();
+        let end = text.rfind("ENDSEC;").expect("a DATA section");
+        format!("{}{data}\n{}", &text[..end], &text[end..])
+    }
+
+    fn assert_placement(actual: &Placement, expected: Placement, what: &str) {
+        for r in 0..3 {
+            for c in 0..4 {
+                assert!(
+                    (actual[r][c] - expected[r][c]).abs() <= 1e-9,
+                    "{what}: {actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
+
+    /// The box of `no_products.step` (`#10`, placed at `#11`) mapped twice
+    /// by a top representation: to an axis placement at x = 100, and by a
+    /// transformation operator turned 90° about z, at y = 50, with scale 2.
+    const TWO_MAPPED_BOXES: &str = "\
+        #9001=REPRESENTATION_MAP(#11,#10);\n\
+        #9002=CARTESIAN_POINT('',(100.,0.,0.));\n\
+        #9003=AXIS2_PLACEMENT_3D('',#9002,#13,#14);\n\
+        #9004=MAPPED_ITEM('',#9001,#9003);\n\
+        #9005=DIRECTION('',(0.,1.,0.));\n\
+        #9006=CARTESIAN_POINT('',(0.,50.,0.));\n\
+        #9007=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','','',#9005,$,#9006,2.,#13);\n\
+        #9008=MAPPED_ITEM('',#9001,#9007);\n\
+        #9009=SHAPE_REPRESENTATION('',(#9004,#9008),#165);";
+
+    #[test]
+    fn mapped_items_place_a_representation_in_a_file_without_products() {
+        let model =
+            read(with_data(NO_PRODUCTS, TWO_MAPPED_BOXES).as_bytes()).expect("a STEP model");
+        assert!(
+            model.direct.is_empty(),
+            "the box is placed, not put straight in"
+        );
+        assert_eq!(model.unit_mm, Some(1.0));
+        assert_eq!(model.roots.len(), 1);
+        let top = &model.products[model.roots[0]];
+        assert_eq!(top.numbered, Some(9009));
+        assert!(top.bodies.is_empty());
+        assert_eq!(top.children.len(), 2);
+        let (child, moved) = top.children[0];
+        assert_eq!(top.children[1].0, child, "both map the same block");
+        let block = &model.products[child];
+        assert_eq!(block.numbered, Some(10));
+        assert_eq!(block.scale, 1.0);
+        assert_eq!(block.bodies.len(), 1);
+        let (min, max) = bounds(&block.bodies[0].body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "block min");
+        assert_close(max, [10.0, 20.0, 30.0], 1e-9, "block max");
+        let moved_x = [
+            [1.0, 0.0, 0.0, 100.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ];
+        assert_placement(&moved, moved_x, "axis placement");
+        // The operator's scale is not applied (as the reference reads it).
+        let turned = [
+            [0.0, -1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 50.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ];
+        assert_placement(&top.children[1].1, turned, "transformation operator");
+    }
+
+    #[test]
+    fn a_map_without_length_units_into_one_without_comes_in_at_a_hundredth() {
+        const NO_UNITS: &str =
+            "#9010=(GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('',''));";
+        let box_without_units = |text: String| {
+            text.replace(
+                "#10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#165);",
+                "#10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#9010);",
+            )
+        };
+        let block_of = |model: &StepModel| {
+            let top = &model.products[model.roots[0]];
+            model.products[top.children[0].0].scale
+        };
+        // Neither has units: the box comes in at a hundredth, and the
+        // drawing takes no unit from the top representation.
+        let data = format!(
+            "{NO_UNITS}\n{}",
+            TWO_MAPPED_BOXES.replace("),#165);", "),#9010);")
+        );
+        let text = box_without_units(with_data(NO_PRODUCTS, &data));
+        assert!(text.contains("#9010);\n#11"), "the box lost its units");
+        let model = read(text.as_bytes()).expect("a STEP model");
+        assert_eq!(block_of(&model), 0.01);
+        assert_eq!(model.unit_mm, None);
+        // Only the box has none: it keeps its size.
+        let text = box_without_units(with_data(
+            NO_PRODUCTS,
+            &format!("{NO_UNITS}\n{TWO_MAPPED_BOXES}"),
+        ));
+        let model = read(text.as_bytes()).expect("a STEP model");
+        assert_eq!(block_of(&model), 1.0);
+        assert_eq!(model.unit_mm, Some(1.0));
+    }
+
+    /// A product's shape representation can hold no solid itself and name,
+    /// by a `SHAPE_REPRESENTATION_RELATIONSHIP`, the one that does.
+    #[test]
+    fn a_product_takes_the_solid_of_a_related_representation() {
+        let text = String::from_utf8_lossy(ASSEMBLY).replace(
+            "#198 = SHAPE_DEFINITION_REPRESENTATION(#199,#205);",
+            "#198 = SHAPE_DEFINITION_REPRESENTATION(#199,#9001);",
+        );
+        let data = "#9001=SHAPE_REPRESENTATION('',(#11),#356);\n\
+                    #9002=SHAPE_REPRESENTATION_RELATIONSHIP('','',#9001,#205);";
+        let text = with_data(text.as_bytes(), data);
+        assert!(text.contains("(#199,#9001)"));
+        let model = read(text.as_bytes()).expect("a STEP model");
+        let unchanged = read(ASSEMBLY).expect("a STEP model");
+        assert_eq!(
+            model.products.len(),
+            unchanged.products.len(),
+            "no product of loose solids"
+        );
+        assert_eq!(model.roots.len(), 1);
+        let post = model
+            .products
+            .iter()
+            .find(|product| product.name == "Post")
+            .expect("the Post");
+        assert_eq!(post.bodies.len(), 1);
+        assert_volume(&post.bodies[0].body, 2.0 * 2.0 * 15.0, "Post");
+    }
+
+    #[test]
+    fn si_prefixes_scale_the_unit_and_a_unit_loop_has_no_size() {
+        let doc = doc(
+            "#1=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));\n\
+             #2=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.));\n\
+             #3=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.DECI.,.METRE.));\n\
+             #4=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));\n\
+             #5=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.KILO.,.METRE.));\n\
+             #6=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MICRO.,.METRE.));\n\
+             #7=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));\n\
+             #8=(CONVERSION_BASED_UNIT('A',#10) LENGTH_UNIT() NAMED_UNIT(*));\n\
+             #9=(CONVERSION_BASED_UNIT('B',#11) LENGTH_UNIT() NAMED_UNIT(*));\n\
+             #10=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(2.),#9);\n\
+             #11=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(2.),#8);",
+        );
+        for (unit, mm) in [
+            (1, 1.0),
+            (2, 10.0),
+            (3, 100.0),
+            (4, 1e3),
+            (5, 1e6),
+            (6, 1e-3),
+            (7, 1.0),
+        ] {
+            let size = unit_size(&doc, unit).expect("a size");
+            assert!((size - mm).abs() <= mm * 1e-12, "#{unit}: {size} != {mm}");
+        }
+        assert_eq!(unit_size(&doc, 8), None, "two units defined by each other");
+    }
+
+    #[test]
+    fn predefined_colours_and_a_curve_colour() {
+        let doc = doc("#1=DRAUGHTING_PRE_DEFINED_COLOUR('red');\n\
+             #2=DRAUGHTING_PRE_DEFINED_COLOUR('green');\n\
+             #3=DRAUGHTING_PRE_DEFINED_COLOUR('blue');\n\
+             #4=DRAUGHTING_PRE_DEFINED_COLOUR('yellow');\n\
+             #5=DRAUGHTING_PRE_DEFINED_COLOUR('magenta');\n\
+             #6=DRAUGHTING_PRE_DEFINED_COLOUR('cyan');\n\
+             #7=DRAUGHTING_PRE_DEFINED_COLOUR('black');\n\
+             #8=DRAUGHTING_PRE_DEFINED_COLOUR('white');\n\
+             #9=DRAUGHTING_PRE_DEFINED_COLOUR('orange');\n\
+             #20=CURVE_STYLE('',#21,POSITIVE_LENGTH_MEASURE(0.1),#1);\n\
+             #21=DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n\
+             #22=PRESENTATION_STYLE_ASSIGNMENT((#20));\n\
+             #23=PRESENTATION_STYLE_ASSIGNMENT((#20,#24));\n\
+             #24=SURFACE_STYLE_USAGE(.BOTH.,#25);\n\
+             #25=SURFACE_SIDE_STYLE('',(#26));\n\
+             #26=SURFACE_STYLE_FILL_AREA(#27);\n\
+             #27=FILL_AREA_STYLE('',(#28));\n\
+             #28=FILL_AREA_STYLE_COLOUR('',#2);");
+        let expected = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ];
+        for (k, rgb) in expected.into_iter().enumerate() {
+            let id = k as u64 + 1;
+            assert_eq!(doc.colour(&P::Ref(id)), Some(rgb), "#{id}");
+        }
+        assert_eq!(doc.colour(&P::Ref(9)), None, "not a predefined name");
+        // A curve colour serves only when no surface colour is found.
+        let styles = |id: u64| P::List(vec![P::Ref(id)]);
+        assert_eq!(doc.style_colour(&styles(22)), Some([1.0, 0.0, 0.0]));
+        assert_eq!(doc.style_colour(&styles(23)), Some([0.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn comments_between_instances_are_skipped() {
+        let text = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n/* first */\n\
+                    #1=CARTESIAN_POINT('',(0.,0.,0.));\n/* second */#2=DIRECTION('',(0.,0.,1.));\n\
+                    /* never closed";
+        let instances = instances(text).expect("instances");
+        let mut ids: Vec<u64> = instances.keys().copied().collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2]);
+    }
 }

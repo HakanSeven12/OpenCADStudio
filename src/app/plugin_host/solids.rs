@@ -398,7 +398,7 @@ impl<'a> HostSession<'a> {
                         return Err(
                             "transform applies to Solid3D, Body, Region and Surface entities"
                                 .into(),
-                        )
+                        );
                     }
                 }
                 self.push_undo("Transform solid");

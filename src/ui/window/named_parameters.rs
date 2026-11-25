@@ -14,14 +14,14 @@
 //! undefined-reference problems across rows immediately, before Apply.
 
 use crate::app::Message;
-use crate::scene::named_parameters::ParameterTable;
 use crate::scene::Scene;
+use crate::scene::named_parameters::ParameterTable;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use document::types::Handle;
 use document::EntityType;
+use document::types::Handle;
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, tooltip, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input, tooltip};
 use iced::{Background, Element, Length, Theme};
 
 /// Short "Kind handle" label for an entity without a user-facing name.

@@ -520,6 +520,13 @@ fn record_test_dispatch(notification: &HostNotification) {
                 ""
             }
         ),
+        // API v29 (S08 equivalence): one entry per owner-targeted surface
+        // event; identity is the per-surface sequence, so the log keeps it.
+        HostNotification::PanelSurfaceEvent {
+            panel_id,
+            sequence,
+            event,
+        } => format!("PanelSurfaceEvent({panel_id}, seq {sequence}, {event:?})"),
         _ => "Other".to_string(),
     };
     TEST_DISPATCH_LOG.with(|log| log.borrow_mut().push(kind));

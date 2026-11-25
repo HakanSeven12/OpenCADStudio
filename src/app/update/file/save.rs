@@ -1087,7 +1087,22 @@ impl OpenCADStudio {
         let capture_ready =
             self.thumbnail_capture_clean && self.pending_native_thumbnail_save.is_none();
         if self.active_save_jobs.contains_key(&tab_id) {
-            if purpose != crate::app::SavePurpose::Autosave {
+            if purpose != crate::app::SavePurpose::Autosave && self.autosave_is_running(tab_id) {
+                // The autosave writes only the recovery copy.
+                self.saves_after_autosave.insert(
+                    tab_id,
+                    crate::app::PendingNativeThumbnailSave {
+                        tab_id,
+                        path,
+                        version,
+                        purpose,
+                        continuation,
+                        set_current_path,
+                        check_external_change,
+                        allow_conversion_loss,
+                    },
+                );
+            } else if purpose != crate::app::SavePurpose::Autosave {
                 self.command_line
                     .push_info(crate::t!("Save already running for this drawing.").as_ref());
             }
@@ -1254,6 +1269,9 @@ impl OpenCADStudio {
         self.save_job_serial = self.save_job_serial.wrapping_add(1);
         let job_id = self.save_job_serial;
         self.active_save_jobs.insert(tab_id, job_id);
+        if purpose == crate::app::SavePurpose::Autosave {
+            self.autosave_jobs.insert(job_id);
+        }
         let previous_autosave =
             (purpose != crate::app::SavePurpose::Autosave).then(|| self.autosave_target(i));
         let backup = purpose != crate::app::SavePurpose::Autosave && self.backup_on_save;
@@ -1440,11 +1458,51 @@ impl OpenCADStudio {
         }
     }
 
+    /// Whether the running save job of tab `tab_id` is an autosave.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn autosave_is_running(&self, tab_id: u64) -> bool {
+        self.active_save_jobs
+            .get(&tab_id)
+            .is_some_and(|job| self.autosave_jobs.contains(job))
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn on_save_finished(
         &mut self,
-        mut outcome: crate::app::SaveOutcome,
+        outcome: crate::app::SaveOutcome,
     ) -> Task<Message> {
+        let tab_id = outcome.tab_id;
+        let autosave = self.autosave_jobs.remove(&outcome.job_id);
+        let task = self.apply_save_outcome(outcome);
+        if !autosave {
+            return task;
+        }
+        Task::batch([task, self.start_save_after_autosave(tab_id)])
+    }
+
+    /// Starts the save that waited for the autosave of tab `tab_id`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start_save_after_autosave(&mut self, tab_id: u64) -> Task<Message> {
+        let Some(save) = self.saves_after_autosave.remove(&tab_id) else {
+            return Task::none();
+        };
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Task::none();
+        };
+        self.conversion_loss_allowed = save.allow_conversion_loss;
+        self.queue_native_save(
+            i,
+            save.path,
+            save.version,
+            save.purpose,
+            save.continuation,
+            save.set_current_path,
+            save.check_external_change,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_save_outcome(&mut self, mut outcome: crate::app::SaveOutcome) -> Task<Message> {
         let latest = self.active_save_jobs.get(&outcome.tab_id).copied() == Some(outcome.job_id);
         if latest {
             self.active_save_jobs.remove(&outcome.tab_id);

@@ -20,8 +20,8 @@ use crate::ui::dock::PanelId;
 use crate::ui::kit;
 use document::objects::SolidHistoryOperation;
 use document::{Document, EntityType, Handle};
-use iced::widget::column;
 use iced::Element;
+use iced::widget::column;
 
 /// The three world planes, with the argument `CREATESKETCH` takes for each.
 const ORIGIN_PLANES: [(&str, &str); 3] = [("XY", "XY"), ("XZ", "XZ"), ("YZ", "YZ")];

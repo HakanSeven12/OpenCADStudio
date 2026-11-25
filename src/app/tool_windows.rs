@@ -72,8 +72,8 @@ impl ModalKind {
         }
     }
 
-    /// A question or a notice: its window is the size of its content and
-    /// cannot be resized (#3241). Stretching it only adds empty space, and
+    /// A question or a notice: its window opens at the size of its content,
+    /// whatever size was remembered, and cannot be made smaller (#3241):
     /// shrinking it clips the buttons.
     pub(crate) fn fixed_size(self) -> bool {
         use ModalKind as K;
@@ -293,6 +293,15 @@ impl OpenCADStudio {
         let task = self.update_guarded(msg);
         #[cfg(target_arch = "wasm32")]
         let task = self.update(msg);
+        if let Some(text) = crate::scene::view::draw_guard::take_notice() {
+            self.command_line.push_error(
+                crate::tf!(
+                    "Internal error while drawing: {}. Save your work under a new name.",
+                    text
+                )
+                .as_ref(),
+            );
+        }
         let settled = self.settle_tool_windows();
         Task::batch([task, settled])
     }
@@ -923,6 +932,13 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn os_window_moved(&mut self, id: iced::window::Id, at: Point) {
+        if self.main_window == Some(id) {
+            // Minimizing parks the window off screen: keep where it was.
+            if at.x > -10000.0 && at.y > -10000.0 {
+                *MAIN_WINDOW_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(at);
+            }
+            return;
+        }
         if let Some(window) = self.os_windows.iter_mut().find(|window| window.id == id) {
             if window.placing {
                 // The window's own move to its place is still to come.
@@ -1086,13 +1102,26 @@ impl OpenCADStudio {
                         h,
                     }
                 });
+            // A dialog without a place of its own, and every prompt (save on
+            // exit and the like), comes up over the main window.
+            let placement =
+                if kind.fixed_size() || !placement.x.is_finite() || !placement.y.is_finite() {
+                    centred_over_main(
+                        placement,
+                        *MAIN_WINDOW_AT.lock().unwrap_or_else(|e| e.into_inner()),
+                        self.win_size,
+                        crate::ui::icons::scale_factor(),
+                    )
+                } else {
+                    placement
+                };
             // A dialog opened from another dialog's window comes up in front
             // of it, not behind the window that was clicked (#2750).
             let (id, open) = open_window(
                 placement,
                 self.modal_title_for(kind),
                 true,
-                !kind.fixed_size(),
+                kind.fixed_size(),
             );
             if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
                 tool.window = Some(id);
@@ -1125,7 +1154,7 @@ impl OpenCADStudio {
                     h: h.max(PALLET_WINDOW_MIN_H) + HEADER_H,
                 };
             }
-            let (id, open) = open_window(placement, panel.title().to_string(), false, true);
+            let (id, open) = open_window(placement, panel.title().to_string(), false, false);
             self.os_windows
                 .push(OsWindow::new(id, Detached::Panel(panel), placement, None));
             tasks.push(open);
@@ -1315,13 +1344,38 @@ pub(crate) fn float_os_windows(
         })
 }
 
+/// Where the main window was last moved to (logical, its top-left corner).
+#[cfg(not(target_arch = "wasm32"))]
+static MAIN_WINDOW_AT: std::sync::Mutex<Option<Point>> = std::sync::Mutex::new(None);
+
+/// `placement` centred over the main window (`at` = its logical top-left
+/// corner, `main` = its logical size, `scale` = its scale factor), so a
+/// dialog comes up on the monitor the app is on, not on the primary one
+/// (`Position::Centered`). Unchanged while the main window's place is unknown.
+#[cfg(not(target_arch = "wasm32"))]
+fn centred_over_main(
+    placement: WindowPlacement,
+    at: Option<Point>,
+    main: (f32, f32),
+    scale: f32,
+) -> WindowPlacement {
+    match at {
+        Some(at) if main.0 > 0.0 && main.1 > 0.0 => WindowPlacement {
+            x: (at.x + ((main.0 - placement.w) / 2.0).max(0.0)) * scale,
+            y: (at.y + ((main.1 - placement.h) / 2.0).max(0.0)) * scale,
+            ..placement
+        },
+        _ => placement,
+    }
+}
+
 /// Open a window of its own at `placement` (centred when it has no place).
 #[cfg(not(target_arch = "wasm32"))]
 fn open_window(
     placement: WindowPlacement,
     _title: String,
     focus: bool,
-    resizable: bool,
+    fixed: bool,
 ) -> (iced::window::Id, Task<Message>) {
     // The main window's scale is the best guess before the window exists;
     // `os_window_scale` puts it right once it knows its own.
@@ -1334,8 +1388,16 @@ fn open_window(
     let (id, open) = iced::window::open(iced::window::Settings {
         size: Size::new(placement.w.max(240.0), placement.h.max(160.0)),
         position,
-        min_size: Some(Size::new(240.0, 160.0)),
-        resizable,
+        // A question opens at its content's size and cannot be made smaller,
+        // so its buttons are never clipped (#3241). It can still be made
+        // larger: where the content measured short of what it draws, its
+        // buttons stay reachable (#3557).
+        min_size: Some(if fixed {
+            Size::new(placement.w.max(240.0), placement.h.max(160.0))
+        } else {
+            Size::new(240.0, 160.0)
+        }),
+        resizable: true,
         exit_on_close_request: false,
         // Opened from the app, which has the focus: above the main window.
         level: iced::window::Level::AlwaysOnTop,
@@ -1361,6 +1423,21 @@ fn open_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prompt opens over the main window on whichever monitor it is, not
+    /// centred on the primary one; with the main window's place unknown the
+    /// placement is left alone (centred by the system).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn prompt_is_centred_over_the_main_window() {
+        let prompt = WindowPlacement { x: f32::NAN, y: f32::NAN, w: 400.0, h: 200.0 };
+        // Main window on a second monitor to the right, 1600 x 900 logical, scale 1.5.
+        let placed = centred_over_main(prompt, Some(Point::new(1920.0, 0.0)), (1600.0, 900.0), 1.5);
+        assert_eq!((placed.x, placed.y), ((1920.0 + 600.0) * 1.5, 350.0 * 1.5));
+        assert_eq!((placed.w, placed.h), (400.0, 200.0));
+        let unknown = centred_over_main(prompt, None, (1600.0, 900.0), 1.5);
+        assert!(unknown.x.is_nan() && unknown.y.is_nan());
+    }
 
     /// An unplaced window must not make the whole settings file unreadable.
     #[test]

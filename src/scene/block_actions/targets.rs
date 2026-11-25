@@ -23,7 +23,7 @@ pub(super) fn geometry(
         }
         // The base point parameter only places the insertion grip; the
         // geometry an action moves does not depend on it.
-        if matches!(kind, Kind::Stretch | Kind::Move)
+        if matches!(kind, Kind::Stretch | Kind::PolarStretch | Kind::Move)
             && super::super::block_basepoint::parameter(doc, definition)
                 .is_some_and(|(basepoint, _)| basepoint == *handle)
         {

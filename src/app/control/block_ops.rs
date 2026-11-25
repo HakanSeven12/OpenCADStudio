@@ -242,6 +242,16 @@ pub(crate) fn resolve_effective_block(
         }
     }
 
+    // 5. Fallback: a copy BricsCAD made of one of its parametric blocks, for a
+    // reference in another state, names that block in its own objects. The
+    // steps above find nothing for it or the copy itself.
+    if let Some(original) = evaluated_handle
+        .filter(|copy| def_handle.is_none_or(|definition| definition == *copy))
+        .and_then(|copy| crate::scene::bricscad_parameters::original_block(doc, copy))
+    {
+        def_handle = Some(original);
+    }
+
     if let Some(def_h) = def_handle {
         if let Some(def_rec) = doc.block_records.iter().find(|r| r.handle == def_h) {
             let true_name = doc
@@ -258,7 +268,7 @@ pub(crate) fn resolve_effective_block(
         }
     }
 
-    // 5. Fallback: check AcDbDynamicBlockTrueName XData on Insert or evaluated BlockRecord
+    // 6. Fallback: check AcDbDynamicBlockTrueName XData on Insert or evaluated BlockRecord
     let xdata_true_name = insert
         .common
         .extended_data

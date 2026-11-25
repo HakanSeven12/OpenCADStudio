@@ -119,6 +119,7 @@ impl OpenCADStudio {
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
             aperture: self.snapper.osnap_radius_px,
+            autosnap_magnet: self.autosnap_magnet,
             hatch_associative: self.hatch_associative,
             hatch_gap_tolerance: self.hatch_gap_tolerance,
             hatch_start_method: self.hatch_prefs.method,
@@ -290,6 +291,15 @@ impl OpenCADStudio {
             block_favorites: self.block_palette.favorites.clone(),
             block_libraries: self.block_palette.libraries.clone(),
             block_palette_view: self.block_palette.view as u8,
+            block_palette_tab: self.block_palette.tab.index(),
+            block_library_folder: self
+                .block_palette
+                .library_dir
+                .as_ref()
+                .filter(|dir| dir.is_dir())
+                .or(self.block_palette.library_resume.as_ref())
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_default(),
             block_insert: self.block_palette.options.clone(),
             block_mru_list: self.block_mru_list,
             block_redefine_mode: self.block_redefine_mode,
@@ -329,6 +339,7 @@ impl OpenCADStudio {
         self.zoom_factor_input = self.zoom_factor.to_string();
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
+        self.autosnap_magnet = s.autosnap_magnet;
         self.snapper.osnap_radius_px = if s.aperture.is_finite() {
             s.aperture.clamp(
                 crate::snap::MIN_OSNAP_RADIUS_PX,
@@ -596,6 +607,10 @@ impl OpenCADStudio {
         self.block_palette.libraries = s.block_libraries.clone();
         self.block_palette.view =
             crate::ui::window::block_palette::ViewMode::from_u8(s.block_palette_view);
+        self.block_palette.tab =
+            crate::ui::window::block_palette::Tab::from_u8(s.block_palette_tab);
+        self.block_palette.library_resume = Some(std::path::PathBuf::from(&s.block_library_folder))
+            .filter(|dir| !s.block_library_folder.is_empty() && dir.is_dir());
         self.block_palette.set_options(s.block_insert.clone());
         self.trim_recent_blocks();
         // Push restored display defaults onto every drawing tab that exists now.
@@ -935,6 +950,7 @@ impl OpenCADStudio {
             show_graphic_attributes: self.show_graphic_attributes,
             show_tool_palettes: self.show_tool_palettes,
             show_command_history: self.show_command_history,
+            geometry_cleanup: self.geometry_cleanup.settings.clone(),
             show_layers: self.show_layers,
             show_block_palette: self.show_block_palette,
             show_external_references: self.show_external_references,
@@ -1019,6 +1035,7 @@ impl OpenCADStudio {
         self.show_tool_palettes = cfg.show_tool_palettes;
         self.ribbon.show_tool_palettes = self.show_tool_palettes;
         self.show_command_history = cfg.show_command_history;
+        self.geometry_cleanup.settings = cfg.geometry_cleanup.clone();
         if self.show_command_history {
             self.sync_command_history_panel();
         }

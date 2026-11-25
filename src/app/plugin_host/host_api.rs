@@ -471,43 +471,98 @@ impl HostApi for HostSession<'_> {
     /// V29: publish the panel's scene for the authenticated owner. Attachment
     /// and ownership resolve here; the store applies the revision rules and
     /// checks the owner again.
+
     fn panel_surface_publish_for_plugin(
         &mut self,
         plugin_id: &str,
         panel_id: &str,
-        surface: ocs_plugin_api::scene::PanelSurface,
+        scene: ocs_plugin_api::scene::PanelScene,
     ) -> Result<ocs_plugin_api::scene::SceneRevision, ocs_plugin_api::scene::SurfaceReject> {
-        use ocs_plugin_api::scene::SurfaceRejectCode;
-        if plugin_id.is_empty() || panel_id.trim().is_empty() {
-            return Err(ocs_plugin_api::scene::SurfaceReject {
-                code: SurfaceRejectCode::Unattached,
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::scene::SurfaceReject {
+                code,
                 current_revision: None,
-            });
-        }
-        // Alias-resolve, then enforce F5's honest distinctions: a panel this
-        // plugin never registered is `Unattached`; one registered by a
-        // different plugin is `OwnedByOther`.
-        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
-            return Err(ocs_plugin_api::scene::SurfaceReject {
-                code: SurfaceRejectCode::Unattached,
+            })?;
+        self.app.panel_surfaces.publish(plugin_id, &resolved, scene)
+    }
+
+    /// V29 (additive): publish the panel's WIDGET surface from the
+    /// authenticated transport owner; the widget tier's independent
+    /// revision space.
+    fn panel_widget_publish_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::widget::WidgetSurface,
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::widget::WidgetReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::widget::WidgetReject {
+                code: code.into(),
                 current_revision: None,
-            });
-        };
-        let Some(registered) = self.app.plugin_panels.get(&resolved) else {
-            return Err(ocs_plugin_api::scene::SurfaceReject {
-                code: SurfaceRejectCode::Unattached,
-                current_revision: None,
-            });
-        };
-        if registered.owner_plugin_id.as_deref() != Some(plugin_id) {
-            return Err(ocs_plugin_api::scene::SurfaceReject {
-                code: SurfaceRejectCode::OwnedByOther,
-                current_revision: None,
-            });
-        }
+            })?;
         self.app
             .panel_surfaces
-            .publish(plugin_id, &resolved, surface)
+            .publish_widget(plugin_id, &resolved, surface)
+    }
+
+    /// V29 (additive): install a bounded widget page atomically from the
+    /// authenticated transport owner (lazy expansion / paging).
+    fn panel_surface_page_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        page: ocs_plugin_api::widget::WidgetPage,
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::widget::WidgetReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::widget::WidgetReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
+        self.app
+            .panel_surfaces
+            .install_widget_page(plugin_id, &resolved, page)
+    }
+
+    /// V29 (additive): publish the panel's TABLE surface from the
+    /// authenticated transport owner; the table tier's independent
+    /// revision space.
+    fn panel_table_publish_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::tables::TableSurface,
+    ) -> Result<ocs_plugin_api::tables::TableRevision, ocs_plugin_api::tables::TableReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::tables::TableReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
+        self.app
+            .panel_surfaces
+            .publish_table(plugin_id, &resolved, surface)
+    }
+
+    /// V29 (additive): patch the panel's stored TABLE atomically from
+    /// the authenticated transport owner (cell/row ops).
+    fn panel_surface_table_patch_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        patch: ocs_plugin_api::tables::TablePatch,
+    ) -> Result<ocs_plugin_api::tables::TableRevision, ocs_plugin_api::tables::TableReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::tables::TableReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
+        self.app
+            .panel_surfaces
+            .patch_table(plugin_id, &resolved, patch)
     }
 
     /// V29 (additive): patch the panel's stored scene atomically from the

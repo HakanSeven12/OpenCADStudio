@@ -268,7 +268,8 @@ impl MTextPreview {
                 } else {
                     best = b.vis;
                     // After the glyph centre → caret sits after this char.
-                    if wx > (b.xmin + b.xmax) * 0.5 {
+                    // A line's zero-width start slot is a caret place itself.
+                    if b.xmax > b.xmin && wx > (b.xmin + b.xmax) * 0.5 {
                         best = b.vis + 1;
                     }
                 }

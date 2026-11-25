@@ -115,18 +115,25 @@ fn reload_checks_basis_and_unit_but_guid_mismatch_keeps_loading_policy() {
     let mut changed = d.external_sources[0].source.clone();
     let IfccadExternalSourceContent::Dwg {
         fingerprint_guid, ..
-    } = &mut changed;
+    } = &mut changed
+    else {
+        panic!("DWG source expected")
+    };
     *fingerprint_guid = Some("11111111-2222-3333-4444-555555555555".into());
     assert!(session
         .check_external_source_reload(handle, &changed)
         .is_ok());
-    let IfccadExternalSourceContent::Dwg { base_point, .. } = &mut changed;
+    let IfccadExternalSourceContent::Dwg { base_point, .. } = &mut changed else {
+        panic!("DWG source expected")
+    };
     base_point[0] += 1.;
     assert!(session
         .check_external_source_reload(handle, &changed)
         .is_err());
     let mut changed = d.external_sources[0].source.clone();
-    let IfccadExternalSourceContent::Dwg { insertion_unit, .. } = &mut changed;
+    let IfccadExternalSourceContent::Dwg { insertion_unit, .. } = &mut changed else {
+        panic!("DWG source expected")
+    };
     *insertion_unit = Some("mm".into());
     assert!(session
         .check_external_source_reload(handle, &changed)

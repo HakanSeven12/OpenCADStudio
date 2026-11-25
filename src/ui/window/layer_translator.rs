@@ -6,7 +6,7 @@
 //! which is only applied when Translate is pressed — so a mapping can be
 //! reconsidered, and a translation is one undo step rather than many.
 
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, scrollable, text};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;

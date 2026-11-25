@@ -136,6 +136,10 @@ pub enum PanelId {
     PointCloudManager,
     /// Block counts (COUNTLIST).
     Count,
+    /// Gaps, overshoots and undershoots (GEOMETRYCLEANUPOPEN).
+    GeometryCleanup,
+    /// Visibility states of a BricsCAD parametric block (VISIBILITYSTATESPANELOPEN).
+    BricscadVisibility,
     /// The open sheet sets: subsets and sheets.
     SheetSetManager,
     /// The Layer Manager (LAYERS).
@@ -154,7 +158,7 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 17] = [
+    pub const ALL: [PanelId; 19] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
@@ -166,6 +170,8 @@ impl PanelId {
         PanelId::NodeGraph,
         PanelId::PointCloudManager,
         PanelId::Count,
+        PanelId::GeometryCleanup,
+        PanelId::BricscadVisibility,
         PanelId::SheetSetManager,
         PanelId::Layers,
         PanelId::Laywalk,
@@ -188,6 +194,8 @@ impl PanelId {
             PanelId::NodeGraph => "Node Graph",
             PanelId::PointCloudManager => "Point Cloud Manager",
             PanelId::Count => "Count",
+            PanelId::GeometryCleanup => "Geometry Cleanup",
+            PanelId::BricscadVisibility => "Visibility States",
             PanelId::SheetSetManager => "Sheet Set Manager",
             PanelId::Layers => "Layer Manager",
             PanelId::Laywalk => "Layer Walk",
@@ -214,6 +222,8 @@ impl PanelId {
             PanelId::NodeGraph => crate::ui::icons::NODE_GRAPH,
             PanelId::PointCloudManager => include_bytes!("../../assets/icons/pc_attach.svg"),
             PanelId::Count => include_bytes!("../../assets/icons/data_extract.svg"),
+            PanelId::GeometryCleanup => crate::ui::window::geometry_cleanup::ICON,
+            PanelId::BricscadVisibility => include_bytes!("../../assets/icons/ui/eye.svg"),
             PanelId::SheetSetManager => include_bytes!("../../assets/icons/sheetset.svg"),
             PanelId::Layers => include_bytes!("../../assets/icons/layers/panel.svg"),
             PanelId::Laywalk => include_bytes!("../../assets/icons/layers/laywalk.svg"),
@@ -238,6 +248,8 @@ impl PanelId {
             PanelId::NodeGraph => 220.0,
             PanelId::PointCloudManager => 280.0,
             PanelId::Count => 280.0,
+            PanelId::GeometryCleanup => 280.0,
+            PanelId::BricscadVisibility => 280.0,
             PanelId::SheetSetManager => 280.0,
             PanelId::Layers => 560.0,
             PanelId::Laywalk => 420.0,

@@ -382,7 +382,7 @@ impl Security {
 
     /// Revision 5 (SHA-256) or 6 (algorithm 2.B) password hash.
     fn hash_r56(&self, password: &[u8], salt: &[u8], user_key: &[u8]) -> Option<[u8; 32]> {
-        use aes::cipher::{BlockEncrypt, KeyInit};
+        use aes::cipher::{BlockCipherEncrypt, KeyInit};
         use sha2::{Digest, Sha256, Sha384, Sha512};
         let password = &password[..password.len().min(127)];
         let mut k: Vec<u8> = Sha256::new()
@@ -407,7 +407,10 @@ impl Security {
                     for (b, v) in block.iter_mut().zip(iv) {
                         *b ^= v;
                     }
-                    cipher.encrypt_block(block.into());
+                    let Ok(block): Result<&mut aes::Block, _> = block.try_into() else {
+                        return None;
+                    };
+                    cipher.encrypt_block(&mut *block);
                     iv.copy_from_slice(block);
                 }
                 let modulo = k1[..16].iter().map(|b| u32::from(*b)).sum::<u32>() % 3;

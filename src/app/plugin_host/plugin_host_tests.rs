@@ -26,12 +26,14 @@ fn linetype_operations_follow_the_shared_rules() {
     app.tabs[0].is_start = false;
     let mut host = HostSession::new(&mut app, 0);
 
-    assert!(host
-        .linetype_operation(create("Gap First", &[-1.0, 1.0]))
-        .is_err());
-    assert!(host
-        .linetype_operation(create("Comma,Name", &[1.0, -1.0]))
-        .is_err());
+    assert!(
+        host.linetype_operation(create("Gap First", &[-1.0, 1.0]))
+            .is_err()
+    );
+    assert!(
+        host.linetype_operation(create("Comma,Name", &[1.0, -1.0]))
+            .is_err()
+    );
     assert!(
         host.linetype_operation(create("dashed", &[1.0, -1.0]))
             .is_err(),
@@ -344,10 +346,11 @@ fn nested_insert_attribute_crud_uses_parent_storage_and_undo() {
         assert!(matches!(host.host_model_entity(attribute_handle),
                 Some(EntityType::AttributeEntity(value)) if value.value == "PN-101"));
         let view = ocs_plugin_api::shm::DocumentViewDataV4::from(host.document());
-        assert!(view
-            .entities
-            .iter()
-            .any(|entity| entity.handle == attribute_handle.value()));
+        assert!(
+            view.entities
+                .iter()
+                .any(|entity| entity.handle == attribute_handle.value())
+        );
 
         let mut changed = host.host_model_entity(attribute_handle).unwrap();
         let EntityType::AttributeEntity(value) = &mut changed else {
@@ -426,17 +429,19 @@ fn entity_transaction_validates_before_mutation_and_undoes_as_one_step() {
         }
         let mut invalid = b.clone();
         invalid.common_mut().owner_handle = Handle::new(99999);
-        assert!(host
-            .update_entities_transaction("Move points", vec![a.clone(), invalid])
-            .is_err());
+        assert!(
+            host.update_entities_transaction("Move points", vec![a.clone(), invalid])
+                .is_err()
+        );
         let mut invalid_geometry = b.clone();
         if let EntityType::Point(p) = &mut invalid_geometry {
             p.location.x = f64::NAN;
         }
-        assert!(host
-            .update_entities_transaction("Move points", vec![a.clone(), invalid_geometry])
-            .unwrap_err()
-            .contains("Point.location"));
+        assert!(
+            host.update_entities_transaction("Move points", vec![a.clone(), invalid_geometry])
+                .unwrap_err()
+                .contains("Point.location")
+        );
         assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
         assert!(
             matches!(host.document().get_entity(first), Some(EntityType::Point(p)) if p.location.x == 1.0)
@@ -508,9 +513,11 @@ fn run_mesh_lifecycle(case: &MeshCase) {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
@@ -715,9 +722,13 @@ fn run_mesh_lifecycle(case: &MeshCase) {
         );
     }
     let (first_patch, _) = case.rejects[0];
-    dispatch(&mut host, &format!(
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Atomic', [{{'handle':{h}, 'layer':'Other'}}, {{'handle':{h}, {first_patch}}}])",
-            h = handle.value()));
+            h = handle.value()
+        ),
+    );
     assert_eq!(host.document().get_entity(handle), Some(&expected));
 
     let dwg = crate::io::load_bytes(
@@ -801,10 +812,12 @@ fn run_mesh_lifecycle(case: &MeshCase) {
                 .unwrap(),
         ),
     ] {
-        assert!(crate::io::load_bytes(name, bytes)
-            .unwrap()
-            .get_entity(handle)
-            .is_none());
+        assert!(
+            crate::io::load_bytes(name, bytes)
+                .unwrap()
+                .get_entity(handle)
+                .is_none()
+        );
     }
     drop(process);
     drop(host);
@@ -834,88 +847,124 @@ fn run_mesh_lifecycle(case: &MeshCase) {
 #[test]
 fn staged_python_polygon_mesh_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "verts = [{'location': P(i, j, 0.0)} for i in range(3) for j in range(3)]\n",
-                "doc.create_entity('PolygonMesh', m_vertex_count=3, n_vertex_count=3, vertices=verts)\n"),
-            edit: concat!(
-                "mesh = doc.entities[HANDLE]\n",
-                "verts = mesh.vertices\n",
-                "verts[4]['location'] = P(1.0, 1.0, 2.5)\n",
-                "with doc.transaction('Edit mesh'):\n",
-                "    mesh.vertices = verts\n",
-                "    mesh.m_smooth_density = 6\n",
-                "    mesh.n_smooth_density = 6\n",
-                "    mesh.smooth_type = 'Cubic'\n",
-                "doc.selection = [mesh]\n"),
-            rejects: &[
-                ("'m_vertex_count':4", "requires 12"),
-                ("'n_vertex_count':1", "at least 2"),
-                ("'m_smooth_density':-1", "non-negative"),
-                ("'elevation':float('nan')", "finite"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-                ("'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}}]*9", "finite"),
-                ("'smooth_type':'Spline'", "unsupported"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::PolygonMesh(_)),
-            digest: |entity| match entity {
-                EntityType::PolygonMesh(m) => format!("{}x{} v{} z{} d{}/{} {:?}", m.m_vertex_count, m.n_vertex_count,
-                    m.vertices.len(), m.vertices[4].location.z, m.m_smooth_density, m.n_smooth_density, m.smooth_type),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::PolygonMesh(m) = entity { m.vertices[0].location.z = 1.0; },
-            expect_created: "3x3 v9 z0 d0/0 NoSmooth",
-            expect_edited: "3x3 v9 z2.5 d6/6 Cubic",
-            expect_reedited: "3x3 v9 z2.5 d6/6 Cubic",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "verts = [{'location': P(i, j, 0.0)} for i in range(3) for j in range(3)]\n",
+            "doc.create_entity('PolygonMesh', m_vertex_count=3, n_vertex_count=3, vertices=verts)\n"
+        ),
+        edit: concat!(
+            "mesh = doc.entities[HANDLE]\n",
+            "verts = mesh.vertices\n",
+            "verts[4]['location'] = P(1.0, 1.0, 2.5)\n",
+            "with doc.transaction('Edit mesh'):\n",
+            "    mesh.vertices = verts\n",
+            "    mesh.m_smooth_density = 6\n",
+            "    mesh.n_smooth_density = 6\n",
+            "    mesh.smooth_type = 'Cubic'\n",
+            "doc.selection = [mesh]\n"
+        ),
+        rejects: &[
+            ("'m_vertex_count':4", "requires 12"),
+            ("'n_vertex_count':1", "at least 2"),
+            ("'m_smooth_density':-1", "non-negative"),
+            ("'elevation':float('nan')", "finite"),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+            (
+                "'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}}]*9",
+                "finite",
+            ),
+            ("'smooth_type':'Spline'", "unsupported"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::PolygonMesh(_)),
+        digest: |entity| match entity {
+            EntityType::PolygonMesh(m) => format!(
+                "{}x{} v{} z{} d{}/{} {:?}",
+                m.m_vertex_count,
+                m.n_vertex_count,
+                m.vertices.len(),
+                m.vertices[4].location.z,
+                m.m_smooth_density,
+                m.n_smooth_density,
+                m.smooth_type
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::PolygonMesh(m) = entity {
+                m.vertices[0].location.z = 1.0;
+            }
+        },
+        expect_created: "3x3 v9 z0 d0/0 NoSmooth",
+        expect_edited: "3x3 v9 z2.5 d6/6 Cubic",
+        expect_reedited: "3x3 v9 z2.5 d6/6 Cubic",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn staged_python_polyface_mesh_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "verts = [{'location': P(0.0, 0.0, 0.0)}, {'location': P(4.0, 0.0, 0.0)},\n",
-                "         {'location': P(4.0, 4.0, 0.0)}, {'location': P(0.0, 4.0, 0.0)}]\n",
-                "faces = [{'index1': 1, 'index2': 2, 'index3': 3}, {'index1': 1, 'index2': 3, 'index3': 4}]\n",
-                "doc.create_entity('PolyfaceMesh', vertices=verts, faces=faces)\n"),
-            edit: concat!(
-                "mesh = doc.entities[HANDLE]\n",
-                "verts = mesh.vertices\n",
-                "verts[2]['location'] = P(4.0, 4.0, 3.0)\n",
-                "verts.append({'location': P(2.0, 6.0, 0.0)})\n",
-                "faces = mesh.faces\n",
-                "faces.append({'index1': 3, 'index2': -4, 'index3': 5})\n",
-                "with doc.transaction('Edit mesh'):\n",
-                "    mesh.vertices = verts\n",
-                "    mesh.faces = faces\n",
-                "doc.selection = [mesh]\n"),
-            rejects: &[
-                ("'faces':[{'index1':1,'index2':2,'index3':9}]", "references vertex 9"),
-                ("'faces':[{'index1':1,'index2':2}]", "at least 3 vertex indices"),
-                ("'faces':[]", "at least 1 face"),
-                ("'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 3"),
-                ("'thickness':float('inf')", "finite"),
-                ("'seqend_handle':5", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::PolyfaceMesh(_)),
-            digest: |entity| match entity {
-                EntityType::PolyfaceMesh(m) => format!("v{} f{} z{} last {:?}", m.vertices.len(), m.faces.len(),
-                    m.vertices[2].location.z,
-                    m.faces.last().map(|f| (f.index1, f.index2, f.index3))),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::PolyfaceMesh(m) = entity { m.vertices[0].location.z = 1.0; },
-            expect_created: "v4 f2 z0 last Some((1, 3, 4))",
-            expect_edited: "v5 f3 z3 last Some((3, -4, 5))",
-            expect_reedited: "v5 f3 z3 last Some((3, -4, 5))",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "verts = [{'location': P(0.0, 0.0, 0.0)}, {'location': P(4.0, 0.0, 0.0)},\n",
+            "         {'location': P(4.0, 4.0, 0.0)}, {'location': P(0.0, 4.0, 0.0)}]\n",
+            "faces = [{'index1': 1, 'index2': 2, 'index3': 3}, {'index1': 1, 'index2': 3, 'index3': 4}]\n",
+            "doc.create_entity('PolyfaceMesh', vertices=verts, faces=faces)\n"
+        ),
+        edit: concat!(
+            "mesh = doc.entities[HANDLE]\n",
+            "verts = mesh.vertices\n",
+            "verts[2]['location'] = P(4.0, 4.0, 3.0)\n",
+            "verts.append({'location': P(2.0, 6.0, 0.0)})\n",
+            "faces = mesh.faces\n",
+            "faces.append({'index1': 3, 'index2': -4, 'index3': 5})\n",
+            "with doc.transaction('Edit mesh'):\n",
+            "    mesh.vertices = verts\n",
+            "    mesh.faces = faces\n",
+            "doc.selection = [mesh]\n"
+        ),
+        rejects: &[
+            (
+                "'faces':[{'index1':1,'index2':2,'index3':9}]",
+                "references vertex 9",
+            ),
+            (
+                "'faces':[{'index1':1,'index2':2}]",
+                "at least 3 vertex indices",
+            ),
+            ("'faces':[]", "at least 1 face"),
+            (
+                "'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]",
+                "at least 3",
+            ),
+            ("'thickness':float('inf')", "finite"),
+            ("'seqend_handle':5", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::PolyfaceMesh(_)),
+        digest: |entity| match entity {
+            EntityType::PolyfaceMesh(m) => format!(
+                "v{} f{} z{} last {:?}",
+                m.vertices.len(),
+                m.faces.len(),
+                m.vertices[2].location.z,
+                m.faces.last().map(|f| (f.index1, f.index2, f.index3))
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::PolyfaceMesh(m) = entity {
+                m.vertices[0].location.z = 1.0;
+            }
+        },
+        expect_created: "v4 f2 z0 last Some((1, 3, 4))",
+        expect_edited: "v5 f3 z3 last Some((3, -4, 5))",
+        expect_reedited: "v5 f3 z3 last Some((3, -4, 5))",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -980,40 +1029,52 @@ fn staged_python_mesh_lifecycle_over_real_ipc() {
 #[test]
 fn staged_python_helix_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('Helix', axis_base_point=P(0.0, 0.0, 0.0), axis_vector=P(0.0, 0.0, 1.0),\n",
-                "    start_point=P(5.0, 0.0, 0.0), radius=5.0, turns=3.0, turn_height=2.0)\n"),
-            edit: concat!(
-                "helix = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit helix'):\n",
-                "    helix.turns = 5.0\n",
-                "    helix.handedness = False\n",
-                "doc.selection = [helix]\n"),
-            rejects: &[
-                ("'radius':0.0", "greater than zero"),
-                ("'turns':-1.0", "greater than zero"),
-                ("'turn_height':float('nan')", "greater than zero"),
-                ("'axis_vector':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-                ("'start_point':{'x':0.0,'y':0.0,'z':3.0}", "on the axis"),
-                ("'spline':{}", "read-only"),
-                ("'major_version':1", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Helix(_)),
-            digest: |entity| match entity {
-                EntityType::Helix(h) => format!("r{} t{} h{} endz{:.1} ccw{} cp{}", h.radius, h.turns, h.turn_height,
-                    h.spline.control_points.last().map_or(f64::NAN, |p| p.z), h.handedness,
-                    !h.spline.control_points.is_empty()),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Helix(h) = entity { h.turns = 6.0; },
-            expect_created: "r5 t3 h2 endz6.0 ccwtrue cptrue",
-            expect_edited: "r5 t5 h2 endz10.0 ccwfalse cptrue",
-            expect_reedited: "r5 t6 h2 endz10.0 ccwfalse cptrue",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('Helix', axis_base_point=P(0.0, 0.0, 0.0), axis_vector=P(0.0, 0.0, 1.0),\n",
+            "    start_point=P(5.0, 0.0, 0.0), radius=5.0, turns=3.0, turn_height=2.0)\n"
+        ),
+        edit: concat!(
+            "helix = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit helix'):\n",
+            "    helix.turns = 5.0\n",
+            "    helix.handedness = False\n",
+            "doc.selection = [helix]\n"
+        ),
+        rejects: &[
+            ("'radius':0.0", "greater than zero"),
+            ("'turns':-1.0", "greater than zero"),
+            ("'turn_height':float('nan')", "greater than zero"),
+            ("'axis_vector':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+            ("'start_point':{'x':0.0,'y':0.0,'z':3.0}", "on the axis"),
+            ("'spline':{}", "read-only"),
+            ("'major_version':1", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Helix(_)),
+        digest: |entity| match entity {
+            EntityType::Helix(h) => format!(
+                "r{} t{} h{} endz{:.1} ccw{} cp{}",
+                h.radius,
+                h.turns,
+                h.turn_height,
+                h.spline.control_points.last().map_or(f64::NAN, |p| p.z),
+                h.handedness,
+                !h.spline.control_points.is_empty()
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Helix(h) = entity {
+                h.turns = 6.0;
+            }
+        },
+        expect_created: "r5 t3 h2 endz6.0 ccwtrue cptrue",
+        expect_edited: "r5 t5 h2 endz10.0 ccwfalse cptrue",
+        expect_reedited: "r5 t6 h2 endz10.0 ccwfalse cptrue",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -1022,92 +1083,129 @@ fn staged_python_raster_image_lifecycle_over_real_ipc() {
         .save(std::env::temp_dir().join("ocs_raster_test.png"))
         .unwrap();
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('RasterImage', file_path='TMPDIR/ocs_raster_test.png',\n",
-                "    insertion_point=P(10.0, 20.0, 0.0), u_vector=P(0.5, 0.0, 0.0), v_vector=P(0.0, 0.5, 0.0))\n"),
-            edit: concat!(
-                "img = doc.entities[HANDLE]\n",
-                "cb = img.clip_boundary\n",
-                "cb['vertices'] = [{'x': 1.0, 'y': 1.0}, {'x': 7.0, 'y': 3.0}]\n",
-                "with doc.transaction('Edit image'):\n",
-                "    img.insertion_point = (12.0, 22.0, 0.0)\n",
-                "    img.u_vector = (1.0, 0.0, 0.0)\n",
-                "    img.brightness = 70\n",
-                "    img.contrast = 40\n",
-                "    img.fade = 10\n",
-                "    img.clip_boundary = cb\n",
-                "    img.clipping_enabled = True\n",
-                "doc.selection = [img]\n"),
-            rejects: &[
-                ("'file_path':'other.png'", "fixed at creation"),
-                ("'brightness':101", "within 0..=100"),
-                ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
-                ("'v_vector':{'x':2.0,'y':0.0,'z':0.0}", "not parallel"),
-                ("'size':{'x':5.0,'y':5.0}", "read-only"),
-                ("'definition_handle':5", "read-only"),
-                ("'flags':64", "unknown or out-of-range bits"),
-                ("'clip_boundary':{'vertices':[]}", "at least 2"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::RasterImage(_)),
-            digest: |entity| match entity {
-                EntityType::RasterImage(i) => format!("{} {:.1},{:.1} u{:.1} b{} c{} f{} clip{} n{} {}x{} def{}",
-                    std::path::Path::new(&i.file_path).file_name().unwrap().to_string_lossy(),
-                    i.insertion_point.x, i.insertion_point.y, i.u_vector.x, i.brightness, i.contrast, i.fade,
-                    i.clipping_enabled, i.clip_boundary.vertices.len(), i.size.x, i.size.y, i.definition_handle.is_some()),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::RasterImage(i) = entity { i.brightness = 80; },
-            expect_created: "ocs_raster_test.png 10.0,20.0 u0.5 b50 c50 f0 clipfalse n2 8x4 deftrue",
-            expect_edited: "ocs_raster_test.png 12.0,22.0 u1.0 b70 c40 f10 cliptrue n2 8x4 deftrue",
-            expect_reedited: "ocs_raster_test.png 12.0,22.0 u1.0 b80 c40 f10 cliptrue n2 8x4 deftrue",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('RasterImage', file_path='TMPDIR/ocs_raster_test.png',\n",
+            "    insertion_point=P(10.0, 20.0, 0.0), u_vector=P(0.5, 0.0, 0.0), v_vector=P(0.0, 0.5, 0.0))\n"
+        ),
+        edit: concat!(
+            "img = doc.entities[HANDLE]\n",
+            "cb = img.clip_boundary\n",
+            "cb['vertices'] = [{'x': 1.0, 'y': 1.0}, {'x': 7.0, 'y': 3.0}]\n",
+            "with doc.transaction('Edit image'):\n",
+            "    img.insertion_point = (12.0, 22.0, 0.0)\n",
+            "    img.u_vector = (1.0, 0.0, 0.0)\n",
+            "    img.brightness = 70\n",
+            "    img.contrast = 40\n",
+            "    img.fade = 10\n",
+            "    img.clip_boundary = cb\n",
+            "    img.clipping_enabled = True\n",
+            "doc.selection = [img]\n"
+        ),
+        rejects: &[
+            ("'file_path':'other.png'", "fixed at creation"),
+            ("'brightness':101", "within 0..=100"),
+            ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
+            ("'v_vector':{'x':2.0,'y':0.0,'z':0.0}", "not parallel"),
+            ("'size':{'x':5.0,'y':5.0}", "read-only"),
+            ("'definition_handle':5", "read-only"),
+            ("'flags':64", "unknown or out-of-range bits"),
+            ("'clip_boundary':{'vertices':[]}", "at least 2"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::RasterImage(_)),
+        digest: |entity| match entity {
+            EntityType::RasterImage(i) => format!(
+                "{} {:.1},{:.1} u{:.1} b{} c{} f{} clip{} n{} {}x{} def{}",
+                std::path::Path::new(&i.file_path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
+                i.insertion_point.x,
+                i.insertion_point.y,
+                i.u_vector.x,
+                i.brightness,
+                i.contrast,
+                i.fade,
+                i.clipping_enabled,
+                i.clip_boundary.vertices.len(),
+                i.size.x,
+                i.size.y,
+                i.definition_handle.is_some()
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::RasterImage(i) = entity {
+                i.brightness = 80;
+            }
+        },
+        expect_created: "ocs_raster_test.png 10.0,20.0 u0.5 b50 c50 f0 clipfalse n2 8x4 deftrue",
+        expect_edited: "ocs_raster_test.png 12.0,22.0 u1.0 b70 c40 f10 cliptrue n2 8x4 deftrue",
+        expect_reedited: "ocs_raster_test.png 12.0,22.0 u1.0 b80 c40 f10 cliptrue n2 8x4 deftrue",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn staged_python_wipeout_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('Wipeout', insertion_point=P(0.0, 0.0, 0.0),\n",
-                "    u_vector=P(10.0, 0.0, 0.0), v_vector=P(0.0, 6.0, 0.0))\n"),
-            edit: concat!(
-                "w = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit wipeout'):\n",
-                "    w.clip_type = 'Polygonal'\n",
-                "    w.clip_boundary_vertices = [{'x': -0.5, 'y': -0.5}, {'x': 0.5, 'y': -0.5}, {'x': 0.0, 'y': 0.5}]\n",
-                "    w.insertion_point = (2.0, 3.0, 0.0)\n",
-                "    w.clip_mode = 'Inside'\n",
-                "doc.selection = [w]\n"),
-            rejects: &[
-                ("'clip_boundary_vertices':[{'x':0.0,'y':0.0}]", "at least 3"),
-                ("'clip_type':'Rectangular'", "exactly 2"),
-                ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
-                ("'brightness':200", "within 0..=100"),
-                ("'size':{'x':0.0,'y':1.0}", "greater than zero"),
-                ("'insertion_point':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-                ("'definition_handle':5", "read-only"),
-                ("'clip_type':'Circle'", "unsupported"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Wipeout(_)),
-            digest: |entity| match entity {
-                EntityType::Wipeout(w) => format!("{:?} {:?} n{} at{:.1},{:.1} u{:.1} v{:.1}", w.clip_type, w.clip_mode,
-                    w.clip_boundary_vertices.len(), w.insertion_point.x, w.insertion_point.y, w.u_vector.x, w.v_vector.y),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Wipeout(w) = entity { w.u_vector.x = 12.0; },
-            expect_created: "Rectangular Outside n2 at0.0,0.0 u10.0 v6.0",
-            expect_edited: "Polygonal Inside n3 at2.0,3.0 u10.0 v6.0",
-            expect_reedited: "Polygonal Inside n3 at2.0,3.0 u12.0 v6.0",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            // DXF writes a polygonal boundary closed (the first vertex
-            // again at the end), and reads it back that way.
-            expect_edited_dxf: "Polygonal Inside n4 at2.0,3.0 u10.0 v6.0",
-            expect_reedited_dxf: "Polygonal Inside n4 at2.0,3.0 u12.0 v6.0",
-        });
+        create: concat!(
+            "doc.create_entity('Wipeout', insertion_point=P(0.0, 0.0, 0.0),\n",
+            "    u_vector=P(10.0, 0.0, 0.0), v_vector=P(0.0, 6.0, 0.0))\n"
+        ),
+        edit: concat!(
+            "w = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit wipeout'):\n",
+            "    w.clip_type = 'Polygonal'\n",
+            "    w.clip_boundary_vertices = [{'x': -0.5, 'y': -0.5}, {'x': 0.5, 'y': -0.5}, {'x': 0.0, 'y': 0.5}]\n",
+            "    w.insertion_point = (2.0, 3.0, 0.0)\n",
+            "    w.clip_mode = 'Inside'\n",
+            "doc.selection = [w]\n"
+        ),
+        rejects: &[
+            ("'clip_boundary_vertices':[{'x':0.0,'y':0.0}]", "at least 3"),
+            ("'clip_type':'Rectangular'", "exactly 2"),
+            ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
+            ("'brightness':200", "within 0..=100"),
+            ("'size':{'x':0.0,'y':1.0}", "greater than zero"),
+            (
+                "'insertion_point':{'x':float('nan'),'y':0.0,'z':0.0}",
+                "finite",
+            ),
+            ("'definition_handle':5", "read-only"),
+            ("'clip_type':'Circle'", "unsupported"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Wipeout(_)),
+        digest: |entity| match entity {
+            EntityType::Wipeout(w) => format!(
+                "{:?} {:?} n{} at{:.1},{:.1} u{:.1} v{:.1}",
+                w.clip_type,
+                w.clip_mode,
+                w.clip_boundary_vertices.len(),
+                w.insertion_point.x,
+                w.insertion_point.y,
+                w.u_vector.x,
+                w.v_vector.y
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Wipeout(w) = entity {
+                w.u_vector.x = 12.0;
+            }
+        },
+        expect_created: "Rectangular Outside n2 at0.0,0.0 u10.0 v6.0",
+        expect_edited: "Polygonal Inside n3 at2.0,3.0 u10.0 v6.0",
+        expect_reedited: "Polygonal Inside n3 at2.0,3.0 u12.0 v6.0",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        // DXF writes a polygonal boundary closed (the first vertex
+        // again at the end), and reads it back that way.
+        expect_edited_dxf: "Polygonal Inside n4 at2.0,3.0 u10.0 v6.0",
+        expect_reedited_dxf: "Polygonal Inside n4 at2.0,3.0 u12.0 v6.0",
+    });
 }
 
 #[test]
@@ -1227,41 +1325,49 @@ fn staged_python_viewport_lifecycle_over_real_ipc() {
 #[test]
 fn staged_python_view_border_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('ViewBorder', min=[0.0, 0.0], max=[40.0, 30.0], center=[20.0, 15.0], scale=1.0,\n",
-                "    active_viewport=VIEWPORTHANDLE, scale_handle=SCALEHANDLE)\n"),
-            edit: concat!(
-                "vb = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit view border'):\n",
-                "    vb.max = [60.0, 45.0]\n",
-                "    vb.center = [30.0, 22.5]\n",
-                "    vb.scale = 2.0\n",
-                "    vb.rotation_angle = 0.3\n",
-                "doc.selection = [vb]\n"),
-            rejects: &[
-                ("'max':[-1.0, 5.0]", "below max"),
-                ("'scale':0.0", "greater than zero"),
-                ("'rotation_angle':float('nan')", "finite"),
-                ("'center':[float('inf'), 0.0]", "finite"),
-                ("'active_viewport':999999", "does not exist"),
-                ("'scale_handle':999999", "does not exist"),
-                ("'version':3", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::ViewBorder(_)),
-            digest: |entity| match entity {
-                EntityType::ViewBorder(v) => format!("max{:.1},{:.1} c{:.1},{:.1} s{:.1} r{:.1}", v.max[0], v.max[1],
-                    v.center[0], v.center[1], v.scale, v.rotation_angle),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::ViewBorder(v) = entity { v.scale = 3.0; },
-            expect_created: "max40.0,30.0 c20.0,15.0 s1.0 r0.0",
-            expect_edited: "max60.0,45.0 c30.0,22.5 s2.0 r0.3",
-            expect_reedited: "max60.0,45.0 c30.0,22.5 s3.0 r0.3",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('ViewBorder', min=[0.0, 0.0], max=[40.0, 30.0], center=[20.0, 15.0], scale=1.0,\n",
+            "    active_viewport=VIEWPORTHANDLE, scale_handle=SCALEHANDLE)\n"
+        ),
+        edit: concat!(
+            "vb = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit view border'):\n",
+            "    vb.max = [60.0, 45.0]\n",
+            "    vb.center = [30.0, 22.5]\n",
+            "    vb.scale = 2.0\n",
+            "    vb.rotation_angle = 0.3\n",
+            "doc.selection = [vb]\n"
+        ),
+        rejects: &[
+            ("'max':[-1.0, 5.0]", "below max"),
+            ("'scale':0.0", "greater than zero"),
+            ("'rotation_angle':float('nan')", "finite"),
+            ("'center':[float('inf'), 0.0]", "finite"),
+            ("'active_viewport':999999", "does not exist"),
+            ("'scale_handle':999999", "does not exist"),
+            ("'version':3", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::ViewBorder(_)),
+        digest: |entity| match entity {
+            EntityType::ViewBorder(v) => format!(
+                "max{:.1},{:.1} c{:.1},{:.1} s{:.1} r{:.1}",
+                v.max[0], v.max[1], v.center[0], v.center[1], v.scale, v.rotation_angle
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::ViewBorder(v) = entity {
+                v.scale = 3.0;
+            }
+        },
+        expect_created: "max40.0,30.0 c20.0,15.0 s1.0 r0.0",
+        expect_edited: "max60.0,45.0 c30.0,22.5 s2.0 r0.3",
+        expect_reedited: "max60.0,45.0 c30.0,22.5 s3.0 r0.3",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -1356,9 +1462,11 @@ fn audit_python_ole2frame_creation_rules_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let frames = |host: &HostSession<'_>| {
@@ -1384,7 +1492,9 @@ fn audit_python_ole2frame_creation_rules_over_real_ipc() {
     };
     let embed = |file: &std::path::Path, extra: &str| {
         format!(
-            "PY_EVAL ocs.active_document.embed_picture({:?}, origin=(1, 2, 3), width=16{extra}).handle", file.display().to_string())
+            "PY_EVAL ocs.active_document.embed_picture({:?}, origin=(1, 2, 3), width=16{extra}).handle",
+            file.display().to_string()
+        )
     };
 
     // C: PNG and JPEG are stored as read, a TIFF is re-encoded as PNG, and
@@ -1497,9 +1607,11 @@ fn audit_python_viewport_ids_and_scale_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let viewports = |host: &HostSession<'_>| {
@@ -1516,7 +1628,9 @@ fn audit_python_viewport_ids_and_scale_over_real_ipc() {
     };
     let create = |width: f64, height: f64, view_height: f64| {
         format!(
-            "PY_EVAL ocs.active_document.create_entity('Viewport', owner_handle={}, center=(50, 50, 0), width={width}, height={height}, view_height={view_height}).handle", paper.value())
+            "PY_EVAL ocs.active_document.create_entity('Viewport', owner_handle={}, center=(50, 50, 0), width={width}, height={height}, view_height={view_height}).handle",
+            paper.value()
+        )
     };
     dispatch(&mut host, &create(80.0, 60.0, 50.0));
     dispatch(&mut host, &create(40.0, 30.0, 10.0));
@@ -1668,10 +1782,17 @@ fn spike_raster_image_definition_persistence() {
                 .count();
             let dicts = document.objects.values().filter(|o| matches!(o, document::objects::ObjectType::Dictionary(d) if d.entries.iter().any(|(k, _)| k.contains("IMAGE")))).count();
             match entity {
-                    Some(EntityType::RasterImage(i)) => eprintln!("SPIKE linked={linked} {label}: file_path_ok={} definition={:?} reactor={:?} defs={defs} reactors={reactors} image_dicts={dicts}",
-                        i.file_path == path, i.definition_handle.map(|h| h.value()), i.definition_reactor_handle.map(|h| h.value())),
-                    other => eprintln!("SPIKE linked={linked} {label}: came back as {:?}", other.map(|e| format!("{e:?}").chars().take(24).collect::<String>())),
-                }
+                Some(EntityType::RasterImage(i)) => eprintln!(
+                    "SPIKE linked={linked} {label}: file_path_ok={} definition={:?} reactor={:?} defs={defs} reactors={reactors} image_dicts={dicts}",
+                    i.file_path == path,
+                    i.definition_handle.map(|h| h.value()),
+                    i.definition_reactor_handle.map(|h| h.value())
+                ),
+                other => eprintln!(
+                    "SPIKE linked={linked} {label}: came back as {:?}",
+                    other.map(|e| format!("{e:?}").chars().take(24).collect::<String>())
+                ),
+            }
         }
     }
 }
@@ -1725,9 +1846,11 @@ fn modify_wrappers_audit_body() {
                 "{body}\n",
                 "L.create(('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(failed))[:250])\n",
             ), body = body)).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (usize, Vec<String>) {
@@ -2140,13 +2263,15 @@ fn audit_python_nested_input_is_validated_over_real_ipc() {
             "good2 = doc.create_entity('Polyline2D', vertices=[{'location': P(0, 0)}, {'location': P(5, 5)}])\n",
             "L.create('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(problems))\n",
         )).unwrap();
-    assert!(process
-        .dispatch(
-            &mut host,
-            &format!("PY_RUN {}", script.display()),
-            &mut |_| {}
-        )
-        .unwrap());
+    assert!(
+        process
+            .dispatch(
+                &mut host,
+                &format!("PY_RUN {}", script.display()),
+                &mut |_| {}
+            )
+            .unwrap()
+    );
     let _ = std::fs::remove_file(&script);
     let name = host
         .document()
@@ -2178,9 +2303,11 @@ fn audit_python_nested_input_is_validated_over_real_ipc() {
             .count(),
         1
     );
-    assert!(!document
-        .entities()
-        .any(|e| matches!(e, EntityType::PolygonMesh(_))));
+    assert!(
+        !document
+            .entities()
+            .any(|e| matches!(e, EntityType::PolygonMesh(_)))
+    );
     drop(process);
 }
 
@@ -2327,13 +2454,15 @@ fn audit_python_raster_image_definition_linkage_over_real_ipc() {
         ),
     )
     .unwrap();
-    assert!(process
-        .dispatch(
-            &mut host,
-            &format!("PY_RUN {}", script.display()),
-            &mut |_| {}
-        )
-        .unwrap());
+    assert!(
+        process
+            .dispatch(
+                &mut host,
+                &format!("PY_RUN {}", script.display()),
+                &mut |_| {}
+            )
+            .unwrap()
+    );
     let _ = std::fs::remove_file(&script);
 
     // The structure: one definition per file, registered and owned by ACAD_IMAGE_DICT.
@@ -2467,9 +2596,11 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
                 "request_point"
             };
             let cmd = format!("PY_EVAL ocs.active_document.{method}('{prompt}')");
-            assert!(process
-                .dispatch(&mut host, &cmd, &mut |id| started = Some(id))
-                .unwrap());
+            assert!(
+                process
+                    .dispatch(&mut host, &cmd, &mut |id| started = Some(id))
+                    .unwrap()
+            );
         }
         let output = app.command_line.history.last().unwrap().text.clone();
         let token = output
@@ -2497,21 +2628,24 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
     assert!(app.tabs[0].active_cmd.is_none());
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({picked_token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({picked_token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("point"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("point")
+    );
 
     let target = {
         let mut host = HostSession::new(&mut app, 0);
@@ -2530,49 +2664,56 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
     let _ = app.apply_cmd_result(result);
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({entity_token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({entity_token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("entity"));
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains(&target.value().to_string()));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("entity")
+    );
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains(&target.value().to_string())
+    );
 
     let cancelled_token = request(&mut app, "Cancel a point", false);
     let result = app.tabs[0].active_cmd.as_mut().unwrap().on_enter();
     let _ = app.apply_cmd_result(result);
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({cancelled_token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({cancelled_token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("cancelled"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("cancelled")
+    );
 }
 
 /// A script asks for an array drag: the plugin previews the copies while the
@@ -2627,14 +2768,19 @@ else:
     let mut started = None;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(&mut host, &format!("PY_RUN {script_path}"), &mut |id| {
-                started = Some(id)
-            })
-            .unwrap());
+        assert!(
+            process
+                .dispatch(&mut host, &format!("PY_RUN {script_path}"), &mut |id| {
+                    started = Some(id)
+                })
+                .unwrap()
+        );
     }
     let text = history(&app);
-    assert!(text.contains("refused: request_drag: an array takes 3 prompts"), "{text}");
+    assert!(
+        text.contains("refused: request_drag: an array takes 3 prompts"),
+        "{text}"
+    );
     let id = started.unwrap_or_else(|| panic!("no drag started: {text}"));
     app.set_active_command(
         0,
@@ -2645,10 +2791,15 @@ else:
     );
     let command = app.tabs[0].active_cmd.as_mut().unwrap();
     assert_eq!(command.prompt(), "Base");
-    assert!(command
-        .on_preview_wires(glam::DVec3::new(9.0, 9.0, 0.0))
-        .is_empty());
-    for point in [glam::DVec3::new(10.0, 0.0, 0.0), glam::DVec3::new(12.0, 0.0, 0.0)] {
+    assert!(
+        command
+            .on_preview_wires(glam::DVec3::new(9.0, 9.0, 0.0))
+            .is_empty()
+    );
+    for point in [
+        glam::DVec3::new(10.0, 0.0, 0.0),
+        glam::DVec3::new(12.0, 0.0, 0.0),
+    ] {
         assert!(matches!(
             command.on_point(point),
             crate::command::CmdResult::NeedPoint
@@ -2673,7 +2824,10 @@ else:
         assert!(process.dispatch(&mut host, &line, &mut |_| {}).unwrap());
     }
     let text = history(&app);
-    assert!(text.contains("resumed drag 3 seven [16.5, 3.0, 0.0]"), "{text}");
+    assert!(
+        text.contains("resumed drag 3 seven [16.5, 3.0, 0.0]"),
+        "{text}"
+    );
     // the result is read once: the same line again is a first run
     {
         let mut host = HostSession::new(&mut app, 0);
@@ -2719,7 +2873,10 @@ fn staged_python_typed_line_leaves_the_requested_point_prompt_open() {
         .0
     };
     let _ = app.run_command_line(&format!("PY_RUN {script_path}"));
-    let prompt = app.tabs[0].active_cmd.as_ref().map(|command| command.prompt());
+    let prompt = app.tabs[0]
+        .active_cmd
+        .as_ref()
+        .map(|command| command.prompt());
     if let Some(command) = app.tabs[0].active_cmd.as_mut() {
         let _ = command.on_enter();
     }
@@ -2769,13 +2926,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     let mut started = None;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                "PY_EVAL ocs.active_document.request_point('Tab zero')",
-                &mut |id| started = Some(id)
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    "PY_EVAL ocs.active_document.request_point('Tab zero')",
+                    &mut |id| started = Some(id)
+                )
+                .unwrap()
+        );
     }
     let token = app
         .command_line
@@ -2795,13 +2954,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     );
     {
         let mut host = HostSession::new(&mut app, 1);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
     assert!(
         app.command_line
@@ -2820,38 +2981,44 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     let _ = app.apply_cmd_result(result);
     {
         let mut host = HostSession::new(&mut app, 1);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("None"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("None")
+    );
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("point"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("point")
+    );
 
     use ocs_plugin_api::host::HostNotification;
     process
@@ -2880,13 +3047,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
         for _ in 0..10 {
             {
                 let mut host = HostSession::new(app, tab);
-                assert!(process
-                    .dispatch(
-                        &mut host,
-                        "PY_EVAL ocs.active_document.poll_events()",
-                        &mut |_| {}
-                    )
-                    .unwrap());
+                assert!(
+                    process
+                        .dispatch(
+                            &mut host,
+                            "PY_EVAL ocs.active_document.poll_events()",
+                            &mut |_| {}
+                        )
+                        .unwrap()
+                );
             }
             output = app.command_line.history.last().unwrap().text.clone();
             if output.contains(epoch) {
@@ -2921,13 +3090,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     std::thread::sleep(std::time::Duration::from_millis(100));
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                "PY_EVAL ocs.active_document.poll_events()",
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    "PY_EVAL ocs.active_document.poll_events()",
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
     let overflow = &app.command_line.history.last().unwrap().text;
     assert!(
@@ -2950,13 +3121,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                "PY_EVAL ocs.active_document.poll_events()",
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    "PY_EVAL ocs.active_document.poll_events()",
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
     assert!(
         app.command_line.history.last().unwrap().text.contains("[]"),
@@ -3041,9 +3214,10 @@ fn system_variables_change_without_command_reentry() {
         host.system_variable("SNAPANG"),
         Some(HostSettingValue::Number(0.0))
     );
-    assert!(host
-        .set_system_variable("CLAYER", HostSettingValue::Text("Missing".into()))
-        .is_err());
+    assert!(
+        host.set_system_variable("CLAYER", HostSettingValue::Text("Missing".into()))
+            .is_err()
+    );
     assert_eq!(
         host.system_variable("CLAYER"),
         Some(HostSettingValue::Text("0".into()))
@@ -3073,12 +3247,14 @@ fn system_variables_change_without_command_reentry() {
         host.system_variable("SNAPANG"),
         Some(HostSettingValue::Number(90.0))
     );
-    assert!(host
-        .set_system_variable("SNAPANG", HostSettingValue::Number(f64::INFINITY))
-        .is_err());
-    assert!(host
-        .set_system_variable("SNAPANG", HostSettingValue::Number(f64::MAX))
-        .is_err());
+    assert!(
+        host.set_system_variable("SNAPANG", HostSettingValue::Number(f64::INFINITY))
+            .is_err()
+    );
+    assert!(
+        host.set_system_variable("SNAPANG", HostSettingValue::Number(f64::MAX))
+            .is_err()
+    );
     assert_eq!(
         host.system_variable("SNAPANG"),
         Some(HostSettingValue::Number(90.0))
@@ -3597,208 +3773,7 @@ fn shared_document_view_read_then_write_xdata_roundtrip() {
     assert!(matches!(got.values[0], XDataValue::Integer32(123)));
 }
 
-#[test]
-fn plugin_add_layer_with_defaults_and_modify() {
-    use ocs_plugin_api::host::LayerConfig;
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let mut host = HostSession::new(&mut app, 0);
-
-    // 1. Add layer with minimal config (only name specified)
-    let config = LayerConfig {
-        name: "ELECTRICAL".to_string(),
-        ..Default::default()
-    };
-    let handle = host.add_layer(config).expect("should create layer");
-    assert_ne!(handle, document::Handle::NULL);
-
-    // Verify defaults were applied
-    let layer = host
-        .document()
-        .layers
-        .get("ELECTRICAL")
-        .expect("layer should exist");
-    assert_eq!(layer.color, document::types::Color::Index(7));
-    assert_eq!(layer.line_type, "Continuous");
-    assert_eq!(layer.line_weight, document::types::LineWeight::ByLayer);
-    assert!(!layer.flags.off);
-    assert!(!layer.flags.frozen);
-    assert!(!layer.flags.locked);
-    assert!(layer.is_plottable);
-
-    // 2. Duplicate add_layer should be rejected (return None)
-    let dup_config = LayerConfig {
-        name: "ELECTRICAL".to_string(),
-        color: Some(document::types::Color::Index(1)),
-        ..Default::default()
-    };
-    assert!(
-        host.add_layer(dup_config).is_none(),
-        "duplicate layer should return None"
-    );
-
-    // 3. Modify only color and locked; other properties should remain untouched
-    let mod_config = LayerConfig {
-        name: "ELECTRICAL".to_string(),
-        color: Some(document::types::Color::Index(1)),
-        locked: Some(true),
-        ..Default::default()
-    };
-    assert!(host.modify_layer(mod_config));
-
-    let updated = host
-        .document()
-        .layers
-        .get("ELECTRICAL")
-        .expect("layer should exist");
-    assert_eq!(updated.color, document::types::Color::Index(1)); // Modified to red
-    assert!(updated.flags.locked); // Modified to locked
-    assert_eq!(updated.line_type, "Continuous"); // Kept as-is
-    assert_eq!(updated.line_weight, document::types::LineWeight::ByLayer); // Kept as-is
-    assert!(!updated.flags.off); // Kept as-is
-
-    // 4. Modify nonexistent layer returns false
-    let non_existent = LayerConfig {
-        name: "DOES_NOT_EXIST".to_string(),
-        color: Some(document::types::Color::Index(2)),
-        ..Default::default()
-    };
-    assert!(!host.modify_layer(non_existent));
-}
-
-/// The catalog linetypes a new drawing leaves out: the ones that draw
-/// shapes only this application defines.
-const LEFT_OUT_OF_A_NEW_DRAWING: [&str; 5] = ["POINT1", "POINT2", "PLANT", "DRAINAGE", "DRAINAGE2"];
-
-fn layer_on(name: &str, linetype: &str) -> ocs_plugin_api::host::LayerConfig {
-    ocs_plugin_api::host::LayerConfig {
-        name: name.to_string(),
-        linetype: Some(linetype.to_string()),
-        ..Default::default()
-    }
-}
-
-/// A plugin that names a catalog linetype the drawing lacks for a new
-/// layer gets it loaded, as a pick in the layer list does.
-#[test]
-fn a_plugin_layer_is_created_on_a_catalog_linetype_the_drawing_lacks() {
-    for linetype in LEFT_OUT_OF_A_NEW_DRAWING {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        assert!(
-            host.document().line_types.get(linetype).is_none(),
-            "{linetype}: a new drawing leaves it out"
-        );
-
-        let created = host.add_layer(layer_on("SITE", &linetype.to_lowercase()));
-
-        assert!(created.is_some(), "{linetype}: the layer is created");
-        assert_eq!(
-            host.document().layers.get("SITE").unwrap().line_type,
-            linetype
-        );
-        assert!(
-            host.document()
-                .line_types
-                .get(linetype)
-                .is_some_and(|loaded| loaded.is_complex()),
-            "{linetype}: loaded with its shapes"
-        );
-    }
-}
-
-#[test]
-fn a_plugin_moves_a_layer_to_a_catalog_linetype_the_drawing_lacks() {
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let mut host = HostSession::new(&mut app, 0);
-    host.add_layer(ocs_plugin_api::host::LayerConfig {
-        name: "SITE".to_string(),
-        ..Default::default()
-    })
-    .expect("a layer on Continuous");
-
-    assert!(host.modify_layer(layer_on("SITE", "POINT2")));
-
-    assert_eq!(
-        host.document().layers.get("SITE").unwrap().line_type,
-        "POINT2"
-    );
-    assert!(host.document().line_types.get("POINT2").is_some());
-}
-
-#[test]
-fn the_layer_table_route_takes_a_catalog_linetype_the_drawing_lacks() {
-    use ocs_plugin_api::host::TableOperation;
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let mut host = HostSession::new(&mut app, 0);
-
-    let created = host.table_operation(TableOperation::LayerCreate {
-        config: layer_on("DRAINS", "DRAINAGE"),
-    });
-    assert!(created.is_ok(), "create: {created:?}");
-    assert_eq!(
-        host.document().layers.get("DRAINS").unwrap().line_type,
-        "DRAINAGE"
-    );
-
-    let modified = host.table_operation(TableOperation::LayerModify {
-        config: layer_on("DRAINS", "PLANT"),
-    });
-    assert!(modified.is_ok(), "modify: {modified:?}");
-    assert_eq!(
-        host.document().layers.get("DRAINS").unwrap().line_type,
-        "PLANT"
-    );
-}
-
-/// Naming a linetype for a layer loads that one alone: the other catalog
-/// linetypes the drawing lacks stay out of it.
-#[test]
-fn a_plugin_layer_loads_only_the_linetype_it_names() {
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let mut host = HostSession::new(&mut app, 0);
-    for purged in ["DASHED", "CENTER"] {
-        assert!(host.document_mut().line_types.remove(purged).is_some());
-    }
-    let before = host.document().line_types.iter().count();
-
-    assert!(host.add_layer(layer_on("AXES", "Center")).is_some());
-
-    assert_eq!(
-        host.document().layers.get("AXES").unwrap().line_type,
-        "CENTER"
-    );
-    assert!(
-        host.document().line_types.get("DASHED").is_none(),
-        "a purged linetype nobody named stays purged"
-    );
-    assert_eq!(host.document().line_types.iter().count(), before + 1);
-}
-
-#[test]
-fn a_plugin_layer_is_refused_a_linetype_nobody_defines() {
-    use ocs_plugin_api::host::TableOperation;
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let mut host = HostSession::new(&mut app, 0);
-    let before = host.document().line_types.iter().count();
-
-    assert!(host.add_layer(layer_on("SITE", "NO_SUCH")).is_none());
-    let refusal = host
-        .table_operation(TableOperation::LayerCreate {
-            config: layer_on("SITE", "NO_SUCH"),
-        })
-        .unwrap_err();
-
-    assert!(refusal.contains("does not exist"), "{refusal}");
-    assert!(host.document().layers.get("SITE").is_none());
-    assert_eq!(host.document().line_types.iter().count(), before);
-}
+mod layer_management;
 
 #[test]
 fn entity_creation_with_novel_layer_refreshes_gui() {
@@ -3806,16 +3781,19 @@ fn entity_creation_with_novel_layer_refreshes_gui() {
     app.tabs[0].is_start = false;
 
     // Verify DYNAMIC_PLUGIN_LINES does not exist initially
-    assert!(!app.tabs[0]
-        .scene
-        .document
-        .layers
-        .contains("DYNAMIC_PLUGIN_LINES"));
-    assert!(!app
-        .ribbon
-        .layer_infos
-        .iter()
-        .any(|l| l.name == "DYNAMIC_PLUGIN_LINES"));
+    assert!(
+        !app.tabs[0]
+            .scene
+            .document
+            .layers
+            .contains("DYNAMIC_PLUGIN_LINES")
+    );
+    assert!(
+        !app.ribbon
+            .layer_infos
+            .iter()
+            .any(|l| l.name == "DYNAMIC_PLUGIN_LINES")
+    );
 
     // 1. Add entity via HostSession (simulating plugin add_entity / add_line)
     {
@@ -3827,11 +3805,13 @@ fn entity_creation_with_novel_layer_refreshes_gui() {
     }
 
     // Verify layer is created in document AND refreshed in ribbon + layer panel
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .layers
-        .contains("DYNAMIC_PLUGIN_LINES"));
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .layers
+            .contains("DYNAMIC_PLUGIN_LINES")
+    );
     assert!(
         app.ribbon
             .layer_infos
@@ -3854,11 +3834,13 @@ fn entity_creation_with_novel_layer_refreshes_gui() {
     let _ = app.commit_entity_handle_preserve_layer(document::EntityType::Line(line2));
 
     // Verify SURVEY_TRAVERSE layer is created and refreshed in ribbon + layer panel
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .layers
-        .contains("SURVEY_TRAVERSE"));
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .layers
+            .contains("SURVEY_TRAVERSE")
+    );
     assert!(
         app.ribbon
             .layer_infos
@@ -4187,9 +4169,11 @@ fn parametric_validation_is_pure_and_rejects_a_hard_corner() {
         segments: Vec::new(),
         ..chain.clone()
     };
-    assert!(HostApi::validate_parametric_chain(&host, &empty, 1e-3)
-        .unwrap_err()
-        .contains("at least one segment"));
+    assert!(
+        HostApi::validate_parametric_chain(&host, &empty, 1e-3)
+            .unwrap_err()
+            .contains("at least one segment")
+    );
 
     assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
     assert_eq!(host.document(), &document_before);
@@ -4290,9 +4274,10 @@ fn grip_edit_restage_updates_the_display_set_in_place() {
     let handles;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(host
-            .register_plugin_class("PLUGIN", &traverse_class())
-            .is_ok());
+        assert!(
+            host.register_plugin_class("PLUGIN", &traverse_class())
+                .is_ok()
+        );
         let mut instance = traverse_instance();
         instance.design =
             ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(crest_profile_chain());
@@ -4754,384 +4739,4 @@ fn plugin_class_parameters_panel_binds_and_commits() {
     );
 }
 
-fn api16_text_panel() -> ocs_plugin_api::dialog::PanelDef {
-    use ocs_plugin_api::dialog::{DialogControl, PanelDef};
-
-    PanelDef::new("panel", "Panel")
-        .with_control(DialogControl::Text {
-            id: "length".into(),
-            label: "Length".into(),
-            default: "1.0".into(),
-        })
-        .with_control(DialogControl::Button {
-            id: "submit".into(),
-            label: "Submit".into(),
-            action: Some("PANEL_SUBMIT".into()),
-            align_h: None,
-            width: None,
-        })
-}
-
-fn api16_number_panel() -> ocs_plugin_api::dialog::PanelDef {
-    let mut panel = api16_text_panel();
-    panel.controls[0] = ocs_plugin_api::dialog::DialogControl::Number {
-        id: "length".into(),
-        label: "Length".into(),
-        default: 1.0,
-        min: None,
-        max: None,
-        step: None,
-    };
-    panel
-}
-
-#[test]
-fn api16_panel_registration_is_idempotent_and_owner_authenticated() {
-    use ocs_plugin_api::dialog::DialogValue;
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let tab_id = app.tabs[0].id;
-    let mut host = HostSession::new(&mut app, 0);
-
-    assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
-    assert!(host.update_panel_for_plugin(
-        "OWNER",
-        "panel",
-        std::collections::HashMap::from([(
-            "length".to_string(),
-            DialogValue::Text("2.5".to_string()),
-        )]),
-    ));
-    assert!(
-        host.register_panel_for_plugin("OWNER", api16_text_panel()),
-        "unchanged re-registration must not reset the live draft"
-    );
-    let before = host.app.plugin_panels["panel"].clone();
-
-    let mut foreign_panel = api16_text_panel();
-    foreign_panel.title = "Foreign replacement".into();
-    assert!(!host.register_panel_for_plugin("OTHER", foreign_panel));
-    assert!(!host.update_panel_for_plugin(
-        "OTHER",
-        "panel",
-        std::collections::HashMap::from([(
-            "length".to_string(),
-            DialogValue::Text("99.0".to_string()),
-        )]),
-    ));
-    assert!(!host.toggle_panel_for_plugin("OTHER", "panel", Some(true)));
-    assert!(host.panel_snapshot_for_plugin("OTHER", "panel").is_err());
-    assert_eq!(host.app.plugin_panels.get("panel"), Some(&before));
-
-    let snapshot = host.panel_snapshot_for_plugin("OWNER", "panel").unwrap();
-    assert_eq!(snapshot.plugin_id, "OWNER");
-    assert_eq!(snapshot.panel_id, "panel");
-    assert_eq!(snapshot.tab_id, tab_id);
-    assert_eq!(snapshot.values.len(), 1);
-    assert_eq!(
-        snapshot.values.get("length"),
-        Some(&DialogValue::Text("2.5".to_string()))
-    );
-    assert_eq!(snapshot.raw_text.len(), 1);
-    assert_eq!(
-        snapshot.raw_text.get("length").map(String::as_str),
-        Some("2.5")
-    );
-    assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
-    let direct = host
-        .panel_snapshot("PANEL")
-        .expect("ordinary HostApi command read-back works");
-    assert_eq!(direct.tab_id, tab_id);
-    assert_eq!(direct.values.get("length"), snapshot.values.get("length"));
-    assert!(!host.app.plugin_panels["panel"].visible);
-    assert_eq!(host.app.plugin_panels.get("panel"), Some(&before));
-}
-
-#[test]
-fn api16_panel_snapshot_uses_the_real_session_tab_without_document_writes() {
-    use ocs_plugin_api::dialog::DialogValue;
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let first_tab_id = app.tabs[0].id;
-    {
-        let mut host = HostSession::new(&mut app, 0);
-        assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
-    }
-    let second_tab_id = app.push_test_document();
-    assert_eq!(second_tab_id, app.tabs[1].id);
-    assert_ne!(first_tab_id, second_tab_id);
-    assert_eq!(app.active_tab, 0);
-
-    let first_document = app.tabs[0].scene.document.clone();
-    let second_document = app.tabs[1].scene.document.clone();
-    let first = HostSession::new(&mut app, 0)
-        .panel_snapshot_for_plugin("OWNER", "panel")
-        .unwrap();
-    let second = HostSession::new(&mut app, 1)
-        .panel_snapshot_for_plugin("OWNER", "panel")
-        .unwrap();
-
-    assert_eq!(first.tab_id, first_tab_id);
-    assert_eq!(second.tab_id, second_tab_id);
-    assert_ne!(first.tab_id, second.tab_id);
-    for snapshot in [&first, &second] {
-        assert_eq!(snapshot.plugin_id, "OWNER");
-        assert_eq!(snapshot.panel_id, "panel");
-        assert_eq!(snapshot.values.len(), 1);
-        assert_eq!(
-            snapshot.values.get("length"),
-            Some(&DialogValue::Text("1.0".to_string()))
-        );
-        assert_eq!(snapshot.raw_text.len(), 1);
-        assert_eq!(
-            snapshot.raw_text.get("length").map(String::as_str),
-            Some("1.0")
-        );
-        assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
-    }
-    assert_eq!(app.tabs[0].scene.document, first_document);
-    assert_eq!(app.tabs[1].scene.document, second_document);
-    assert_eq!(app.active_tab, 0);
-    assert!(app.tabs[0].history.pending.is_none());
-    assert!(app.tabs[1].history.pending.is_none());
-}
-
-#[test]
-fn api16_panel_snapshot_rejects_malformed_and_missing_panels_without_writes() {
-    use ocs_plugin_api::dialog::DialogValue;
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let document_before = app.tabs[0].scene.document.clone();
-    let undo_before = app.tabs[0].history.undo_stack.len();
-    let mut host = HostSession::new(&mut app, 0);
-    assert!(host.register_panel_for_plugin("OWNER", api16_number_panel()));
-    assert!(host.update_panel_for_plugin(
-        "OWNER",
-        "panel",
-        std::collections::HashMap::from([(
-            "length".to_string(),
-            DialogValue::Text("-".to_string()),
-        )]),
-    ));
-    let snapshot = host.panel_snapshot_for_plugin("OWNER", "panel").unwrap();
-
-    assert_eq!(
-        snapshot.raw_text.get("length").map(String::as_str),
-        Some("-")
-    );
-    assert!(!snapshot.values.contains_key("length"));
-    assert!(
-        snapshot.errors.iter().any(|error| {
-            error.contains("invalid finite number")
-                && error.contains("'length'")
-                && error.contains("'-'")
-        }),
-        "{:?}",
-        snapshot.errors
-    );
-
-    let error = host
-        .panel_snapshot_for_plugin("OWNER", "missing")
-        .unwrap_err();
-    assert!(error.contains("not registered"), "{error}");
-    assert_eq!(host.document(), &document_before);
-    assert_eq!(host.app.tabs[0].history.undo_stack.len(), undo_before);
-    assert!(host.app.tabs[0].history.pending.is_none());
-}
-
-#[test]
-fn api17_panel_reset_preserves_owner_and_aliases_remain_authenticated() {
-    use crate::app::Message;
-    use ocs_plugin_api::dialog::DialogValue;
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    {
-        let mut host = HostSession::new(&mut app, 0);
-        assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
-        assert!(host.update_panel_for_plugin(
-            "OWNER",
-            "panel",
-            std::collections::HashMap::from([(
-                "length".to_string(),
-                DialogValue::Text("2.5".to_string()),
-            )]),
-        ));
-    }
-
-    // The built-in reset path must retain the authenticated owner and
-    // restore the declaration's defaults, not brick subsequent access.
-    let _ = app.update(Message::PluginPanelButtonClick(
-        "panel".to_string(),
-        "reset".to_string(),
-        Some("reset".to_string()),
-    ));
-    let mut host = HostSession::new(&mut app, 0);
-    let snapshot = host
-        .panel_snapshot_for_plugin("OWNER", "panel")
-        .expect("owner remains able to read after reset");
-    assert_eq!(
-        snapshot.values.get("length"),
-        Some(&DialogValue::Text("1.0".into()))
-    );
-    assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
-    assert!(host.update_panel_for_plugin(
-        "OWNER",
-        "PANEL",
-        std::collections::HashMap::from([(
-            "length".to_string(),
-            DialogValue::Text("3.0".to_string()),
-        )]),
-    ));
-    assert!(host.toggle_panel_for_plugin("OWNER", "Panel", Some(true)));
-    assert!(!host.update_panel_for_plugin("OTHER", "panel", std::collections::HashMap::new(),));
-    assert!(host.panel_snapshot_for_plugin("OTHER", "Panel").is_err());
-}
-
-#[test]
-fn api17_explicit_plugin_panel_reopens_in_clean_screen_without_document_writes() {
-    use ocs_plugin_api::dialog::{DialogControl, PanelDef};
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    app.clean_screen = true;
-    let mut host = HostSession::new(&mut app, 0);
-    for id in ["cvifc.ifc_h_properties", "cvifc.ifc_v_properties"] {
-        let panel = PanelDef::new(id, "IFC Alignment Segment")
-            .with_command(format!(
-                "CVI_IFC_{}_PANEL",
-                if id.ends_with("h_properties") {
-                    "H"
-                } else {
-                    "V"
-                }
-            ))
-            .with_control(DialogControl::Text {
-                id: "source_record".into(),
-                label: "Source record".into(),
-                default: "Alignment-Axis-h-seg-001".into(),
-            })
-            .with_control(DialogControl::Button {
-                id: "apply".into(),
-                label: "Apply".into(),
-                action: Some("CVI_IFC_PANEL_APPLY".into()),
-                align_h: None,
-                width: None,
-            });
-        assert!(host.register_panel_for_plugin("opencad.civil_ifc", panel));
-    }
-    let panel_id = crate::ui::dock::PanelId::Plugin(1);
-    let other_id = crate::ui::dock::PanelId::Plugin(2);
-    assert!(!host.app.dock_panel_visible(panel_id));
-    assert!(host.toggle_panel_for_plugin(
-        "opencad.civil_ifc",
-        "cvifc.ifc_h_properties",
-        Some(true),
-    ));
-    assert!(host.app.dock_panel_visible(panel_id));
-    assert!(
-        matches!(
-            host.app.dock.location(panel_id),
-            Some((crate::app::config::DockSide::Right, _))
-        ),
-        "an explicit show places a new panel into the default dock"
-    );
-    assert!(host.app.dock_panel_on_screen(panel_id));
-    assert!(!host.app.dock_panel_visible(other_id));
-    assert!(host.app.plugin_panels["cvifc.ifc_h_properties"].visible);
-    assert!(!host.app.plugin_panels["cvifc.ifc_v_properties"].visible);
-    assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
-    assert!(host.app.tabs[0].history.pending.is_none());
-}
-
-#[test]
-fn plugin_panels_toggle_like_graphic_attributes_including_clean_screen() {
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    app.clean_screen = true;
-    let graphic_id = crate::ui::dock::PanelId::GraphicAttributes;
-    assert!(!app.dock_panel_visible(graphic_id));
-    let _ = app.update(crate::app::Message::ToggleGraphicAttributes);
-    assert!(app.show_graphic_attributes);
-    assert!(!app.dock_panel_visible(graphic_id));
-    let _ = app.update(crate::app::Message::ToggleGraphicAttributes);
-    assert!(!app.show_graphic_attributes);
-    assert!(!app.dock_panel_visible(graphic_id));
-    let _ = app.update(crate::app::Message::ToggleGraphicAttributes);
-    assert!(app.show_graphic_attributes);
-    assert!(!app.dock_panel_visible(graphic_id));
-
-    let mut host = HostSession::new(&mut app, 0);
-    let panel_id = crate::ui::dock::PanelId::Plugin(1);
-    assert!(host.register_panel_for_plugin("opencad.civil_ifc", api16_text_panel()));
-    // Like Graphic Attributes, the panel stays hidden in Clean Screen;
-    // opening it still binds its values without a document edit.
-    app.clean_screen = false;
-    let mut host = HostSession::new(&mut app, 0);
-    assert!(!host.app.dock_panel_visible(panel_id));
-    assert!(host.toggle_panel_for_plugin("opencad.civil_ifc", "panel", None));
-    assert!(host.app.dock_panel_visible(panel_id));
-    assert!(host.app.dock_panel_on_screen(panel_id));
-    assert!(host.toggle_panel_for_plugin("opencad.civil_ifc", "panel", None));
-    assert!(!host.app.dock_panel_visible(panel_id));
-    assert!(!host.app.plugin_panels["panel"].visible);
-    assert!(host.toggle_panel_for_plugin("opencad.civil_ifc", "panel", None));
-    assert!(host.app.dock_panel_visible(panel_id));
-    assert!(host.app.plugin_panels["panel"].visible);
-    assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
-    assert!(host.app.tabs[0].history.pending.is_none());
-}
-
-#[test]
-fn api17_update_panel_for_plugin_allows_owned_modal_dialog() {
-    use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
-
-    let mut app = OpenCADStudio::new_for_test();
-    app.tabs[0].is_start = false;
-    let dlg = DialogDef::new("Test Dialog").with_control(DialogControl::Text {
-        id: "field1".into(),
-        label: "Field 1".into(),
-        default: "initial".into(),
-    });
-    app.open_plugin_dialog_on_tab(0, dlg, Some("MY_PLUGIN".to_string()));
-
-    let mut host = HostSession::new(&mut app, 0);
-
-    // Foreign plugin cannot update the dialog
-    assert!(!host.update_panel_for_plugin(
-        "OTHER_PLUGIN",
-        "Test Dialog",
-        std::collections::HashMap::from([("field1".into(), DialogValue::Text("hacked".into()))]),
-    ));
-
-    // Owner plugin can update by title
-    assert!(host.update_panel_for_plugin(
-        "MY_PLUGIN",
-        "Test Dialog",
-        std::collections::HashMap::from([("field1".into(), DialogValue::Text("updated".into()))]),
-    ));
-    let field1 = |host: &HostSession| {
-        host.app
-            .plugin_dialog_state
-            .as_ref()
-            .unwrap()
-            .text_values
-            .get("field1")
-            .cloned()
-    };
-    assert_eq!(field1(&host).as_deref(), Some("updated"));
-
-    // Owner plugin can also update with empty panel_id (active dialog convention)
-    assert!(host.update_panel_for_plugin(
-        "MY_PLUGIN",
-        "",
-        std::collections::HashMap::from([(
-            "field1".into(),
-            DialogValue::Text("empty_id_update".into())
-        )]),
-    ));
-    assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
-}
+mod plugin_panels;

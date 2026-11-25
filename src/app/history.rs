@@ -388,8 +388,17 @@ impl OpenCADStudio {
             .graph_before
             .take()
             .map(|before| Box::new((before, self.tabs[i].graph.undo_state())));
+        let named_parameters_after = self.tabs[i].scene.named_parameters();
+        let named_parameters =
+            (&pending.named_parameters_before != named_parameters_after).then(|| {
+                (
+                    pending.named_parameters_before,
+                    named_parameters_after.clone(),
+                )
+            });
         if !pending.keep_empty
             && graph.is_none()
+            && named_parameters.is_none()
             && visibility_states.is_none()
             && entities.is_empty()
             && reference_designations.is_empty()
@@ -421,7 +430,7 @@ impl OpenCADStudio {
             reference_designations,
             reference_session,
             graph,
-            named_parameters: None,
+            named_parameters,
             label: pending.label,
         };
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
@@ -524,6 +533,7 @@ impl OpenCADStudio {
             reference_designations_before: Vec::new(),
             reference_session_before: self.reference_session_state(i),
             parametric_constraints_before: self.tabs[i].scene.parametric_constraints.clone(),
+            named_parameters_before: self.tabs[i].scene.named_parameters().clone(),
             plugin_owned: false,
             keep_empty: false,
             held: false,

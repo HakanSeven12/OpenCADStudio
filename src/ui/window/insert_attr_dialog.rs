@@ -5,7 +5,7 @@
 use crate::app::Message;
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt, field_style};
 use crate::ui::window::pdf_dialogs::card_style;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length};
 
 /// One attribute the operator answers while the block is being placed.
@@ -144,7 +144,10 @@ pub fn view(
             .edit
             .as_ref()
             .is_some_and(|e| e.multiline.get(index).copied().unwrap_or(false));
-        body = body.push(line(caption(&row.label), slot(&row.value, index, multiline)));
+        body = body.push(line(
+            caption(&row.label),
+            slot(&row.value, index, multiline),
+        ));
     }
     let step = |label: &str, go: bool, msg: InsertAttrMsg| {
         dialog_button_styled_opt(
@@ -163,7 +166,11 @@ pub fn view(
         spread(),
         dialog_button(crate::t!("Cancel").into_owned(), Message::CloseModal, false),
         spread(),
-        step(&crate::t!("Previous"), state.has_previous(), InsertAttrMsg::Previous),
+        step(
+            &crate::t!("Previous"),
+            state.has_previous(),
+            InsertAttrMsg::Previous
+        ),
         spread(),
         step(&crate::t!("Next"), state.has_next(), InsertAttrMsg::Next),
         spread(),

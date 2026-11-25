@@ -167,6 +167,91 @@ pub struct PlotContent {
     /// Effective STB style keyed by the plotted object and optional block member.
     pub entity_plot_styles:
         std::collections::HashMap<(document::Handle, Option<document::Handle>), String>,
+    /// The hyperlinks of the plotted objects, for formats that carry links.
+    pub links: Vec<PlotLink>,
+    /// The name links reach this page by, when a page of the same file is
+    /// their target (a named destination of the PDF).
+    pub destination: Option<String>,
+}
+
+/// A hyperlink on a plotted object.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PlotLink {
+    /// The object the link sits on: its plotted geometry is the link's area.
+    pub entity: Option<document::Handle>,
+    /// The area in drawing coordinates (`[x0, y0, x1, y1]`) where the object
+    /// plots nothing, such as a text of spaces.
+    pub bounds: Option<[f64; 4]>,
+    /// The address as stored: a web address, a file, or empty for the
+    /// drawing itself.
+    pub url: String,
+    /// The named location: a layout or a view.
+    pub location: String,
+    /// The folder a relative file address is taken from.
+    pub base: Option<std::path::PathBuf>,
+    /// A page of the same file the link opens (its `destination`), when the
+    /// target is one of the pages written with it.
+    pub destination: Option<String>,
+}
+
+impl PlotLink {
+    /// A web, mail or other address with a scheme, not a file.
+    pub fn is_web(&self) -> bool {
+        let url = self.url.trim();
+        let scheme = url.split_once(':').map(|(scheme, _)| scheme).unwrap_or("");
+        // `C:` is a drive, not a scheme.
+        scheme.len() > 1
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    }
+
+    /// The drawing a file link opens: its address taken from `base` when
+    /// relative, the drawing `own` for an empty address. `None` for a web
+    /// address.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn drawing(&self, own: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+        let url = self.url.trim().trim_matches('"');
+        if url.is_empty() {
+            return own.map(std::path::Path::to_path_buf);
+        }
+        if self.is_web() && !url.to_ascii_lowercase().starts_with("file:") {
+            return None;
+        }
+        let url = url
+            .strip_prefix("file:///")
+            .map(|rest| {
+                if cfg!(windows) {
+                    rest.to_string()
+                } else {
+                    format!("/{rest}")
+                }
+            })
+            .unwrap_or_else(|| url.to_string());
+        let mut path = std::path::PathBuf::from(&url);
+        let base = self.base.clone().unwrap_or_default();
+        // A link written on Windows names its folders with backslashes.
+        #[cfg(not(windows))]
+        if url.contains('\\') && !base.join(&path).exists() {
+            path = std::path::PathBuf::from(url.replace('\\', "/"));
+        }
+        if path.is_relative() {
+            path = base.join(path);
+        }
+        Some(std::fs::canonicalize(&path).unwrap_or(path))
+    }
+
+    /// The layouts the named location can mean: the whole location, and the
+    /// layout of a `view,layout` pair.
+    pub fn layout_candidates(&self) -> Vec<&str> {
+        let location = self.location.trim();
+        let mut names = vec![location];
+        if let Some((_, layout)) = location.rsplit_once(',') {
+            names.push(layout.trim());
+        }
+        names.retain(|name| !name.is_empty());
+        names
+    }
 }
 
 /// Owned geometry and settings for one plot page.
@@ -261,20 +346,27 @@ impl Default for PlotOptions {
 /// end]`, in the coordinates of its own points, so a plot draws the true
 /// curve instead of the screen's chords (#2854). The wire's tangent geometry
 /// only says that it is one circle or arc; the curve is fitted to the points,
-/// which a layout viewport has already carried onto the sheet. `None` for any
-/// other wire, or when a point is off that circle: the chords are plotted.
+/// which a layout viewport has already carried onto the sheet. A spline or
+/// ellipse wire (no straight-segment vertices, no circle) is drawn through
+/// its points by [`smooth_spans`] (#3526). `None` for any other wire, or when
+/// a point is off that circle: the chords are plotted.
 pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[glam::DVec2; 4]>> {
     use crate::scene::model::wire_model::TangentGeom;
     use glam::DVec2;
-    let curve = matches!(
+    let arc = matches!(
         wire.tangent_geoms.as_slice(),
         [TangentGeom::Circle { .. } | TangentGeom::PlanarCircle { .. } | TangentGeom::Arc { .. }]
     );
-    if !curve
+    let sampled = wire.key_vertices.is_empty()
+        && matches!(
+            wire.tangent_geoms.as_slice(),
+            [] | [TangentGeom::PlanarEllipse { .. }]
+        );
+    if !(arc || sampled)
         || wire.world_width > 0.0
         || wire.point_marker.is_some()
         || wire.stub.is_some()
-        || wire.points.len() < 5
+        || wire.points.len() < if arc { 5 } else { 3 }
     {
         return None;
     }
@@ -285,7 +377,60 @@ pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[gla
     if !points.iter().all(|point| point.is_finite()) {
         return None;
     }
-    circle_beziers(&points)
+    if arc {
+        circle_beziers(&points)
+    } else {
+        smooth_spans(&points)
+    }
+}
+
+/// Chords sampled from a smooth curve (a spline or an ellipse tessellated for
+/// the screen, at most 7.5° a step) as cubic Bézier spans through the same
+/// points (#3526). A vertex turning more than 8° is a corner and stays one;
+/// a chord leaving a run of smooth vertices curves only when it is at most
+/// twice as long as its neighbour in the run, so a line meeting a curve stays
+/// straight. Straight chords come back as straight spans. `None` when nothing
+/// curves.
+fn smooth_spans(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
+    use glam::DVec2;
+    const MAX_TURN: f64 = 8.0 * std::f64::consts::PI / 180.0;
+    let n = points.len();
+    if n < 3 {
+        return None;
+    }
+    let dir = |i: usize| (points[i + 1] - points[i]).normalize_or_zero();
+    let tangent: Vec<Option<DVec2>> = (0..n)
+        .map(|i| {
+            if i == 0 || i + 1 == n {
+                return None;
+            }
+            let (a, b) = (dir(i - 1), dir(i));
+            (a != DVec2::ZERO && b != DVec2::ZERO && a.angle_to(b).abs() <= MAX_TURN)
+                .then(|| (a + b).normalize())
+        })
+        .collect();
+    let length = |i: usize| points[i].distance(points[i + 1]);
+    // The end tangent of a parabola through the run: the inner one mirrored
+    // in the chord.
+    let mirror = |t: DVec2, d: DVec2| (2.0 * t.dot(d) * d - t).normalize_or_zero();
+    let mut curved = false;
+    let spans = (0..n - 1)
+        .map(|i| {
+            let (p, q, len, d) = (points[i], points[i + 1], length(i), dir(i));
+            let ends = match (tangent[i], tangent[i + 1]) {
+                (Some(a), Some(b)) => Some((a, b)),
+                (Some(a), None) if len <= 2.0 * length(i - 1) => Some((a, mirror(a, d))),
+                (None, Some(b)) if len <= 2.0 * length(i + 1) => Some((mirror(b, d), b)),
+                _ => None,
+            };
+            let Some((t0, t1)) = ends else {
+                return [p, p.lerp(q, 1.0 / 3.0), p.lerp(q, 2.0 / 3.0), q];
+            };
+            curved = true;
+            [p, p + t0 * len / 3.0, q - t1 * len / 3.0, q]
+        })
+        .collect();
+    curved.then_some(spans)
 }
 
 /// The one circle through `points`, turning one way at most once round it:
@@ -307,9 +452,15 @@ fn fit_circle(points: &[glam::DVec2]) -> Option<(glam::DVec2, f64, f64, f64)> {
         ab.x * ac.length_squared() - ac.x * ab.length_squared(),
     ) / det;
     let radius = center.distance(a);
-    if points
-        .iter()
-        .any(|point| (point.distance(center) - radius).abs() > radius * 1.0e-3)
+    // Tolerances follow the run's own size: against the radius alone, a run
+    // of nearly collinear points fits a huge circle whose arc leaves the
+    // boundary far behind (#3611).
+    let span = points.iter().map(|point| point.distance(a)).fold(0.0, f64::max);
+    let tolerance = radius.min(span) * 1.0e-3;
+    if radius > span * 1.0e3
+        || points
+            .iter()
+            .any(|point| (point.distance(center) - radius).abs() > tolerance)
     {
         return None;
     }
@@ -377,7 +528,8 @@ fn ring_arc_runs(ring: &[glam::DVec2]) -> Vec<(usize, usize)> {
         while end + 1 < ring.len() {
             let next = ring[end + 1];
             let turn = (ring[end] - center).angle_to(next - center);
-            if (next.distance(center) - radius).abs() > radius * 1.0e-3
+            if (next.distance(center) - radius).abs()
+                > radius.min(ring[start].distance(next)) * 1.0e-3
                 || turn * sweep <= 0.0
                 || turn.abs() > MAX_STEP
             {
@@ -399,15 +551,29 @@ fn ring_arc_runs(ring: &[glam::DVec2]) -> Vec<(usize, usize)> {
 /// with every arc run among them replaced by its Bézier spans.
 pub(crate) fn curved_ring(ring: &[glam::DVec2]) -> Vec<(glam::DVec2, bool)> {
     let mut path = Vec::with_capacity(ring.len());
-    let mut next = 0;
+    let Some(&first) = ring.first() else {
+        return path;
+    };
+    path.push((first, false));
+    // The chords from the point already on the path; a spline among them is
+    // drawn as its curve (#3526).
+    let chords = |path: &mut Vec<(glam::DVec2, bool)>, run: &[glam::DVec2]| match smooth_spans(run) {
+        Some(spans) => {
+            for [_, c1, c2, point] in spans {
+                path.extend([(c1, true), (c2, true), (point, false)]);
+            }
+        }
+        None => path.extend(run.iter().skip(1).map(|&point| (point, false))),
+    };
+    let mut from = 0;
     for (start, end) in ring_arc_runs(ring) {
-        path.extend(ring[next..=start].iter().map(|&point| (point, false)));
+        chords(&mut path, &ring[from..=start]);
         for [_, c1, c2, point] in circle_beziers(&ring[start..=end]).unwrap_or_default() {
             path.extend([(c1, true), (c2, true), (point, false)]);
         }
-        next = end + 1;
+        from = end;
     }
-    path.extend(ring.get(next..).unwrap_or_default().iter().map(|&point| (point, false)));
+    chords(&mut path, &ring[from..]);
     path
 }
 
@@ -525,5 +691,14 @@ mod tests {
         let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
             .map(DVec2::from);
         assert!(super::curved_ring(&square).iter().all(|(_, control)| !control));
+        // A slightly bowed side and the corner after it stay chords: fitted
+        // to a huge circle, the run took the corner in and its arc ended 3
+        // units off it (#3611).
+        let bowed = [[0.0, 0.0], [10.0, 0.001], [20.0, 0.0015], [30.0, 0.001], [40.0, 0.0]]
+            .into_iter()
+            .chain([[41.0, -3.0], [0.0, -3.0]])
+            .map(DVec2::from)
+            .collect::<Vec<_>>();
+        assert!(super::ring_arc_runs(&bowed).is_empty());
     }
 }

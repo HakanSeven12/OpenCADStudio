@@ -93,6 +93,7 @@ fn a_selected_hatch_gets_edit_hatch_in_the_context_menu() {
         MenuContext::Idle {
             single_hatch: true,
             single_mleader: false,
+            single_block: None,
             ..
         }
     ));

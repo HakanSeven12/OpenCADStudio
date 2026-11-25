@@ -22,9 +22,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::traits::Listener;
@@ -35,7 +35,7 @@ use crate::host::{
 };
 use crate::ipc::protocol::{
     Document, EntityType, Handle, HostRequest, HostResponse, HostToPlugin, InteractiveEvent,
-    PluginToHost, RunnerHandshake, PLUGIN_TOKEN_ENV,
+    PLUGIN_TOKEN_ENV, PluginToHost, RunnerHandshake,
 };
 use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::{recv, send};
@@ -109,9 +109,9 @@ fn create_kill_on_close_job(child: &Child) -> windows_sys::Win32::Foundation::HA
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
     };
 
     // SAFETY: all calls use plain OS handles and zeroed-parameter patterns
@@ -667,8 +667,7 @@ impl PluginProcess {
                     base_handler(&id, command_id, notification);
                 })
             };
-            let v4_conn =
-                V4Connection::new(stream, handler_for_v4, Some(Arc::clone(&child)))?;
+            let v4_conn = V4Connection::new(stream, handler_for_v4, Some(Arc::clone(&child)))?;
             // Owner-scoped declarations (entity classes, quad panels, custom
             // grips) arrive as nested requests while GetManifest is in
             // flight — the plugin registers them as part of its own boot.
@@ -1562,14 +1561,7 @@ fn pump_stream_lines(
             }
         }
         if !buffer.is_empty() || truncated {
-            emit(
-                &buffer,
-                truncated,
-                source,
-                io_tx,
-                plugin_id,
-                last_stderr,
-            );
+            emit(&buffer, truncated, source, io_tx, plugin_id, last_stderr);
         }
         if eof_reached {
             break 'stream;
@@ -1895,7 +1887,7 @@ fn generate_socket_name() -> String {
     // would re-open the guessing/squatting the suffix exists to close): the
     // pid+counter name alone stays unique within this host process, matching
     // the pre-hardening shape.
-    match getrandom::getrandom(&mut bytes) {
+    match getrandom::fill(&mut bytes) {
         Ok(()) => format!(
             "ocs_plugin_{}_{n}_{:016x}",
             std::process::id(),
@@ -1908,7 +1900,7 @@ fn generate_socket_name() -> String {
 /// Generate a 32-byte random token for runner authentication.
 fn generate_token() -> Result<String, PluginError> {
     let mut bytes = [0u8; PLUGIN_TOKEN_LEN];
-    getrandom::getrandom(&mut bytes)
+    getrandom::fill(&mut bytes)
         .map_err(|e| PluginError::Runner(format!("token generation failed: {e}")))?;
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -2020,9 +2012,10 @@ mod tests {
             "NullHost ensure_plugin_state must degrade, not panic: {:?}",
             outcome.err()
         );
-        assert!(null
-            .ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
-            .is_none());
+        assert!(
+            null.ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
+                .is_none()
+        );
     }
 }
 
@@ -2040,11 +2033,11 @@ mod timeout_tests {
     use document::xdata::ExtendedDataRecord;
     use document::{Document, EntityType, Handle};
     use interprocess::local_socket::{
-        traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,
+        traits::{Listener, Stream as StreamTrait},
     };
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::Instant;
 

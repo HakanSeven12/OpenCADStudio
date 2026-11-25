@@ -82,11 +82,11 @@ mod validation;
 mod xrecords;
 
 pub(in crate::app) use self::classes::{
-    find_design_record_entries, resolve_plugin_class_binding, rows_from_entries, rows_from_schema,
-    PluginClassInstanceBinding,
+    PluginClassInstanceBinding, find_design_record_entries, resolve_plugin_class_binding,
+    rows_from_entries, rows_from_schema,
 };
-pub(in crate::app) use self::interactive::convert_preview_wires;
 pub(crate) use self::interactive::PluginProcessInteractiveAdapter;
+pub(in crate::app) use self::interactive::convert_preview_wires;
 pub use self::quad::plugin_quad_panels;
 use self::validation::resolve_toggle_panel_id;
 
@@ -119,6 +119,30 @@ impl<'a> HostSession<'a> {
             Some(panel) if panel.owner_plugin_id.as_deref() == Some(plugin_id) => Some(resolved),
             _ => None,
         }
+    }
+
+    /// Shared attachment/ownership resolution for the surface tier: an
+    /// unregistered alias is `Unattached`, a foreign-registered panel is
+    /// `OwnedByOther`. Lives on the session (not the trait) — callers map
+    /// the code into their own tier's rejection type.
+    fn resolve_surface_panel(
+        &self,
+        plugin_id: &str,
+        panel_id: &str,
+    ) -> Result<String, ocs_plugin_api::scene::SurfaceRejectCode> {
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(ocs_plugin_api::scene::SurfaceRejectCode::Unattached);
+        }
+        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
+            return Err(ocs_plugin_api::scene::SurfaceRejectCode::Unattached);
+        };
+        let Some(registered) = self.app.plugin_panels.get(&resolved) else {
+            return Err(ocs_plugin_api::scene::SurfaceRejectCode::Unattached);
+        };
+        if registered.owner_plugin_id.as_deref() != Some(plugin_id) {
+            return Err(ocs_plugin_api::scene::SurfaceRejectCode::OwnedByOther);
+        }
+        Ok(resolved)
     }
 
     pub fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {

@@ -2257,6 +2257,16 @@ impl OpenCADStudio {
             self.start_mtp_modifier(i);
             return Task::none();
         }
+        if crate::command::is_tracking_token(token) && self.point_modifier_step(i) {
+            self.start_tracking_modifier(i);
+            return Task::none();
+        }
+        if let Some(filter) =
+            crate::command::PointFilter::parse(token).filter(|_| self.point_modifier_step(i))
+        {
+            self.start_point_filter_modifier(i, filter);
+            return Task::none();
+        }
         if let Some(kind) = self.typed_snap_override(i, token) {
             self.apply_snap_override(kind);
             return Task::none();

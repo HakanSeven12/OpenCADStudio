@@ -10,6 +10,7 @@ impl OpenCADStudio {
             if self.has_property_selection(i) {
                 return Task::none();
             }
+            self.push_undo_snapshot(i, "CLAYER");
             // No selection — change the creation default. Persist
             // into the tab's header (CLAYER) so it survives a tab
             // switch and rides the next save. #21.
@@ -52,6 +53,7 @@ impl OpenCADStudio {
             if self.has_property_selection(i) {
                 return Task::none();
             }
+            self.push_undo_snapshot(i, "CECOLOR");
             // Persist the new default into the tab's header so it
             // round-trips through tab switches and writes back on
             // save (CECOLOR). #21.
@@ -80,6 +82,7 @@ impl OpenCADStudio {
             if self.has_property_selection(i) {
                 return Task::none();
             }
+            self.push_undo_snapshot(i, "CELWEIGHT");
             // Persist into the tab's header (CELWEIGHT). #21.
             self.tabs[i].scene.document.header.current_line_weight = lw.value();
             self.tabs[i].dirty = true;
@@ -106,6 +109,7 @@ impl OpenCADStudio {
             if self.has_property_selection(i) {
                 return Task::none();
             }
+            self.push_undo_snapshot(i, "CELTYPE");
             // Persist into the tab's header (CELTYPE). Resolve to a
             // handle when the name matches a line_types entry so the
             // handle-based lookup stays in sync. #21.

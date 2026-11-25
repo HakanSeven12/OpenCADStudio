@@ -34,6 +34,8 @@ mod clipboard;
 mod qselect_cmd;
 mod properties;
 
+mod content_search;
+
 pub(crate) use self::tabs::*;
 pub(crate) use self::submit::*;
 pub(crate) use self::layer_manager::*;
@@ -170,6 +172,7 @@ impl OpenCADStudio {
                     };
 
                 self.command_line.set_contextual_suggestions(suggestions);
+                self.refresh_content_suggestions();
 
                 if should_update {
                     self.command_line.set_step_options(opts);
@@ -247,6 +250,7 @@ impl OpenCADStudio {
                 }
             }
         }
+        self.refresh_content_suggestions();
         self.focus_cmd_input()
     }
 
@@ -325,8 +329,19 @@ impl OpenCADStudio {
             let w = self.tabs[i].last_cursor_world;
             let xf = self.tabs[i].ucs_xform();
             let d_ucs = xf.vec_to_ucs(w - anchor);
-            let dx = d_ucs.x;
-            let dy = d_ucs.y;
+            let (mut dx, mut dy) = (d_ucs.x, d_ucs.y);
+            // Tracking moves along the plane axis nearest the cursor.
+            if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.name() == "TRACKING")
+            {
+                if dx.abs() >= dy.abs() {
+                    dy = 0.0;
+                } else {
+                    dx = 0.0;
+                }
+            }
             // In the plane unless the cursor is tracked straight up or down
             // (#2796), where what is left in the plane is only noise.
             let in_plane = (dx * dx + dy * dy).sqrt();
@@ -808,7 +823,11 @@ std::thread_local! {
 }
 
 #[cfg(test)]
+mod content_search_tests;
+#[cfg(test)]
 mod grip_ctrl_cycle_tests;
+#[cfg(test)]
+mod grip_extend_vertex_tests;
 #[cfg(test)]
 mod layer_name_target_tests;
 #[cfg(test)]

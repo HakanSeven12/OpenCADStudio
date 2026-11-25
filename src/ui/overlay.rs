@@ -3798,13 +3798,21 @@ fn draw_grid(
     // stroke, matching the reference hierarchy without glaring.
     let major_alpha = (alpha * 1.5).clamp(0.03, 1.0);
     let [r, g, b] = style.color;
+    // The web build draws canvas geometry without MSAA, and a stroke thinner
+    // than a pixel then misses the pixel centres along whole rows and columns,
+    // so bands of grid lines vanished (#3671). One pixel always covers them.
+    let (minor_width, major_width) = if cfg!(target_arch = "wasm32") {
+        (1.0, 1.0)
+    } else {
+        (0.5, 0.75)
+    };
     let minor_stroke = canvas::Stroke {
-        width: 0.5,
+        width: minor_width,
         style: canvas::Style::Solid(Color { r, g, b, a: alpha }),
         ..Default::default()
     };
     let major_stroke = canvas::Stroke {
-        width: 0.75,
+        width: major_width,
         style: canvas::Style::Solid(Color {
             r,
             g,

@@ -105,3 +105,60 @@ fn a_tolerance_of_zero_in_a_file_becomes_the_minimum() {
         Some(MIN_TOLERANCE)
     );
 }
+
+#[test]
+fn the_proposed_settings_have_the_angle_rows_of_autocad() {
+    assert_eq!(
+        CleanupSettings::proposed(0.4),
+        CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap()
+    );
+}
+
+#[test]
+fn the_angle_rows_give_the_standard_angles_of_each_type() {
+    let tolerances = CleanupSettings::parse_gcs(SAMPLE_GCS)
+        .unwrap()
+        .angle_tolerances();
+    let standards = |angles: [f64; 2]| {
+        angles
+            .map(|angle| AngleTolerance {
+                angle,
+                tolerance: 5.0,
+            })
+            .to_vec()
+    };
+    assert_eq!(tolerances.absolute, standards([0.0, 90.0]));
+    assert_eq!(tolerances.relative, standards([0.0, 90.0]));
+}
+
+#[test]
+fn an_angle_row_that_is_not_a_number_or_a_second_time_is_kept_but_not_scanned() {
+    let text = r#"{"tolerances":[
+        {"name":"absolute-angle","subName":"right","tolerance":2.0},
+        {"name":"absolute-angle","subName":"-45","tolerance":2.0},
+        {"name":"absolute-angle","subName":"315","tolerance":3.0},
+        {"name":"relative-angle","subName":"","tolerance":2.0},
+        {"name":"relative-angle","subName":"60","tolerance":0.00001}
+    ]}"#;
+    let settings = CleanupSettings::parse_gcs(text).unwrap();
+    assert_eq!(settings.tolerances.len(), 5);
+    let tolerances = settings.angle_tolerances();
+    assert_eq!(
+        tolerances.absolute,
+        [AngleTolerance {
+            angle: 135.0,
+            tolerance: 2.0
+        }]
+    );
+    assert_eq!(
+        tolerances.relative,
+        [AngleTolerance {
+            angle: 60.0,
+            tolerance: MIN_TOLERANCE
+        }]
+    );
+    assert!(CleanupSettings::parse_gcs(&settings.to_gcs())
+        .unwrap()
+        .to_gcs()
+        .contains("\"right\""));
+}

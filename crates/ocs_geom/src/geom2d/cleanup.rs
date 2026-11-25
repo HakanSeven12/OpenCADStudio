@@ -1287,6 +1287,204 @@ mod tests {
         assert_eq!(errors[0].corner, None);
     }
 
+    /// A line from `from`, `length` long, at `degrees`.
+    fn at(from: [f64; 2], degrees: f64, length: f64) -> Curve {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        line(from, [from[0] + length * cos, from[1] + length * sin])
+    }
+
+    fn end_of(curve: &Curve) -> [f64; 2] {
+        match curve {
+            Curve::Line(line) => line.end,
+            _ => unreachable!(),
+        }
+    }
+
+    fn standards(angles: &[f64]) -> Vec<AngleTolerance> {
+        angles
+            .iter()
+            .map(|&angle| AngleTolerance {
+                angle,
+                tolerance: 5.0,
+            })
+            .collect()
+    }
+
+    fn angles(
+        curves: &[Curve],
+        absolute: &[f64],
+        relative: &[f64],
+        x_axis: f64,
+    ) -> Vec<AngleError> {
+        let tolerances = AngleTolerances {
+            absolute: standards(absolute),
+            relative: standards(relative),
+        };
+        angle_errors(curves, &tolerances, x_axis, Tolerance::new(1e-9))
+    }
+
+    fn degrees(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn a_line_a_little_off_an_angle_is_an_absolute_error() {
+        let curves = [
+            at([3.2, -1.7], 91.7, 12.4),
+            line([7.3, 2.1], [7.3, 15.6]),
+            at([-6.1, 4.4], 96.2, 8.3),
+        ];
+        let errors = angles(&curves, &[0.0, 90.0], &[], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, AngleErrorKind::Absolute);
+        assert_eq!(error.curve, 0);
+        assert_eq!(error.angle, 90.0);
+        assert!(degrees(error.deviation, 1.7), "{error:?}");
+        assert!(degrees(error.turn.to_degrees(), -1.7), "{error:?}");
+        let end = end_of(&curves[0]);
+        assert!(near(
+            error.location,
+            [(3.2 + end[0]) / 2.0, (-1.7 + end[1]) / 2.0]
+        ));
+        assert_eq!(error.meets, [false, false]);
+    }
+
+    #[test]
+    fn an_angle_is_the_same_angle_turned_half_round() {
+        let errors = angles(&[at([2.3, 5.9], 178.6, 7.7)], &[0.0], &[], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].angle, 0.0);
+        assert!(degrees(errors[0].turn.to_degrees(), 1.4), "{errors:?}");
+    }
+
+    #[test]
+    fn a_line_near_two_angles_is_reported_for_the_nearer_one() {
+        let errors = angles(&[at([1.6, 2.7], 3.1, 9.4)], &[0.0, 4.0, 4.0], &[], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].angle, 4.0);
+        assert!(degrees(errors[0].deviation, 0.9), "{errors:?}");
+    }
+
+    #[test]
+    fn the_absolute_angle_is_measured_from_the_ucs_x_axis() {
+        let curves = [at([1.4, 3.6], 31.2, 6.3), at([-8.2, -5.7], 30.0, 4.9)];
+        let errors = angles(&curves, &[0.0], &[], 30f64.to_radians());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].curve, 0);
+        assert!(degrees(errors[0].deviation, 1.2), "{errors:?}");
+    }
+
+    #[test]
+    fn an_absolute_error_tells_which_ends_meet_other_geometry() {
+        let wall = line([2.7, -6.1], [2.7, 9.8]);
+        let leaning = at([2.7, 1.3], 177.9, 5.6);
+        let errors = angles(&[wall, leaning], &[0.0], &[], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].curve, 1);
+        assert_eq!(errors[0].meets, [true, false]);
+    }
+
+    /// Two lines from `start`: to a corner at `first` degrees, and on from
+    /// it at `second` degrees.
+    fn corner(start: [f64; 2], first: f64, second: f64) -> [Curve; 2] {
+        let one = at(start, first, 9.1);
+        let two = at(end_of(&one), second, 6.7);
+        [one, two]
+    }
+
+    #[test]
+    fn lines_that_meet_a_little_off_an_angle_are_a_relative_error() {
+        let curves = corner([-4.3, 2.6], 23.0, 111.5);
+        let errors = angles(&curves, &[], &[0.0, 90.0], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, AngleErrorKind::Relative);
+        assert_eq!((error.curve, error.other), (0, Some(1)));
+        assert_eq!(error.angle, 90.0);
+        assert!(near(error.location, end_of(&curves[0])), "{error:?}");
+        assert!(degrees(error.deviation, 1.5), "{error:?}");
+        // The first line turned by `turn` meets the second at 90°.
+        assert!(degrees(error.turn.to_degrees(), -1.5), "{error:?}");
+    }
+
+    #[test]
+    fn lines_that_cross_match_an_angle_or_its_supplement() {
+        let one = at([1.3, -2.2], 17.0, 10.0);
+        let middle = [
+            1.3 + 5.0 * 17f64.to_radians().cos(),
+            -2.2 + 5.0 * 17f64.to_radians().sin(),
+        ];
+        for (between, deviation) in [(46.3, 1.3), (134.0, 1.0)] {
+            let direction = (17.0 + between) * std::f64::consts::PI / 180.0;
+            let from = [
+                middle[0] - 4.0 * direction.cos(),
+                middle[1] - 4.0 * direction.sin(),
+            ];
+            let two = at(from, 17.0 + between, 8.0);
+            let errors = angles(&[one.clone(), two], &[], &[45.0], 0.0);
+            assert_eq!(errors.len(), 1, "{between}: {errors:?}");
+            assert_eq!(errors[0].angle, 45.0);
+            assert!(near(errors[0].location, middle), "{between}: {errors:?}");
+            assert!(
+                degrees(errors[0].deviation, deviation),
+                "{between}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lines_that_do_not_meet_are_not_a_relative_error() {
+        let [one, two] = corner([-4.3, 2.6], 23.0, 111.5);
+        let Curve::Line(two) = two else {
+            unreachable!()
+        };
+        let (sin, cos) = 111.5f64.to_radians().sin_cos();
+        let apart = line(
+            [two.start[0] + 0.01 * cos, two.start[1] + 0.01 * sin],
+            two.end,
+        );
+        assert!(angles(&[one, apart], &[], &[90.0], 0.0).is_empty());
+    }
+
+    #[test]
+    fn lines_that_cross_almost_along_each_other_are_a_relative_zero_error() {
+        // The second line starts 0.2 to the right of the first and crosses
+        // it 4.6 on.
+        let one = at([-3.9, 1.1], 38.0, 11.0);
+        let (sin, cos) = 38f64.to_radians().sin_cos();
+        let two = at([-3.9 + cos + 0.2 * sin, 1.1 + sin - 0.2 * cos], 40.5, 9.0);
+        let errors = angles(&[one, two], &[], &[0.0, 90.0], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].angle, 0.0);
+        assert!(degrees(errors[0].deviation, 2.5), "{errors:?}");
+    }
+
+    #[test]
+    fn a_type_with_no_angles_finds_nothing() {
+        let curves = corner([-4.3, 2.6], 23.0, 111.5);
+        assert!(angles(&curves, &[], &[], 0.0).is_empty());
+        let errors = angles(&curves, &[], &[90.0, 90.0], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+    }
+
+    #[test]
+    fn arcs_and_polylines_have_no_angle_errors() {
+        let (sin, cos) = 91.7f64.to_radians().sin_cos();
+        let path = polyline(
+            &[[1.2, 3.4], [1.2 + 5.0 * cos, 3.4 + 5.0 * sin], [8.9, 7.1]],
+            false,
+        );
+        let bow = arc([4.1, -3.3], 2.6, 0.1, 1.6);
+        assert!(angles(&[path, bow], &[90.0], &[90.0], 0.0).is_empty());
+    }
+
+    #[test]
+    fn a_line_no_longer_than_the_weld_has_no_angle() {
+        let speck = at([2.9, -6.1], 91.7, 5e-10);
+        assert!(angles(&[speck], &[90.0], &[], 0.0).is_empty());
+    }
+
     #[test]
     fn no_tolerance_above_the_weld_finds_nothing() {
         let curves = [

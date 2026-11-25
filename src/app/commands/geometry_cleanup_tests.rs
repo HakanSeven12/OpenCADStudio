@@ -630,6 +630,31 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
 }
 
 #[test]
+fn two_relative_angles_of_one_line_are_two_errors() {
+    let error = Finding {
+        kind: ErrorType::RelativeAngle,
+        handle: Handle::new(1),
+        at_start: false,
+        location: [2.3, 1.7],
+        target: [2.3, 1.7],
+        other: Some((Handle::new(2), false)),
+        corner: None,
+        deviation: 1.5,
+        angle: None,
+    };
+    let moved = Finding {
+        location: [4.1, 2.9],
+        ..error
+    };
+    assert!(error.same_error(&moved));
+    let other_line = Finding {
+        other: Some((Handle::new(3), false)),
+        ..error
+    };
+    assert!(!error.same_error(&other_line));
+}
+
+#[test]
 fn the_settings_are_kept_in_the_user_profile() {
     let (mut app, _) = app();
     app.geometry_cleanup.settings = Some(CleanupSettings::proposed(0.4));
@@ -973,4 +998,189 @@ fn a_typed_tolerance_changes_only_its_own_type() {
     assert_eq!(parsed.tolerance(EndErrorKind::Gap), Some(0.25));
     assert_eq!(parsed.tolerance(EndErrorKind::Overshoot), Some(0.5198));
     assert_eq!(parsed.tolerance(EndErrorKind::Undershoot), Some(0.5198));
+}
+
+/// A line from `from`, `length` long, at `degrees`.
+fn at(app: &mut OpenCADStudio, from: [f64; 2], degrees: f64, length: f64) -> Handle {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    line(app, from, [from[0] + length * cos, from[1] + length * sin])
+}
+
+/// The direction of a line in degrees, and its length.
+fn direction(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
+    let [a, b] = ends(app, handle);
+    (
+        (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees(),
+        (b[0] - a[0]).hypot(b[1] - a[1]),
+    )
+}
+
+fn fixes_of(app: &OpenCADStudio, kind: ErrorType) -> Vec<Fix> {
+    findings(app)
+        .iter()
+        .find(|f| f.kind == kind)
+        .expect("the error is listed")
+        .fixes()
+}
+
+#[test]
+fn rotate_at_start_turns_a_line_onto_its_angle_as_one_undo_step() {
+    let (mut app, _) = app();
+    let leaning = at(&mut app, [3.2, -1.7], 91.7, 12.4);
+    let found = scan(&mut app, &[leaning]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].kind, ErrorType::AbsoluteAngle);
+    assert_eq!(found[0].angle.map(|a| a.angle), Some(90.0));
+    let before = ends(&app, leaning);
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtStart);
+    let (angle, length) = direction(&app, leaning);
+    assert!(near(ends(&app, leaning)[0], [3.2, -1.7]));
+    assert!((angle - 90.0).abs() < 1e-9, "{angle}");
+    assert!((length - 12.4).abs() < 1e-9, "{length}");
+    assert!(findings(&app).is_empty(), "{:?}", findings(&app));
+    let _ = app.update(Message::Undo);
+    assert_eq!(ends(&app, leaning), before);
+}
+
+#[test]
+fn rotate_at_end_keeps_the_end_that_meets_a_wall_and_comes_first() {
+    let (mut app, _) = app();
+    let wall = line(&mut app, [2.7, -6.1], [2.7, 9.8]);
+    let leaning = line(&mut app, [-2.9, 1.5], [2.7, 1.3]);
+    scan(&mut app, &[wall, leaning]);
+    assert_eq!(
+        fixes_of(&app, ErrorType::AbsoluteAngle),
+        [Fix::RotateAtEnd, Fix::RotateAtStart]
+    );
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtEnd);
+    let [start, end] = ends(&app, leaning);
+    assert!(near(end, [2.7, 1.3]), "{end:?}");
+    assert!((start[1] - 1.3).abs() < 1e-9, "{start:?}");
+    assert!(
+        (start[0] - (2.7 - 5.6f64.hypot(0.2))).abs() < 1e-9,
+        "{start:?}"
+    );
+}
+
+/// Two lines that meet at 88.5°: 9.1 long at 23°, then 6.7 long at 111.5°.
+fn corner_drawing(app: &mut OpenCADStudio) -> [Handle; 2] {
+    let long = at(app, [-4.3, 2.6], 23.0, 9.1);
+    let meet = ends(app, long)[1];
+    let short = at(app, meet, 111.5, 6.7);
+    [long, short]
+}
+
+#[test]
+fn rotate_shorter_and_longer_turn_one_line_about_the_meet_point() {
+    for (fix_with, turned) in [(Fix::RotateShorter, 1), (Fix::RotateLonger, 0)] {
+        let (mut app, _) = app();
+        let lines = corner_drawing(&mut app);
+        let meet = ends(&app, lines[0])[1];
+        let found = scan(&mut app, &lines);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].kind, ErrorType::RelativeAngle);
+        assert!(near(found[0].location, meet));
+        assert_eq!(
+            fixes_of(&app, ErrorType::RelativeAngle),
+            [Fix::RotateShorter, Fix::RotateLonger]
+        );
+        let kept = ends(&app, lines[1 - turned]);
+        let (_, length) = direction(&app, lines[turned]);
+        fix(&mut app, ErrorType::RelativeAngle, fix_with);
+        assert_eq!(ends(&app, lines[1 - turned]), kept, "{fix_with:?}");
+        assert!(ends(&app, lines[turned]).iter().any(|&p| near(p, meet)));
+        assert!((direction(&app, lines[turned]).1 - length).abs() < 1e-9);
+        let between = direction(&app, lines[1]).0 - direction(&app, lines[0]).0;
+        assert!((between - 90.0).abs() < 1e-9, "{fix_with:?}: {between}");
+        let _ = app.update(Message::Undo);
+        let between = direction(&app, lines[1]).0 - direction(&app, lines[0]).0;
+        assert!((between - 88.5).abs() < 1e-9, "{fix_with:?}: {between}");
+    }
+}
+
+#[test]
+fn picking_a_relative_angle_selects_both_lines() {
+    let (mut app, _) = app();
+    let lines = corner_drawing(&mut app);
+    scan(&mut app, &lines);
+    let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(0)));
+    let mut expected = lines.to_vec();
+    expected.sort_by_key(|handle| handle.value());
+    assert_eq!(selected(&app), expected);
+}
+
+#[test]
+fn a_rotate_repair_picks_the_next_angle_error() {
+    let (mut app, _) = app();
+    let first = at(&mut app, [3.2, -1.7], 91.7, 12.4);
+    let second = at(&mut app, [-6.4, 8.8], 2.3, 7.9);
+    scan(&mut app, &[first, second]);
+    let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(0)));
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtStart);
+    let left: Vec<Handle> = findings(&app).iter().map(|f| f.handle).collect();
+    assert_eq!(left, [second]);
+    assert_eq!(picked(&app).map(|f| f.handle), Some(second));
+}
+
+#[test]
+fn the_absolute_angle_is_measured_in_the_ucs() {
+    let (mut app, i) = app();
+    let (sin, cos) = 30f64.to_radians().sin_cos();
+    let mut ucs = document::tables::Ucs::new("GC-test");
+    ucs.origin = Vector3::new(7.5, -3.5, 0.0);
+    ucs.x_axis = Vector3::new(cos, sin, 0.0);
+    ucs.y_axis = Vector3::new(-sin, cos, 0.0);
+    app.tabs[i].active_ucs = Some(ucs);
+    let on = at(&mut app, [1.4, 3.6], 30.0, 6.3);
+    let off = at(&mut app, [-8.2, -5.7], 31.2, 4.9);
+    let found = scan(&mut app, &[on, off]);
+    let handles: Vec<Handle> = found.iter().map(|f| f.handle).collect();
+    assert_eq!(handles, [off], "{found:?}");
+    assert!((found[0].deviation - 1.2).abs() < 1e-9, "{found:?}");
+}
+
+#[test]
+fn a_tilted_ucs_measures_the_absolute_angle_from_the_wcs_x_axis() {
+    let (mut app, i) = app();
+    // The UCS turned 30° about Z, then tilted 60° about the WCS X axis: its
+    // X axis is 16.1° from the WCS X axis in plan.
+    let (sin, cos) = 30f64.to_radians().sin_cos();
+    let (tilt_sin, tilt_cos) = 60f64.to_radians().sin_cos();
+    let mut ucs = document::tables::Ucs::new("GC-tilted");
+    ucs.origin = Vector3::new(7.5, -3.5, 0.0);
+    ucs.x_axis = Vector3::new(cos, sin * tilt_cos, sin * tilt_sin);
+    ucs.y_axis = Vector3::new(-sin, cos * tilt_cos, cos * tilt_sin);
+    app.tabs[i].active_ucs = Some(ucs);
+    let leaning = at(&mut app, [1.4, 3.6], 88.8, 6.3);
+    let found = scan(&mut app, &[leaning]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0].deviation - 1.2).abs() < 1e-9, "{found:?}");
+}
+
+#[test]
+fn saved_settings_without_angle_rows_find_no_angle_errors() {
+    let (mut app, _) = app();
+    let leaning = at(&mut app, [3.2, -1.7], 91.7, 12.4);
+    let mut settings = CleanupSettings::default();
+    settings.set(EndErrorKind::Gap, Some(0.5));
+    app.geometry_cleanup.settings = Some(settings);
+    assert!(scan(&mut app, &[leaning]).is_empty());
+}
+
+#[test]
+fn the_palette_lists_the_angle_types_after_the_length_types() {
+    let (mut app, _) = app();
+    let mut objects = errors_drawing(&mut app).to_vec();
+    objects.extend(corner_drawing(&mut app));
+    objects.push(at(&mut app, [3.2, -31.7], 91.7, 12.4));
+    // The tolerance of the length drawing alone: the short lines would
+    // lower the proposed one below the overshoot.
+    app.geometry_cleanup.settings = Some(CleanupSettings::proposed(0.5198));
+    scan(&mut app, &objects);
+    let scan = app.geometry_cleanup.scan.as_ref().unwrap();
+    let kinds: Vec<ErrorType> = crate::ui::window::geometry_cleanup::groups(scan)
+        .into_iter()
+        .map(|(kind, _)| kind)
+        .collect();
+    assert_eq!(kinds, crate::ui::window::geometry_cleanup::TYPES);
 }

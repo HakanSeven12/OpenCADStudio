@@ -1005,13 +1005,17 @@ impl Scene {
     ) -> Arc<Vec<WireModel>> {
         use rustc_hash::FxHashSet as HSet;
 
-        // The viewport's frozen-layer set is the only resident-geometry input.
-        // Its live zoom is camera magnification, not CANNOSCALE: tying
-        // annotation geometry to view_height rebuilt the entire model on every
-        // wheel tick whenever the drawing contained one annotative object.
+        // The viewport's live zoom is camera magnification, not CANNOSCALE:
+        // tying annotation geometry to view_height rebuilt the entire model on
+        // every wheel tick whenever the drawing contained one annotative object.
         // Explicit viewport annotation-scale changes still rebuild the resident
         // set; PSLTSCALE is a viewport GPU uniform, except for complex linetypes,
         // which rebuild once when the zoom settles.
+        //
+        // The resident set is built without the viewport's frozen layers and
+        // they are left out of it afterwards: a set per frozen-layer list was
+        // tessellated in full, past the per-entity memo, for every viewport of
+        // a sheet set, seconds each time a layout was opened (#3260).
         let frozen: HSet<Handle> = self.viewport_hidden_handles(vp_handle);
 
         let scale_handle = self.viewport_scale_handle(vp_handle);
@@ -1021,20 +1025,21 @@ impl Scene {
             self.model_space_block_handle(),
             Some(self.viewport_annotation_multiplier(vp_handle)),
             scale_handle,
-            Some(&frozen),
+            Some(&HSet::default()),
             Some(vp_handle),
         );
         self.viewport_complex_lt.set(None);
         self.without_viewport_frozen_members(wires, &frozen)
     }
 
-    /// `wires` without the block lines on a layer the viewport freezes.
+    /// `wires` without what the viewport hides: the objects it hides by
+    /// handle or on a layer it freezes, and the block lines on such a layer.
     ///
-    /// The resident set leaves out the objects on those layers, but a block
-    /// reference is drawn from definitions shared by every viewport, so the
-    /// lines its members draw on a frozen layer came along. Each such line
-    /// knows the layer it shows on (`effective_layer`); a copy of a block
-    /// drawn as a stub is expanded only when its definition holds one.
+    /// A block reference is drawn from definitions shared by every viewport,
+    /// so the lines its members draw on a frozen layer come along with it.
+    /// Each such line knows the layer it shows on (`effective_layer`); a copy
+    /// of a block drawn as a stub is expanded only when its definition holds
+    /// one.
     fn without_viewport_frozen_members(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -1068,11 +1073,40 @@ impl Scene {
                     .get(layer)
                     .is_some_and(|record| frozen.contains(&record.handle))
         };
-        // `None`: no block line to leave out, the set is drawn as it is. The
-        // set itself is not kept here: an edit patches it in place only while
-        // the scene alone holds it (#358).
-        let kept =
-            crate::scene::model::instance_model::without_layers(&wires, layer_frozen).map(Arc::new);
+        // An object's wires carry its handle as their name.
+        let object_hidden = |wire: &WireModel| {
+            wire.name
+                .parse::<u64>()
+                .ok()
+                .and_then(|value| self.document.get_entity(Handle::new(value)))
+                .is_some_and(|entity| {
+                    let common = entity.common();
+                    frozen.contains(&common.handle)
+                        || self
+                            .document
+                            .layers
+                            .get(&common.layer)
+                            .is_some_and(|record| frozen.contains(&record.handle))
+                })
+        };
+        let shown: Option<Vec<WireModel>> = wires.iter().any(object_hidden).then(|| {
+            wires
+                .iter()
+                .filter(|wire| !object_hidden(wire))
+                .cloned()
+                .collect()
+        });
+        // `None`: nothing to leave out, the set is drawn as it is. The set
+        // itself is not kept here: an edit patches it in place only while the
+        // scene alone holds it (#358).
+        let kept = match shown {
+            Some(shown) => Some(Arc::new(
+                crate::scene::model::instance_model::without_layers(&shown, layer_frozen)
+                    .unwrap_or(shown),
+            )),
+            None => crate::scene::model::instance_model::without_layers(&wires, layer_frozen)
+                .map(Arc::new),
+        };
         let mut cache = self.viewport_frozen_member_cache.borrow_mut();
         // A set that was replaced takes its result along.
         cache.retain(|_, (source, _)| source.strong_count() > 0);

@@ -2710,6 +2710,12 @@ impl OpenCADStudio {
                     Message::AlignmentPointFilePicked,
                 ));
             }
+            cmd if crate::modules::civil::point_slope::Kind::of(cmd).is_some() => {
+                let kind = crate::modules::civil::point_slope::Kind::of(cmd).unwrap();
+                let c = crate::modules::civil::point_slope::SlopePointCommand::new(kind, &self.tabs[i].scene.document);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
             cmd if crate::modules::civil::point_surface::Kind::of(cmd).is_some() => {
                 let kind = crate::modules::civil::point_surface::Kind::of(cmd).unwrap();
                 let c = crate::modules::civil::point_surface::SurfacePointCommand::new(kind, &self.tabs[i].scene.document);

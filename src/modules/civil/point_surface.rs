@@ -268,8 +268,6 @@ impl SurfacePointCommand {
         Some((0..=nv).flat_map(|j| (0..=nu).map(move |i| (i, j))).map(|(i, j)| base + u * self.x_spacing * f64::from(i) + v * self.y_spacing * f64::from(j)).collect())
     }
 
-    /// The vertices and the points every `distance` along a picked polyline
-    /// (from its start; a 3D polyline is measured in 3D).
     /// The surface whose border lies within the pick box of `pick`.
     fn border_hit(&self, pick: DVec3) -> Option<usize> {
         let c = self.context.as_ref()?;
@@ -287,6 +285,8 @@ impl SurfacePointCommand {
             .map(|(i, _)| i)
     }
 
+    /// The vertices and the points every `distance` along a picked polyline
+    /// (from its start; a 3D polyline is measured in 3D).
     fn polyline_points(&self, e: &EntityType) -> Option<Vec<DVec2>> {
         let vertices3d = |v: Vec<DVec3>, closed: bool| -> Vec<DVec3> {
             let mut v = v;

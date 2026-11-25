@@ -824,6 +824,8 @@ pub(super) struct OpenCADStudio {
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     /// The annotation scale asked for before a session's first annotative text.
     anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
+    /// The surface list a Create Points > Surface command opened.
+    surface_list: Option<crate::ui::window::surface_list::SurfaceList>,
     /// The Paragraph, Column Settings, Background Mask or Find and Replace
     /// window the Text Editor tab opened.
     mtext_dialog: Option<crate::ui::window::mtext_dialogs::MTextDialog>,
@@ -981,6 +983,10 @@ pub(super) struct OpenCADStudio {
     hatch_boundary_warning: Option<crate::ui::window::hatch_dialogs::BoundaryWarningState>,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     show_menu_bar: bool,
+    /// The main window is maximized, for the title bar's maximize button.
+    main_maximized: bool,
+    /// The title bar's empty space is pressed: a move drags the window.
+    title_bar_pressed: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
     ribbon_closed: bool,
     /// COMMANDLINEHIDE (Ctrl+9) hid the command line; COMMANDLINE shows it.
@@ -2634,6 +2640,8 @@ pub enum ModalKind {
     TableCellWarning,
     /// The annotation scale asked for before a session's first annotative text.
     AnnotationScalePrompt,
+    /// The surface list of a Create Points > Surface command.
+    SurfaceList,
     /// A window of the Text Editor tab (paragraph, columns, mask, find).
     MTextDialog,
     /// A value typed into a cell that is not of the cell's data type.
@@ -2959,6 +2967,7 @@ impl OpenCADStudio {
             table_cell_block: None,
             table_cell_format: None,
             anno_scale_prompt: None,
+            surface_list: None,
             mtext_dialog: None,
             table_cell_warning: None,
             table_cell_entry: None,
@@ -3020,6 +3029,8 @@ impl OpenCADStudio {
             outline_switch_hover: false,
             hatch_boundary_warning: None,
             show_menu_bar: false,
+            main_maximized: true,
+            title_bar_pressed: false,
             ribbon_closed: false,
             command_line_hidden: false,
             double_click_block_refedit: false,
@@ -4009,6 +4020,12 @@ impl OpenCADStudio {
         self.command_line.push_error(msg);
     }
 
+    /// Whether the app draws the main window's title bar (see
+    /// `ui::title_bar::drawn`).
+    pub(crate) fn draws_title_bar(&self) -> bool {
+        crate::ui::title_bar::drawn()
+    }
+
     /// Boot function for `iced::daemon`: returns initial state plus a task that
     /// opens the primary application window. Native only — the web build uses
     /// [`Self::boot_web`].
@@ -4019,10 +4036,26 @@ impl OpenCADStudio {
         // up once via the first-launch prompt below (when the user hasn't been
         // asked yet) and afterwards managed entirely by the FILEASSOC command.
         crate::sys::startup_times::mark("boot: begin");
+        // The desktop's window buttons (a `gsettings` call on GNOME) are read
+        // while the rest starts, not in the first view.
+        std::thread::spawn(|| {
+            crate::ui::title_bar::layout();
+            crate::ui::title_bar::double_click();
+        });
         let state = Self::new();
         crate::sys::startup_times::mark("boot: App constructed");
         let (id, open_task) = window::open(window::Settings {
             maximized: true,
+            // The app draws the title bar over the ribbon; macOS keeps its
+            // frame for the traffic lights, over a content view that runs
+            // under the hidden title.
+            decorations: !crate::ui::title_bar::frameless(),
+            #[cfg(target_os = "macos")]
+            platform_specific: window::settings::PlatformSpecific {
+                title_hidden: crate::ui::title_bar::drawn(),
+                titlebar_transparent: crate::ui::title_bar::drawn(),
+                fullsize_content_view: crate::ui::title_bar::drawn(),
+            },
             icon: build_window_icon().and_then(|rgba| window::icon::from_rgba(rgba, 32, 32).ok()),
             exit_on_close_request: false,
             // A Wayland compositor has no StartupWMClass to go on: it resolves a

@@ -24,6 +24,8 @@ pub fn run() -> iced::Result {
         // window's scale times this one. Noted where iced reads it, so the
         // two never disagree.
         crate::ui::icons::set_ui_scale(scale);
+        #[cfg(target_os = "windows")]
+        crate::ui::title_bar::windows::set_ui_scale(scale);
         scale
     })
     .title(|state: &OpenCADStudio, window_id: window::Id| {

@@ -2332,6 +2332,8 @@ pub enum Message {
     FilterDialog(filter_dialog::FilterMsg),
     /// The user clicked the title-bar ✕ (fires before the window closes).
     WindowCloseRequested(window::Id),
+    /// The app's own title bar over the ribbon (see `ui::title_bar`).
+    TitleBar(crate::ui::title_bar::TitleBarMsg),
     /// A window was fully closed (fires after `window::close()` is called).
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.
@@ -2703,6 +2705,7 @@ pub enum Message {
     /// An edit in a picked table cell window (Cell Borders, Cell Contents).
     TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
     AnnoScalePrompt(crate::ui::window::anno_scale_prompt::AnnoScaleMsg),
+    SurfaceList(crate::ui::window::surface_list::SurfaceListMsg),
     MTextDialog(crate::ui::window::mtext_dialogs::MTextDialogMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.

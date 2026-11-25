@@ -248,6 +248,15 @@ impl OpenCADStudio {
         let (index, x) = crate::ui::menu_bar::menu_for_letter(letter, self.tabs[i].is_start)?;
         self.menu_bar_popup = Some(index);
         self.context_menu_editing = None;
+        // The menu opens at the top of the drawing, under its title: the
+        // menus may start after the logo, in the title bar or a row of their
+        // own, and the drawing after a pallet docked on the left.
+        let menus_x = crate::ui::wrap_bar::dropdown_bounds(crate::ui::menu_bar::MENUS_ID)
+            .map_or(0.0, |b| b.x);
+        let viewport_x =
+            crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID)
+                .map_or(0.0, |b| b.x);
+        let x = (menus_x + x - viewport_x).max(0.0);
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.menu.open(iced::Point::new(x, 2.0));
         sel.menu.ui.highlighted = Some(0);

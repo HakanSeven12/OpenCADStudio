@@ -274,9 +274,10 @@ pub(super) struct CrosshairMarks {
     pub dot: Option<Point>,
 }
 
-/// Where the crosshairs are drawn: on a hovered grip; else, with the
-/// AutoSnap Magnet on, on the object snap point; else at the pointer. A
-/// grid snap is SNAP mode, not AutoSnap, so the magnet does not take it.
+/// Where the crosshairs are drawn: on a hovered grip; else on a grid snap
+/// point; else, with the AutoSnap Magnet on, on the object snap point; else
+/// at the pointer. A grid snap is SNAP mode, not AutoSnap, so it moves the
+/// crosshairs with the magnet on or off.
 pub(super) fn crosshair_centre(
     hovered_grip: Option<Point>,
     snap: Option<(Point, SnapType)>,
@@ -284,7 +285,7 @@ pub(super) fn crosshair_centre(
     pointer: Option<Point>,
 ) -> Option<Point> {
     let snap_point = snap
-        .filter(|&(_, snap_type)| magnet && snap_type != SnapType::Grid)
+        .filter(|&(_, snap_type)| magnet || snap_type == SnapType::Grid)
         .map(|(point, _)| point);
     hovered_grip.or(snap_point).or(pointer)
 }
@@ -7537,11 +7538,20 @@ mod autosnap_magnet_tests {
     }
 
     #[test]
-    fn a_grid_snap_does_not_move_the_crosshairs() {
+    fn a_grid_snap_moves_the_crosshairs() {
         let snap = Some((SNAP, SnapType::Grid));
         assert_eq!(
             crosshair_centre(None, snap, true, Some(POINTER)),
-            Some(POINTER)
+            Some(SNAP)
+        );
+    }
+
+    #[test]
+    fn a_grid_snap_moves_the_crosshairs_with_the_magnet_off() {
+        let snap = Some((SNAP, SnapType::Grid));
+        assert_eq!(
+            crosshair_centre(None, snap, false, Some(POINTER)),
+            Some(SNAP)
         );
     }
 

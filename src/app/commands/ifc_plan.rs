@@ -121,16 +121,17 @@ impl OpenCADStudio {
         match event {
             IfcPlanMsg::Picked(ticket, Some(path)) if self.window_read_current(ticket, IfcPlan) => {
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Some(target) = self
+                if let Some((tab_id, generation)) = self
                     .import_dialogs
                     .ifc_plan
                     .as_ref()
                     .and_then(|state| state.xref.as_ref())
+                    .map(|target| (target.tab_id, target.document_generation))
                 {
                     return self.read_ifc_slice_into(
                         std::path::Path::new(&path),
-                        target.tab_id,
-                        target.document_generation,
+                        tab_id,
+                        generation,
                     );
                 }
                 return self.read_ifc_plan(&path);
@@ -256,11 +257,14 @@ impl OpenCADStudio {
                 state.pending = false;
                 match result {
                     Ok(ready) => {
-                        let Some(target) = state.xref.as_ref() else {
+                        let Some((tab_id, generation)) = state
+                            .xref
+                            .as_ref()
+                            .map(|target| (target.tab_id, target.document_generation))
+                        else {
                             return Task::none();
                         };
-                        let Some(i) = self.import_target(target.tab_id, target.document_generation)
-                        else {
+                        let Some(i) = self.import_target(tab_id, generation) else {
                             self.close_active_modal();
                             return Task::none();
                         };

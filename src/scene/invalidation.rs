@@ -1715,7 +1715,7 @@ impl Scene {
         if let Some(t) = inst.tile_idx {
             0x1000_0000_0000_0000 | (t as u64)
         } else if inst.paper_sheet {
-            0x2000_0000_0000_0000
+            0x2000_0000_0000_0000 | u64::from(inst.sheet_over)
         } else {
             0x3000_0000_0000_0000 | inst.handle.value()
         }
@@ -1743,6 +1743,7 @@ impl Scene {
                 }
             } else {
                 set.insert(0x2000_0000_0000_0000); // sheet
+                set.insert(0x2000_0000_0000_0001); // its pass over the viewports
                 let (_sheet, _sheet_h, content) = self.paper_viewport_handles();
                 for h in content.iter() {
                     set.insert(0x3000_0000_0000_0000 | h.value());
@@ -1756,6 +1757,7 @@ impl Scene {
                 }
                 None => {
                     set.insert(0x2000_0000_0000_0000);
+                    set.insert(0x2000_0000_0000_0001);
                 }
             }
         } else {

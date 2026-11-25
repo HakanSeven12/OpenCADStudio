@@ -161,6 +161,7 @@ impl Scene {
                         active: i == active,
                         grid_on: tile.grid_on,
                         paper_sheet: false,
+                        sheet_over: false,
                     }
                 })
                 .collect();
@@ -195,6 +196,7 @@ impl Scene {
             active: false,
             grid_on: sheet_grid_on,
             paper_sheet: true,
+            sheet_over: false,
         });
         for &handle in content_handles.iter() {
             let Some(EntityType::Viewport(vp)) = self.document.get_entity(handle) else {
@@ -229,9 +231,74 @@ impl Scene {
                 active: self.active_viewport == Some(h),
                 grid_on: vp.status.grid_on,
                 paper_sheet: false,
+                sheet_over: false,
             });
         }
         out
+    }
+
+    /// Appends the second sheet pass to a frame's `instances` when the sheet
+    /// has entities after the first content viewport in draw order: they go
+    /// over the viewports. `tint_selected` as the frame's sheet pass has it;
+    /// `enabled` false keeps the sheet whole. The frame's sheet passes read
+    /// the outcome through [`Self::sheet_split_for`].
+    pub(super) fn push_sheet_over(&self, instances: &mut Vec<ViewportInstance>, tint_selected: bool, enabled: bool) {
+        let over = enabled
+            .then(|| instances.iter().find(|i| i.paper_sheet && !i.sheet_over))
+            .flatten()
+            .filter(|_| instances.iter().any(|i| !i.paper_sheet))
+            .filter(|_| self.paper_sheet_split(tint_selected).is_some())
+            .map(|sheet| ViewportInstance { sheet_over: true, grid_on: false, ..sheet.clone() });
+        self.paper_sheet_split_cache.borrow_mut().frame_split = over.is_some();
+        instances.extend(over);
+    }
+
+    /// The split a sheet pass of this frame draws with (see
+    /// [`Self::push_sheet_over`]); `None` for every other view.
+    pub(super) fn sheet_split_for(&self, inst: &ViewportInstance, tint_selected: bool) -> Option<SheetSplit> {
+        (inst.paper_sheet && self.paper_sheet_split_cache.borrow().frame_split)
+            .then(|| self.paper_sheet_split(tint_selected))
+            .flatten()
+    }
+
+    /// Where the sheet splits into the passes under and over the content
+    /// viewports: after the first content viewport shown, in draw order.
+    /// `None` in Model, without a content viewport on, or when nothing of the
+    /// sheet comes after it.
+    pub(super) fn paper_sheet_split(&self, tint_selected: bool) -> Option<SheetSplit> {
+        if self.current_layout == "Model" {
+            return None;
+        }
+        let (_, _, content) = self.paper_viewport_handles();
+        let depths = self.draw_depth_map();
+        let first = content
+            .iter()
+            .filter(|h| self.viewport_displays_content(**h))
+            .filter_map(|h| depths.get(&h.value()).copied())
+            .min_by(|a, b| (a[0], a[1]).partial_cmp(&(b[0], b[1])).unwrap_or(std::cmp::Ordering::Equal))?;
+        let key = self.geometry_epoch.rotate_left(32)
+            ^ (Arc::as_ptr(&depths) as usize as u64)
+            ^ (u64::from(first[0].to_bits()) << 32 | u64::from(first[1].to_bits())).rotate_left(7);
+        let viewports = content.iter().map(|h| h.value()).collect();
+        let split = SheetSplit { depths, first, viewports, key };
+        let wires = self.paper_sheet_wires_arc();
+        let (hatches, wipeouts, images) = self.paper_sheet_render_models_for_view(tint_selected);
+        let sources = key
+            ^ (Arc::as_ptr(&wires) as usize as u64).rotate_left(11)
+            ^ (Arc::as_ptr(&hatches) as usize as u64).rotate_left(23)
+            ^ (Arc::as_ptr(&wipeouts) as usize as u64).rotate_left(37)
+            ^ (Arc::as_ptr(&images) as usize as u64).rotate_left(51);
+        let known = self.paper_sheet_split_cache.borrow().any_over.filter(|(k, _)| *k == sources);
+        let any_over = known.map(|(_, any)| any).unwrap_or_else(|| {
+            let entity_over = |e: &Option<Handle>| e.is_some_and(|h| split.is_over(h.value()));
+            let any = wires.iter().any(|w| split.is_over_name(&w.name))
+                || hatches.iter().any(|h| entity_over(&h.entity))
+                || wipeouts.iter().any(|h| entity_over(&h.entity))
+                || images.iter().any(|i| entity_over(&i.entity));
+            self.paper_sheet_split_cache.borrow_mut().any_over = Some((sources, any));
+            any
+        });
+        any_over.then_some(split)
     }
 
     pub(super) fn paper_sheet_render_models(
@@ -1182,4 +1249,76 @@ impl Scene {
     ) -> Arc<Vec<WireModel>> {
         self.model_wires_for_viewport(vp_handle, screen_height_px)
     }
+}
+
+/// The draw order a layout's sheet splits at (see
+/// [`Scene::paper_sheet_split`]).
+pub(super) struct SheetSplit {
+    depths: Arc<HashMap<u64, [f32; 2]>>,
+    first: [f32; 2],
+    /// The content viewports, whose frames stay under.
+    viewports: HashSet<u64>,
+    /// Changes whenever the split can: the edit epoch, the order, the
+    /// threshold.
+    pub(super) key: u64,
+}
+
+impl SheetSplit {
+    /// `true` for an entity drawn after the first content viewport, other
+    /// than a content viewport's own frame.
+    pub(super) fn is_over(&self, handle: u64) -> bool {
+        !self.viewports.contains(&handle)
+            && self
+                .depths
+                .get(&handle)
+                .is_some_and(|d| (d[0], d[1]) > (self.first[0], self.first[1]))
+    }
+
+    /// [`Self::is_over`] for a wire, named by its entity's handle (synthetic
+    /// wires stay under).
+    pub(super) fn is_over_name(&self, name: &str) -> bool {
+        name.parse::<u64>().is_ok_and(|h| self.is_over(h))
+    }
+}
+
+/// One model list split under / over, kept while its source and the split
+/// stay the same.
+pub(super) struct SplitList<T> {
+    key: Option<(usize, u64)>,
+    /// Held so the source's address is not reused while it is the key.
+    source: Option<Arc<Vec<T>>>,
+    under: Arc<Vec<T>>,
+    over: Arc<Vec<T>>,
+}
+
+impl<T> Default for SplitList<T> {
+    fn default() -> Self {
+        Self { key: None, source: None, under: Arc::new(Vec::new()), over: Arc::new(Vec::new()) }
+    }
+}
+
+impl<T: Clone> SplitList<T> {
+    pub(super) fn part(&mut self, source: &Arc<Vec<T>>, key: u64, over: bool, is_over: impl Fn(&T) -> bool) -> Arc<Vec<T>> {
+        let id = (Arc::as_ptr(source) as usize, key);
+        if self.key != Some(id) {
+            let (o, u): (Vec<T>, Vec<T>) = source.iter().cloned().partition(|m| is_over(m));
+            self.over = Arc::new(o);
+            self.under = Arc::new(u);
+            self.key = Some(id);
+            self.source = Some(Arc::clone(source));
+        }
+        Arc::clone(if over { &self.over } else { &self.under })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct SheetSplitCache {
+    /// Whether anything of the sheet is over, by split and sources.
+    any_over: Option<(u64, bool)>,
+    /// The frame being built has the pass over the viewports.
+    frame_split: bool,
+    pub(super) wires: SplitList<WireModel>,
+    pub(super) hatches: SplitList<HatchModel>,
+    pub(super) wipeouts: SplitList<HatchModel>,
+    pub(super) images: SplitList<ImageModel>,
 }

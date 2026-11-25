@@ -100,9 +100,10 @@ fn frame(scene: &Scene, count: u32) -> Primitive {
         false,
         [1.0; 4],
     );
-    assert_eq!(
-        primitive.viewports.len(),
-        count as usize + 1,
+    // A line added to the sheet after the viewports draws in a second sheet
+    // pass, over them.
+    assert!(
+        (count as usize + 1..=count as usize + 2).contains(&primitive.viewports.len()),
         "the sheet and its {count} viewports are on the canvas"
     );
     primitive
@@ -246,8 +247,8 @@ fn a_frame_built_after_an_edit_keeps_its_wires_and_old_copies_are_let_go() {
         }
         let kept = scene.split_cache.borrow().len();
         assert!(
-            kept <= 2 * 13,
-            "{extra:?}: {kept} splits kept for the 13 sets the layout draws"
+            kept <= 2 * 14,
+            "{extra:?}: {kept} splits kept for the 14 sets the layout draws"
         );
     }
 }

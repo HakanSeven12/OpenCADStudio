@@ -5207,7 +5207,8 @@ impl Scene {
             self.set_render_pixel_scale(bounds.width, bounds.height);
         }
         let canvas = (bounds.width.max(1.0), bounds.height.max(1.0));
-        let instances = self.active_viewports(canvas.0, canvas.1, model_render_mode);
+        let mut instances = self.active_viewports(canvas.0, canvas.1, model_render_mode);
+        self.push_sheet_over(&mut instances, show_interaction, true);
         // Transparent clear — outside drawn geometry the resolve texture
         // stays at alpha=0, so the alpha-blended blit reveals the container
         // background (model bg, or the desk colour in a paper layout).
@@ -5276,9 +5277,14 @@ impl Scene {
                 active: true,
                 grid_on: false,
                 paper_sheet: false,
+                sheet_over: false,
             }]
         } else {
-            self.active_viewports(canvas.0, canvas.1, model_render_mode)
+            let mut instances = self.active_viewports(canvas.0, canvas.1, model_render_mode);
+            // Plotting paper space last draws the whole sheet over the
+            // viewports below; no draw-order split then.
+            self.push_sheet_over(&mut instances, false, !paper_space_last);
+            instances
         };
 
         let mut viewports: Vec<ViewportData> = instances
@@ -5528,6 +5534,7 @@ impl Scene {
             active: is_active,
             grid_on: tile.grid_on,
             paper_sheet: false,
+            sheet_over: false,
         };
         let force = self.refresh_consume(self.instance_id_for(&inst));
         let viewports = self
@@ -5667,12 +5674,36 @@ impl Scene {
         let (base_arc, styled_gen) = self.display_styled_wires(base_arc, source_gen);
         self.last_model_wire_gen.set(styled_gen);
         vp_mark("styled");
+        // A sheet with entities after the first content viewport in draw order
+        // draws in two passes, under and over the viewports.
+        let sheet_split = self.sheet_split_for(inst, show_interaction);
+        if inst.sheet_over && sheet_split.is_none() {
+            return None;
+        }
+        let base_arc = match &sheet_split {
+            Some(split) => self.paper_sheet_split_cache.borrow_mut().wires.part(
+                &base_arc,
+                split.key,
+                inst.sheet_over,
+                |w| split.is_over_name(&w.name),
+            ),
+            None => base_arc,
+        };
         // Wire-buffer content id for the upload gate. Preview / interim wires
         // are NOT part of this buffer anymore (they go in a separate per-frame
         // overlay buffer below), so the base id is the source's stable content
         // gen — a drag or camera move never re-uploads the base wire set.
-        let base_wire_content_id = styled_gen;
-        let base_wire_patch = self.model_wire_patch_for(base_wire_content_id);
+        let base_wire_content_id = match &sheet_split {
+            Some(split) => (styled_gen ^ split.key.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+                .wrapping_mul(2)
+                .wrapping_add(u64::from(inst.sheet_over)),
+            None => styled_gen,
+        };
+        let base_wire_patch = if sheet_split.is_some() {
+            None
+        } else {
+            self.model_wire_patch_for(base_wire_content_id)
+        };
         // Split Face3D wires from the rest. The split is content-only (keyed
         // by the wire-set content id), so while the geometry is unchanged it's
         // memoized rather than re-walking every wire (handle lookup + clone)
@@ -5778,7 +5809,8 @@ impl Scene {
             } else if self.active_viewport.is_some() {
                 !inst.paper_sheet
             } else {
-                inst.paper_sheet
+                // The sheet's overlay draws on its topmost pass.
+                inst.paper_sheet && (inst.sheet_over || sheet_split.is_none())
             };
         let (selected_annotation_context_wires, annotation_context_wires) = if show_live_overlay {
             (
@@ -5983,8 +6015,15 @@ impl Scene {
         // paper area. Content viewport model builders are block-filtered too;
         // the scissor only clips their already-correct Model Space set.
         let (hatches, wipeout_hatches, paper_images) = if inst.paper_sheet {
-            let (hatches, wipeouts, images) =
+            let (hatches, wipeouts, mut images) =
                 self.paper_sheet_render_models_for_view(show_interaction);
+            let mut wipeouts = wipeouts;
+            if let Some(split) = &sheet_split {
+                let over = |e: &Option<Handle>| e.is_some_and(|h| split.is_over(h.value()));
+                let mut cache = self.paper_sheet_split_cache.borrow_mut();
+                wipeouts = cache.wipeouts.part(&wipeouts, split.key, inst.sheet_over, |h| over(&h.entity));
+                images = cache.images.part(&images, split.key, inst.sheet_over, |i| over(&i.entity));
+            }
             (hatches, wipeouts, Some(images))
         } else {
             let hatches = self.hatch_models_for_viewport(inst.handle, &vp_frozen, show_interaction);
@@ -6012,11 +6051,19 @@ impl Scene {
         let pattern_scale = (self.paper_space_unit_factor() / viewport_scale.max(1.0e-9)) as f32;
         let styled_wire_fills =
             self.display_styled_wire_fills(&styled_fill_source, source_gen, pattern_scale);
-        let hatches = self.display_styled_hatches(
+        let mut hatches = self.display_styled_hatches(
             hatches,
             styled_wire_fills.as_ref().filter(|fills| !fills.is_empty()),
             pattern_scale,
         );
+        if let Some(split) = &sheet_split {
+            hatches = self.paper_sheet_split_cache.borrow_mut().hatches.part(
+                &hatches,
+                split.key,
+                inst.sheet_over,
+                |h| h.entity.is_some_and(|e| split.is_over(e.value())),
+            );
+        }
         vp_mark("styled-hatches");
         let images = if let Some(images) = paper_images {
             images
@@ -6036,11 +6083,11 @@ impl Scene {
         } else {
             self.meshes_for_viewport(inst.handle, &vp_frozen)
         };
-        let point_clouds = self.point_clouds_for_viewport(
-            inst.handle,
-            &vp_frozen,
-            inst.paper_sheet || wireframe_2d,
-        );
+        let point_clouds = if inst.sheet_over {
+            Arc::default()
+        } else {
+            self.point_clouds_for_viewport(inst.handle, &vp_frozen, inst.paper_sheet || wireframe_2d)
+        };
         vp_mark("meshes-clouds");
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
@@ -6062,7 +6109,9 @@ impl Scene {
         let text_source_key: u64 = if inst.tile_idx.is_some() {
             0x1000_0000_0000_0000
         } else if inst.paper_sheet {
-            0x2000_0000_0000_0000 | self.current_layout_block_handle().value()
+            0x2000_0000_0000_0000
+                | u64::from(inst.sheet_over) << 59
+                | self.current_layout_block_handle().value()
         } else if inst.handle == document::Handle::NULL {
             0x4000_0000_0000_0000 | self.current_layout_block_handle().value()
         } else {
@@ -6224,9 +6273,10 @@ impl Scene {
             skip_hatch: self.hatch_lod_enabled() && navigating,
             // A floating viewport shows the page behind it unless it has a
             // background of its own.
-            skip_background: !inst.paper_sheet
-                && self.current_layout != "Model"
-                && display.background.params[0] < 0.5,
+            skip_background: inst.sheet_over
+                || (!inst.paper_sheet
+                    && self.current_layout != "Model"
+                    && display.background.params[0] < 0.5),
             geometry_epoch: self.geometry_epoch,
             camera_generation: self.camera_generation,
             wire_content_id,

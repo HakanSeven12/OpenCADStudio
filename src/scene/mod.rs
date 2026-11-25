@@ -2337,6 +2337,10 @@ pub struct ViewportInstance {
     /// view (paper-space entities, top-locked), the paper equivalent of the
     /// Model view. Floating content viewports overlay it.
     pub paper_sheet: bool,
+    /// `true` for the second sheet pass, drawn after the content viewports:
+    /// the paper-space entities that come after the first content viewport
+    /// in draw order, so they cover what the viewports show.
+    pub sheet_over: bool,
 }
 
 /// One pane of the Model-space tiled viewport layout: the normalized screen
@@ -3068,6 +3072,8 @@ pub struct Scene {
     /// movement scanned the whole document for wipeouts and recreated the same
     /// Arcs, making Paper frame construction CPU-bound on large drawings.
     paper_sheet_render_cache: RefCell<HashMap<String, PaperSheetRenderCache>>,
+    /// The sheet's models split at the first content viewport's draw order.
+    paper_sheet_split_cache: RefCell<paper::SheetSplitCache>,
     display_plot_style_cache:
         RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
@@ -3734,6 +3740,7 @@ impl Scene {
             paper_sheet_cache: RefCell::new(HashMap::default()),
             paper_viewport_cache: RefCell::new(HashMap::default()),
             paper_sheet_render_cache: RefCell::new(HashMap::default()),
+            paper_sheet_split_cache: RefCell::new(paper::SheetSplitCache::default()),
             display_plot_style_cache: RefCell::new(HashMap::default()),
             styled_wire_cache: RefCell::new(HashMap::default()),
             styled_hatch_cache: RefCell::new(HashMap::default()),

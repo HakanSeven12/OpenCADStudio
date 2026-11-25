@@ -4114,12 +4114,32 @@ bg={bg_ms:.1}ms n={view_count}"
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };
-        // macOS keeps its frame, which resizes the window itself, and on
-        // Windows the system's hit test finds the edges (`title_bar::windows`).
+        // The drawn maximize button answers as the system's only while
+        // nothing of the app's lies over it.
+        #[cfg(target_os = "windows")]
+        crate::ui::title_bar::windows::set_maximize_free(
+            !covered && !self.title_buttons_overlaid(),
+        );
         crate::ui::title_bar::with_resize_edges(
             iced::widget::stack![top, controls].into(),
-            cfg!(target_os = "linux") && crate::ui::title_bar::frameless() && !self.main_maximized,
+            crate::ui::title_bar::app_draws_edges() && !self.main_maximized,
         )
+    }
+
+    /// Whether something of the app's lies over the title bar's window
+    /// buttons: an open ribbon dropdown or menu, or a floating pallet.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(in crate::app) fn title_buttons_overlaid(&self) -> bool {
+        let right = self.win_size.0;
+        let left = right - crate::ui::title_bar::buttons_width();
+        let bottom = crate::ui::title_bar::bar_height();
+        self.ribbon.open_dropdown.is_some()
+            || self.ribbon.menu_open()
+            || self
+                .dock
+                .floating
+                .iter()
+                .any(|f| f.x < right && f.x + f.w > left && f.y < bottom)
     }
 
     /// Measured outer pixel bounds for whichever shared modal is visible, used

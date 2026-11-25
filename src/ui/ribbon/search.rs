@@ -35,7 +35,7 @@ const BOX_ID: &str = "ribbon_search_box";
 const RESULTS_ID: &str = "ribbon_search_results";
 const RESULTS_SCROLL_ID: &str = "ribbon_search_scroll";
 /// The full box, its padding and the gap between its parts.
-const BOX_W: f32 = 190.0;
+pub(super) const BOX_W: f32 = 190.0;
 const BOX_H: f32 = 20.0;
 const BOX_PAD_LEFT: f32 = 6.0;
 /// The last button meets the box's border, so its hover fills to the edge.

@@ -4038,7 +4038,6 @@ impl OpenCADStudio {
                 title_hidden: crate::ui::title_bar::drawn(),
                 titlebar_transparent: crate::ui::title_bar::drawn(),
                 fullsize_content_view: crate::ui::title_bar::drawn(),
-                ..Default::default()
             },
             icon: build_window_icon().and_then(|rgba| window::icon::from_rgba(rgba, 32, 32).ok()),
             exit_on_close_request: false,

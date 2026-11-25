@@ -5556,7 +5556,11 @@ impl OpenCADStudio {
                         let snap = iced::window::run(id, |window| {
                             if let Ok(handle) = window.window_handle() {
                                 if let RawWindowHandle::Win32(handle) = handle.as_raw() {
-                                    crate::ui::title_bar::windows::install(handle.hwnd.get());
+                                    // Without it the app draws the edges
+                                    // and the button stays its own.
+                                    if !crate::ui::title_bar::windows::install(handle.hwnd.get()) {
+                                        log::warn!("title bar: subclassing the main window failed");
+                                    }
                                 }
                             }
                         })

@@ -8,12 +8,15 @@
 //! [`platform`]); macOS keeps its traffic lights over the bar. A tiling
 //! window manager keeps the system's way.
 
+pub mod geometry;
 mod platform;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+use platform::button_metrics;
 pub use platform::{
-    double_click, layout, tiling_desktop, Button, ButtonLayout, ButtonStyle, DoubleClick,
+    double_click, layout, system_title_bar_forced, tiling_desktop, Button, ButtonLayout,
+    ButtonStyle, DoubleClick,
 };
 
 use iced::widget::{button, column, container, mouse_area, row, stack, text, Space};
@@ -25,13 +28,15 @@ use crate::ui::kit::{tooltip, TipPosition};
 use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 
 /// Whether the app draws the main window's title bar: on Windows, Linux and
-/// macOS, unless a tiling window manager arranges the windows.
+/// macOS, unless a tiling window manager arranges the windows or
+/// `OCS_SYSTEM_TITLEBAR=1` asks for the system's.
 pub fn drawn() -> bool {
     cfg!(any(
         target_os = "windows",
         target_os = "linux",
         target_os = "macos"
     )) && !tiling_desktop()
+        && !system_title_bar_forced()
 }
 
 /// The bar's height: on macOS that of a window's title, so the traffic
@@ -42,6 +47,16 @@ pub fn bar_height() -> f32 {
     } else {
         metrics::TITLE_BAR_H
     }
+}
+
+/// Whether the app draws resize edges of its own: without a system frame,
+/// unless the system finds the edges itself (Windows, see [`windows`]).
+pub fn app_draws_edges() -> bool {
+    #[cfg(target_os = "windows")]
+    let system_edges = windows::installed();
+    #[cfg(not(target_os = "windows"))]
+    let system_edges = false;
+    frameless() && !system_edges
 }
 
 /// Whether the main window opens without a system frame: where the app draws
@@ -182,32 +197,7 @@ fn leading_inset() -> f32 {
 /// The width the window buttons and the inset before the logo take, for
 /// the room left to the search box.
 pub fn buttons_width() -> f32 {
-    let buttons = layout();
-    let count = buttons.left.len() + buttons.right.len();
-    let groups = usize::from(!buttons.left.is_empty()) + usize::from(!buttons.right.is_empty());
-    let (w, gap, margin) = button_metrics(buttons.style);
-    leading_inset()
-        + count as f32 * w
-        + count.saturating_sub(groups) as f32 * gap
-        + groups as f32 * margin
-}
-
-/// A button's width, the gap between buttons and the margin at the bar's end.
-fn button_metrics(style: ButtonStyle) -> (f32, f32, f32) {
-    match style {
-        ButtonStyle::Windows => (metrics::CAPTION_W, 0.0, 0.0),
-        ButtonStyle::Adwaita => (
-            metrics::ADWAITA_BUTTON,
-            metrics::CAPTION_GAP,
-            metrics::CAPTION_GAP,
-        ),
-        ButtonStyle::Breeze => (
-            metrics::BREEZE_BUTTON,
-            metrics::CAPTION_GAP,
-            metrics::CAPTION_GAP,
-        ),
-        ButtonStyle::System => (0.0, 0.0, 0.0),
-    }
+    platform::buttons_width_of(layout())
 }
 
 /// A group of window buttons, `side` telling at which end its margin goes.

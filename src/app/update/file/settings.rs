@@ -366,7 +366,6 @@ impl OpenCADStudio {
         };
         self.hatch_boundary_warning_off = s.hatch_boundary_warning_off;
         self.show_menu_bar = s.show_menu_bar;
-        self.ribbon.set_in_title_bar(self.draws_title_bar());
         self.ribbon_closed = s.ribbon_closed;
         self.command_line_hidden = s.command_line_hidden;
         crate::ui::window::layers::set_column_layout_names(&s.layer_columns);

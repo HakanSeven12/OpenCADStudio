@@ -16,17 +16,23 @@ use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
 };
-use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, IsZoomed, PostMessageW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT,
-    HTMAXBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, SC_MAXIMIZE, SC_RESTORE, WM_NCHITTEST,
-    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_SYSCOMMAND,
+    HTMAXBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, SC_MAXIMIZE, SC_RESTORE, WM_NCDESTROY,
+    WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
+    WM_SYSCOMMAND,
 };
 
-use crate::ui::style::ribbon_metrics as metrics;
+use super::geometry::{self, Edge, Rect};
 
 /// The pointer is over the maximize button (the system's hit test says so).
 static HOVERED: AtomicBool = AtomicBool::new(false);
+/// Nothing of the app's (a dialog, a menu, a floating pallet) lies over the
+/// maximize button, which may then answer as the system's.
+static MAXIMIZE_FREE: AtomicBool = AtomicBool::new(true);
+/// The window is subclassed: the system finds its edges.
+static INSTALLED: AtomicBool = AtomicBool::new(false);
 /// The app's UI scale (`f32` bits), on top of the monitor's DPI.
 static UI_SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000);
 
@@ -43,18 +49,30 @@ pub fn maximize_hovered() -> bool {
     HOVERED.load(Ordering::Relaxed)
 }
 
-/// Subclass the main window `hwnd` (once).
-pub fn install(hwnd: isize) {
+/// Whether the maximize button may answer as the system's: nothing of the
+/// app's lies over it (the view says so each time it is built).
+pub fn set_maximize_free(free: bool) {
+    MAXIMIZE_FREE.store(free, Ordering::Relaxed);
+}
+
+/// Whether the window is subclassed, so the system finds its edges; else
+/// the app draws edges of its own.
+pub fn installed() -> bool {
+    INSTALLED.load(Ordering::Relaxed)
+}
+
+/// Subclass the main window `hwnd` (once); whether that worked.
+pub fn install(hwnd: isize) -> bool {
     // SAFETY: `hwnd` is the live main window, handed over by winit on the
     // UI thread that owns it; the procedure is a plain function.
-    unsafe {
-        SetWindowSubclass(hwnd as HWND, Some(procedure), SUBCLASS_ID, 0);
-    }
+    let ok = unsafe { SetWindowSubclass(hwnd as HWND, Some(procedure), SUBCLASS_ID, 0) } != 0;
+    INSTALLED.store(ok, Ordering::Relaxed);
+    ok
 }
 
 /// The client area and the scale from logical to client pixels: the
 /// monitor's DPI times the app's scale.
-fn client_and_scale(hwnd: HWND) -> Option<(RECT, f32)> {
+fn client_and_scale(hwnd: HWND) -> Option<(Rect, f32)> {
     let mut client = RECT {
         left: 0,
         top: 0,
@@ -68,24 +86,16 @@ fn client_and_scale(hwnd: HWND) -> Option<(RECT, f32)> {
         }
         GetDpiForWindow(hwnd)
     };
+    let client = Rect {
+        left: client.left,
+        top: client.top,
+        right: client.right,
+        bottom: client.bottom,
+    };
     Some((
         client,
         dpi as f32 / 96.0 * f32::from_bits(UI_SCALE.load(Ordering::Relaxed)),
     ))
-}
-
-/// The maximize button in client pixels: second from the right, the bar's
-/// height.
-fn maximize_rect(hwnd: HWND) -> Option<RECT> {
-    let (client, scale) = client_and_scale(hwnd)?;
-    let w = (metrics::CAPTION_W * scale).round() as i32;
-    let h = (metrics::TITLE_BAR_H * scale).round() as i32;
-    Some(RECT {
-        left: client.right - 2 * w,
-        top: 0,
-        right: client.right - w,
-        bottom: h,
-    })
 }
 
 /// The hit-test point in client pixels.
@@ -98,36 +108,31 @@ fn client_point(hwnd: HWND, lparam: LPARAM) -> Option<POINT> {
     (unsafe { ScreenToClient(hwnd, &mut point) } != 0).then_some(point)
 }
 
-fn over_maximize(hwnd: HWND, point: POINT) -> bool {
-    maximize_rect(hwnd).is_some_and(|r| {
-        point.x >= r.left && point.x < r.right && point.y >= r.top && point.y < r.bottom
-    })
-}
-
-/// The edge or corner of a restored window under `point`, as the system's
-/// hit-test code; `None` inside.
-fn edge(hwnd: HWND, point: POINT) -> Option<u32> {
-    // SAFETY: plain query on a valid window handle.
-    if unsafe { IsZoomed(hwnd) } != 0 {
-        return None;
-    }
+/// The system's hit-test code for a point: an edge of a restored window,
+/// the maximize button while nothing of the app's lies over it, else
+/// `None` (the client area, which winit and iced handle).
+fn hit(hwnd: HWND, point: POINT) -> Option<u32> {
     let (client, scale) = client_and_scale(hwnd)?;
-    let e = (metrics::RESIZE_EDGE * scale).round().max(1.0) as i32;
-    let left = point.x < client.left + e;
-    let right = point.x >= client.right - e;
-    let top = point.y < client.top + e;
-    let bottom = point.y >= client.bottom - e;
-    Some(match (left, right, top, bottom) {
-        (true, _, true, _) => HTTOPLEFT,
-        (_, true, true, _) => HTTOPRIGHT,
-        (true, _, _, true) => HTBOTTOMLEFT,
-        (_, true, _, true) => HTBOTTOMRIGHT,
-        (true, ..) => HTLEFT,
-        (_, true, ..) => HTRIGHT,
-        (_, _, true, _) => HTTOP,
-        (_, _, _, true) => HTBOTTOM,
-        _ => return None,
-    })
+    // SAFETY: plain query on a valid window handle.
+    let restored = unsafe { IsZoomed(hwnd) } == 0;
+    // The edges first: the top edge runs over the buttons.
+    if restored {
+        if let Some(edge) = geometry::edge(client, scale, point.x, point.y) {
+            return Some(match edge {
+                Edge::TopLeft => HTTOPLEFT,
+                Edge::TopRight => HTTOPRIGHT,
+                Edge::BottomLeft => HTBOTTOMLEFT,
+                Edge::BottomRight => HTBOTTOMRIGHT,
+                Edge::Left => HTLEFT,
+                Edge::Right => HTRIGHT,
+                Edge::Top => HTTOP,
+                Edge::Bottom => HTBOTTOM,
+            });
+        }
+    }
+    (MAXIMIZE_FREE.load(Ordering::Relaxed)
+        && geometry::maximize_button(client, scale).contains(point.x, point.y))
+    .then_some(HTMAXBUTTON)
 }
 
 /// Light or dim the button: redraw, so its style reads the new state.
@@ -161,18 +166,11 @@ unsafe extern "system" fn procedure(
     let on_button = wparam == HTMAXBUTTON as WPARAM;
     match msg {
         WM_NCHITTEST => {
-            if let Some(point) = client_point(hwnd, lparam) {
-                // The edges first: the top edge runs over the buttons.
-                if let Some(code) = edge(hwnd, point) {
-                    set_hovered(hwnd, false);
-                    return code as LRESULT;
-                }
-                let over = over_maximize(hwnd, point);
-                set_hovered(hwnd, over);
-                if over {
-                    return HTMAXBUTTON as LRESULT;
-                }
+            if let Some(code) = client_point(hwnd, lparam).and_then(|point| hit(hwnd, point)) {
+                set_hovered(hwnd, code == HTMAXBUTTON);
+                return code as LRESULT;
             }
+            set_hovered(hwnd, false);
         }
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if on_button => return 0,
         WM_NCLBUTTONUP if on_button => {
@@ -186,6 +184,12 @@ unsafe extern "system" fn procedure(
             return 0;
         }
         WM_NCMOUSELEAVE => set_hovered(hwnd, false),
+        // As Microsoft asks: the subclass goes before the window does.
+        WM_NCDESTROY => {
+            INSTALLED.store(false, Ordering::Relaxed);
+            // SAFETY: removes this procedure from the window being destroyed.
+            unsafe { RemoveWindowSubclass(hwnd, Some(procedure), SUBCLASS_ID) };
+        }
         _ => {}
     }
     // SAFETY: hands every other message to the next procedure (winit's).

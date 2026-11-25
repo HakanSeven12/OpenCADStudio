@@ -63,6 +63,16 @@ pub fn tiling_desktop() -> bool {
     *TILING.get_or_init(|| cfg!(target_os = "linux") && is_tiling(&desktop_names()))
 }
 
+/// `OCS_SYSTEM_TITLEBAR=1` keeps the system's title bar and frame, for a
+/// window manager the app does not recognise as tiling or a session where
+/// the app's own bar gets in the way (remote desktop, assistive tools).
+pub fn system_title_bar_forced() -> bool {
+    static FORCED: OnceLock<bool> = OnceLock::new();
+    *FORCED.get_or_init(|| {
+        std::env::var("OCS_SYSTEM_TITLEBAR").is_ok_and(|v| !v.is_empty() && v != "0")
+    })
+}
+
 /// Whether desktop `names` (`:`/`;` separated) name a tiling window manager.
 pub(super) fn is_tiling(names: &str) -> bool {
     has_desktop(
@@ -104,11 +114,7 @@ fn detect() -> ButtonLayout {
     }
     let names = desktop_names();
     if has_desktop(&names, &["kde", "plasma"]) {
-        let kwinrc = config_home()
-            .map(|dir| dir.join("kwinrc"))
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .unwrap_or_default();
-        let (left, right) = parse_kwinrc(&kwinrc);
+        let (left, right) = parse_kwinrc(&kwinrc());
         return ButtonLayout {
             style: ButtonStyle::Breeze,
             left,
@@ -118,7 +124,7 @@ fn detect() -> ButtonLayout {
     // Other desktops (Xfce, Cinnamon, MATE, ...) keep their buttons in
     // settings of their own; GNOME's key would mostly hold its default,
     // close only. They get all three buttons on the right.
-    if !has_desktop(&names, &["gnome", "budgie", "pantheon", "unity", "ubuntu"]) {
+    if !has_desktop(&names, &GNOME_FAMILY) {
         return ButtonLayout {
             style: ButtonStyle::Adwaita,
             left: Vec::new(),
@@ -127,18 +133,41 @@ fn detect() -> ButtonLayout {
     }
     // The GNOME family keeps its order in this key; without it (no
     // gsettings), GNOME's own default.
-    let setting = std::process::Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.wm.preferences", "button-layout"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-        .unwrap_or_else(|| "appmenu:close".to_owned());
+    let setting = gsettings("button-layout").unwrap_or_else(|| "appmenu:close".to_owned());
     let (left, right) = parse_gnome_layout(&setting);
     ButtonLayout {
         style: ButtonStyle::Adwaita,
         left,
         right,
+    }
+}
+
+/// The width the window buttons and the inset before the logo take in
+/// `layout`: a button's width, the gap between buttons of a group and a
+/// margin at the bar's end for each group; macOS's traffic lights.
+pub fn buttons_width_of(layout: &ButtonLayout) -> f32 {
+    use crate::ui::style::ribbon_metrics as m;
+    if layout.style == ButtonStyle::System {
+        return m::TRAFFIC_LIGHTS_W;
+    }
+    let (w, gap, margin) = button_metrics(layout.style);
+    let count = layout.left.len() + layout.right.len();
+    let groups = usize::from(!layout.left.is_empty()) + usize::from(!layout.right.is_empty());
+    m::TITLE_BAR_PAD
+        + count as f32 * w
+        + count.saturating_sub(groups) as f32 * gap
+        + groups as f32 * margin
+}
+
+/// A button's width, the gap between buttons of a group and the margin at
+/// the bar's end, in `style`.
+pub fn button_metrics(style: ButtonStyle) -> (f32, f32, f32) {
+    use crate::ui::style::ribbon_metrics as m;
+    match style {
+        ButtonStyle::Windows => (m::CAPTION_W, 0.0, 0.0),
+        ButtonStyle::Adwaita => (m::ADWAITA_BUTTON, m::CAPTION_GAP, m::CAPTION_GAP),
+        ButtonStyle::Breeze => (m::BREEZE_BUTTON, m::CAPTION_GAP, m::CAPTION_GAP),
+        ButtonStyle::System => (0.0, 0.0, 0.0),
     }
 }
 
@@ -149,6 +178,30 @@ pub fn windows_layout() -> ButtonLayout {
         left: Vec::new(),
         right: ALL.to_vec(),
     }
+}
+
+/// Desktops that keep GNOME's window-manager settings.
+const GNOME_FAMILY: [&str; 5] = ["gnome", "budgie", "pantheon", "unity", "ubuntu"];
+
+/// A key of `org.gnome.desktop.wm.preferences`, as `gsettings` prints it.
+fn gsettings(key: &str) -> Option<String> {
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.wm.preferences", key])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// KDE's `kwinrc`: the user's, else the system-wide default a
+/// distribution ships.
+fn kwinrc() -> String {
+    config_home()
+        .map(|dir| dir.join("kwinrc"))
+        .into_iter()
+        .chain(std::iter::once(std::path::PathBuf::from("/etc/xdg/kwinrc")))
+        .find_map(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default()
 }
 
 fn config_home() -> Option<std::path::PathBuf> {
@@ -229,61 +282,109 @@ pub enum DoubleClick {
     Nothing,
 }
 
-/// What a double click on the title bar does here: on macOS as set in
-/// System Settings (Desktop & Dock), elsewhere it maximizes.
+/// What a double click on the title bar does here, as the desktop is set:
+/// GNOME's `action-double-click-titlebar`, KDE's `TitlebarDoubleClickCommand`,
+/// elsewhere it maximizes. On macOS the system's own title area handles the
+/// double click (System Settings › Desktop & Dock), so the app does nothing.
 pub fn double_click() -> DoubleClick {
     static ACTION: OnceLock<DoubleClick> = OnceLock::new();
     *ACTION.get_or_init(|| {
-        if !cfg!(target_os = "macos") {
+        if cfg!(target_os = "macos") {
+            return DoubleClick::Nothing;
+        }
+        if !cfg!(target_os = "linux") {
             return DoubleClick::Maximize;
         }
-        let read = |key: &str| {
-            std::process::Command::new("defaults")
-                .args(["read", "-g", key])
-                .output()
-                .ok()
-                .filter(|out| out.status.success())
-                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-        };
-        parse_double_click(
-            read("AppleActionOnDoubleClick").as_deref(),
-            read("AppleMiniaturizeOnDoubleClick").as_deref(),
-        )
+        let names = desktop_names();
+        if has_desktop(&names, &["kde", "plasma"]) {
+            return parse_kde_double_click(&kwinrc());
+        }
+        if has_desktop(&names, &GNOME_FAMILY) {
+            let setting = gsettings("action-double-click-titlebar");
+            return parse_gnome_double_click(setting.as_deref().unwrap_or("toggle-maximize"));
+        }
+        DoubleClick::Maximize
     })
 }
 
-/// macOS's `AppleActionOnDoubleClick` (`Maximize`, `Minimize`, `None`),
-/// or before it the older `AppleMiniaturizeOnDoubleClick` (`1`); unset, the
-/// window zooms.
-pub(super) fn parse_double_click(action: Option<&str>, miniaturize: Option<&str>) -> DoubleClick {
-    match action.map(str::trim) {
-        Some("Minimize") => DoubleClick::Minimize,
-        Some("None") => DoubleClick::Nothing,
-        Some(_) => DoubleClick::Maximize,
-        None if miniaturize.map(str::trim) == Some("1") => DoubleClick::Minimize,
-        None => DoubleClick::Maximize,
+/// GNOME's `action-double-click-titlebar`; the vertical-only and menu
+/// actions, which the app has no counterpart for, maximize.
+pub(super) fn parse_gnome_double_click(setting: &str) -> DoubleClick {
+    match setting.trim().trim_matches(|c| c == '\'' || c == '"') {
+        "minimize" => DoubleClick::Minimize,
+        "none" | "lower" => DoubleClick::Nothing,
+        _ => DoubleClick::Maximize,
     }
+}
+
+/// KDE's `TitlebarDoubleClickCommand` in `[Windows]` of `kwinrc`; unset,
+/// Plasma's default (maximize). Actions without a counterpart do nothing.
+pub(super) fn parse_kde_double_click(kwinrc: &str) -> DoubleClick {
+    match ini_value(kwinrc, "Windows", "TitlebarDoubleClickCommand").as_deref() {
+        None | Some("Maximize") => DoubleClick::Maximize,
+        Some("Minimize") => DoubleClick::Minimize,
+        Some(_) => DoubleClick::Nothing,
+    }
+}
+
+/// The value of `key` in `[section]` of an ini-style file.
+fn ini_value(text: &str, section: &str, key: &str) -> Option<String> {
+    let mut current = "";
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            current = name;
+        } else if current == section {
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim() == key {
+                    return Some(v.trim().to_owned());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        is_tiling, parse_double_click, parse_gnome_layout, parse_kwinrc, Button::*, DoubleClick,
+        buttons_width_of, is_tiling, parse_gnome_double_click, parse_gnome_layout,
+        parse_kde_double_click, parse_kwinrc, Button::*, ButtonLayout, ButtonStyle, DoubleClick,
     };
 
     #[test]
-    fn the_mac_double_click_setting_is_read() {
-        assert_eq!(parse_double_click(None, None), DoubleClick::Maximize);
+    fn the_desktops_double_click_setting_is_read() {
         assert_eq!(
-            parse_double_click(Some("Maximize\n"), None),
+            parse_gnome_double_click("'toggle-maximize'"),
             DoubleClick::Maximize
         );
         assert_eq!(
-            parse_double_click(Some("Minimize\n"), None),
+            parse_gnome_double_click("'minimize'\n"),
             DoubleClick::Minimize
         );
-        assert_eq!(parse_double_click(Some("None"), None), DoubleClick::Nothing);
-        assert_eq!(parse_double_click(None, Some("1")), DoubleClick::Minimize);
+        assert_eq!(parse_gnome_double_click("'none'"), DoubleClick::Nothing);
+        assert_eq!(parse_kde_double_click(""), DoubleClick::Maximize);
+        let kwinrc = "[Windows]\nTitlebarDoubleClickCommand=Minimize\n";
+        assert_eq!(parse_kde_double_click(kwinrc), DoubleClick::Minimize);
+        let kwinrc = "[Windows]\nTitlebarDoubleClickCommand=Shade\n";
+        assert_eq!(parse_kde_double_click(kwinrc), DoubleClick::Nothing);
+    }
+
+    #[test]
+    fn the_buttons_width_follows_the_style() {
+        let layout = |style, left: Vec<_>, right: Vec<_>| ButtonLayout { style, left, right };
+        let windows = layout(
+            ButtonStyle::Windows,
+            vec![],
+            vec![Minimize, Maximize, Close],
+        );
+        assert_eq!(buttons_width_of(&windows), 6.0 + 3.0 * 46.0);
+        let gnome = layout(ButtonStyle::Adwaita, vec![], vec![Close]);
+        assert_eq!(buttons_width_of(&gnome), 6.0 + 24.0 + 6.0);
+        let kde = layout(ButtonStyle::Breeze, vec![Close], vec![Minimize, Maximize]);
+        assert_eq!(buttons_width_of(&kde), 6.0 + 3.0 * 20.0 + 6.0 + 2.0 * 6.0);
+        let mac = layout(ButtonStyle::System, vec![], vec![]);
+        assert_eq!(buttons_width_of(&mac), 78.0);
     }
 
     #[test]

@@ -637,7 +637,8 @@ impl Ribbon {
             tab_span: CenterSpan::default(),
             tab_flow_natural: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             search_in_tab_row: AtomicBool::new(true),
-            in_title_bar: false,
+            // Tests choose the mode themselves (`set_in_title_bar`).
+            in_title_bar: cfg!(not(test)) && crate::ui::title_bar::drawn(),
             title_start_w: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             narrow_shown: AtomicBool::new(false),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
@@ -675,7 +676,9 @@ impl Ribbon {
     }
 
     /// Whether the app's title bar holds the logo, the Quick Access Toolbar
-    /// and the search box (see [`Self::title_bar_start`]).
+    /// and the search box (see [`Self::title_bar_start`]); set from
+    /// `title_bar::drawn` when the ribbon is made.
+    #[cfg(test)]
     pub fn set_in_title_bar(&mut self, on: bool) {
         self.in_title_bar = on;
     }
@@ -3250,18 +3253,23 @@ mod tests {
 
     #[test]
     fn the_title_bar_keeps_the_full_search_box_while_it_has_room() {
+        use std::sync::atomic::Ordering::Relaxed;
         let mut ribbon = Ribbon::default();
         ribbon.set_in_title_bar(true);
         // Before the title bar is laid out the window's width decides.
         ribbon.set_window_size((1024.0, 768.0));
         assert!(ribbon.narrow());
-        // Logo and toolbar 200 px wide: 1024 px hold the name, the box and
-        // the window buttons; 600 px do not.
-        ribbon
-            .title_start_w
-            .store(200f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        // Logo and toolbar 200 px wide: the box shows while the window also
+        // holds the name, the box and this desktop's window buttons.
+        ribbon.title_start_w.store(200f32.to_bits(), Relaxed);
+        let need = 200.0
+            + crate::ui::style::ribbon_metrics::TITLE_NAME_ROOM
+            + super::search::BOX_W
+            + 2.0 * crate::ui::style::ribbon_metrics::TITLE_BAR_PAD
+            + crate::ui::title_bar::buttons_width();
+        ribbon.set_window_size((need, 768.0));
         assert!(!ribbon.narrow());
-        ribbon.set_window_size((600.0, 768.0));
+        ribbon.set_window_size((need - 1.0, 768.0));
         assert!(ribbon.narrow());
     }
 

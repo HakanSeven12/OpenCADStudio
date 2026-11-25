@@ -11,11 +11,11 @@ use crate::ui::style::kit_metrics as km;
 use document::Handle;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Element, Fill, Padding};
-use ocs_geom::geom2d::cleanup::{EndErrorKind, Tolerances};
+use ocs_geom::geom2d::cleanup::{AngleErrorKind, AngleTolerances, EndErrorKind, Tolerances};
 
 pub const ICON: &[u8] = include_bytes!("../../../assets/icons/geometry_cleanup.svg");
 
-/// The error types, in the order of the tree.
+/// The length types, in the order of the tree and of the settings rows.
 pub const KINDS: [EndErrorKind; 3] = [
     EndErrorKind::Gap,
     EndErrorKind::Overshoot,
@@ -23,10 +23,65 @@ pub const KINDS: [EndErrorKind; 3] = [
 ];
 
 pub fn kind_label(kind: EndErrorKind) -> &'static str {
-    match kind {
-        EndErrorKind::Gap => "Gap",
-        EndErrorKind::Overshoot => "Overshoot",
-        EndErrorKind::Undershoot => "Undershoot",
+    ErrorType::from(kind).label()
+}
+
+/// An error type of the palette, in the order of the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorType {
+    Gap,
+    Overshoot,
+    Undershoot,
+    AbsoluteAngle,
+    RelativeAngle,
+}
+
+pub const TYPES: [ErrorType; 5] = [
+    ErrorType::Gap,
+    ErrorType::Overshoot,
+    ErrorType::Undershoot,
+    ErrorType::AbsoluteAngle,
+    ErrorType::RelativeAngle,
+];
+
+impl ErrorType {
+    pub fn label(self) -> &'static str {
+        match self {
+            ErrorType::Gap => "Gap",
+            ErrorType::Overshoot => "Overshoot",
+            ErrorType::Undershoot => "Undershoot",
+            ErrorType::AbsoluteAngle => "Absolute Angle",
+            ErrorType::RelativeAngle => "Relative Angle",
+        }
+    }
+
+    /// The length type, for a length error.
+    pub fn end_kind(self) -> Option<EndErrorKind> {
+        match self {
+            ErrorType::Gap => Some(EndErrorKind::Gap),
+            ErrorType::Overshoot => Some(EndErrorKind::Overshoot),
+            ErrorType::Undershoot => Some(EndErrorKind::Undershoot),
+            ErrorType::AbsoluteAngle | ErrorType::RelativeAngle => None,
+        }
+    }
+}
+
+impl From<EndErrorKind> for ErrorType {
+    fn from(kind: EndErrorKind) -> Self {
+        match kind {
+            EndErrorKind::Gap => ErrorType::Gap,
+            EndErrorKind::Overshoot => ErrorType::Overshoot,
+            EndErrorKind::Undershoot => ErrorType::Undershoot,
+        }
+    }
+}
+
+impl From<AngleErrorKind> for ErrorType {
+    fn from(kind: AngleErrorKind) -> Self {
+        match kind {
+            AngleErrorKind::Absolute => ErrorType::AbsoluteAngle,
+            AngleErrorKind::Relative => ErrorType::RelativeAngle,
+        }
     }
 }
 
@@ -43,6 +98,14 @@ pub enum Fix {
     Move,
     /// Run both ends on to where their lines cross (a gap at a corner).
     ExtendBoth,
+    /// Turn the line about its start onto the angle (an absolute angle).
+    RotateAtStart,
+    /// Turn the line about its end onto the angle (an absolute angle).
+    RotateAtEnd,
+    /// Turn the shorter of two lines about their meet (a relative angle).
+    RotateShorter,
+    /// Turn the longer of two lines about their meet (a relative angle).
+    RotateLonger,
 }
 
 impl Fix {
@@ -58,6 +121,10 @@ impl Fix {
             Fix::ExtendBoth => {
                 "Lengthen both ends along their own lines to the corner where they meet."
             }
+            Fix::RotateAtStart => "Turn the line about its start so that it is on the angle.",
+            Fix::RotateAtEnd => "Turn the line about its end so that it is on the angle.",
+            Fix::RotateShorter => "Turn the shorter line about the point where the lines meet.",
+            Fix::RotateLonger => "Turn the longer line about the point where the lines meet.",
         }
     }
 
@@ -67,6 +134,10 @@ impl Fix {
             Fix::Extend | Fix::ExtendBoth => "Extend",
             Fix::Stretch => "Stretch",
             Fix::Move => "Move",
+            Fix::RotateAtStart => "Rotate at Start",
+            Fix::RotateAtEnd => "Rotate at End",
+            Fix::RotateShorter => "Rotate Shorter",
+            Fix::RotateLonger => "Rotate Longer",
         }
     }
 }
@@ -74,30 +145,57 @@ impl Fix {
 /// One error of a scan, with the objects in place of curve indices.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Finding {
-    pub kind: EndErrorKind,
+    pub kind: ErrorType,
     pub handle: Handle,
     pub at_start: bool,
     pub location: [f64; 2],
     pub target: [f64; 2],
-    /// A gap's other end.
+    /// A gap's other end, or the line that a relative angle meets.
     pub other: Option<(Handle, bool)>,
     /// A gap's corner, for Extend.
     pub corner: Option<[f64; 2]>,
+    /// In degrees for an angle error.
     pub deviation: f64,
+    /// What an angle error needs for its repair.
+    pub angle: Option<AngleFinding>,
+}
+
+/// An angle error's standard angle and turn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AngleFinding {
+    /// The standard angle, in degrees.
+    pub angle: f64,
+    /// The turn in radians, counter-clockwise, that puts the line (`handle`)
+    /// on the angle; the opposite turn of the other line does it as well.
+    pub turn: f64,
+    /// Whether the start and the end of the line meet other geometry.
+    pub meets: [bool; 2],
 }
 
 impl Finding {
-    /// Whether `other` is the same error: the same type at the same end.
+    /// Whether `other` is the same error: the same type at the same end,
+    /// or of the same two lines.
     pub fn same_error(&self, other: &Finding) -> bool {
-        self.kind == other.kind && self.handle == other.handle && self.at_start == other.at_start
+        self.kind == other.kind
+            && self.handle == other.handle
+            && self.at_start == other.at_start
+            && (self.kind != ErrorType::RelativeAngle
+                || self.other.map(|o| o.0) == other.other.map(|o| o.0))
     }
 
     /// The repairs that this error offers.
     pub fn fixes(&self) -> Vec<Fix> {
         match self.kind {
-            EndErrorKind::Overshoot => vec![Fix::Trim],
-            EndErrorKind::Undershoot => vec![Fix::Extend],
-            EndErrorKind::Gap => {
+            ErrorType::Overshoot => vec![Fix::Trim],
+            ErrorType::Undershoot => vec![Fix::Extend],
+            // The end that meets other geometry first: turning about it
+            // keeps it there.
+            ErrorType::AbsoluteAngle => match self.angle.map(|a| a.meets) {
+                Some([false, true]) => vec![Fix::RotateAtEnd, Fix::RotateAtStart],
+                _ => vec![Fix::RotateAtStart, Fix::RotateAtEnd],
+            },
+            ErrorType::RelativeAngle => vec![Fix::RotateShorter, Fix::RotateLonger],
+            ErrorType::Gap => {
                 let mut fixes = Vec::new();
                 if self.corner.is_some() {
                     fixes.push(Fix::ExtendBoth);
@@ -125,6 +223,7 @@ pub struct Scan {
     /// The objects that were selected for the scan.
     pub objects: Vec<Handle>,
     pub tolerances: Tolerances,
+    pub angles: AngleTolerances,
     pub findings: Vec<Finding>,
 }
 
@@ -135,7 +234,7 @@ pub struct GeometryCleanupPalette {
     /// The index in the scan's findings of the picked error.
     pub picked: Option<usize>,
     /// The error types whose list is folded.
-    pub folded: Vec<EndErrorKind>,
+    pub folded: Vec<ErrorType>,
     /// The saved settings; `None` until the user saves them.
     pub settings: Option<CleanupSettings>,
     /// The file that the saved settings were imported from, for display.
@@ -151,7 +250,7 @@ pub enum GeometryCleanupMsg {
     /// Pick an error: zoom to it and show its repairs.
     Pick(usize),
     Fix(usize, Fix),
-    Fold(EndErrorKind),
+    Fold(ErrorType),
     /// The Settings dialog.
     OpenSettings,
     SettingsTolerance(EndErrorKind, String),
@@ -171,8 +270,8 @@ pub enum GeometryCleanupMsg {
 /// The errors of a scan by type, in the order of the tree: each type with
 /// the indices of its errors in `scan.findings`. Types with no error are
 /// left out.
-pub fn groups(scan: &Scan) -> Vec<(EndErrorKind, Vec<usize>)> {
-    KINDS
+pub fn groups(scan: &Scan) -> Vec<(ErrorType, Vec<usize>)> {
+    TYPES
         .into_iter()
         .map(|kind| {
             let indices = (0..scan.findings.len())
@@ -242,7 +341,7 @@ pub fn view<'a>(
             column![
                 kit::band(tools),
                 kit::empty_state(crate::t!(
-                    "Select objects to find gaps, overshoots and undershoots."
+                    "Select objects to find gaps, overshoots, undershoots and lines off an angle."
                 )),
             ],
             width,
@@ -259,13 +358,19 @@ pub fn view<'a>(
     }
     for (kind, indices) in groups(scan) {
         let folded = palette.folded.contains(&kind);
-        list = list.push(kit::category_bar(
-            format!(
+        // A length type shows its tolerance; an angle type has one for
+        // each angle.
+        let label = match kind.end_kind() {
+            Some(end) => format!(
                 "{}: {} ({})",
-                crate::t!(kind_label(kind)),
+                crate::t!(kind.label()),
                 indices.len(),
-                scan.tolerances.get(kind).unwrap_or_default()
+                scan.tolerances.get(end).unwrap_or_default()
             ),
+            None => format!("{}: {}", crate::t!(kind.label()), indices.len()),
+        };
+        list = list.push(kit::category_bar(
+            label,
             folded,
             msg(GeometryCleanupMsg::Fold(kind)),
         ));
@@ -274,8 +379,12 @@ pub fn view<'a>(
         }
         for index in indices {
             let finding = &scan.findings[index];
+            let place = match finding.angle {
+                Some(angle) => format!("{} ({}°)", coordinates(finding.location), angle.angle),
+                None => coordinates(finding.location),
+            };
             list = list.push(
-                kit::tree_row(coordinates(finding.location))
+                kit::tree_row(place)
                     .depth(1)
                     .selected(palette.picked == Some(index))
                     .trailing(fix_buttons(index, finding))

@@ -1,7 +1,7 @@
 use crate::app::{Message, OpenCADStudio};
 use crate::modules::manage::geometry_cleanup_settings::{CleanupSettings, SAMPLE_GCS};
 use crate::ui::dock::PanelId;
-use crate::ui::window::geometry_cleanup::{Finding, Fix, GeometryCleanupMsg};
+use crate::ui::window::geometry_cleanup::{ErrorType, Finding, Fix, GeometryCleanupMsg};
 use document::entities::{Arc, Line, LwPolyline};
 use document::types::{Vector2, Vector3};
 use document::{EntityType, Handle};
@@ -56,7 +56,8 @@ fn findings(app: &OpenCADStudio) -> Vec<Finding> {
         .unwrap_or_default()
 }
 
-fn fix(app: &mut OpenCADStudio, kind: EndErrorKind, fix: Fix) {
+fn fix(app: &mut OpenCADStudio, kind: impl Into<ErrorType>, fix: Fix) {
+    let kind = kind.into();
     let index = findings(app)
         .iter()
         .position(|finding| finding.kind == kind)
@@ -103,17 +104,17 @@ fn a_scan_lists_each_end_error_of_the_selection() {
         .gap
         .unwrap();
     assert!(tolerance > 0.4, "proposed tolerance {tolerance}");
-    let mut kinds: Vec<(EndErrorKind, Handle)> = found.iter().map(|f| (f.kind, f.handle)).collect();
+    let mut kinds: Vec<(ErrorType, Handle)> = found.iter().map(|f| (f.kind, f.handle)).collect();
     kinds.sort_by_key(|(kind, handle)| (*kind, handle.value()));
     assert_eq!(
         kinds,
         [
-            (EndErrorKind::Gap, left),
-            (EndErrorKind::Overshoot, over),
-            (EndErrorKind::Undershoot, under),
+            (ErrorType::Gap, left),
+            (ErrorType::Overshoot, over),
+            (ErrorType::Undershoot, under),
         ]
     );
-    let gap = found.iter().find(|f| f.kind == EndErrorKind::Gap).unwrap();
+    let gap = found.iter().find(|f| f.kind == ErrorType::Gap).unwrap();
     assert_eq!(gap.other, Some((right, true)));
 }
 
@@ -127,7 +128,7 @@ fn trim_cuts_an_overshoot_back_as_one_undo_step() {
     assert!(
         !findings(&app)
             .iter()
-            .any(|f| f.kind == EndErrorKind::Overshoot),
+            .any(|f| f.kind == ErrorType::Overshoot),
         "the list is scanned again after the fix"
     );
     let _ = app.update(Message::Undo);
@@ -166,7 +167,7 @@ fn extend_takes_both_ends_of_a_corner_gap_to_the_corner() {
     let a = line(&mut app, [0.0, 0.0], [10.0, 0.0]);
     let b = line(&mut app, [10.2, 0.1], [10.2, 10.0]);
     let found = scan(&mut app, &[wide, a, b]);
-    let gap = found.iter().find(|f| f.kind == EndErrorKind::Gap).copied();
+    let gap = found.iter().find(|f| f.kind == ErrorType::Gap).copied();
     let gap = gap.expect("a gap");
     assert!(gap.fixes().contains(&Fix::ExtendBoth));
     fix(&mut app, EndErrorKind::Gap, Fix::ExtendBoth);
@@ -193,7 +194,7 @@ fn an_arc_end_is_trimmed_along_its_circle() {
     );
     let found = scan(&mut app, &[wall, arc]);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].kind, EndErrorKind::Overshoot);
+    assert_eq!(found[0].kind, ErrorType::Overshoot);
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
     match app.tabs[i].scene.document.get_entity(arc) {
         Some(EntityType::Arc(arc)) => {
@@ -223,7 +224,7 @@ fn a_polyline_arc_end_keeps_its_circle_when_extended() {
     let handle = add(&mut app, EntityType::LwPolyline(polyline));
     let found = scan(&mut app, &[wall, handle]);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].kind, EndErrorKind::Undershoot);
+    assert_eq!(found[0].kind, ErrorType::Undershoot);
     assert!(near(found[0].target, [0.0, 10.0]), "{found:?}");
     fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
     match app.tabs[i].scene.document.get_entity(handle) {
@@ -256,8 +257,8 @@ fn locked_layers_and_lines_off_the_xy_plane_are_not_scanned() {
             line.end.z = 1.0;
         }
     }
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
-    assert_eq!(kinds, [EndErrorKind::Gap]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [ErrorType::Gap]);
 }
 
 #[test]
@@ -300,10 +301,7 @@ fn picking_an_error_selects_its_objects() {
     let (mut app, i) = app();
     let objects = errors_drawing(&mut app);
     let found = scan(&mut app, &objects);
-    let gap = found
-        .iter()
-        .position(|f| f.kind == EndErrorKind::Gap)
-        .unwrap();
+    let gap = found.iter().position(|f| f.kind == ErrorType::Gap).unwrap();
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(gap)));
     assert_eq!(app.geometry_cleanup.picked, Some(gap));
     let selected = &app.tabs[i].scene.selected;
@@ -337,11 +335,11 @@ fn the_open_palette_lists_an_error_again_after_its_repair_is_undone() {
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
     assert!(!findings(&app)
         .iter()
-        .any(|f| f.kind == EndErrorKind::Overshoot));
+        .any(|f| f.kind == ErrorType::Overshoot));
     let _ = app.update(Message::Undo);
     assert!(findings(&app)
         .iter()
-        .any(|f| f.kind == EndErrorKind::Overshoot));
+        .any(|f| f.kind == ErrorType::Overshoot));
 }
 
 #[test]
@@ -351,7 +349,7 @@ fn the_open_palette_scans_again_after_an_edit_and_keeps_the_picked_error() {
     open_and_scan(&mut app, &objects);
     let gap = findings(&app)
         .iter()
-        .position(|f| f.kind == EndErrorKind::Gap)
+        .position(|f| f.kind == ErrorType::Gap)
         .unwrap();
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(gap)));
     let picked = findings(&app)[gap];
@@ -360,7 +358,7 @@ fn the_open_palette_scans_again_after_an_edit_and_keeps_the_picked_error() {
     app.refresh_geometry_cleanup_if_stale();
     let now = findings(&app);
     assert!(
-        !now.iter().any(|f| f.kind == EndErrorKind::Overshoot),
+        !now.iter().any(|f| f.kind == ErrorType::Overshoot),
         "{now:?}"
     );
     let index = app.geometry_cleanup.picked.expect("still picked");
@@ -420,10 +418,10 @@ fn a_repair_picks_the_next_row() {
     let [_, _, under, left, right] = objects;
     open_and_scan(&mut app, &objects);
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Undershoot));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Undershoot));
     assert_eq!(selected(&app), [under]);
     fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Gap));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
     assert_eq!(selected(&app), [left, right]);
     fix(&mut app, EndErrorKind::Gap, Fix::Stretch);
     assert_eq!(picked(&app), None, "no error is left");
@@ -435,10 +433,10 @@ fn a_folded_type_is_skipped_by_the_next_pick() {
     let objects = errors_drawing(&mut app);
     open_and_scan(&mut app, &objects);
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Fold(
-        EndErrorKind::Undershoot,
+        ErrorType::Undershoot,
     )));
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Gap));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
 }
 
 #[test]
@@ -448,7 +446,7 @@ fn a_repair_that_fails_keeps_the_pick() {
     open_and_scan(&mut app, &objects);
     let gap = findings(&app)
         .iter()
-        .position(|f| f.kind == EndErrorKind::Gap)
+        .position(|f| f.kind == ErrorType::Gap)
         .unwrap();
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(gap)));
     // The overshoot is gone before its repair is pressed; the list is not
@@ -458,7 +456,7 @@ fn a_repair_that_fails_keeps_the_pick() {
         line.end.x = 10.0;
     }
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Gap));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
 }
 
 #[test]
@@ -479,11 +477,11 @@ fn folding_a_type_again_unfolds_it() {
     let (mut app, _) = app();
     let fold = |app: &mut OpenCADStudio| {
         let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Fold(
-            EndErrorKind::Gap,
+            ErrorType::Gap,
         )));
     };
     fold(&mut app);
-    assert_eq!(app.geometry_cleanup.folded, [EndErrorKind::Gap]);
+    assert_eq!(app.geometry_cleanup.folded, [ErrorType::Gap]);
     fold(&mut app);
     assert!(app.geometry_cleanup.folded.is_empty());
 }
@@ -493,8 +491,8 @@ fn move_takes_the_whole_object_across_a_gap_in_x_and_y() {
     let (mut app, _) = app();
     let a = line(&mut app, [-40.0, 5.0], [10.0, 5.0]);
     let b = line(&mut app, [10.2, 5.1], [60.0, 5.1]);
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &[a, b]).iter().map(|f| f.kind).collect();
-    assert_eq!(kinds, [EndErrorKind::Gap]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &[a, b]).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [ErrorType::Gap]);
     fix(&mut app, EndErrorKind::Gap, Fix::Move);
     let moved = ends(&app, a);
     assert!(
@@ -558,11 +556,11 @@ fn a_two_point_polyline_is_extended_at_its_end() {
             Vector2::new(9.7, 0.0),
         ])),
     );
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &[wall, handle])
+    let kinds: Vec<ErrorType> = scan(&mut app, &[wall, handle])
         .iter()
         .map(|f| f.kind)
         .collect();
-    assert_eq!(kinds, [EndErrorKind::Undershoot]);
+    assert_eq!(kinds, [ErrorType::Undershoot]);
     fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
     match app.tabs[i].scene.document.get_entity(handle) {
         Some(EntityType::LwPolyline(polyline)) => {
@@ -597,7 +595,7 @@ fn stretch_moves_the_grip_at_the_end_that_it_repairs() {
 #[test]
 fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
     let error = Finding {
-        kind: EndErrorKind::Gap,
+        kind: ErrorType::Gap,
         handle: Handle::new(1),
         at_start: true,
         location: [0.0, 0.0],
@@ -605,6 +603,7 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
         other: None,
         corner: None,
         deviation: 0.1,
+        angle: None,
     };
     let moved = Finding {
         location: [1.0, 1.0],
@@ -614,7 +613,7 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
     assert!(error.same_error(&moved));
     for other in [
         Finding {
-            kind: EndErrorKind::Overshoot,
+            kind: ErrorType::Overshoot,
             ..error
         },
         Finding {
@@ -628,6 +627,31 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
     ] {
         assert!(!error.same_error(&other), "{other:?}");
     }
+}
+
+#[test]
+fn two_relative_angles_of_one_line_are_two_errors() {
+    let error = Finding {
+        kind: ErrorType::RelativeAngle,
+        handle: Handle::new(1),
+        at_start: false,
+        location: [2.3, 1.7],
+        target: [2.3, 1.7],
+        other: Some((Handle::new(2), false)),
+        corner: None,
+        deviation: 1.5,
+        angle: None,
+    };
+    let moved = Finding {
+        location: [4.1, 2.9],
+        ..error
+    };
+    assert!(error.same_error(&moved));
+    let other_line = Finding {
+        other: Some((Handle::new(3), false)),
+        ..error
+    };
+    assert!(!error.same_error(&other_line));
 }
 
 #[test]
@@ -662,8 +686,8 @@ fn a_scan_uses_the_saved_tolerance_of_each_type() {
     settings.set(EndErrorKind::Undershoot, None);
     settings.set(EndErrorKind::Gap, Some(0.1));
     app.geometry_cleanup.settings = Some(settings);
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
-    assert_eq!(kinds, [EndErrorKind::Overshoot]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [ErrorType::Overshoot]);
 }
 
 #[test]
@@ -730,9 +754,9 @@ fn scan_saves_the_settings_and_scans_the_drawing() {
     assert!(app.geometry_cleanup.show, "the palette shows the result");
     let saved = app.geometry_cleanup.settings.as_ref().expect("saved");
     assert_eq!(saved.tolerance(EndErrorKind::Undershoot), None);
-    let mut kinds: Vec<EndErrorKind> = findings(&app).iter().map(|f| f.kind).collect();
+    let mut kinds: Vec<ErrorType> = findings(&app).iter().map(|f| f.kind).collect();
     kinds.sort();
-    assert_eq!(kinds, [EndErrorKind::Gap, EndErrorKind::Overshoot]);
+    assert_eq!(kinds, [ErrorType::Gap, ErrorType::Overshoot]);
 }
 
 #[test]
@@ -974,4 +998,189 @@ fn a_typed_tolerance_changes_only_its_own_type() {
     assert_eq!(parsed.tolerance(EndErrorKind::Gap), Some(0.25));
     assert_eq!(parsed.tolerance(EndErrorKind::Overshoot), Some(0.5198));
     assert_eq!(parsed.tolerance(EndErrorKind::Undershoot), Some(0.5198));
+}
+
+/// A line from `from`, `length` long, at `degrees`.
+fn at(app: &mut OpenCADStudio, from: [f64; 2], degrees: f64, length: f64) -> Handle {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    line(app, from, [from[0] + length * cos, from[1] + length * sin])
+}
+
+/// The direction of a line in degrees, and its length.
+fn direction(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
+    let [a, b] = ends(app, handle);
+    (
+        (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees(),
+        (b[0] - a[0]).hypot(b[1] - a[1]),
+    )
+}
+
+fn fixes_of(app: &OpenCADStudio, kind: ErrorType) -> Vec<Fix> {
+    findings(app)
+        .iter()
+        .find(|f| f.kind == kind)
+        .expect("the error is listed")
+        .fixes()
+}
+
+#[test]
+fn rotate_at_start_turns_a_line_onto_its_angle_as_one_undo_step() {
+    let (mut app, _) = app();
+    let leaning = at(&mut app, [3.2, -1.7], 91.7, 12.4);
+    let found = scan(&mut app, &[leaning]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].kind, ErrorType::AbsoluteAngle);
+    assert_eq!(found[0].angle.map(|a| a.angle), Some(90.0));
+    let before = ends(&app, leaning);
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtStart);
+    let (angle, length) = direction(&app, leaning);
+    assert!(near(ends(&app, leaning)[0], [3.2, -1.7]));
+    assert!((angle - 90.0).abs() < 1e-9, "{angle}");
+    assert!((length - 12.4).abs() < 1e-9, "{length}");
+    assert!(findings(&app).is_empty(), "{:?}", findings(&app));
+    let _ = app.update(Message::Undo);
+    assert_eq!(ends(&app, leaning), before);
+}
+
+#[test]
+fn rotate_at_end_keeps_the_end_that_meets_a_wall_and_comes_first() {
+    let (mut app, _) = app();
+    let wall = line(&mut app, [2.7, -6.1], [2.7, 9.8]);
+    let leaning = line(&mut app, [-2.9, 1.5], [2.7, 1.3]);
+    scan(&mut app, &[wall, leaning]);
+    assert_eq!(
+        fixes_of(&app, ErrorType::AbsoluteAngle),
+        [Fix::RotateAtEnd, Fix::RotateAtStart]
+    );
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtEnd);
+    let [start, end] = ends(&app, leaning);
+    assert!(near(end, [2.7, 1.3]), "{end:?}");
+    assert!((start[1] - 1.3).abs() < 1e-9, "{start:?}");
+    assert!(
+        (start[0] - (2.7 - 5.6f64.hypot(0.2))).abs() < 1e-9,
+        "{start:?}"
+    );
+}
+
+/// Two lines that meet at 88.5°: 9.1 long at 23°, then 6.7 long at 111.5°.
+fn corner_drawing(app: &mut OpenCADStudio) -> [Handle; 2] {
+    let long = at(app, [-4.3, 2.6], 23.0, 9.1);
+    let meet = ends(app, long)[1];
+    let short = at(app, meet, 111.5, 6.7);
+    [long, short]
+}
+
+#[test]
+fn rotate_shorter_and_longer_turn_one_line_about_the_meet_point() {
+    for (fix_with, turned) in [(Fix::RotateShorter, 1), (Fix::RotateLonger, 0)] {
+        let (mut app, _) = app();
+        let lines = corner_drawing(&mut app);
+        let meet = ends(&app, lines[0])[1];
+        let found = scan(&mut app, &lines);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].kind, ErrorType::RelativeAngle);
+        assert!(near(found[0].location, meet));
+        assert_eq!(
+            fixes_of(&app, ErrorType::RelativeAngle),
+            [Fix::RotateShorter, Fix::RotateLonger]
+        );
+        let kept = ends(&app, lines[1 - turned]);
+        let (_, length) = direction(&app, lines[turned]);
+        fix(&mut app, ErrorType::RelativeAngle, fix_with);
+        assert_eq!(ends(&app, lines[1 - turned]), kept, "{fix_with:?}");
+        assert!(ends(&app, lines[turned]).iter().any(|&p| near(p, meet)));
+        assert!((direction(&app, lines[turned]).1 - length).abs() < 1e-9);
+        let between = direction(&app, lines[1]).0 - direction(&app, lines[0]).0;
+        assert!((between - 90.0).abs() < 1e-9, "{fix_with:?}: {between}");
+        let _ = app.update(Message::Undo);
+        let between = direction(&app, lines[1]).0 - direction(&app, lines[0]).0;
+        assert!((between - 88.5).abs() < 1e-9, "{fix_with:?}: {between}");
+    }
+}
+
+#[test]
+fn picking_a_relative_angle_selects_both_lines() {
+    let (mut app, _) = app();
+    let lines = corner_drawing(&mut app);
+    scan(&mut app, &lines);
+    let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(0)));
+    let mut expected = lines.to_vec();
+    expected.sort_by_key(|handle| handle.value());
+    assert_eq!(selected(&app), expected);
+}
+
+#[test]
+fn a_rotate_repair_picks_the_next_angle_error() {
+    let (mut app, _) = app();
+    let first = at(&mut app, [3.2, -1.7], 91.7, 12.4);
+    let second = at(&mut app, [-6.4, 8.8], 2.3, 7.9);
+    scan(&mut app, &[first, second]);
+    let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(0)));
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtStart);
+    let left: Vec<Handle> = findings(&app).iter().map(|f| f.handle).collect();
+    assert_eq!(left, [second]);
+    assert_eq!(picked(&app).map(|f| f.handle), Some(second));
+}
+
+#[test]
+fn the_absolute_angle_is_measured_in_the_ucs() {
+    let (mut app, i) = app();
+    let (sin, cos) = 30f64.to_radians().sin_cos();
+    let mut ucs = document::tables::Ucs::new("GC-test");
+    ucs.origin = Vector3::new(7.5, -3.5, 0.0);
+    ucs.x_axis = Vector3::new(cos, sin, 0.0);
+    ucs.y_axis = Vector3::new(-sin, cos, 0.0);
+    app.tabs[i].active_ucs = Some(ucs);
+    let on = at(&mut app, [1.4, 3.6], 30.0, 6.3);
+    let off = at(&mut app, [-8.2, -5.7], 31.2, 4.9);
+    let found = scan(&mut app, &[on, off]);
+    let handles: Vec<Handle> = found.iter().map(|f| f.handle).collect();
+    assert_eq!(handles, [off], "{found:?}");
+    assert!((found[0].deviation - 1.2).abs() < 1e-9, "{found:?}");
+}
+
+#[test]
+fn a_tilted_ucs_measures_the_absolute_angle_from_the_wcs_x_axis() {
+    let (mut app, i) = app();
+    // The UCS turned 30° about Z, then tilted 60° about the WCS X axis: its
+    // X axis is 16.1° from the WCS X axis in plan.
+    let (sin, cos) = 30f64.to_radians().sin_cos();
+    let (tilt_sin, tilt_cos) = 60f64.to_radians().sin_cos();
+    let mut ucs = document::tables::Ucs::new("GC-tilted");
+    ucs.origin = Vector3::new(7.5, -3.5, 0.0);
+    ucs.x_axis = Vector3::new(cos, sin * tilt_cos, sin * tilt_sin);
+    ucs.y_axis = Vector3::new(-sin, cos * tilt_cos, cos * tilt_sin);
+    app.tabs[i].active_ucs = Some(ucs);
+    let leaning = at(&mut app, [1.4, 3.6], 88.8, 6.3);
+    let found = scan(&mut app, &[leaning]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0].deviation - 1.2).abs() < 1e-9, "{found:?}");
+}
+
+#[test]
+fn saved_settings_without_angle_rows_find_no_angle_errors() {
+    let (mut app, _) = app();
+    let leaning = at(&mut app, [3.2, -1.7], 91.7, 12.4);
+    let mut settings = CleanupSettings::default();
+    settings.set(EndErrorKind::Gap, Some(0.5));
+    app.geometry_cleanup.settings = Some(settings);
+    assert!(scan(&mut app, &[leaning]).is_empty());
+}
+
+#[test]
+fn the_palette_lists_the_angle_types_after_the_length_types() {
+    let (mut app, _) = app();
+    let mut objects = errors_drawing(&mut app).to_vec();
+    objects.extend(corner_drawing(&mut app));
+    objects.push(at(&mut app, [3.2, -31.7], 91.7, 12.4));
+    // The tolerance of the length drawing alone: the short lines would
+    // lower the proposed one below the overshoot.
+    app.geometry_cleanup.settings = Some(CleanupSettings::proposed(0.5198));
+    scan(&mut app, &objects);
+    let scan = app.geometry_cleanup.scan.as_ref().unwrap();
+    let kinds: Vec<ErrorType> = crate::ui::window::geometry_cleanup::groups(scan)
+        .into_iter()
+        .map(|(kind, _)| kind)
+        .collect();
+    assert_eq!(kinds, crate::ui::window::geometry_cleanup::TYPES);
 }

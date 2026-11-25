@@ -196,6 +196,19 @@ impl OpenCADStudio {
                     |(command, path)| Message::PluginFileDialogResult { command, path },
                 );
             }
+            ModuleEvent::PluginFolderDialog { command, title } => {
+                return Task::perform(
+                    async move {
+                        let path = crate::sys::file_dialog()
+                            .set_title(title)
+                            .pick_folder()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h));
+                        (command, path)
+                    },
+                    |(command, path)| Message::PluginFileDialogResult { command, path },
+                );
+            }
         }
         // Every non-Command event above is a one-shot (state toggle,
         // clear, dialog spawn) — nothing stays running to clear the

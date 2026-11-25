@@ -12,6 +12,23 @@ pub(crate) enum CoordKind {
     Absolute,
     /// No prefix — the caller decides (DYN on → relative, off → absolute).
     Default,
+    /// `*x,y` prefix — absolute in the world coordinate system, whatever
+    /// the current UCS.
+    World,
+    /// `@*x,y` prefix — offset from the last point along the world axes.
+    WorldRelative,
+}
+
+impl CoordKind {
+    /// An offset from the last input point.
+    pub(crate) fn is_relative(self) -> bool {
+        matches!(self, CoordKind::Relative | CoordKind::WorldRelative)
+    }
+
+    /// Typed along the world axes instead of the current UCS.
+    pub(crate) fn is_world(self) -> bool {
+        matches!(self, CoordKind::World | CoordKind::WorldRelative)
+    }
 }
 
 /// Parse a typed coordinate string into a local Vec3 plus its interpretation.
@@ -19,7 +36,8 @@ pub(crate) enum CoordKind {
 /// `x,y`, `x,y,z`, `distance<angle`, `distance<angle,z`, and
 /// `distance<angle<elevation`.
 /// A leading `@` marks the value relative to the last point; a leading
-/// `#` forces absolute. Separators: comma or semicolon.
+/// `#` forces absolute; a `*` after either (or alone) reads it along the
+/// world axes. Separators: comma or semicolon.
 ///
 /// Each number is read by the same pair that writes it, so anything the
 /// drawing displays can be typed straight back: `5'-6 1/2"`, `9 1/2`,
@@ -28,7 +46,14 @@ pub(crate) enum CoordKind {
 pub(crate) fn parse_coord(text: &str) -> Option<(glam::DVec3, CoordKind)> {
     use crate::entities::common::{parse_direction, parse_length};
     let trimmed = text.trim();
-    let (kind, rest) = if let Some(r) = trimmed.strip_prefix('@') {
+    let (kind, rest) = if let Some(r) = trimmed.strip_prefix("@*") {
+        (CoordKind::WorldRelative, r)
+    } else if let Some(r) = trimmed
+        .strip_prefix("#*")
+        .or_else(|| trimmed.strip_prefix('*'))
+    {
+        (CoordKind::World, r)
+    } else if let Some(r) = trimmed.strip_prefix('@') {
         (CoordKind::Relative, r)
     } else if let Some(r) = trimmed.strip_prefix('#') {
         (CoordKind::Absolute, r)
@@ -103,6 +128,9 @@ mod coordinate_parsing_tests {
         ));
         assert_eq!(parse_coord("@10<0").unwrap().1, CoordKind::Relative);
         assert_eq!(parse_coord("#1,2").unwrap().1, CoordKind::Absolute);
+        assert_eq!(parse_coord("*1,2").unwrap().1, CoordKind::World);
+        assert_eq!(parse_coord("#*1,2").unwrap().1, CoordKind::World);
+        assert_eq!(parse_coord("@*1,2").unwrap().1, CoordKind::WorldRelative);
     }
 
     use crate::entities::common::{set_unit_context, unit_context, UnitContext};

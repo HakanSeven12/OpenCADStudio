@@ -1839,6 +1839,7 @@ common =
     .dynamic-ucs-on = SCU dynamique: activé
     .dynamic-ucs-off = SCU dynamique: désactivé
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Pavé tactile : le défilement déplace, Ctrl+défilement ou pincement zoome
+    .numeric-keypad-decimal-key-always-types-a-point = Pavé numérique : la touche décimale saisit toujours un point (désactivé : le caractère de la disposition, une virgule sépare alors les coordonnées)
     .interface-scale = Échelle de l'interface
     .zoom-factor = Facteur de zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = De combien zoome un cran de molette (ZOOMFACTOR).

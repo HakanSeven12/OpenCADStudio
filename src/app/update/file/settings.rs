@@ -114,6 +114,7 @@ impl OpenCADStudio {
             navigation_style: self.navigation_style,
             dynamic_ucs: self.dynamic_ucs,
             touchpad_pan: self.touchpad_pan,
+            keypad_decimal_point: crate::app::view::keypad_decimal_point(),
             ui_scale_percent: self.ui_scale_percent,
             zoom_factor: self.zoom_factor,
             cursor_size: self.cursor_size,
@@ -330,6 +331,7 @@ impl OpenCADStudio {
         self.navigation_style = s.navigation_style;
         self.dynamic_ucs = s.dynamic_ucs;
         self.touchpad_pan = s.touchpad_pan;
+        crate::app::view::set_keypad_decimal_point(s.keypad_decimal_point);
         self.ui_scale_percent = crate::app::settings::clamp_ui_scale(s.ui_scale_percent);
         self.zoom_factor = crate::app::settings::clamp_zoom_factor(s.zoom_factor);
         // Like the drafting-rotation field below, the Options field edits a

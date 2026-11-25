@@ -1257,6 +1257,8 @@ pub(super) struct OpenCADStudio {
     /// coordinates and typing `@` selects relative coordinates again.
     /// Cleared after a point is committed or a new command starts.
     dyn_coord_absolute: bool,
+    /// With `dyn_coord_absolute`: typed `*`, the coordinates are world ones.
+    dyn_coord_wcs: bool,
     /// Grip the cursor is currently dwelling on. Set when the cursor
     /// stops within `GRIP_THRESHOLD_PX` of a grip; cleared when it
     /// drifts away. The instant lets `ViewportMove` detect when the
@@ -1500,6 +1502,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
     /// Last pointer position during a dock drag.
     pub(crate) dock_drag_last: Option<iced::Point>,
+    /// The window `dock_drag_last` is in (`None`: the main window).
+    pub(crate) dock_drag_window: Option<iced::window::Id>,
     /// Docked panel whose title bar the pointer is over (shows pin / close).
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
     /// Edge whose icon-strip pallet menu (+) is open.
@@ -3139,6 +3143,7 @@ impl OpenCADStudio {
             pane_move_from: None,
             dyn_user_reshaped: false,
             dyn_coord_absolute: false,
+            dyn_coord_wcs: false,
             grip_hover: None,
             #[cfg(not(target_arch = "wasm32"))]
             plugin_grip_hover: None,
@@ -3242,6 +3247,7 @@ impl OpenCADStudio {
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
             dock_drag_last: None,
+            dock_drag_window: None,
             dock_title_hover: None,
             dock_edge_menu: None,
             dock_edge_menu_y: None,

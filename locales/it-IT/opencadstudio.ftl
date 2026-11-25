@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = UCS dinamico: attivo
     .dynamic-ucs-off = UCS dinamico: disattivo
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: lo scorrimento sposta la vista, Ctrl+scorrimento o pizzico esegue lo zoom
+    .numeric-keypad-decimal-key-always-types-a-point = Tastierino numerico: il tasto decimale scrive sempre un punto (disattivato: il carattere del layout, così una virgola separa le coordinate)
     .interface-scale = Scala dell'interfaccia
     .zoom-factor = Fattore di zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = Di quanto ingrandisce uno scatto della rotellina (ZOOMFACTOR).

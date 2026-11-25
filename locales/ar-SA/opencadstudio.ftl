@@ -1851,6 +1851,7 @@ common =
     .dynamic-ucs-on = نظام الإحداثيات الديناميكي: تشغيل
     .dynamic-ucs-off = نظام الإحداثيات الديناميكي: إيقاف
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = لوحة اللمس: التمرير يحرك العرض، Ctrl+تمرير أو القرص يكبّر
+    .numeric-keypad-decimal-key-always-types-a-point = لوحة المفاتيح الرقمية: مفتاح الفاصلة العشرية يكتب نقطة دائمًا (معطّل: حرف التخطيط، فتفصل الفاصلة بين الإحداثيات)
     .interface-scale = مقياس الواجهة
     .zoom-factor = معامل التكبير
     .how-far-one-wheel-notch-zooms-zoomfactor = مقدار التكبير لكل درجة من العجلة (ZOOMFACTOR).

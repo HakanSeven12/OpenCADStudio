@@ -24,6 +24,7 @@ Space normally works like Enter: it submits what you typed. To type a command an
 | `@dx,dy` | Relative to the last point. |
 | `@d<a` | Polar: distance and angle from the last point. |
 | `#x,y` | Absolute even while dynamic input expects relative values. |
+| `*x,y` | Absolute in world coordinates, whatever the current UCS. `@*dx,dy` is relative along the world axes. |
 | a number alone | **Direct distance**: that far in the direction of the cursor. |
 | `END`, `MID`, `CEN`, `INT`, `PER`, `TAN`, `NEA`, `QUA`, `NOD`, `INS`, `EXT`, `APP`, `PAR`, `GCEN` | **Object snap override** for this one pick. `NON` turns snapping off for it. |
 | `FROM` | Pick a base point, then give an offset from it. |

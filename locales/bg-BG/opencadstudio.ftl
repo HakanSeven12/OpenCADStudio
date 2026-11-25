@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = Динамична ПКС: вкл.
     .dynamic-ucs-off = Динамична ПКС: изкл.
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Тъчпад: превъртането мести изгледа, Ctrl+превъртане или щипване мащабира
+    .numeric-keypad-decimal-key-always-types-a-point = Цифрова клавиатура: десетичният клавиш винаги въвежда точка (изкл.: знакът на подредбата, тогава запетая разделя координатите)
     .interface-scale = Мащаб на интерфейса
     .zoom-factor = Коефициент на мащабиране
     .how-far-one-wheel-notch-zooms-zoomfactor = Колко мащабира едно щракване на колелцето (ZOOMFACTOR).

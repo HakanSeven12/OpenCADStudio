@@ -303,6 +303,7 @@ impl OpenCADStudio {
                             zoom_wheel_reversed: self.zoom_wheel_reversed,
                             navigation_style: self.navigation_style,
                             touchpad_pan: self.touchpad_pan,
+                            keypad_decimal_point: crate::app::view::keypad_decimal_point(),
                             ui_scale_percent: self.ui_scale_percent,
                             zoom_factor: self.zoom_factor,
                             texteditmode: self.texteditmode,

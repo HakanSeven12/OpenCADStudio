@@ -360,6 +360,7 @@ impl OpenCADStudio {
                         self.tabs[i].dyn_active = 0;
                         self.dyn_user_reshaped = false;
                         self.dyn_coord_absolute = self.dyn_pointer_absolute;
+                        self.dyn_coord_wcs = false;
 
                         self.tabs[i].dirty = true;
 
@@ -608,8 +609,8 @@ impl OpenCADStudio {
                 // default lives in the DYN tooltip path — see
                 // `dyn_resolve_point`; command-line coordinates stay
                 // absolute regardless of the DYN setting.)
-                let want_relative = matches!(kind, CoordKind::Relative);
-                let ucs = self.tabs[i].active_ucs.clone();
+                let want_relative = kind.is_relative();
+                let ucs = self.tabs[i].active_ucs.clone().filter(|_| !kind.is_world());
                 let wcs_pt = match (want_relative, self.relative_input_base(i)) {
                     (true, Some(base)) => {
                         // Offset from the last point, rotated by the
@@ -645,6 +646,7 @@ impl OpenCADStudio {
                 self.last_point = Some(wcs_pt);
                 self.dyn_user_reshaped = false;
                 self.dyn_coord_absolute = self.dyn_pointer_absolute;
+                self.dyn_coord_wcs = false;
                 self.sync_dyn_fields();
                 self.reset_tracking_after_point();
                 self.snapper.clear_override();

@@ -211,7 +211,10 @@
 /// v29 appends `PluginRequest::PanelSurfacePublish`: a plugin publishes a
 /// bounded `PanelScene` (`PanelSurface::Scene`) for a panel it registered and
 /// gets the stored revision or a typed `SurfaceReject` back.
-pub const API_VERSION: u32 = 29;
+/// v30 appends `ModuleEvent::PluginFolderDialog`: a ribbon tool asks the host
+/// for a native folder picker and gets `"<command> <folder>"` dispatched back.
+/// A v29 host cannot decode the event, so a plugin that sends it declares v30.
+pub const API_VERSION: u32 = 30;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

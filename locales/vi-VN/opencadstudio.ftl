@@ -1840,6 +1840,7 @@ common =
     .dynamic-ucs-on = UCS động: bật
     .dynamic-ucs-off = UCS động: tắt
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: cuộn để dịch chuyển, Ctrl+cuộn hoặc chụm để phóng to/thu nhỏ
+    .numeric-keypad-decimal-key-always-types-a-point = Bàn phím số: phím thập phân luôn gõ dấu chấm (tắt: ký tự của bố cục, khi đó dấu phẩy phân tách tọa độ)
     .interface-scale = Tỷ lệ giao diện
     .zoom-factor = Hệ số Zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = Mức độ phóng to/thu nhỏ của một nấc cuộn chuột (ZOOMFACTOR).

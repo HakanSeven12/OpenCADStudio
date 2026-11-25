@@ -34,6 +34,9 @@ pub enum DockMsg {
     HoverEnd(PanelId),
     /// Pointer moved while a panel is dragging or resizing.
     DragMove(iced::Point),
+    /// Pointer moved over a pallet in a window of its own while one of its
+    /// column dividers is dragged; the point is in that window's space.
+    DragMoveIn(iced::window::Id, iced::Point),
     /// Pointer released after a drag / resize.
     DragRelease,
     /// A press on `panel`'s strip icon: show its group, and start a possible

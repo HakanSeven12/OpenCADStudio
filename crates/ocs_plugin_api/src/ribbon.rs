@@ -41,6 +41,18 @@ pub enum ModuleEvent {
         /// Accepted extensions, without the dot (e.g. `["csv", "txt"]`).
         extensions: Vec<String>,
     },
+    /// Ask the host to open a native folder picker (API v30). On selection the
+    /// host dispatches `"<command> <folder>"` back to the plugin, exactly as
+    /// for [`ModuleEvent::PluginFileDialog`]; on cancel nothing happens. Lets
+    /// an add-on work on a whole folder (a project, a batch of drawings).
+    /// Appended so older variants keep their wire index; a v29 host cannot
+    /// decode it, so a plugin that sends it declares v30.
+    PluginFolderDialog {
+        /// Plugin command to dispatch with the chosen folder appended.
+        command: String,
+        /// Dialog window title.
+        title: String,
+    },
 }
 
 // ── Data types ────────────────────────────────────────────────────────────
@@ -164,6 +176,36 @@ pub trait CadModule: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The v30 folder picker is appended: earlier events keep their wire
+    /// index, and the new one round-trips with its command and title.
+    #[test]
+    fn plugin_folder_dialog_v30_is_appended() {
+        let index = |event: &ModuleEvent| {
+            let bytes = bincode::serialize(event).expect("serialize");
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+        };
+        let file = ModuleEvent::PluginFileDialog {
+            command: "EX_IMPORT".into(),
+            title: "Import".into(),
+            filter_name: "CSV".into(),
+            extensions: vec!["csv".into()],
+        };
+        let folder = ModuleEvent::PluginFolderDialog {
+            command: "EX_PROJECT".into(),
+            title: "Project folder".into(),
+        };
+        assert_eq!(index(&ModuleEvent::ToggleLayers), 4);
+        assert_eq!(index(&file), 5);
+        assert_eq!(index(&folder), 6);
+        let bytes = bincode::serialize(&folder).expect("serialize");
+        match bincode::deserialize::<ModuleEvent>(&bytes).expect("deserialize") {
+            ModuleEvent::PluginFolderDialog { command, title } => {
+                assert_eq!((command.as_str(), title.as_str()), ("EX_PROJECT", "Project folder"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
 
     // Timing microbenchmark, not a correctness check: it intentionally
     // `Box::leak`s ~400k strings to defeat the allocator's reuse, so keep it out

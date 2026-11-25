@@ -846,6 +846,9 @@ pub struct UserSettings {
     /// Scrolling pans and Ctrl+scroll (a touchpad pinch) zooms, for a
     /// touchpad that reports two-finger drags as wheel scrolls.
     pub touchpad_pan: bool,
+    /// The numeric keypad's decimal key always types a decimal point; off,
+    /// it types the layout's character (a comma then separates coordinates).
+    pub keypad_decimal_point: bool,
     /// Interface scale in percent, on top of the display's own scale.
     pub ui_scale_percent: u16,
     pub zoom_factor: i32,
@@ -1530,6 +1533,7 @@ impl Default for UserSettings {
             dynamic_ucs: true,
             // A Mac's built-in trackpad is the common case there.
             touchpad_pan: cfg!(target_os = "macos"),
+            keypad_decimal_point: true,
             ui_scale_percent: 100,
             zoom_factor: 60,
             cursor_size: 5,

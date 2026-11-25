@@ -171,12 +171,13 @@ impl Face {
     }
 
     /// Look up a glyph. A stroke (LFF) font uses its own glyphs; anything it
-    /// lacks falls back to a system TrueType font chosen by cosmic-text (filled
-    /// outline, so covers scripts no stroke font provides). The TTF path mirrors
-    /// this for its single-glyph lookups.
+    /// lacks comes from the bundled `unicode` stroke font, so the text stays
+    /// single-stroke lines (#3643), and only then from a system TrueType font
+    /// chosen by cosmic-text (filled outline, so covers scripts no stroke font
+    /// provides). The TTF path mirrors this for its single-glyph lookups.
     pub fn glyph(&self, ch: char) -> Option<GlyphRef<'_>> {
         match self {
-            Face::Lff(f) => match f.glyph(ch) {
+            Face::Lff(f) => match f.glyph(ch).or_else(|| lff::get_font("unicode").glyph(ch)) {
                 Some(g) => Some(GlyphRef::Borrowed(g)),
                 None => ttf_glyph::fallback_glyph(ch).map(GlyphRef::Owned),
             },

@@ -1829,6 +1829,7 @@ common =
     .dynamic-ucs-on = ダイナミック UCS: オン
     .dynamic-ucs-off = ダイナミック UCS: オフ
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = タッチパッド: スクロールで画面移動、Ctrl+スクロールまたはピンチでズーム
+    .numeric-keypad-decimal-key-always-types-a-point = テンキー: 小数点キーは常にピリオドを入力 (オフ: レイアウトの文字。コンマで座標を区切ります)
     .interface-scale = インターフェースの拡大率
     .zoom-factor = ズーム倍率
     .how-far-one-wheel-notch-zooms-zoomfactor = ホイール 1 ノッチのズーム量 (ZOOMFACTOR)。

@@ -760,6 +760,7 @@ impl OpenCADStudio {
                 | "cad_extract_block_instances"
                 | "keytips"
                 | "plugins"
+                | "plugin_panels"
         );
         if !query && !self.control.enabled {
             return (
@@ -1033,7 +1034,13 @@ impl OpenCADStudio {
         } else if !query
             && !matches!(
                 op,
-                "new" | "open" | "font_register" | "stop" | "user_select" | "getpoint"
+                "new"
+                    | "open"
+                    | "font_register"
+                    | "stop"
+                    | "user_select"
+                    | "getpoint"
+                    | "plugin_panel_action"
             )
         {
             return (
@@ -1492,6 +1499,16 @@ impl OpenCADStudio {
             "panel_input" => self.control_panel_input(req)?,
             "panel_button" => self.control_panel_button(req)?,
             "panel_action" => self.control_panel_action(req)?,
+            // The surface facade's activation rides the same route as the GUI
+            // gesture; the control envelope owns request_id idempotency.
+            "plugin_panel_action" => {
+                let result = self.automation_op_inner(&req.to_string());
+                if result["ok"] != true {
+                    return Err(result);
+                }
+                self.set_control_result(result);
+                Task::none()
+            }
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
             "dgn_import" => self.control_dgn_import(req)?,
@@ -2372,6 +2389,34 @@ mod tests {
             r
         }
     }
+    #[test]
+    fn plugin_panel_surface_ops_pass_the_control_envelope() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        // plugin_panels is a query: no request_id, no document_id.
+        let read = request(&mut app, json!({"op":"plugin_panels"}));
+        assert_eq!(read["ok"], true, "{read}");
+        assert!(read["panels"].is_array(), "{read}");
+        // plugin_panel_action carries a request_id (idempotent replay) but
+        // needs no document_id — panel surfaces are app-level state.
+        let payload = json!({
+            "op":"plugin_panel_action","request_id":"env-1",
+            "panel_id":"nobody:here","element":1,"kind":"node_activated"
+        });
+        let act = request(&mut app, payload.clone());
+        assert_eq!(act["ok"], false, "{act}");
+        assert!(
+            act["error"]
+                .as_str()
+                .unwrap_or("")
+                .contains("unknown panel"),
+            "the envelope must let the action reach the facade: {act}"
+        );
+        // The same request_id replays the cached response (no double fire).
+        let replay = request(&mut app, payload);
+        assert_eq!(replay, act, "replay returns the cached response");
+    }
+
     #[test]
     fn edits_reach_an_inactive_document_without_switching_tabs() {
         let mut app = OpenCADStudio::new_for_test();

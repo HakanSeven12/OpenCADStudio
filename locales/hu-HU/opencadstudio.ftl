@@ -1837,6 +1837,7 @@ common =
     .dynamic-ucs-on = Dinamikus FKR: be
     .dynamic-ucs-off = Dinamikus FKR: ki
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Érintőpad: a görgetés mozgat, a Ctrl+görgetés vagy csippentés nagyít
+    .numeric-keypad-decimal-key-always-types-a-point = Numerikus billentyűzet: a tizedes billentyű mindig pontot ír (ki: a kiosztás karaktere, így vessző választja el a koordinátákat)
     .interface-scale = Felület mérete
     .zoom-factor = Nagyítási tényező
     .how-far-one-wheel-notch-zooms-zoomfactor = Mennyit nagyít egy görgőkattanás (ZOOMFACTOR).

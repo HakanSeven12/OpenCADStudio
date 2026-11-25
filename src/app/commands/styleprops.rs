@@ -2413,6 +2413,7 @@ impl OpenCADStudio {
                                         "0" | "1" => {
                                             *flag = (v.trim() == "1") != inverted;
                                             self.dyn_coord_absolute = self.dyn_pointer_absolute;
+                                            self.dyn_coord_wcs = false;
                                             Ok((format!("{name} = {}", v.trim()), true))
                                         }
                                         _ => Err("SETVAR: 0 or 1 required.".into()),

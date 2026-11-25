@@ -1827,6 +1827,7 @@ common =
     .dynamic-ucs-on = डायनामिक UCS: चालू
     .dynamic-ucs-off = डायनामिक UCS: बंद
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = टचपैड: स्क्रॉल पैन करता है, Ctrl+स्क्रॉल या पिंच ज़ूम करता है
+    .numeric-keypad-decimal-key-always-types-a-point = न्यूमेरिक कीपैड: दशमलव कुंजी हमेशा बिंदु लिखती है (बंद: लेआउट का वर्ण, तब अल्पविराम निर्देशांक अलग करता है)
     .interface-scale = इंटरफ़ेस स्केल
     .zoom-factor = ज़ूम गुणक
     .how-far-one-wheel-notch-zooms-zoomfactor = व्हील का एक पायदान कितना ज़ूम करता है (ZOOMFACTOR)।

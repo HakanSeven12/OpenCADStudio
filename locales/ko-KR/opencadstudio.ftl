@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = 동적 UCS: 켜짐
     .dynamic-ucs-off = 동적 UCS: 꺼짐
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = 터치패드: 스크롤은 화면 이동, Ctrl+스크롤 또는 핀치는 확대/축소
+    .numeric-keypad-decimal-key-always-types-a-point = 숫자 키패드: 소수점 키는 항상 마침표를 입력 (끄기: 레이아웃의 문자, 쉼표로 좌표를 구분)
     .interface-scale = 인터페이스 배율
     .zoom-factor = 줌 배율
     .how-far-one-wheel-notch-zooms-zoomfactor = 휠 한 칸이 확대하는 정도 (ZOOMFACTOR).

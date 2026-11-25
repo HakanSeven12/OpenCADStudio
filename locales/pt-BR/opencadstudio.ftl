@@ -1839,6 +1839,7 @@ common =
     .dynamic-ucs-on = SCU dinâmico: ativado
     .dynamic-ucs-off = SCU dinâmico: desativado
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: rolar move a vista, Ctrl+rolar ou pinçar aplica zoom
+    .numeric-keypad-decimal-key-always-types-a-point = Teclado numérico: a tecla decimal sempre digita um ponto (desligado: o caractere do layout, assim uma vírgula separa coordenadas)
     .interface-scale = Escala da interface
     .zoom-factor = Fator de zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = Quanto um passo da roda amplia (ZOOMFACTOR).

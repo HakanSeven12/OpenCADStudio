@@ -945,6 +945,69 @@ fn the_idle_rollover_follows_bit_one() {
     );
 }
 
+/// The rollover shows what a click would select: with PICKLOCKED off an
+/// object on a locked layer is not highlighted, an object on another layer is.
+#[test]
+fn the_rollover_leaves_out_locked_layers_when_picklocked_is_off() {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            crate::scene::set_pick_locked(self.0);
+        }
+    }
+    let _restore = Restore(crate::scene::pick_locked());
+
+    for (locked, pick_locked, gathering, lit) in [
+        (true, true, false, true),
+        (true, false, false, false),
+        (false, false, false, true),
+        (true, true, true, true),
+        (true, false, true, false),
+        (false, false, true, true),
+    ] {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.model_space.selection_preview = 3;
+        let _ = app.run_command_line("LINE 0,0 10,10");
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get_mut("0")
+            .expect("the layer of the line exists")
+            .flags
+            .locked = locked;
+        crate::scene::set_pick_locked(pick_locked);
+        if gathering {
+            let _ = app.run_command_line("SELECT");
+            assert!(
+                app.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.is_selection_gathering()),
+                "SELECT gathers a selection",
+            );
+        }
+        app.hover_dwell = Some(HoverDwell {
+            last_move_at: Instant::now()
+                - std::time::Duration::from_millis(HOVER_DWELL_MS as u64 * 2),
+            point: iced::Point::new(400.0, 300.0),
+            tile_size: (800.0, 600.0),
+            tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
+        });
+        let _ = app.on_hover_dwell_tick();
+        assert_eq!(
+            app.tabs[i].scene.hover_highlight.is_some(),
+            lit,
+            "locked={locked} PICKLOCKED={pick_locked} gathering={gathering}",
+        );
+    }
+}
+
 /// The quad's own dwell poll (docs/quad-menu.md §3.4): with the quad's
 /// delay beyond the rollover cadence, the re-armed `HoverDwellTick`s
 /// must not re-run the full O(N) settled pick while cursor and scene

@@ -1843,6 +1843,7 @@ common =
     .dynamic-ucs-on = Dynamický USS: zapnuto
     .dynamic-ucs-off = Dynamický USS: vypnuto
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: posouvání posouvá pohled, Ctrl+posouvání nebo sevření prstů mění zoom
+    .numeric-keypad-decimal-key-always-types-a-point = Numerická klávesnice: desetinná klávesa vždy píše tečku (vypnuto: znak rozložení, čárka pak odděluje souřadnice)
     .interface-scale = Měřítko rozhraní
     .zoom-factor = Faktor zoomu
     .how-far-one-wheel-notch-zooms-zoomfactor = O kolik přiblíží jeden zub kolečka (ZOOMFACTOR).

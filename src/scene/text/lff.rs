@@ -1311,6 +1311,22 @@ mod tests {
         assert!(!s.is_empty(), "Turkish '{ch}' should render via fallback");
     }
 
+    /// A letter a stroke font lacks (or whose bogus dot copy was dropped)
+    /// comes from the bundled `unicode` strokes, not a filled TrueType glyph
+    /// and not a dot (#3643).
+    #[rstest]
+    #[case("romans", 'ä')]
+    #[case("simplex", 'õ')]
+    #[case("romand", 'Ö')]
+    #[case("scripts", 'é')]
+    fn missing_accented_letters_stay_strokes(#[case] font: &str, #[case] ch: char) {
+        let face = crate::scene::text::font_face::Face::resolve(font);
+        let g = face.glyph(ch).expect("a glyph");
+        assert!(g.fill_tris.is_empty(), "{font} {ch} is filled");
+        let top = g.strokes.iter().flatten().map(|p| p[1]).fold(f32::MIN, f32::max);
+        assert!(top > 5.0, "{font} {ch} is a dot (top {top})");
+    }
+
     #[rstest]
     #[case("BOX")]
     #[case("CIRC1")]

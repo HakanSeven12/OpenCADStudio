@@ -342,6 +342,8 @@ pub enum Message {
     /// F6 / UCSDETECT: toggle the dynamic UCS.
     ToggleDynamicUcs,
     TouchpadPanChanged(bool),
+    /// Options: the keypad decimal key always types a point.
+    KeypadDecimalPointChanged(bool),
     /// Options: show the pull-down menus (MENUBAR).
     MenuBarChanged(bool),
     /// Options: show the ribbon (RIBBON / RIBBONCLOSE).
@@ -521,7 +523,8 @@ pub enum Message {
         tool_id: String,
         event: ModuleEvent,
     },
-    /// Result of a plugin-requested file picker (`ModuleEvent::PluginFileDialog`).
+    /// Result of a plugin-requested file or folder picker
+    /// (`ModuleEvent::PluginFileDialog` / `PluginFolderDialog`).
     /// `path` is `None` when the user cancels. On `Some`, the host dispatches
     /// `"<command> <path>"` to the plugins with original case preserved.
     PluginFileDialogResult {
@@ -684,8 +687,6 @@ pub enum Message {
     ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
     /// Toggles the funnel's two-entry menu.
     ParametersManagerFilterMenu,
-    /// Toggles the header's column menu.
-    ParametersManagerHeaderMenu,
     /// Shows or hides one header column.
     ParametersManagerColumn(crate::ui::window::parameters_manager::Column),
     ParametersManagerSearch(String),
@@ -943,12 +944,16 @@ pub enum Message {
     LayerNameColGrab,
     /// Start dragging the divider after a Layer Manager column.
     LayerColGrab(crate::ui::window::layers::LayerSortCol),
-    /// Open or close the Layer Manager's column chooser.
-    LayerColumnsMenu(bool),
+    /// Show every Layer Manager column again (the header's right-click menu).
+    LayerColumnsShowAll,
     /// Show or hide a Layer Manager column.
     LayerColumnToggle(crate::ui::window::layers::LayerSortCol),
-    /// Move a Layer Manager column left (-1) or right (1).
-    LayerColumnMove(crate::ui::window::layers::LayerSortCol, i8),
+    /// Move a Layer Manager column past the column the header shows next to
+    /// it (the second).
+    LayerColumnMove(
+        crate::ui::window::layers::LayerSortCol,
+        crate::ui::window::layers::LayerSortCol,
+    ),
     /// Toggle the persistent literal-space mode (the `>` button): while on,
     /// every command line behaves as if it started with `>` — Space stays in
     /// the input instead of submitting. Saved in the user config.

@@ -193,7 +193,14 @@ impl OpenCADStudio {
             | DockMsg::HoverExit
             | DockMsg::HoverStay
             | DockMsg::HoverSettled(_) => return self.dock_hover(m),
-            DockMsg::DragMove(point) => self.dock_drag_move(point),
+            DockMsg::DragMove(point) => {
+                self.dock_drag_over(None);
+                self.dock_drag_move(point);
+            }
+            DockMsg::DragMoveIn(window, point) => {
+                self.dock_drag_over(Some(window));
+                self.dock_drag_move(point);
+            }
             DockMsg::DragRelease => self.dock_drag_release(),
         }
         iced::Task::none()
@@ -274,6 +281,17 @@ impl OpenCADStudio {
         self.dock_grip_lit = None;
     }
 
+    /// The pointer moved over `window` (`None`: the main window). Points of
+    /// two windows have different origins, so moving from one into the other
+    /// starts the drag's deltas afresh instead of jumping by the windows'
+    /// offset.
+    fn dock_drag_over(&mut self, window: Option<iced::window::Id>) {
+        if self.dock_drag_window != window {
+            self.dock_drag_window = window;
+            self.dock_drag_last = None;
+        }
+    }
+
     /// Pointer released: land what was dragged and save a changed layout.
     fn dock_drag_release(&mut self) {
         use crate::ui::dock::{DockDrag, DropTarget, FloatPanel};
@@ -332,6 +350,7 @@ impl OpenCADStudio {
             self.save_config();
         }
         self.dock_drag_last = None;
+        self.dock_drag_window = None;
         self.xref_col_drag = None;
         self.xref_col_last = None;
         self.xref_split_drag = false;

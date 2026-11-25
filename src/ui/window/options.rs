@@ -94,6 +94,8 @@ pub struct AppPrefs {
     pub annotation_auto_scale: i8,
     /// Polar tracking increment in degrees.
     pub polar_increment_deg: f32,
+    /// The AutoSnap Magnet: the crosshairs lock onto an object snap point.
+    pub autosnap_magnet: bool,
     /// NAVVCUBE: show the navigation cube.
     pub show_viewcube: bool,
     /// UCSICON: show the UCS icon.
@@ -1939,6 +1941,21 @@ pub fn view_window<'a>(
         ]
         .spacing(10)
         .align_y(iced::Center),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(prefs.autosnap_magnet)
+                .on_toggle(Message::AutoSnapMagnetChanged)
+                .size(15),
+            text(crate::t!("Magnet")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "The crosshairs lock onto the object snap point while its marker shows (AUTOSNAP)."
+        ))
+        .size(11)
+        .width(sizing.width),
         Space::new().height(24),
         text(crate::t!("Snap and Grid")).size(15),
         Space::new().height(10),

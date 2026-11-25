@@ -294,6 +294,8 @@ pub enum Message {
     GripSizeChanged(u8),
     /// Change the object-snap marker size in pixels (1–20, SNAPMARKERSIZE).
     SnapMarkerSizeChanged(u8),
+    /// Turn the AutoSnap Magnet on or off (the crosshairs lock onto a snap point).
+    AutoSnapMagnetChanged(bool),
     /// Change Unselected Grip color ACI index (0 = Theme Primary, 1..=255 = ACI, GRIPCOLOR).
     GripColorChanged(u8),
     /// Change Selected/Hot Grip color ACI index (0 = Theme Danger, 1..=255 = ACI, GRIPHOT).

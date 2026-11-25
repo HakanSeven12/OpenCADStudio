@@ -287,6 +287,21 @@ pub(super) struct CrosshairMarks {
     pub dot: Option<Point>,
 }
 
+/// Where the crosshairs are drawn: on a hovered grip; else, with the
+/// AutoSnap Magnet on, on the object snap point; else at the pointer. A
+/// grid snap is SNAP mode, not AutoSnap, so the magnet does not take it.
+pub(super) fn crosshair_centre(
+    hovered_grip: Option<Point>,
+    snap: Option<(Point, SnapType)>,
+    magnet: bool,
+    pointer: Option<Point>,
+) -> Option<Point> {
+    let snap_point = snap
+        .filter(|&(_, snap_type)| magnet && snap_type != SnapType::Grid)
+        .map(|(point, _)| point);
+    hovered_grip.or(snap_point).or(pointer)
+}
+
 /// The crosshair's marks, all anchored on the pointer it belongs to.
 ///
 /// The pickbox is centred on the pointer because that centre is the click
@@ -385,6 +400,8 @@ pub struct CrosshairOptions {
     pub snap_color: Option<[u8; 3]>,
     /// Object-snap marker half-size in pixels (SNAPMARKERSIZE, 1–20).
     pub snap_size: f32,
+    /// The AutoSnap Magnet: draw the crosshairs on the object snap point.
+    pub magnet: bool,
 }
 
 /// Rendering style for the viewport grid.
@@ -3181,7 +3198,12 @@ impl canvas::Program<Message> for SelectionCanvas {
                     .iter()
                     .find(|grip| grip.is_hovered)
                     .map(|grip| grip.pos);
-                if let Some(cp) = hovered_grip.or(self.selection.borrow().input.last_move_pos) {
+                if let Some(cp) = crosshair_centre(
+                    hovered_grip,
+                    self.snap,
+                    self.crosshair.magnet,
+                    self.selection.borrow().input.last_move_pos,
+                ) {
                     let [r, g, b, a] = self.crosshair.color.map_or_else(
                         || {
                             crate::scene::view::render::adapt_to_bg(

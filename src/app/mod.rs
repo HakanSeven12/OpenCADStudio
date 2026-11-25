@@ -944,6 +944,8 @@ pub(super) struct OpenCADStudio {
     cursor_size: i32,
     /// Selection-box size setting (PICKBOX, 0..=50).
     pick_box: i32,
+    /// The AutoSnap Magnet: the crosshairs lock onto an object snap point.
+    autosnap_magnet: bool,
     /// HPASSOC: new hatches follow their boundary objects.
     hatch_associative: bool,
     /// The Hatch panel's numbers as typed.
@@ -2988,6 +2990,7 @@ impl OpenCADStudio {
             zoom_factor_input: 60.to_string(),
             cursor_size: 5,
             pick_box: 3,
+            autosnap_magnet: true,
             hatch_associative: true,
             hatch_drafts: Default::default(),
             context_menu_custom: Default::default(),

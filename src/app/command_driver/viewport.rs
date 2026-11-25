@@ -249,8 +249,8 @@ impl OpenCADStudio {
         let viewport_handle = if created_boundary {
             self.commit_entity_handle(viewport)
         } else {
-            // AutoCAD's VIEWPORTLAYER is not for a viewport made from an
-            // object: it goes on the current layer.
+            // VIEWPORTLAYER is not for a viewport made from an object: it
+            // goes on the current layer.
             let mut viewport = viewport;
             viewport
                 .as_entity_mut()

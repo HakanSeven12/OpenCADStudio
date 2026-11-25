@@ -1535,7 +1535,7 @@ impl Default for UserSettings {
             cursor_size: 5,
             pick_box: 3,
             aperture: crate::snap::DEFAULT_OSNAP_RADIUS_PX,
-            // On, as AutoCAD's AUTOSNAP initial value 63.
+            // On, as in the initial AUTOSNAP value 63.
             autosnap_magnet: true,
             hatch_associative: true,
             hatch_gap_tolerance: 0.0,

@@ -5,7 +5,7 @@ use crate::app::OpenCADStudio;
 use glam::DVec3;
 
 /// A selected line (0,0)-(100,0) with its end grip hot (engaging click).
-fn hot_line_end() -> (OpenCADStudio, Handle) {
+pub(super) fn hot_line_end() -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
     let i = app.active_tab;
@@ -28,7 +28,7 @@ fn hot_line_end() -> (OpenCADStudio, Handle) {
     (app, handle)
 }
 
-fn click(app: &mut OpenCADStudio, world: DVec3) {
+pub(super) fn click(app: &mut OpenCADStudio, world: DVec3) {
     let i = app.active_tab;
     let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
     let p = app.tabs[i]
@@ -44,12 +44,12 @@ fn click(app: &mut OpenCADStudio, world: DVec3) {
     let _ = app.on_viewport_left_release();
 }
 
-fn submit(app: &mut OpenCADStudio, text: &str) {
+pub(super) fn submit(app: &mut OpenCADStudio, text: &str) {
     app.command_line.input = text.to_string();
     let _ = app.on_command_submit();
 }
 
-fn line_end(app: &OpenCADStudio, handle: Handle) -> DVec3 {
+pub(super) fn line_end(app: &OpenCADStudio, handle: Handle) -> DVec3 {
     let Some(document::EntityType::Line(line)) =
         app.tabs[app.active_tab].scene.document.get_entity(handle)
     else {

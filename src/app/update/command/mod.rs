@@ -284,9 +284,13 @@ impl OpenCADStudio {
     /// `<angle` at a point prompt locks the next point's direction from the
     /// last point; a bare distance then runs along it. True when consumed.
     pub(in crate::app) fn try_angle_override(&mut self, text: &str) -> bool {
-        let (Some(angle), Some(_)) = (text.trim().strip_prefix('<'), self.last_point) else {
+        let Some(angle) = text.trim().strip_prefix('<') else {
             return false;
         };
+        // The direction runs from the last point, or from a hot grip.
+        if self.last_point.is_none() && !self.grip_point_prompt(self.active_tab) {
+            return false;
+        }
         let Some(angle) = crate::entities::common::parse_typed_direction(angle) else {
             return false;
         };
@@ -299,6 +303,27 @@ impl OpenCADStudio {
         self.command_line
             .push_output(crate::tf!("Angle Override: {shown}").as_ref());
         true
+    }
+
+    /// A typed coordinate in world coordinates: read in the current UCS unless
+    /// it is starred, and added to `base` when it is relative (absolute when
+    /// there is no base).
+    pub(in crate::app) fn typed_coordinate_wcs(
+        &self,
+        i: usize,
+        coord: glam::DVec3,
+        kind: CoordKind,
+        base: Option<glam::DVec3>,
+    ) -> glam::DVec3 {
+        let ucs = self.tabs[i]
+            .active_ucs
+            .as_ref()
+            .filter(|_| !kind.is_world());
+        match (kind.is_relative(), base) {
+            // The offset turns with the UCS axes; the origin does not move it.
+            (true, Some(base)) => base + ucs.map_or(coord, |u| ucs_rotate_vec(coord, u)),
+            _ => ucs.map_or(coord, |u| ucs_to_wcs(coord, u)),
+        }
     }
 
     pub(in crate::app) fn try_direct_distance_entry(

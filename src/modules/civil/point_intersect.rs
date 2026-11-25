@@ -121,9 +121,12 @@ pub struct IntersectionPointCommand {
     /// The bearing quadrant Enter keeps.
     quadrant: u8,
     picked: Option<EntityType>,
-    /// The picked object's curve and whether it runs from the end nearest
-    /// the pick backwards (its offsets then go to the other side).
-    object: Option<(Curve, bool)>,
+    /// The picked lot line's or feature line's geometry, read from the
+    /// drawing it was picked in.
+    site_line: Option<Curve>,
+    /// The picked object's curve and the side a positive offset moves it
+    /// to: +1 right, -1 left (see `on_entity_pick`).
+    object: Option<(Curve, f64)>,
     /// The meeting points waiting for their description and elevation.
     queue: VecDeque<DVec3>,
     description: Option<String>,
@@ -157,17 +160,51 @@ fn offset_right(curve: Curve, offset: f64) -> Option<Curve> {
     }
     match &curve {
         Curve::Polyline(p) => {
-            // The side point: right of the first segment.
-            let (a, b) = (curve.point_at(0.0), curve.point_at(1e-6));
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-            let side = [a[0] + dy, a[1] - dx];
-            offset_polyline(p, offset.abs(), if offset > 0.0 { side } else { [2.0 * a[0] - side[0], 2.0 * a[1] - side[1]] })
-                .into_iter()
-                .next()
-                .map(Curve::Polyline)
+            // The side point: right of the middle of the first segment (at
+            // a vertex it could fall on the next segment's line).
+            let n = if p.closed { p.vertices.len() } else { p.vertices.len().saturating_sub(1) }.max(1) as f64;
+            let t = 0.5 / n;
+            let (a, b) = (glam::DVec2::from(curve.point_at(t)), glam::DVec2::from(curve.point_at(t + 1e-6 / n)));
+            let right = (b - a).perp().normalize_or_zero() * -(offset.abs() * 1e-3);
+            let side = if offset > 0.0 { a + right } else { a - right };
+            offset_polyline(p, offset.abs(), side.to_array()).into_iter().next().map(|o| Curve::Polyline(aligned(p, o)))
         }
         _ => offset_curve(&curve, -offset, 1e-9),
     }
+}
+
+/// `offset` run the way `source` runs and, when closed, from the offset of
+/// its first vertex: the meeting points follow the source's pieces.
+fn aligned(source: &ocs_geom::geom2d::Polyline, mut offset: ocs_geom::geom2d::Polyline) -> ocs_geom::geom2d::Polyline {
+    let ring = |p: &ocs_geom::geom2d::Polyline| p.vertices.iter().map(|v| v.position).collect::<Vec<_>>();
+    let flip = if source.closed {
+        ocs_geom::geom2d::signed_area(&ring(source)).signum() != ocs_geom::geom2d::signed_area(&ring(&offset)).signum()
+    } else {
+        let (first, last) = (glam::DVec2::from(source.vertices[0].position), glam::DVec2::from(source.vertices[source.vertices.len() - 1].position));
+        let start = glam::DVec2::from(offset.vertices[0].position);
+        start.distance(first) > start.distance(last)
+    };
+    if flip {
+        let n = offset.vertices.len();
+        let old = offset.vertices.clone();
+        offset.vertices = (0..n)
+            .map(|k| {
+                let at = if offset.closed { (n - k) % n } else { n - 1 - k };
+                // The segment leaving `at` backwards is the one arriving at it.
+                let arriving = if offset.closed { (at + n - 1) % n } else if at == 0 { usize::MAX } else { at - 1 };
+                ocs_geom::geom2d::PolylineVertex { position: old[at].position, bulge: old.get(arriving).map_or(0.0, |v| -v.bulge) }
+            })
+            .collect();
+    }
+    if offset.closed {
+        let first = glam::DVec2::from(source.vertices[0].position);
+        if let Some(k) = (0..offset.vertices.len()).min_by(|a, b| {
+            glam::DVec2::from(offset.vertices[*a].position).distance(first).total_cmp(&glam::DVec2::from(offset.vertices[*b].position).distance(first))
+        }) {
+            offset.vertices.rotate_left(k);
+        }
+    }
+    offset
 }
 
 /// The azimuth (degrees clockwise from north) of bearing `b` in quadrant `q`.
@@ -197,9 +234,38 @@ fn bearing_text(azimuth: f64) -> String {
     format!("{ns}{}° {:02}' {:02}\"{ew}", total / 3600, total / 60 % 60, total % 60)
 }
 
-/// An alignment's plan geometry in station order.
-// ponytail: curves and spirals come as their solved chords; exact arcs when
-// the alignment reader gives the elements' arcs.
+/// The sweep of each chord of a solved alignment piece. A curve's chords
+/// lie on its arc (`curvature` signed, positive to the left); a spiral's
+/// heading changes quadratically, so each step turns by the mean of the
+/// turns at its two ends (extrapolated at the piece's ends).
+fn piece_sweeps(kind: document::classes::civil::AlignmentPiece, curvature: f64, points: &[[f64; 2]]) -> Vec<f64> {
+    use document::classes::civil::AlignmentPiece;
+    let m = points.len().saturating_sub(1);
+    let chord = |i: usize| glam::DVec2::from(points[i + 1]) - glam::DVec2::from(points[i]);
+    let turn: Vec<f64> = (1..m).map(|i| chord(i - 1).angle_to(chord(i))).collect();
+    match kind {
+        AlignmentPiece::Line => vec![0.0; m],
+        AlignmentPiece::Curve if curvature.abs() > 1e-12 => {
+            let side = turn.iter().sum::<f64>().signum();
+            let side = if side == 0.0 { curvature.signum() } else { side };
+            (0..m).map(|i| side * 2.0 * (chord(i).length() * curvature.abs() / 2.0).min(1.0).asin()).collect()
+        }
+        _ => match turn.len() {
+            0 => vec![0.0; m],
+            1 => vec![turn[0]; m],
+            n => (0..m)
+                .map(|i| match i {
+                    0 => 1.5 * turn[0] - 0.5 * turn[1],
+                    i if i == m - 1 => 1.5 * turn[n - 1] - 0.5 * turn[n - 2],
+                    i => (turn[i - 1] + turn[i]) / 2.0,
+                })
+                .collect(),
+        },
+    }
+}
+
+/// An alignment's plan geometry in station order: lines, its curves as
+/// arcs and its spirals as short arcs along their solved points.
 pub(crate) fn alignment_curve(e: &EntityType) -> Option<Curve> {
     let EntityType::Extended(x) = e else { return None };
     let document::entities::ExtendedEntityData::Arch(a) = &x.data else { return None };
@@ -207,15 +273,132 @@ pub(crate) fn alignment_curve(e: &EntityType) -> Option<Curve> {
         return None;
     }
     let mut vertices: Vec<ocs_geom::geom2d::PolylineVertex> = Vec::new();
-    for (_, points) in a.alignment_pieces() {
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-6;
+    for (kind, curvature, points) in a.alignment_pieces_with_curvature() {
+        // A solved end can be followed by its stored end a hair away.
+        let mut piece: Vec<[f64; 2]> = Vec::new();
         for p in points {
-            let q = [p.x, p.y];
-            if vertices.last().is_none_or(|v| (v.position[0] - q[0]).hypot(v.position[1] - q[1]) > 1e-9) {
-                vertices.push(ocs_geom::geom2d::PolylineVertex::straight(q));
+            if piece.last().is_none_or(|q| !near(*q, [p.x, p.y])) {
+                piece.push([p.x, p.y]);
+            }
+        }
+        let sweeps = piece_sweeps(kind, curvature, &piece);
+        for (i, q) in piece.iter().enumerate() {
+            let bulge = sweeps.get(i).map_or(0.0, |s| (s / 4.0).tan());
+            match vertices.last_mut() {
+                Some(v) if near(v.position, *q) => v.bulge = bulge,
+                _ => vertices.push(ocs_geom::geom2d::PolylineVertex { position: *q, bulge }),
             }
         }
     }
     (vertices.len() >= 2).then(|| Curve::Polyline(ocs_geom::geom2d::Polyline { vertices, closed: false }))
+}
+
+/// Whether `e` is a lot line or a feature line.
+fn is_site_line(e: &EntityType) -> bool {
+    matches!(e, EntityType::Extended(x) if matches!(&x.data, document::entities::ExtendedEntityData::Arch(a) if matches!(a.dxf_name.as_str(), "AECC_PARCEL_SEGMENT" | "AECC_FEATURE_LINE")))
+}
+
+/// A lot line's or a feature line's plan geometry: its edge in the
+/// topology of the site (or feature line container) that holds it.
+pub(crate) fn site_line_curve(document: &document::Document, e: &EntityType) -> Option<Curve> {
+    if !is_site_line(e) {
+        return None;
+    }
+    let handle = e.common().handle.value();
+    document.objects.values().find_map(|o| {
+        let document::objects::ObjectType::Arch(a) = o else { return None };
+        let members = a.site_members();
+        let index = members.iter().position(|h| *h == handle)?;
+        let topology = a.topology().filter(|t| t.edges.len() == members.len())?;
+        let mut run = topology.edges.get(index)?.clone();
+        // A closed edge repeats its first point last.
+        let closed = topology.edge_flags.get(index).is_some_and(|f| f & 1 != 0);
+        if closed {
+            run.pop();
+        }
+        let vertices = run.iter().map(|v| ocs_geom::geom2d::PolylineVertex { position: [v.point.x, v.point.y], bulge: v.bulge }).collect::<Vec<_>>();
+        (vertices.len() >= 2).then(|| Curve::Polyline(ocs_geom::geom2d::Polyline { vertices, closed }))
+    })
+}
+
+/// How far along `curve` its point nearest `p` lies, as a share of its
+/// length.
+fn travelled_fraction(curve: &Curve, p: [f64; 2]) -> f64 {
+    let t = closest_point(curve, p).t;
+    let Curve::Polyline(pl) = curve else { return t };
+    let n = if pl.closed { pl.vertices.len() } else { pl.vertices.len().saturating_sub(1) };
+    let lengths: Vec<f64> = (0..n)
+        .map(|i| match pl.segment_arc(i) {
+            Some(a) => (a.sweep * a.radius).abs(),
+            None => glam::DVec2::from(pl.vertices[i].position).distance(glam::DVec2::from(pl.vertices[(i + 1) % pl.vertices.len()].position)),
+        })
+        .collect();
+    let total: f64 = lengths.iter().sum();
+    if n == 0 || total <= 0.0 {
+        return t;
+    }
+    let at = (t * n as f64).clamp(0.0, n as f64);
+    let index = (at.floor() as usize).min(n - 1);
+    (lengths[..index].iter().sum::<f64>() + (at - index as f64) * lengths[index]) / total
+}
+
+/// The pieces the reference meets one at a time, in order: a polyline's
+/// (or an alignment's) segments, any other curve whole; each with whether
+/// it runs against its parameter (a clockwise arc) and its rank — which
+/// of two pieces orders the points they share: a circle, then a line (a
+/// picked one runs on past its ends), then an arc; a direction last.
+fn pieces(curve: &Curve, direction: bool) -> Vec<(Curve, bool, u8)> {
+    match curve {
+        Curve::Polyline(p) => {
+            let n = if p.closed { p.vertices.len() } else { p.vertices.len().saturating_sub(1) };
+            (0..n)
+                .map(|i| match p.segment_arc(i) {
+                    Some(a) => {
+                        let (start_angle, end_angle) = if a.sweep >= 0.0 { (a.start_angle, a.end_angle) } else { (a.end_angle, a.start_angle) };
+                        (Curve::Arc(ocs_geom::geom2d::Arc { centre: a.center, radius: a.radius, start_angle, end_angle }), a.sweep < 0.0, 1)
+                    }
+                    None => (Curve::Line(ocs_geom::geom2d::Line { start: p.vertices[i].position, end: p.vertices[(i + 1) % p.vertices.len()].position }), false, 2),
+                })
+                .collect()
+        }
+        Curve::Circle(_) => vec![(curve.clone(), false, 3)],
+        Curve::Line(_) => vec![(curve.clone(), false, 2)],
+        Curve::XLine(_) => vec![(curve.clone(), false, if direction { 0 } else { 2 })],
+        // ponytail: ellipses and splines ranked as arcs; measure them if
+        // their order ever matters.
+        _ => vec![(curve.clone(), false, 1)],
+    }
+}
+
+/// Where the first and second shapes meet, in the order the reference
+/// writes them (measured): piece by piece along the first shape, then
+/// along the second; two pieces' points along the higher ranked one (the
+/// second's on a tie). Two circles give the point left of the first
+/// centre → second centre line first.
+fn meets(a: &Curve, a_direction: bool, b: &Curve, b_direction: bool) -> Vec<DVec3> {
+    let tolerance = Tolerance::new(1e-9);
+    let mut found: Vec<DVec3> = Vec::new();
+    for (pa, ra_reversed, ra) in pieces(a, a_direction) {
+        for (pb, rb_reversed, rb) in pieces(b, b_direction) {
+            let mut crossings = intersect(&pa, &pb, tolerance);
+            let along = |c: &ocs_geom::geom2d::Crossing| if ra > rb { if ra_reversed { -c.t_a } else { c.t_a } } else if rb_reversed { -c.t_b } else { c.t_b };
+            crossings.sort_by(|x, y| along(x).total_cmp(&along(y)));
+            if let (Curve::Circle(c1), Curve::Circle(c2)) = (&pa, &pb) {
+                let (o, d) = (glam::DVec2::from(c1.centre), glam::DVec2::from(c2.centre) - glam::DVec2::from(c1.centre));
+                let left = |p: [f64; 2]| -d.perp_dot(glam::DVec2::from(p) - o);
+                crossings.sort_by(|x, y| left(x.point).total_cmp(&left(y.point)));
+            }
+            for c in crossings {
+                let p = DVec3::new(c.point[0], c.point[1], 0.0);
+                // A point where two segments join is met once.
+                if !found.iter().any(|q| q.distance(p) < 1e-7) {
+                    found.push(p);
+                }
+            }
+        }
+    }
+    found
 }
 
 /// The foot of the perpendicular from `p` on `curve`; `None` when it would
@@ -248,6 +431,7 @@ impl IntersectionPointCommand {
             offset: 0.0,
             quadrant: 1,
             picked: None,
+            site_line: None,
             object: None,
             queue: VecDeque::new(),
             description: None,
@@ -302,26 +486,9 @@ impl IntersectionPointCommand {
             return CmdResult::NeedPoint;
         }
         let first = self.first.take().flatten();
+        let legs = self.kind.legs();
         let points = match (first, shape) {
-            (Some(a), Some(b)) => {
-                // Ordered along the second shape; two circles give the point
-                // left of the first centre → second centre line first
-                // (measured).
-                let tolerance = Tolerance::new(1e-9);
-                let mut found: Vec<DVec3> = Vec::new();
-                for c in intersect(&b, &a, tolerance) {
-                    let p = DVec3::new(c.point[0], c.point[1], 0.0);
-                    if !found.iter().any(|q| q.distance(p) < 1e-7) {
-                        found.push(p);
-                    }
-                }
-                if let (Curve::Circle(c1), Curve::Circle(c2)) = (&a, &b) {
-                    let (o, d) = (glam::DVec2::from(c1.centre), glam::DVec2::from(c2.centre) - glam::DVec2::from(c1.centre));
-                    let left = |p: &DVec3| -d.perp_dot(glam::DVec2::new(p.x, p.y) - o);
-                    found.sort_by(|p, q| left(p).total_cmp(&left(q)));
-                }
-                found
-            }
+            (Some(a), Some(b)) => meets(&a, legs[0] == Leg::Direction, &b, legs[1] == Leg::Direction),
             _ => Vec::new(),
         };
         self.found(points)
@@ -358,7 +525,7 @@ impl IntersectionPointCommand {
         self.offset = o;
         let shape = match self.current() {
             Leg::Direction => self.shape(),
-            _ => self.object.take().and_then(|(c, reversed)| offset_right(c, if reversed { -o } else { o })),
+            _ => self.object.take().and_then(|(c, side)| offset_right(c, side * o)),
         };
         self.leg_done(shape)
     }
@@ -429,25 +596,35 @@ impl CadCommand for IntersectionPointCommand {
         match (&self.step, self.current()) {
             (Step::Object, Leg::Alignment) => Some(|e| alignment_curve(e).is_some()),
             // An alignment is found too, then refused (measured).
-            (Step::Object, _) => Some(|e| alignment_curve(e).is_some() || entity_curve_xy(e).is_some()),
+            (Step::Object, _) => Some(|e| alignment_curve(e).is_some() || entity_curve_xy(e).is_some() || is_site_line(e)),
             _ => None,
         }
     }
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked = Some(entity);
+        self.site_line = None;
+    }
+
+    fn inject_picked_from(&mut self, document: &document::Document) {
+        self.site_line = self.picked.as_ref().and_then(|e| site_line_curve(document, e));
     }
 
     fn on_entity_pick(&mut self, _handle: Handle, pick: DVec3) -> CmdResult {
         let alignment = self.current() == Leg::Alignment;
-        let Some(curve) = self.picked.take().filter(|e| alignment || alignment_curve(e).is_none()).and_then(|e| if alignment { alignment_curve(&e) } else { entity_curve_xy(&e) }) else {
+        let site_line = self.site_line.take().filter(|_| !alignment);
+        let Some(curve) = site_line.or_else(|| self.picked.take().filter(|e| alignment || alignment_curve(e).is_none()).and_then(|e| if alignment { alignment_curve(&e) } else { entity_curve_xy(&e) })) else {
             return CmdResult::ReportError(t("ERROR: Invalid selection set!"));
         };
-        // An object runs from its end nearest the pick (the end on a tie);
-        // an alignment runs with its stations.
-        let (start, end) = (curve.point_at(0.0), curve.point_at(1.0));
-        let near = |p: [f64; 2]| (p[0] - pick.x).hypot(p[1] - pick.y);
-        let reversed = !alignment && near(start) >= near(end);
+        // An object runs from the end the pick is nearer along it (the end
+        // on a tie, so a closed one from its start only when picked in its
+        // first half); an alignment runs with its stations. A positive
+        // offset moves a line or an alignment to the right of that run, an
+        // arc, a polyline, a lot line or a feature line to its left
+        // (measured).
+        let reversed = !alignment && travelled_fraction(&curve, [pick.x, pick.y]) >= 0.5;
+        let left = !alignment && !matches!(curve, Curve::Line(_));
+        let side = if reversed != left { -1.0 } else { 1.0 };
         // Perpendicular: the object itself, with no offset; the foot must
         // fall on it (measured).
         if self.kind == Kind::Perpendicular {
@@ -458,7 +635,7 @@ impl CadCommand for IntersectionPointCommand {
             Curve::Line(l) => Curve::XLine(XLine { base: l.start, direction: [l.end[0] - l.start[0], l.end[1] - l.start[1]] }),
             c => c,
         };
-        self.object = Some((curve, reversed));
+        self.object = Some((curve, side));
         self.offset = if self.leg == 0 { 0.0 } else { self.offset };
         self.step = Step::Offset;
         CmdResult::NeedPoint
@@ -516,6 +693,10 @@ impl CadCommand for IntersectionPointCommand {
         let word = typed.to_ascii_uppercase();
         let invalid = || Some(CmdResult::ReportError(t("Invalid input")));
         match self.step.clone() {
+            // A word at an object prompt picks nothing (measured).
+            Step::Object if !typed.is_empty() && !typed.chars().any(|c| c.is_ascii_digit()) => {
+                return Some(CmdResult::ReportError(crate::tr!("measurement", "angle-invalid-second")));
+            }
             Step::Start | Step::Centre | Step::Object | Step::Perpendicular => return None,
             Step::Direction => {
                 match word.as_str() {

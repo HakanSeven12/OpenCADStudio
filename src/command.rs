@@ -4299,6 +4299,11 @@ pub trait CadCommand: Send {
     /// Default: no-op.
     fn inject_picked_entity(&mut self, _entity: document::EntityType) {}
 
+    /// Called right after [`Self::inject_picked_entity`] with the drawing the
+    /// entity was picked in, for objects whose geometry lives elsewhere in
+    /// it (a lot line's in its site). Default: no-op.
+    fn inject_picked_from(&mut self, _document: &document::Document) {}
+
     /// The host undid one document step on the command's behalf
     /// (`CmdResult::UndoDocument`) and the command stays active. Commands
     /// that cache document entities (FILLET, CHAMFER) refresh them here so

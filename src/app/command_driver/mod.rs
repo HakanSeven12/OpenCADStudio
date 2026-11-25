@@ -2508,6 +2508,7 @@ fn entity_at_typed_point(
     owner: Handle,
     point: glam::DVec3,
     keep: Option<fn(&document::EntityType) -> bool>,
+    tolerance: Option<f64>,
 ) -> Option<Handle> {
     let mut extent = 0.0f64;
     let mut nearest: Option<(f64, Handle)> = None;
@@ -2523,7 +2524,9 @@ fn entity_at_typed_point(
             .max((bounds.max.x - bounds.min.x).abs())
             .max((bounds.max.y - bounds.min.y).abs());
         // An alignment answers by its plan geometry.
+        // So do lot lines and feature lines, by their edges in their site.
         let alignment = crate::modules::civil::point_intersect::alignment_curve(entity)
+            .or_else(|| crate::modules::civil::point_intersect::site_line_curve(document, entity))
             .map(|curve| ocs_geom::geom2d::closest_point(&curve, [point.x, point.y]).distance);
         let distance =
             match alignment.or_else(|| crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point)) {
@@ -2582,7 +2585,7 @@ fn entity_at_typed_point(
             nearest = Some((distance, common.handle));
         }
     }
-    let tolerance = (extent * 0.002).max(1.0e-9);
+    let tolerance = tolerance.unwrap_or((extent * 0.002).max(1.0e-9));
     nearest
         .filter(|(distance, _)| *distance <= tolerance)
         .map(|(_, handle)| handle)

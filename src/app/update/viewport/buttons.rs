@@ -1577,8 +1577,10 @@ impl OpenCADStudio {
                             .map(|(entity, _)| entity)
                             .or_else(|| self.tabs[i].scene.document.get_entity(handle).cloned())
                         {
-                            if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                            let tab = &mut self.tabs[i];
+                            if let Some(cmd) = tab.active_cmd.as_mut() {
                                 cmd.inject_picked_entity(entity);
+                                cmd.inject_picked_from(&tab.scene.document);
                                 if let Some(area) = surface_area {
                                     cmd.inject_picked_surface_area(area);
                                 }

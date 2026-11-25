@@ -1063,8 +1063,10 @@ impl OpenCADStudio {
                 .is_some_and(|command| command.inject_before_entity_pick())
             {
                 if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() {
-                    if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                    let tab = &mut self.tabs[i];
+                    if let Some(command) = tab.active_cmd.as_mut() {
                         command.inject_picked_entity(entity);
+                        command.inject_picked_from(&tab.scene.document);
                     }
                 }
             }
@@ -2104,9 +2106,17 @@ impl OpenCADStudio {
             .owner_handle(&self.tabs[i].scene.document);
         // A typed point off the screen finds nothing, as a click there could
         // not: the object prompt then reads it as empty space.
+        // It finds what a click there would: an object within the pick box
+        // (measured: a point 6 pixels off a line picks it, 7.5 does not, at
+        // PICKBOX 5).
+        let (_, pixels) = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let tolerance = (pixels > 0.0).then(|| {
+            let per_px = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0 / f64::from(pixels);
+            f64::from(crate::ui::overlay::pick_box_aperture_px(self.pick_box)) * per_px
+        });
         let found = self
             .typed_point_in_view(i, wcs)
-            .then(|| entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs, keep))
+            .then(|| entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs, keep, tolerance))
             .flatten();
         if gathering {
             self.last_point = Some(wcs);

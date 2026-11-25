@@ -3256,12 +3256,12 @@ mod tests {
         ribbon.set_window_size((1024.0, 768.0));
         assert!(ribbon.narrow());
         // Logo and toolbar 200 px wide: 1024 px hold the name, the box and
-        // the window buttons; 700 px do not.
+        // the window buttons; 600 px do not.
         ribbon
             .title_start_w
             .store(200f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
         assert!(!ribbon.narrow());
-        ribbon.set_window_size((700.0, 768.0));
+        ribbon.set_window_size((600.0, 768.0));
         assert!(ribbon.narrow());
     }
 

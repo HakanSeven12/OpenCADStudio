@@ -7,29 +7,6 @@ use crate::app::{Message, OpenCADStudio};
 use crate::ui::title_bar::TitleBarMsg;
 
 impl OpenCADStudio {
-    /// Bring the main window's system frame, the ribbon and the maximize
-    /// button in line with `draws_title_bar`, after anything that may have
-    /// changed it: the Options checkbox, Restore Defaults, a discarded
-    /// Options session.
-    pub(in crate::app) fn sync_window_frame(&mut self) -> Task<Message> {
-        let draws = self.draws_title_bar();
-        self.ribbon.set_in_title_bar(draws);
-        let Some(id) = self.main_window else {
-            return Task::none();
-        };
-        if self.frame_shown != draws {
-            return Task::none();
-        }
-        self.frame_shown = !draws;
-        // The window may have been restored meanwhile: the button and the
-        // resize edges follow what the system reports.
-        Task::batch([
-            iced::window::toggle_decorations(id),
-            iced::window::is_maximized(id)
-                .map(|max| Message::TitleBar(TitleBarMsg::Maximized(max))),
-        ])
-    }
-
     pub(in crate::app) fn on_title_bar(&mut self, msg: TitleBarMsg) -> Task<Message> {
         let Some(id) = self.main_window else {
             return Task::none();
@@ -75,26 +52,7 @@ mod tests {
     fn app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.main_window = Some(iced::window::Id::unique());
-        app.frame_shown = !app.draws_title_bar();
         app
-    }
-
-    #[test]
-    fn a_discarded_options_session_takes_the_frame_back() {
-        let mut app = app();
-        assert!(app.draws_title_bar() && !app.frame_shown);
-        let _ = app.update_root(Message::OptionsOpen);
-        let _ = app.update_root(Message::SystemTitleBarChanged(true));
-        assert!(app.frame_shown, "the system frame is back");
-        // Closed without Apply: the app's title bar returns, the frame goes.
-        let _ = app.update_root(Message::OptionsCloseDiscard);
-        assert!(!app.system_title_bar);
-        assert!(app.draws_title_bar() && !app.frame_shown);
-        // Restore Defaults after a change does the same.
-        let _ = app.update_root(Message::OptionsOpen);
-        let _ = app.update_root(Message::SystemTitleBarChanged(true));
-        let _ = app.update_root(Message::OptionsRestoreDefaults);
-        assert!(app.draws_title_bar() && !app.frame_shown);
     }
 
     #[test]
@@ -133,22 +91,5 @@ mod tests {
         assert!(!app.main_maximized);
         let _ = app.update_root(Message::TitleBar(TitleBarMsg::ToggleMaximize));
         assert!(app.main_maximized);
-    }
-
-    #[test]
-    fn the_system_title_bar_setting_is_saved_and_restored() {
-        let mut app = app();
-        assert!(!app.system_title_bar, "the app's own title bar by default");
-        let _ = app.update_root(Message::SystemTitleBarChanged(true));
-        assert!(!app.draws_title_bar());
-        let saved = app
-            .last_saved_config
-            .clone()
-            .expect("the change is saved")
-            .settings;
-        assert!(saved.system_title_bar);
-        let mut next = OpenCADStudio::new_for_test();
-        next.apply_settings(&saved);
-        assert!(next.system_title_bar, "the next session keeps it");
     }
 }

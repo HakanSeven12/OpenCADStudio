@@ -546,7 +546,6 @@ common =
     .options-hpassoc = Новите щриховки следват границите си (HPASSOC)
     .options-show-ribbon = Показване на лентата (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Показване на лентата с менюта (MENUBAR)
-    .options-use-system-title-bar = Използване на системната заглавна лента
     .window-minimize = Минимизиране
     .window-maximize = Максимизиране
     .options-window-elements = Елементи на прозореца

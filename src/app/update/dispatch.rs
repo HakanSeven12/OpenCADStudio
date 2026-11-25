@@ -5547,7 +5547,23 @@ impl OpenCADStudio {
             // after the first resize.
             Message::WindowOpened(id, w, h) => {
                 if Some(id) == self.main_window {
-                    return self.update(Message::WindowResized(w, h));
+                    let resized = self.update(Message::WindowResized(w, h));
+                    // The drawn maximize button answers as the system's own,
+                    // for the Snap Layouts flyout.
+                    #[cfg(target_os = "windows")]
+                    if self.draws_title_bar() {
+                        use iced::window::raw_window_handle::RawWindowHandle;
+                        let snap = iced::window::run(id, |window| {
+                            if let Ok(handle) = window.window_handle() {
+                                if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                                    crate::ui::title_bar::windows::install(handle.hwnd.get());
+                                }
+                            }
+                        })
+                        .discard();
+                        return Task::batch([resized, snap]);
+                    }
+                    return resized;
                 }
                 Task::none()
             }
@@ -11050,7 +11066,7 @@ impl OpenCADStudio {
             }
             Message::OptionsRestoreDefaults => {
                 self.options_restore_defaults();
-                self.sync_window_frame()
+                Task::none()
             }
             Message::OptionsOk => {
                 self.options_apply();
@@ -11065,14 +11081,12 @@ impl OpenCADStudio {
                 }
                 self.options_discard();
                 self.close_active_modal();
-                // A reverted "Use the system title bar" takes the frame along.
-                self.sync_window_frame()
+                Task::none()
             }
             Message::OptionsCloseDiscard => {
                 self.options_discard();
                 self.close_active_modal();
-                // A reverted "Use the system title bar" takes the frame along.
-                self.sync_window_frame()
+                Task::none()
             }
             Message::OptionsCloseKeep => {
                 self.options_close_confirm = false;
@@ -11580,12 +11594,6 @@ impl OpenCADStudio {
                 self.show_menu_bar = shown;
                 self.persist_settings_if_changed();
                 Task::none()
-            }
-
-            Message::SystemTitleBarChanged(system) => {
-                self.system_title_bar = system;
-                self.persist_settings_if_changed();
-                self.sync_window_frame()
             }
 
             Message::TitleBar(msg) => self.on_title_bar(msg),

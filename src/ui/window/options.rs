@@ -64,8 +64,6 @@ pub struct AppPrefs {
     pub command_line_font_size: u16,
     /// MENUBAR: the pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
-    /// The main window keeps the system's title bar (Windows and Linux).
-    pub system_title_bar: bool,
     /// The ribbon shows (RIBBON / RIBBONCLOSE).
     pub show_ribbon: bool,
     /// The ribbon's tabs and panels sit in its middle.
@@ -1000,31 +998,6 @@ pub fn view_window<'a>(
             .spacing(8)
             .align_y(iced::Center),
         )
-        // Only where the app draws the title bar in place of the system's.
-        .push({
-            // A tiling window manager keeps the system's frame anyway.
-            let system_bar: Element<'_, Message> = if cfg!(any(
-                target_os = "windows",
-                target_os = "linux"
-            )) && !crate::ui::title_bar::tiling_desktop()
-            {
-                column![
-                    Space::new().height(8),
-                    row![
-                        iced::widget::checkbox(prefs.system_title_bar)
-                            .on_toggle(Message::SystemTitleBarChanged)
-                            .size(15),
-                        text(crate::t!("Use the system title bar")).size(12),
-                    ]
-                    .spacing(8)
-                    .align_y(iced::Center),
-                ]
-                .into()
-            } else {
-                Space::new().into()
-            };
-            system_bar
-        })
         .push(Space::new().height(8))
         .push(
             row![

@@ -547,7 +547,6 @@ common =
     .options-hpassoc = Les nouvelles hachures suivent leurs contours (HPASSOC)
     .options-show-ribbon = Afficher le ruban (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Afficher la barre de menus (MENUBAR)
-    .options-use-system-title-bar = Utiliser la barre de titre du système
     .window-minimize = Réduire
     .window-maximize = Agrandir
     .options-window-elements = Éléments de fenêtre

@@ -296,7 +296,6 @@ impl OpenCADStudio {
                             command_line_font: self.command_line.font_family().to_owned(),
                             command_line_font_size: self.command_line.font_size(),
                             show_menu_bar: self.show_menu_bar,
-                            system_title_bar: self.system_title_bar,
                             show_ribbon: !self.ribbon_closed,
                             ribbon_centered: self.ribbon.layout().centered,
                             ribbon_wheel_tabs: self.ribbon.layout().wheel_switches_tabs,

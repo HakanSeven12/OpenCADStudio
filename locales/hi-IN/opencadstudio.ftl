@@ -535,7 +535,6 @@ common =
     .options-hpassoc = नए हैच अपनी सीमाओं का अनुसरण करते हैं (HPASSOC)
     .options-show-ribbon = रिबन दिखाएँ (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = मेनू बार दिखाएँ (MENUBAR)
-    .options-use-system-title-bar = सिस्टम शीर्षक पट्टी का उपयोग करें
     .window-minimize = छोटा करें
     .window-maximize = बड़ा करें
     .options-window-elements = विंडो तत्व

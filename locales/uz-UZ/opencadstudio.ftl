@@ -546,7 +546,6 @@ common =
     .options-hpassoc = Yangi ştrixlar öz çegaralariga boğliq bölsin (HPASSOC)
     .options-show-ribbon = Lentani körsatiş (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Menyu satrini körsatiş (MENUBAR)
-    .options-use-system-title-bar = Tizim sarlavha satrini ishlatiş
     .window-minimize = Kichraytiriş
     .window-maximize = Kattalaştiriş
     .options-window-elements = Oyna elementlari

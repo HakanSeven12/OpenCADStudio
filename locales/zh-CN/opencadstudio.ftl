@@ -534,7 +534,6 @@ common =
     .options-hpassoc = 新图案填充跟随其边界 (HPASSOC)
     .options-show-ribbon = 显示功能区 (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = 显示菜单栏 (MENUBAR)
-    .options-use-system-title-bar = 使用系统标题栏
     .window-minimize = 最小化
     .window-maximize = 最大化
     .options-window-elements = 窗口元素

@@ -546,7 +546,6 @@ common =
     .options-hpassoc = 새 해치가 경계를 따름 (HPASSOC)
     .options-show-ribbon = 리본 표시 (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = 메뉴 막대 표시 (MENUBAR)
-    .options-use-system-title-bar = 시스템 제목 표시줄 사용
     .window-minimize = 최소화
     .window-maximize = 최대화
     .options-window-elements = 창 요소

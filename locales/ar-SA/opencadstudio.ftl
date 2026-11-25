@@ -559,7 +559,6 @@ common =
     .options-hpassoc = التظليلات الجديدة تتبع حدودها (HPASSOC)
     .options-show-ribbon = إظهار الشريط (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = إظهار شريط القوائم (MENUBAR)
-    .options-use-system-title-bar = استخدام شريط عنوان النظام
     .window-minimize = تصغير
     .window-maximize = تكبير
     .options-window-elements = عناصر النافذة

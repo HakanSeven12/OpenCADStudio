@@ -4114,9 +4114,10 @@ bg={bg_ms:.1}ms n={view_count}"
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };
+        // macOS keeps its frame, which resizes the window itself.
         crate::ui::title_bar::with_resize_edges(
             iced::widget::stack![top, controls].into(),
-            !self.main_maximized,
+            crate::ui::title_bar::frameless() && !self.main_maximized,
         )
     }
 

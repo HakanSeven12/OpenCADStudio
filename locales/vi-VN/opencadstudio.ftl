@@ -546,7 +546,6 @@ common =
     .options-hpassoc = Tô vật liệu mới theo đường biên (HPASSOC)
     .options-show-ribbon = Hiện dải băng (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Hiện thanh menu (MENUBAR)
-    .options-use-system-title-bar = Dùng thanh tiêu đề của hệ thống
     .window-minimize = Thu nhỏ
     .window-maximize = Phóng to
     .options-window-elements = Thành phần cửa sổ

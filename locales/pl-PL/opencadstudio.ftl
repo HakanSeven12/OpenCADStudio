@@ -546,7 +546,6 @@ common =
     .options-hpassoc = Nowe kreskowania podążają za obwiedniami (HPASSOC)
     .options-show-ribbon = Pokaż wstążkę (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Pokaż pasek menu (MENUBAR)
-    .options-use-system-title-bar = Użyj systemowego paska tytułu
     .window-minimize = Minimalizuj
     .window-maximize = Maksymalizuj
     .options-window-elements = Elementy okna

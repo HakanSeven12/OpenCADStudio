@@ -852,7 +852,10 @@ impl Ribbon {
         if start.is_nan() {
             return None;
         }
-        let rest = m::TITLE_NAME_ROOM + BOX_W + 3.0 * m::TITLE_BAR_PAD + 3.0 * m::CAPTION_W;
+        let rest = m::TITLE_NAME_ROOM
+            + BOX_W
+            + 2.0 * m::TITLE_BAR_PAD
+            + crate::ui::title_bar::buttons_width();
         Some(start + rest <= self.win_w)
     }
 

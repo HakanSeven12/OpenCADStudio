@@ -975,14 +975,10 @@ pub(super) struct OpenCADStudio {
     hatch_boundary_warning: Option<crate::ui::window::hatch_dialogs::BoundaryWarningState>,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     show_menu_bar: bool,
-    /// The main window keeps the system's title bar (see `draws_title_bar`).
-    system_title_bar: bool,
     /// The main window is maximized, for the title bar's maximize button.
     main_maximized: bool,
     /// The title bar's empty space is pressed: a move drags the window.
     title_bar_pressed: bool,
-    /// The main window has its system frame (see `sync_window_frame`).
-    frame_shown: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
     ribbon_closed: bool,
     /// COMMANDLINEHIDE (Ctrl+9) hid the command line; COMMANDLINE shows it.
@@ -3018,10 +3014,8 @@ impl OpenCADStudio {
             outline_switch_hover: false,
             hatch_boundary_warning: None,
             show_menu_bar: false,
-            system_title_bar: false,
             main_maximized: true,
             title_bar_pressed: false,
-            frame_shown: true,
             ribbon_closed: false,
             command_line_hidden: false,
             double_click_block_refedit: false,
@@ -4009,13 +4003,10 @@ impl OpenCADStudio {
         self.command_line.push_error(msg);
     }
 
-    /// Whether the app draws the main window's title bar (no system frame):
-    /// on Windows and Linux, unless "Use the system title bar" is on or a
-    /// tiling window manager arranges the windows.
+    /// Whether the app draws the main window's title bar (see
+    /// `ui::title_bar::drawn`).
     pub(crate) fn draws_title_bar(&self) -> bool {
-        cfg!(any(target_os = "windows", target_os = "linux"))
-            && !self.system_title_bar
-            && !crate::ui::title_bar::tiling_desktop()
+        crate::ui::title_bar::drawn()
     }
 
     /// Boot function for `iced::daemon`: returns initial state plus a task that
@@ -4032,8 +4023,17 @@ impl OpenCADStudio {
         crate::sys::startup_times::mark("boot: App constructed");
         let (id, open_task) = window::open(window::Settings {
             maximized: true,
-            // The app draws the title bar over the ribbon.
-            decorations: !state.draws_title_bar(),
+            // The app draws the title bar over the ribbon; macOS keeps its
+            // frame for the traffic lights, over a content view that runs
+            // under the hidden title.
+            decorations: !crate::ui::title_bar::frameless(),
+            #[cfg(target_os = "macos")]
+            platform_specific: window::settings::PlatformSpecific {
+                title_hidden: crate::ui::title_bar::drawn(),
+                titlebar_transparent: crate::ui::title_bar::drawn(),
+                fullsize_content_view: crate::ui::title_bar::drawn(),
+                ..Default::default()
+            },
             icon: build_window_icon().and_then(|rgba| window::icon::from_rgba(rgba, 32, 32).ok()),
             exit_on_close_request: false,
             // A Wayland compositor has no StartupWMClass to go on: it resolves a
@@ -4051,7 +4051,6 @@ impl OpenCADStudio {
         });
         let mut s = state;
         s.main_window = Some(id);
-        s.frame_shown = !s.draws_title_bar();
         tool_windows::set_main_window(id);
         let open_main = open_task.map(|_| Message::Noop);
         let check_update = if crate::config::managed() {

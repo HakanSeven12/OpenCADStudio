@@ -5179,7 +5179,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Array (Path)" => Some(("common", "assoc-array-array-path")),
         "Window Elements" => Some(("common", "options-window-elements")),
         "Show the menu bar (MENUBAR)" => Some(("common", "options-show-menu-bar")),
-        "Use the system title bar" => Some(("common", "options-use-system-title-bar")),
         "Minimize" => Some(("common", "window-minimize")),
         "Maximize" => Some(("common", "window-maximize")),
         "Show the ribbon (RIBBON / RIBBONCLOSE)" => Some(("common", "options-show-ribbon")),

@@ -546,7 +546,6 @@ common =
     .options-hpassoc = Uudet viivoitukset seuraavat rajojaan (HPASSOC)
     .options-show-ribbon = Näytä valintanauha (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Näytä valikkorivi (MENUBAR)
-    .options-use-system-title-bar = Käytä järjestelmän otsikkoriviä
     .window-minimize = Pienennä
     .window-maximize = Suurenna
     .options-window-elements = Ikkunan osat

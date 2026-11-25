@@ -2329,8 +2329,6 @@ pub enum Message {
     WindowCloseRequested(window::Id),
     /// The app's own title bar over the ribbon (see `ui::title_bar`).
     TitleBar(crate::ui::title_bar::TitleBarMsg),
-    /// Options: the main window keeps the system's title bar.
-    SystemTitleBarChanged(bool),
     /// A window was fully closed (fires after `window::close()` is called).
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.

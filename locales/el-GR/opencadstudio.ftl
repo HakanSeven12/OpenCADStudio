@@ -546,7 +546,6 @@ common =
     .options-hpassoc = Οι νέες διαγραμμίσεις ακολουθούν τα όριά τους (HPASSOC)
     .options-show-ribbon = Εμφάνιση κορδέλας (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Εμφάνιση γραμμής μενού (MENUBAR)
-    .options-use-system-title-bar = Χρήση της γραμμής τίτλου του συστήματος
     .window-minimize = Ελαχιστοποίηση
     .window-maximize = Μεγιστοποίηση
     .options-window-elements = Στοιχεία παραθύρου

@@ -539,7 +539,6 @@ common =
     .options-hpassoc = Az új sraffozások követik határaikat (HPASSOC)
     .options-show-ribbon = Szalag megjelenítése (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Menüsor megjelenítése (MENUBAR)
-    .options-use-system-title-bar = A rendszer címsorának használata
     .window-minimize = Kis méret
     .window-maximize = Teljes méret
     .options-window-elements = Ablakelemek

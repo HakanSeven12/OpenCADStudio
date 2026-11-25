@@ -547,7 +547,6 @@ common =
     .options-hpassoc = Nieuwe arceringen volgen hun grenzen (HPASSOC)
     .options-show-ribbon = Lint tonen (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Menubalk tonen (MENUBAR)
-    .options-use-system-title-bar = De titelbalk van het systeem gebruiken
     .window-minimize = Minimaliseren
     .window-maximize = Maximaliseren
     .options-window-elements = Vensterelementen

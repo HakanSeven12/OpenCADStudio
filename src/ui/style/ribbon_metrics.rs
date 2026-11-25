@@ -9,6 +9,16 @@ pub const TITLE_BAR_H: f32 = 32.0;
 /// Width of a window button (minimize, maximize, close) and its icon size.
 pub const CAPTION_W: f32 = 46.0;
 pub const CAPTION_ICON: f32 = 14.0;
+/// GNOME's (Adwaita) round window buttons and their icons.
+pub const ADWAITA_BUTTON: f32 = 24.0;
+pub const ADWAITA_ICON: f32 = 12.0;
+/// KDE's (Breeze) round window buttons and their icons.
+pub const BREEZE_BUTTON: f32 = 20.0;
+pub const BREEZE_ICON: f32 = 14.0;
+/// Between round window buttons, and between them and the bar's end.
+pub const CAPTION_GAP: f32 = 6.0;
+/// Room macOS's traffic lights take at the start of the bar.
+pub const TRAFFIC_LIGHTS_W: f32 = 78.0;
 /// Room the title bar leaves at its start and before the search box.
 pub const TITLE_BAR_PAD: f32 = 6.0;
 /// Room kept for the drawing's name before the search box shrinks to its

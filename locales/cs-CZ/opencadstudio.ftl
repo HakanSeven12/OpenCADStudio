@@ -551,7 +551,6 @@ common =
     .options-hpassoc = Nové šrafy sledují své hranice (HPASSOC)
     .options-show-ribbon = Zobrazit pás karet (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Zobrazit řádek nabídek (MENUBAR)
-    .options-use-system-title-bar = Použít systémový záhlaví okna
     .window-minimize = Minimalizovat
     .window-maximize = Maximalizovat
     .options-window-elements = Prvky okna

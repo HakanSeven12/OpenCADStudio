@@ -546,7 +546,6 @@ common =
     .options-hpassoc = New hatches follow their boundaries (HPASSOC)
     .options-show-ribbon = Show the ribbon (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Show the menu bar (MENUBAR)
-    .options-use-system-title-bar = Use the system title bar
     .window-minimize = Minimize
     .window-maximize = Maximize
     .options-window-elements = Window Elements

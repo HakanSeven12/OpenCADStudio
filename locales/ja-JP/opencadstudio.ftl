@@ -537,7 +537,6 @@ common =
     .options-hpassoc = 新しいハッチングは境界に従う (HPASSOC)
     .options-show-ribbon = リボンを表示 (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = メニュー バーを表示 (MENUBAR)
-    .options-use-system-title-bar = システムのタイトル バーを使用
     .window-minimize = 最小化
     .window-maximize = 最大化
     .options-window-elements = ウィンドウの要素

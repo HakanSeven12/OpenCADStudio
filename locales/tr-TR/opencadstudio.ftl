@@ -532,7 +532,6 @@ common =
     .options-hpassoc = Yeni taramalar sınırlarını izler (HPASSOC)
     .options-show-ribbon = Şeridi göster (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Menü çubuğunu göster (MENUBAR)
-    .options-use-system-title-bar = Sistem başlık çubuğunu kullan
     .window-minimize = Simge durumuna küçült
     .window-maximize = Ekranı kapla
     .options-window-elements = Pencere Öğeleri

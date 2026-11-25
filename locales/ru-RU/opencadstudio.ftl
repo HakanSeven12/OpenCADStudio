@@ -550,7 +550,6 @@ common =
     .options-hpassoc = Новые штриховки следуют за контурами (HPASSOC)
     .options-show-ribbon = Показывать ленту (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Показывать строку меню (MENUBAR)
-    .options-use-system-title-bar = Использовать системную строку заголовка
     .window-minimize = Свернуть
     .window-maximize = Развернуть
     .options-window-elements = Элементы окна

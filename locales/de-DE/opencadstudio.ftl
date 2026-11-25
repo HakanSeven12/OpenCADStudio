@@ -547,7 +547,6 @@ common =
     .options-hpassoc = Neue Schraffuren folgen ihren Grenzen (HPASSOC)
     .options-show-ribbon = Multifunktionsleiste anzeigen (RIBBON / RIBBONCLOSE)
     .options-show-menu-bar = Menüleiste anzeigen (MENUBAR)
-    .options-use-system-title-bar = Titelleiste des Systems verwenden
     .window-minimize = Minimieren
     .window-maximize = Maximieren
     .options-window-elements = Fensterelemente

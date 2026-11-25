@@ -6605,6 +6605,7 @@ mod layer0_inherit_tests {
                 .iter()
                 .position(|weight| (weight - mm).abs() < 1e-6)
                 .expect("standard lineweight") as u8
+                + 1 // the style number of entry N is N + 1
         };
         let mut table = PlotStyleTable::builtin(crate::io::plot_style::MONOCHROME_PLOT_STYLE)
             .expect("built-in table");

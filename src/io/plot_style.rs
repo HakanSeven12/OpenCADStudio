@@ -604,8 +604,9 @@ impl PlotStyleTableExt for PlotStyleTable {
         if matches!(entry.lineweight, 0 | 255) {
             None
         } else {
+            // Style N names entry N - 1: the editor lists "object" first.
             self.lineweights
-                .get(entry.lineweight as usize)
+                .get(entry.lineweight as usize - 1)
                 .copied()
                 .map(|weight| {
                     if self.apply_factor {
@@ -694,7 +695,7 @@ mod round_trip_tests {
     #[test]
     fn load_named_resolves_a_session_registered_table() {
         let mut table = PlotStyleTable::identity("SessionPens.ctb");
-        table.aci_entries[1].lineweight = 13; // 0.50 mm
+        table.aci_entries[1].lineweight = 14; // entry 13, 0.50 mm
         let bytes = table.to_bytes().expect("encode");
         super::register_session_table("SessionPens.ctb", std::sync::Arc::new(bytes));
 

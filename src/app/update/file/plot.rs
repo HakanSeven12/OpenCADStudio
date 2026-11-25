@@ -4286,7 +4286,7 @@ impl OpenCADStudio {
                 .push_error(crate::t!("Choose a valid plot lineweight.").as_ref());
             return Task::none();
         };
-        if lineweight != 255 && lineweight as usize >= crate::io::plot_style::LW_TABLE.len() {
+        if lineweight != 255 && lineweight as usize > crate::io::plot_style::LW_TABLE.len() {
             self.command_line
                 .push_error(crate::t!("Choose a valid plot lineweight.").as_ref());
             return Task::none();

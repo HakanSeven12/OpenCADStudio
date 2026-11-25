@@ -288,6 +288,8 @@ tool fires `ModuleEvent::Command("EX_FOO")`, which round-trips to
 `ModuleEvent::PluginFileDialog { command, title, filter_name, extensions }` lets a
 tool request a native file picker; on selection the host dispatches
 `"<command> <path>"` back with the path's original case preserved.
+`ModuleEvent::PluginFolderDialog { command, title }` (API v30) does the same with
+a folder picker.
 
 A leading `>` or the persistent literal-input toggle preserves both spaces
 and case. Automation and `ModuleEvent::PluginFileDialog` already preserve

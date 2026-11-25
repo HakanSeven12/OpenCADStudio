@@ -521,7 +521,8 @@ pub enum Message {
         tool_id: String,
         event: ModuleEvent,
     },
-    /// Result of a plugin-requested file picker (`ModuleEvent::PluginFileDialog`).
+    /// Result of a plugin-requested file or folder picker
+    /// (`ModuleEvent::PluginFileDialog` / `PluginFolderDialog`).
     /// `path` is `None` when the user cancels. On `Some`, the host dispatches
     /// `"<command> <path>"` to the plugins with original case preserved.
     PluginFileDialogResult {

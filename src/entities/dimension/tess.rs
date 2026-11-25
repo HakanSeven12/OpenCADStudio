@@ -762,7 +762,16 @@ pub(crate) fn tessellate_dimension_inner(
                     aci_to_rgba(&c)
                 };
                 wires.push(WireModel {
-                    bg_adapt: None,
+                    // The background mask follows the canvas on screen and
+                    // plots as the paper.
+                    bg_adapt: (!selected && s.dimtfill == 1).then(|| {
+                        Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                            raw_color: fill_color,
+                            canvas_color: true,
+                            preserve_color: true,
+                            ..Default::default()
+                        })
+                    }),
                     point_marker: None,
                     world_width: 0.0,
                     depth_override: None,

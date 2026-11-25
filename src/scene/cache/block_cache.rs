@@ -1901,12 +1901,16 @@ fn tessellate_sub_local(
             sub,
             EntityType::MText(text) if text.background_fill_flags & 0x01 != 0
         );
-        let preserve_color = mtext_has_background && is_fill_only;
-        let canvas_color = is_fill_only
-            && matches!(
-                sub,
-                EntityType::MText(text) if text.background_fill_flags & 0x02 != 0
-            );
+        // A mask the tessellator flagged itself (a leader's or a
+        // dimension's background fill) covers with the canvas too.
+        let own_mask = wire.bg_adapt.as_deref().is_some_and(|adapt| adapt.canvas_color);
+        let preserve_color = (mtext_has_background && is_fill_only) || own_mask;
+        let canvas_color = own_mask
+            || is_fill_only
+                && matches!(
+                    sub,
+                    EntityType::MText(text) if text.background_fill_flags & 0x02 != 0
+                );
         let contrast_bg =
             if !preserve_color && (!geom.text_verts.is_empty() || !geom.points.is_empty()) {
                 tessellate::explicit_mtext_background(sub)

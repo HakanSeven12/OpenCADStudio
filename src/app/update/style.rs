@@ -966,6 +966,11 @@ impl OpenCADStudio {
         ) {
             self.color_picker = None;
 
+            // White/black (index 7) plots on white paper, so it is black.
+            let color = match color {
+                document::types::Color::Index(7) => document::types::Color::Rgb { r: 0, g: 0, b: 0 },
+                color => color,
+            };
             if let Some((r, g, b)) = crate::ui::color_select::math::color_rgb(color) {
                 self.ps_color_buf = crate::ui::color_select::math::hex_string(r, g, b);
             }

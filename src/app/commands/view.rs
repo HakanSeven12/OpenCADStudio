@@ -1968,9 +1968,11 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, label);
         self.tabs[i].scene.erase_entities(&to_erase);
+        let layer = self.new_variable_layer(i, "VIEWPORTLAYER");
         let mut created = 0usize;
         for (cx, cy, w, h) in rects {
             let mut vp = document::entities::Viewport::new();
+            vp.common.layer = layer.clone();
             vp.center = document::types::Vector3::new(*cx, *cy, 0.0);
             vp.width = *w;
             vp.height = *h;

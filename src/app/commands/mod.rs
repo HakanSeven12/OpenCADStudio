@@ -27,6 +27,7 @@ pub(crate) fn linetype_library_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 mod revcloud_vars;
+pub(crate) use layer_variable::command_layer_variable;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
 mod bricscad_visibility;
@@ -38,6 +39,8 @@ mod geometry_cleanup;
 #[cfg(test)]
 mod geometry_cleanup_tests;
 mod ifc_plan;
+#[cfg(test)]
+mod layer_variable_tests;
 pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;
 mod dim_cmd;

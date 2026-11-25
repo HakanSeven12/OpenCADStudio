@@ -234,58 +234,6 @@ impl OpenCADStudio {
                     None => crate::tf!("{} point(s) created.", changes.len()).into_owned(),
                 }
             }
-            "CREATEPOINTGROUP" => {
-                let doc = &self.tabs[i].scene.document;
-                let numbers: Vec<u32> = req.objects[0]
-                    .iter()
-                    .filter_map(|h| match doc.get_entity(*h)? {
-                        EntityType::Extended(x) => match &x.data {
-                            document::entities::ExtendedEntityData::Arch(a) => a.cogo_point_number(),
-                            _ => None,
-                        },
-                        _ => None,
-                    })
-                    .collect();
-                let patterns = |key: &str| {
-                    req.text(key).map(|t| t.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect::<Vec<_>>())
-                };
-                let (low, high) = (req.values.get("elevation_min").copied(), req.values.get("elevation_max").copied());
-                // One criterion: the selected points, or a name, description or elevation rule.
-                let mut criteria = Vec::new();
-                if !numbers.is_empty() {
-                    criteria.push(c3d::PointQuery::Numbers(numbers.clone()));
-                }
-                if let Some(names) = patterns("name") {
-                    criteria.push(c3d::PointQuery::Names(names));
-                }
-                if let Some(descriptions) = patterns("description") {
-                    criteria.push(c3d::PointQuery::RawDescription(descriptions));
-                }
-                match (low, high) {
-                    (Some(low), Some(high)) => criteria.push(c3d::PointQuery::ElevationRange(low.min(high), low.max(high))),
-                    (Some(low), None) => criteria.push(c3d::PointQuery::Elevation(c3d::Comparison::GreaterOrEqual, low)),
-                    (None, Some(high)) => criteria.push(c3d::PointQuery::Elevation(c3d::Comparison::LessOrEqual, high)),
-                    (None, None) => {}
-                }
-                let query = match criteria.len() {
-                    0 => return Err(crate::t!("No COGO points selected.").into_owned()),
-                    1 => criteria.remove(0),
-                    _ => return Err(crate::t!("Use one of: selected points, a name pattern, a description pattern or an elevation range.").into_owned()),
-                };
-                let group = next_name(doc, "AECC_POINT_PG", "Point Group");
-                self.push_undo_snapshot(i, name);
-                let doc = &mut self.tabs[i].scene.document;
-                match query {
-                    c3d::PointQuery::Numbers(_) => {
-                        c3d::add_point_group(doc, &group, None, &numbers).map_err(refused)?;
-                        crate::tf!("Point group {} created with {} point(s).", group, numbers.len()).into_owned()
-                    }
-                    query => {
-                        c3d::add_point_group_query(doc, &group, None, &query).map_err(refused)?;
-                        crate::tf!("Point group {} created.", group).into_owned()
-                    }
-                }
-            }
             "CREATEPOINTLABELSTYLE" => {
                 let points = req.objects[0].clone();
                 let height = req.values.get("height").copied();

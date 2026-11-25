@@ -156,7 +156,6 @@ pub fn is_pending(cmd: &str) -> bool {
         && !matches!(
         cmd,
         "CREATEPOINTMANUAL"
-            | "CREATEPOINTGROUP"
             | "CREATEPOINTNORTHINGEASTING"
             | "CREATEPOINTBEARING"
             | "CREATEPOINTAZIMUTH"
@@ -173,8 +172,7 @@ pub fn is_pending(cmd: &str) -> bool {
             | "CREATEPOINTRESECTION"
             | "CREATEPTGEODETICDIR"
     )
-        && (GROUPS.iter().flat_map(|g| g.entries.iter().flatten()).any(|e| e.command == cmd)
-            || TOOLS.iter().any(|e| e.command == cmd))
+        && GROUPS.iter().flat_map(|g| g.entries.iter().flatten()).any(|e| e.command == cmd)
 }
 
 /// Whether the menu is open and which group is folded open.

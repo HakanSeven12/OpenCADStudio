@@ -2706,6 +2706,8 @@ pub enum Message {
     TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
     AnnoScalePrompt(crate::ui::window::anno_scale_prompt::AnnoScaleMsg),
     SurfaceList(crate::ui::window::surface_list::SurfaceListMsg),
+    PointGroup(crate::ui::window::point_group::PointGroupMsg),
+    PointTool(crate::ui::window::point_tools::PointToolMsg),
     MTextDialog(crate::ui::window::mtext_dialogs::MTextDialogMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.

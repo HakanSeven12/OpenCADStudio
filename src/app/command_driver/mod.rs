@@ -1279,6 +1279,18 @@ impl OpenCADStudio {
                 }
                 let _ = self.handle_need_point();
             }
+            CmdResult::ConvertCadPoint { handle, at, description, more } => {
+                self.add_created_cogo_point(at, description, Some(at.z), false);
+                self.tabs[i].scene.erase_entities(&[handle]);
+                if more {
+                    let _ = self.handle_need_point();
+                } else {
+                    use crate::command::CadCommand;
+                    let next = crate::modules::civil::point_convert::selection();
+                    self.command_line.push_info(&next.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(next));
+                }
+            }
             CmdResult::AddCogoPoints { points, lines, done } => {
                 for line in &lines {
                     self.command_line.push_output(line);

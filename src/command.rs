@@ -2100,6 +2100,15 @@ pub enum CmdResult {
         lines: Vec<String>,
         done: bool,
     },
+    /// Convert CAD Points: the POINT `handle` becomes a COGO point at `at`
+    /// (its z the elevation) with `description`; with no `more` points the
+    /// selection is asked again.
+    ConvertCadPoint {
+        handle: Handle,
+        at: DVec3,
+        description: Option<String>,
+        more: bool,
+    },
     /// Update the committed-segment wire (normal colour) and keep collecting points.
     InterimWire(WireModel),
     /// Update the in-progress (cyan) preview wire in the viewport.

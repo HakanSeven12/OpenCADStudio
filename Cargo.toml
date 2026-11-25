@@ -46,7 +46,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.16"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "7f89e593aa42fefbf60f4d1b7bc5d26afb5e1a7a", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "e6d6520dec61fd1966e226d0e42c5866444f4fd3", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -176,6 +176,7 @@ iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4e
 iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "7f89e593aa42fefbf60f4d1b7bc5d26afb5e1a7a", features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "e6d6520dec61fd1966e226d0e42c5866444f4fd3", features = ["serde"] }
 bincode = "1.3"
 serde = { version = "1", features = ["derive"] }
 console_error_panic_hook = "0.1"

@@ -1,16 +1,19 @@
 ---
-summary: Creates a point group of the COGO points you select, or of those matching a name, description or elevation rule.
-related: CREATEPOINTS, CREATESURFACE
+summary: Opens the Point Group Properties window to make a point group from point numbers, elevations, names, descriptions, other groups or a query.
+related: CREATEPOINTS, CREATEPOINTSFROMCORRIDOR, CREATESURFACE
 ---
 
 ## Usage
-1. Select COGO points and press Enter, or press Enter without selecting to choose the points by a rule.
-2. Press Enter, or first set one option: **Name pattern**, **Description pattern**, **Minimum elevation**, **Maximum elevation**.
+1. Run the command; the Point Group Properties window opens.
+2. On **Information**, set the name, description and the group's point and label styles.
+3. Choose the points on **Point Groups**, **Include**, **Exclude** or **Query Builder**, and set **Overrides** if the group should change the points' raw description, elevation or styles.
+4. Check **Point List** and **Summary**, then press **OK** (or **Apply** to keep the window open).
 
 ## Notes
-- Selected points make a group of their numbers.
-- Patterns match the whole name or description, case ignored: `*` stands for any run of characters, `?` for one character. Separate several patterns with commas; a point matching any of them belongs to the group.
-- Minimum and maximum elevation together keep the points between them; one alone keeps the points above or below it.
-- A group takes one rule: selected points, a name pattern, a description pattern or an elevation range.
+- Number rules take a comma list of numbers and `a-b` ranges; elevation rules take `v`, `<v`, `>v`, `<=v`, `>=v` and `a-b`. A point without elevation matches no elevation rule.
+- Name and description rules take comma lists of `*` / `?` patterns, case ignored unless the Query Builder's case-sensitive option is on.
+- Include rules are joined by OR; Exclude rules take points away.
+- **Selection Set in Drawing >>** fills the number rule with the COGO points you pick.
+- **Modify query** turns the rules into Query Builder rows (AND, OR, NOT, parentheses).
 - The group keeps its rule, so points added later that match it belong to it too.
-- The group is named Point Group and a number.
+- Apply and OK are one undo step each.

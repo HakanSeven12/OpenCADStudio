@@ -1446,9 +1446,20 @@ impl Scene {
             }
             clones.push((new_h, obj));
         }
+        // A cloned FIELD joins the field index and the FIELDLIST too, or the
+        // copy's field is never evaluated (D3657).
+        let mut fields = Vec::new();
         for (new_h, obj) in clones {
-            doc.objects.insert(new_h, obj);
             created.push(new_h);
+            match obj {
+                document::objects::ObjectType::Field(f) => fields.push(f),
+                obj => {
+                    doc.objects.insert(new_h, obj);
+                }
+            }
+        }
+        if !fields.is_empty() {
+            doc.register_fields(fields);
         }
         doc.block_representations.extend(representations);
         Some(remap[&src_root])
@@ -1647,6 +1658,21 @@ impl Scene {
             .map(|(h, _, _, root)| (*h, *root))
             .collect::<Vec<_>>();
         let (cross, owner_of) = self.prepare_xdict_copies(&roots);
+        // A copied field joins the FIELDLIST; undo puts the list back.
+        if self.is_recording_undo() && roots.iter().any(|(_, root)| root.is_some()) {
+            let lists: Vec<(Handle, document::objects::ObjectType)> = self
+                .document
+                .objects
+                .iter()
+                .filter(|(_, object)| {
+                    matches!(object, document::objects::ObjectType::FieldList(_))
+                })
+                .map(|(handle, object)| (*handle, object.clone()))
+                .collect();
+            for (handle, before) in lists {
+                self.record_undo_object_before(handle, Some(before));
+            }
+        }
         let mut created_objects = Vec::new();
         for (src_handle, mut entity, annotation_scales, src_xdict) in clones {
             let source_attributes = match &entity {

@@ -1180,17 +1180,19 @@ mod xref_attach_read_tests {
         std::fs::write(&ifc, crate::ifc_plan::TWO_WALLS_FIXTURE).unwrap();
         let mut app = OpenCADStudio::new_for_test();
         let target = app.active_tab;
-        let task = app.open_xref_attach_dialog(ifc);
-        app.drive_headless_task(task).unwrap();
-
-        let task = app.update(Message::TabNew);
-        app.drive_headless_task(task).unwrap();
+        let _ = app.update(Message::TabNew);
         let other = app.active_tab;
         assert_ne!(target, other);
+        let _ = app.update(Message::TabSwitch(target));
 
+        let task = app.open_xref_attach_dialog(ifc);
+        app.drive_headless_task(task).unwrap();
         let task = app.update(Message::ImportDialog(ImportDialogMsg::IfcPlan(
             IfcPlanMsg::Import,
         )));
+        assert!(app.import_dialogs.ifc_plan.as_ref().unwrap().pending);
+        let _ = app.update(Message::TabSwitch(other));
+        assert_eq!(app.active_tab, other);
         app.drive_headless_task(task).unwrap();
         assert_eq!(references(&app, target), 0);
         assert_eq!(references(&app, other), 0);

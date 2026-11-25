@@ -175,6 +175,7 @@ pub(super) const NAMES: &[&str] = &[
     "mleader_style_dialog",
     "dimstyle_dialog",
     "anno_scale_prompt",
+    "surface_list_dialog",
     "mtext_dialog",
     "text_style_dialog",
     "scale_list_dialog",
@@ -3616,6 +3617,29 @@ impl OpenCADStudio {
             // "load_cancel", "reload=this|all|skip|skip_rest|cancel",
             // "text_styles", "ok", "cancel". Compare:
             // "first=<style>", "second=<style|none>", "copy", "compare_close".
+            // The surface list of a Create Points > Surface command:
+            // "pick=<surface>", "pick_in_drawing", "ok", "cancel".
+            "surface_list_dialog" => {
+                use crate::ui::window::surface_list::SurfaceListMsg as S;
+                if !self.focus_dialog(crate::app::ModalKind::SurfaceList) {
+                    return Err(failure("no_dialog", "The surface list is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                match key {
+                    "pick" => {
+                        let names = self.surface_list.as_ref().map(|s| s.names.clone()).unwrap_or_default();
+                        match names.iter().position(|n| n.eq_ignore_ascii_case(value)) {
+                            Some(k) => Message::SurfaceList(S::Pick(k)),
+                            None => return Err(failure("invalid_value", spec)),
+                        }
+                    }
+                    "ok" => Message::SurfaceList(S::Ok),
+                    "pick_in_drawing" => Message::SurfaceList(S::FromDrawing),
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
+                }
+            }
             // The annotation scale question: "pick=<scale>", "dont_ask=0|1",
             // "ok".
             "anno_scale_prompt" => {

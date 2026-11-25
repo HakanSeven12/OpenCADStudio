@@ -1957,6 +1957,7 @@ impl OpenCADStudio {
             Message::DimInspect(message) => self.update_dim_inspect(message),
             Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
             Message::AnnoScalePrompt(message) => self.on_anno_scale_prompt(message),
+            Message::SurfaceList(message) => self.on_surface_list(message),
             Message::MTextDialog(message) => self.on_mtext_dialog(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),

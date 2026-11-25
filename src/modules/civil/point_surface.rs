@@ -127,6 +127,8 @@ impl Surface {
 enum Step {
     Surface,
     SurfaceName,
+    /// The list window's pick from the drawing.
+    SurfacePick,
     Location,
     Base,
     Rotation,
@@ -160,10 +162,15 @@ pub struct SurfacePointCommand {
     again: bool,
     /// The grid asks its next base point without the rotation.
     repeat: bool,
+    /// The extent of the last grid given, along and across its rotation.
+    extent: Option<(f64, f64)>,
+    /// The surface the list window shows picked.
+    list_pick: usize,
 }
 
-/// The X spacing every grid prompt offers (measured: not the last one).
-const GRID_X_DEFAULT: f64 = 5.0;
+/// What the list window's pick button answers the list prompt with.
+pub const PICK_SURFACE: &str = "_PICKSURFACE";
+
 
 impl SurfacePointCommand {
     pub fn new(kind: Kind, document: &document::Document) -> Self {
@@ -185,6 +192,8 @@ impl SurfacePointCommand {
             first_point: None,
             again: false,
             repeat: false,
+            extent: None,
+            list_pick: 0,
         };
         if c.surfaces.len() == 1 {
             c.surface = Some(0);
@@ -234,8 +243,10 @@ impl SurfacePointCommand {
                 // Measured: after its points the grid names the surface
                 // again and asks a new base point (the rotation is kept).
                 Kind::Grid => {
+                    // The new round offers the first X spacing again.
                     self.step = Step::Base;
                     self.repeat = true;
+                    self.x_spacing = 5.0;
                     return CmdResult::ReportMessage(self.intro().unwrap_or_default());
                 }
                 Kind::Random => self.step = Step::Location,
@@ -255,17 +266,12 @@ impl SurfacePointCommand {
     }
 
     /// The grid's points: rows of columns from the base point, along the
-    /// rotation, up to the upper right corner (measured).
-    fn grid(&self, corner: DVec3) -> Option<Vec<DVec2>> {
+    /// rotation, as many whole spacings as fit in the extent (measured).
+    fn grid_points(&self, du: f64, dv: f64) -> Vec<DVec2> {
         let (u, v) = (DVec2::from_angle(self.rotation), DVec2::from_angle(self.rotation).perp());
-        let d = (corner - self.base).truncate();
-        let (du, dv) = (d.dot(u), d.dot(v));
-        if du < 0.0 || dv < 0.0 {
-            return None;
-        }
         let (nu, nv) = ((du / self.x_spacing + 1e-9).floor() as u32, (dv / self.y_spacing + 1e-9).floor() as u32);
         let base = self.base.truncate();
-        Some((0..=nv).flat_map(|j| (0..=nu).map(move |i| (i, j))).map(|(i, j)| base + u * self.x_spacing * f64::from(i) + v * self.y_spacing * f64::from(j)).collect())
+        (0..=nv).flat_map(|j| (0..=nu).map(move |i| (i, j))).map(|(i, j)| base + u * self.x_spacing * f64::from(i) + v * self.y_spacing * f64::from(j)).collect()
     }
 
     /// The surface whose border lies within the pick box of `pick`.
@@ -368,11 +374,12 @@ impl CadCommand for SurfacePointCommand {
         }
         match &self.step {
             Step::Surface => t("Select a surface <or press Enter key to select from a list>:"),
-            Step::SurfaceName => crate::tf!("Select a surface from the list <{}>:", self.surfaces.first().map_or("", |s| s.name.as_str())).into_owned(),
+            Step::SurfaceName => crate::tf!("Select a surface from the list <{}>:", self.surfaces.get(self.list_pick).map_or("", |s| s.name.as_str())).into_owned(),
+            Step::SurfacePick => t("Select Surface:"),
             Step::Location => t("Please specify a location for the new point:"),
             Step::Base => t("Specify a grid basepoint:"),
             Step::Rotation => crate::tf!("Grid rotation <{:.4} (d)>:", self.rotation.to_degrees()).into_owned(),
-            Step::XSpacing => crate::tf!("Grid X spacing <{:.4}>:", GRID_X_DEFAULT).into_owned(),
+            Step::XSpacing => crate::tf!("Grid X spacing <{:.4}>:", self.x_spacing).into_owned(),
             Step::YSpacing => crate::tf!("Grid Y spacing <{:.4}>:", self.y_spacing).into_owned(),
             Step::UpperRight => t("Specify the upper right location for the grid:"),
             Step::Change => t("Change the size or rotation of the grid/grid squares [Yes/No] <No>:"),
@@ -392,7 +399,7 @@ impl CadCommand for SurfacePointCommand {
 
     fn input_kind(&self) -> InputKind {
         match self.step {
-            Step::Surface | Step::Location | Step::Base | Step::UpperRight | Step::Polyline | Step::XSpacing | Step::YSpacing | Step::Distance => InputKind::Point,
+            Step::Surface | Step::SurfacePick | Step::Location | Step::Base | Step::UpperRight | Step::Polyline | Step::XSpacing | Step::YSpacing | Step::Distance => InputKind::Point,
             _ => InputKind::FreeText,
         }
     }
@@ -402,7 +409,7 @@ impl CadCommand for SurfacePointCommand {
     }
 
     fn needs_entity_pick(&self) -> bool {
-        matches!(self.step, Step::Surface | Step::Polyline) && self.first_point.is_none()
+        matches!(self.step, Step::Surface | Step::SurfacePick | Step::Polyline) && self.first_point.is_none()
     }
 
     fn inject_before_entity_pick(&self) -> bool {
@@ -413,8 +420,12 @@ impl CadCommand for SurfacePointCommand {
         self.picked = Some(entity);
     }
 
+    fn surface_list(&self) -> Option<(Vec<String>, usize)> {
+        (self.step == Step::SurfaceName).then(|| (self.surfaces.iter().map(|s| s.name.clone()).collect(), self.list_pick))
+    }
+
     fn wants_point_pick_context(&self) -> bool {
-        matches!(self.step, Step::Surface | Step::Polyline)
+        matches!(self.step, Step::Surface | Step::SurfacePick | Step::Polyline)
     }
 
     fn set_point_pick_context(&mut self, context: Option<PointPickContext>) {
@@ -424,13 +435,17 @@ impl CadCommand for SurfacePointCommand {
     fn on_entity_pick(&mut self, handle: Handle, pick: DVec3) -> CmdResult {
         let picked = self.picked.take();
         match self.step {
-            Step::Surface => {
-                if let Some(i) = self.surfaces.iter().position(|s| s.handle == handle) {
-                    return self.take_surface(i);
-                }
+            Step::Surface | Step::SurfacePick => {
+                let found = self.surfaces.iter().position(|s| s.handle == handle).or_else(|| self.border_hit(pick));
                 // Measured: a surface is taken by its border within the
-                // pick box; inside it nothing is selected.
-                match (self.border_hit(pick), picked) {
+                // pick box; inside it nothing is selected. Picked from the
+                // list window, the window comes back with it picked.
+                match (found, picked) {
+                    (Some(i), _) if self.step == Step::SurfacePick => {
+                        self.list_pick = i;
+                        self.step = Step::SurfaceName;
+                        CmdResult::NeedPoint
+                    }
                     (Some(i), _) => self.take_surface(i),
                     (_, None) => CmdResult::ReportError(t("Nothing selected.")),
                     _ => CmdResult::ReportError(t("Selected entity must be of type: Surface")),
@@ -461,7 +476,7 @@ impl CadCommand for SurfacePointCommand {
             };
         }
         match self.step {
-            Step::Surface | Step::Polyline => self.on_entity_pick(Handle::NULL, pt),
+            Step::Surface | Step::SurfacePick | Step::Polyline => self.on_entity_pick(Handle::NULL, pt),
             // Measured: a location off the surface ends the command.
             Step::Location => match self.chosen().and_then(|s| s.elevation(pt.truncate())) {
                 Some(z) => {
@@ -476,16 +491,30 @@ impl CadCommand for SurfacePointCommand {
                 self.again = false;
                 CmdResult::NeedPoint
             }
-            Step::UpperRight => match self.grid(pt) {
-                // The points wait for the answer to the change prompt.
-                Some(points) => {
-                    self.queue.clear();
-                    self.queue_on_surface(points);
-                    self.step = Step::Change;
-                    CmdResult::NeedPoint
+            Step::UpperRight => {
+                let (u, v) = (DVec2::from_angle(self.rotation), DVec2::from_angle(self.rotation).perp());
+                let d = (pt - self.base).truncate();
+                let (du, dv) = (d.dot(u), d.dot(v));
+                let valid = du > 1e-9 && dv > 1e-9;
+                if valid {
+                    self.extent = Some((du, dv));
                 }
-                None => CmdResult::ReportError(t("The specified point was not a valid upper right point.")),
-            },
+                // Measured: a corner not above the base row and right of the
+                // base column is refused; once a grid was given, the grid keeps
+                // that extent (along and across) and the change prompt follows.
+                let Some((du, dv)) = self.extent else {
+                    return CmdResult::ReportError(t("The specified point was not a valid upper right point."));
+                };
+                // The points wait for the answer to the change prompt.
+                self.queue.clear();
+                self.queue_on_surface(self.grid_points(du, dv));
+                self.step = Step::Change;
+                if valid {
+                    CmdResult::NeedPoint
+                } else {
+                    CmdResult::ReportMessage(t("The specified point was not a valid upper right point."))
+                }
+            }
             _ => CmdResult::NeedPoint,
         }
     }
@@ -510,8 +539,23 @@ impl CadCommand for SurfacePointCommand {
                 }
                 Some(CmdResult::ReportError(format!("{}\n{}", t("*Invalid selection*"), t("Expects a point or Last"))))
             }
+            Step::SurfacePick => {
+                if typed.is_empty() {
+                    self.step = Step::SurfaceName;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if coordinate {
+                    return None;
+                }
+                Some(CmdResult::ReportError(format!("{}
+{}", t("*Invalid selection*"), t("Expects a point or Last"))))
+            }
+            Step::SurfaceName if typed == PICK_SURFACE => {
+                self.step = Step::SurfacePick;
+                Some(CmdResult::NeedPoint)
+            }
             Step::SurfaceName => {
-                let i = if typed.is_empty() { Some(0) } else { self.surfaces.iter().position(|s| s.name.eq_ignore_ascii_case(typed)) };
+                let i = if typed.is_empty() { Some(self.list_pick) } else { self.surfaces.iter().position(|s| s.name.eq_ignore_ascii_case(typed)) };
                 match i {
                     Some(i) => Some(self.take_surface(i)),
                     None => Some(CmdResult::ReportError(t("Invalid input"))),
@@ -548,7 +592,7 @@ impl CadCommand for SurfacePointCommand {
                 }
                 let value = if typed.is_empty() {
                     match self.step {
-                        Step::XSpacing => GRID_X_DEFAULT,
+                        Step::XSpacing => self.x_spacing,
                         Step::YSpacing => self.y_spacing,
                         _ => self.distance,
                     }

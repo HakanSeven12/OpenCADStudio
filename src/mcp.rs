@@ -65,8 +65,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Find and Replace is driveable from a script: `find_replace_dialog`.
 /// `save` describes its `target_version` as the DWG version.
 /// `ocs_capture` / `ocs_render` gained `layout`, `aspect_fit`, and `renderer` (`document_id` on `ocs_capture`) for headless off-screen capture.
+/// The surface list of the Create Points > Surface commands: `surface_list_dialog`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "b6f40c032594c2626b6eeb04d4eb0c1532c3722a3d2dca3368ee5b73983ec3cc";
+const TOOL_SCHEMA_DIGEST: &str = "5e1e88636817eec20180a22e7ff214044774a5edfe5cf9b0003a5e01700a1c62";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

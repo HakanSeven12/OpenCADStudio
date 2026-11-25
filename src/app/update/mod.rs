@@ -442,6 +442,12 @@ impl OpenCADStudio {
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
             Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
+            // Cancel or ✕ ends the command that asked (measured).
+            Some(SurfaceList) => {
+                if self.surface_list.take().is_some() {
+                    let _ = self.apply_cmd_result(crate::command::CmdResult::Cancel);
+                }
+            }
             // Esc or ✕ on the text style question changes the style, as Yes.
             Some(MTextDialog) => {
                 if let Some(dialog) = self.mtext_dialog.take() {

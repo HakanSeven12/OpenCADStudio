@@ -824,6 +824,8 @@ pub(super) struct OpenCADStudio {
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     /// The annotation scale asked for before a session's first annotative text.
     anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
+    /// The surface list a Create Points > Surface command opened.
+    surface_list: Option<crate::ui::window::surface_list::SurfaceList>,
     /// The Paragraph, Column Settings, Background Mask or Find and Replace
     /// window the Text Editor tab opened.
     mtext_dialog: Option<crate::ui::window::mtext_dialogs::MTextDialog>,
@@ -2634,6 +2636,8 @@ pub enum ModalKind {
     TableCellWarning,
     /// The annotation scale asked for before a session's first annotative text.
     AnnotationScalePrompt,
+    /// The surface list of a Create Points > Surface command.
+    SurfaceList,
     /// A window of the Text Editor tab (paragraph, columns, mask, find).
     MTextDialog,
     /// A value typed into a cell that is not of the cell's data type.
@@ -2959,6 +2963,7 @@ impl OpenCADStudio {
             table_cell_block: None,
             table_cell_format: None,
             anno_scale_prompt: None,
+            surface_list: None,
             mtext_dialog: None,
             table_cell_warning: None,
             table_cell_entry: None,

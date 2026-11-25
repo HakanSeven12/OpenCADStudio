@@ -119,6 +119,7 @@ impl OpenCADStudio {
         let task = self.apply_cmd_result_outer(result);
         if self.result_depth == 0 {
             self.ask_annotation_scale_after_first_point();
+            self.open_surface_list_if_asked();
         }
         task
     }

@@ -1371,6 +1371,7 @@ impl OpenCADStudio {
         self.angle_override = None;
         self.axis_lock_dir = None;
         self.snapper.clear_tracking();
+        self.snapper.end_cycle();
         self.otrack_active = None;
         self.otrack_cross = None;
         self.otrack_kind = None;

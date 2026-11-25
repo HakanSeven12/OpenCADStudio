@@ -389,6 +389,18 @@ pub struct Snapper {
     /// (CIRCLE 2P, 3P) want a line; elsewhere a running Tangent snap does
     /// not, since a line has no tangent point from a base point.
     pub(crate) tangent_lines: bool,
+    /// The object snaps Tab has stepped past at the cursor. `None` when no
+    /// cycle is in progress.
+    cycle: Option<SnapCycle>,
+}
+
+/// Tab cycling: the snaps the user stepped past, and the pointer position
+/// (canvas pixels) where the cycle started. A skipped snap is not offered
+/// again until the cycle ends.
+#[derive(Debug, Clone)]
+struct SnapCycle {
+    anchor: Point,
+    skipped: Vec<(SnapType, DVec3)>,
 }
 
 impl Default for Snapper {
@@ -434,6 +446,7 @@ impl Default for Snapper {
             override_saved: None,
             osnap_z_plane: None,
             tangent_lines: false,
+            cycle: None,
         }
     }
 }
@@ -595,6 +608,51 @@ impl Snapper {
             self.enabled = enabled;
             self.snap_enabled = on;
         }
+    }
+
+    /// Step past `hit` (Tab): the next snap pass offers the next candidate.
+    /// `pointer` is in the frame later given to [`Self::keep_cycle_near`].
+    pub(crate) fn skip_in_cycle(&mut self, hit: &SnapResult, pointer: Point) {
+        let cycle = self.cycle.get_or_insert_with(|| SnapCycle {
+            anchor: pointer,
+            skipped: Vec::new(),
+        });
+        cycle
+            .skipped
+            .push((hit.snap_type, hit.model_point.unwrap_or(hit.world)));
+    }
+
+    /// The number of snaps skipped in the current cycle.
+    pub(crate) fn cycle_len(&self) -> usize {
+        self.cycle.as_ref().map_or(0, |cycle| cycle.skipped.len())
+    }
+
+    /// End the Tab cycle: every snap is offered again.
+    pub(crate) fn end_cycle(&mut self) {
+        self.cycle = None;
+    }
+
+    /// End the Tab cycle when the pointer leaves the aperture around the
+    /// position where the cycle started.
+    pub(crate) fn keep_cycle_near(&mut self, pointer: Point) {
+        let radius2 = self.osnap_radius_px * self.osnap_radius_px;
+        if self
+            .cycle
+            .as_ref()
+            .is_some_and(|cycle| dist2(cycle.anchor, pointer) > radius2)
+        {
+            self.cycle = None;
+        }
+    }
+
+    /// Whether Tab has stepped past this candidate.
+    fn skipped_in_cycle(&self, world: DVec3, kind: SnapType) -> bool {
+        self.cycle.as_ref().is_some_and(|cycle| {
+            cycle
+                .skipped
+                .iter()
+                .any(|&(k, w)| k == kind && (w - world).length_squared() <= 1e-12)
+        })
     }
 
     /// Whether temporary tracking points are being acquired and drawn: OTRACK
@@ -1416,6 +1474,7 @@ impl Snapper {
             override_saved: None,
             osnap_z_plane: None,
             tangent_lines: true,
+            cycle: self.cycle.clone(),
         };
         // Tangent-only: Grid is disabled here, so the grid basis is irrelevant.
         tmp.snap(
@@ -1484,7 +1543,7 @@ impl Snapper {
                     return;
                 }
                 let d2 = dist2(screen, cursor_screen);
-                if !(d2 < radius2) {
+                if !(d2 < radius2) || self.skipped_in_cycle(world, snap_type) {
                     return;
                 }
                 let (tier, sub) = (snap_tier(snap_type), snap_priority(snap_type));
@@ -2042,7 +2101,7 @@ impl Snapper {
             // degenerate geometry is rejected: with priority selection a NaN
             // would otherwise pass the gate and be chosen on rank alone,
             // feeding a NaN snap point to the renderer. (#118)
-            if !(d2 < radius2) {
+            if !(d2 < radius2) || self.skipped_in_cycle(world, snap_type) {
                 return;
             }
             let (tier, sub) = (snap_tier(snap_type), snap_priority(snap_type));
@@ -2987,6 +3046,7 @@ impl Snapper {
                     let sub = snap_priority(SnapType::Tangent);
                     if d2 < radius2
                         && in_bounds(screen_pt)
+                        && !self.skipped_in_cycle(world_pt, SnapType::Tangent)
                         && snap_better(tier, d2, sub, (best_rank, best_d2, best_sub))
                     {
                         best_rank = tier;
@@ -3126,6 +3186,7 @@ impl Snapper {
                 let (tier, sub) = (1u8, snap_priority(SnapType::Center));
                 if curve_d2 < radius2
                     && in_bounds(screen)
+                    && !self.skipped_in_cycle(center, SnapType::Center)
                     && snap_better(tier, curve_d2, sub, (best_rank, best_d2, best_sub))
                 {
                     best_rank = tier;
@@ -3237,7 +3298,10 @@ impl Snapper {
                     |world, snap_type, source| {
                         let screen = world_to_screen(world, view_rot, eye, bounds);
                         let d2 = dist2(screen, cursor_screen);
-                        if in_bounds(screen) && nearest.as_ref().is_none_or(|(n, _)| d2 < *n) {
+                        if in_bounds(screen)
+                            && !self.skipped_in_cycle(world, snap_type)
+                            && nearest.as_ref().is_none_or(|(n, _)| d2 < *n)
+                        {
                             nearest = Some((
                                 d2,
                                 SnapResult {

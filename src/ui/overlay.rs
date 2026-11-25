@@ -23,8 +23,6 @@ pub const CROSSHAIR_SQ: f32 = 7.5;
 pub const CROSSHAIR_ARM: f32 = 60.0;
 pub(crate) const TRACKING_DASH_PX: [f32; 2] = [6.0, 4.0];
 const DEFAULT_CURSOR_SIZE: i32 = 5;
-const DEFAULT_PICK_BOX: i32 = 3;
-const DEFAULT_PICK_APERTURE: f32 = 8.0;
 const CONSTRAINT_HOVER_MARKER_RADIUS: f32 = 7.0;
 
 use crate::scene::parametric_constraints::{
@@ -254,29 +252,18 @@ pub(crate) fn crosshair_arm_px(bounds: iced::Rectangle, value: i32) -> f32 {
     CROSSHAIR_ARM + (full - CROSSHAIR_ARM) * scale
 }
 
-/// Convert PICKBOX to the visible half-size while retaining the original
-/// 15 x 15 px center box at the default value.
+/// PICKBOX is the pick box's half-size in screen pixels: an object is picked
+/// within that distance of the pointer, and the square shows that reach
+/// (measured: 2, 5 and 10 pick up to 2.5, 6.25 and 12.5 device pixels at a
+/// 125 % display scale, i.e. PICKBOX interface pixels).
 pub(crate) fn pick_box_half_px(value: i32) -> f32 {
-    let value = value.clamp(0, 50);
-    if value <= DEFAULT_PICK_BOX {
-        return CROSSHAIR_SQ * value as f32 / DEFAULT_PICK_BOX as f32;
-    }
-
-    let scale = (value - DEFAULT_PICK_BOX) as f32 / (50 - DEFAULT_PICK_BOX) as f32;
-    CROSSHAIR_SQ + (50.0 - CROSSHAIR_SQ) * scale
+    value.clamp(0, 50) as f32
 }
 
-/// Convert PICKBOX to the real click/hover aperture. A zero setting hides the
-/// box but retains the one-pixel minimum needed for direct hits.
+/// The click/hover aperture of PICKBOX. A zero setting hides the box but
+/// retains the one-pixel minimum needed for direct hits.
 pub(crate) fn pick_box_aperture_px(value: i32) -> f32 {
-    let value = value.clamp(0, 50);
-    let aperture = if value <= DEFAULT_PICK_BOX {
-        DEFAULT_PICK_APERTURE * value as f32 / DEFAULT_PICK_BOX as f32
-    } else {
-        let scale = (value - DEFAULT_PICK_BOX) as f32 / (50 - DEFAULT_PICK_BOX) as f32;
-        DEFAULT_PICK_APERTURE + (50.0 - DEFAULT_PICK_APERTURE) * scale
-    };
-    aperture.max(1.0)
+    pick_box_half_px(value).max(1.0)
 }
 
 /// What a crosshair paints around the pointer, in canvas pixels.

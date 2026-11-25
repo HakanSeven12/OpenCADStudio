@@ -854,7 +854,9 @@ pub struct UserSettings {
     pub zoom_factor: i32,
     /// CURSORSIZE: normalized crosshair reach; 5 retains the original 60 px arms.
     pub cursor_size: i32,
-    /// PICKBOX: normalized visible-box and click-aperture size.
+    /// PICKBOX: the pick box half-size in screen pixels. Stored under a
+    /// new name: the old key held a scaled value (3 drew 8 pixels).
+    #[serde(rename = "pickbox")]
     pub pick_box: i32,
     /// APERTURE: object-snap capture radius in screen pixels.
     pub aperture: f32,
@@ -1537,7 +1539,7 @@ impl Default for UserSettings {
             ui_scale_percent: 100,
             zoom_factor: 60,
             cursor_size: 5,
-            pick_box: 3,
+            pick_box: 5,
             aperture: crate::snap::DEFAULT_OSNAP_RADIUS_PX,
             // On, as in the initial AUTOSNAP value 63.
             autosnap_magnet: true,

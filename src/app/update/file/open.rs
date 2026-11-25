@@ -273,7 +273,7 @@ impl OpenCADStudio {
                 .as_deref()
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let keys: rustc_hash::FxHashSet<document::Handle> = tab
+            let mut keys: rustc_hash::FxHashSet<document::Handle> = tab
                 .scene
                 .document
                 .block_records
@@ -287,6 +287,48 @@ impl OpenCADStudio {
                         .map(|_| br.handle)
                 })
                 .collect();
+            if let Some(session) = &tab.ifccad_session {
+                for (root, row) in session.nested_source_rows() {
+                    if row
+                        .found_at
+                        .as_deref()
+                        .is_some_and(|found| native_paths_match(std::path::Path::new(found), path))
+                    {
+                        keys.insert(root);
+                    }
+                }
+            } else {
+                let entries = crate::io::xref::collect_entries_with_prev(
+                    &tab.scene.document,
+                    &base_dir,
+                    tab.xref_unloaded.as_set(),
+                    &tab.xref_stat_cache.0,
+                );
+                for entry in &entries {
+                    if entry.parent_key.is_none()
+                        || !entry.found_at.as_deref().is_some_and(|found| {
+                            native_paths_match(std::path::Path::new(found), path)
+                        })
+                    {
+                        continue;
+                    }
+                    let mut ancestor = entry;
+                    let mut seen = rustc_hash::FxHashSet::default();
+                    while let Some(parent) = ancestor.parent_key {
+                        if !seen.insert(parent) {
+                            break;
+                        }
+                        if let Some(next) = entries.iter().find(|e| e.key == parent) {
+                            ancestor = next;
+                        } else {
+                            break;
+                        }
+                    }
+                    if ancestor.parent_key.is_none() {
+                        keys.insert(document::Handle::new(ancestor.key));
+                    }
+                }
+            }
             if !keys.is_empty() {
                 matches.push((j, keys));
             }

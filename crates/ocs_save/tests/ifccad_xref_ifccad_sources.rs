@@ -15,7 +15,9 @@ fn native_source_json_and_cbor_use_the_production_reader_without_a_guid() {
     let json = encode_ifccad_document(&source).unwrap();
     let cbor = encode_ifccad_cbor_document(&source).unwrap();
     for bytes in [json.bytes(), cbor.bytes()] {
-        let (read, content) = ocs_save::read_ifccad_source(bytes).unwrap();
+        let source = ocs_save::read_ifccad_source(bytes).unwrap();
+        let read = source.outcome;
+        let content = source.content;
         assert!(read.stats.stream_completed);
         assert_eq!(
             content,
@@ -36,15 +38,32 @@ fn native_source_json_and_cbor_use_the_production_reader_without_a_guid() {
 }
 
 #[test]
-fn native_source_with_its_own_external_sources_fails_before_projection() {
-    let error = ocs_save::read_ifccad_source(include_bytes!("fixtures/xref.ifcx")).unwrap_err();
-    assert!(error.contains("external"), "{error}");
+fn nested_native_source_reader_retains_child_context_json_cbor() {
+    let source = load_ifccad_bytes(include_bytes!("fixtures/xref.ifcx"), Default::default())
+        .unwrap()
+        .into_document();
+    let json = encode_ifccad_document(&source).unwrap();
+    let cbor = encode_ifccad_cbor_document(&source).unwrap();
+    for bytes in [json.bytes(), cbor.bytes()] {
+        let read = ocs_save::read_ifccad_source(bytes).unwrap();
+        let br = read
+            .outcome
+            .document
+            .block_records
+            .get("grondplan")
+            .unwrap();
+        assert_eq!(
+            read.context.external_source(br.handle),
+            Some(&source.external_sources[0])
+        );
+    }
 }
 
 #[test]
 fn native_source_session_keeps_offline_identity_and_never_observes_a_guid() {
-    let (_, content) =
-        ocs_save::read_ifccad_source(encode_ifccad_document(&source()).unwrap().bytes()).unwrap();
+    let content = ocs_save::read_ifccad_source(encode_ifccad_document(&source()).unwrap().bytes())
+        .unwrap()
+        .content;
     let mut main = load_ifccad_bytes(include_bytes!("fixtures/xref.ifcx"), Default::default())
         .unwrap()
         .into_document();

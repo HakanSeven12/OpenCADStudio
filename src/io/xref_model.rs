@@ -350,6 +350,7 @@ pub enum RefKind {
 /// produces them yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefStatus {
+    Circular,
     Loaded,
     Unloaded,
     NotFound,
@@ -395,6 +396,9 @@ pub struct ReferenceEntry {
     pub saved_path: String,
     pub found_at: Option<String>,
     pub parent_key: Option<u64>,
+    pub owner_resource: Option<u64>,
+    pub source_id: Option<u64>,
+    pub diagnostic: Option<String>,
 }
 
 impl ReferenceEntry {
@@ -410,6 +414,9 @@ impl ReferenceEntry {
             saved_path: String::new(),
             found_at: None,
             parent_key: None,
+            owner_resource: None,
+            source_id: None,
+            diagnostic: None,
         }
     }
 

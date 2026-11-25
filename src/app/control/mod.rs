@@ -571,6 +571,7 @@ pub(super) fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static
 pub(super) fn ref_status_name(status: crate::io::xref_model::RefStatus) -> &'static str {
     use crate::io::xref_model::RefStatus as S;
     match status {
+        S::Circular => "circular",
         S::Loaded => "loaded",
         S::Unloaded => "unloaded",
         S::NotFound => "not_found",

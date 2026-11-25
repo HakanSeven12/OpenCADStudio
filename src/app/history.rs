@@ -138,6 +138,9 @@ impl OpenCADStudio {
         }
         self.tabs[i].history.push_undo(snapshot);
         self.tabs[i].edit_revision = self.tabs[i].edit_revision.wrapping_add(1);
+        if let Some(session) = &self.tabs[i].ifccad_session {
+            session.invalidate_source_generation();
+        }
         self.clear_redo_history(i);
         self.trim_history(i);
     }
@@ -1628,6 +1631,9 @@ impl OpenCADStudio {
         touched_visibility_blocks: &[Handle],
     ) {
         self.tabs[i].edit_revision = self.tabs[i].edit_revision.wrapping_add(1);
+        if let Some(session) = &self.tabs[i].ifccad_session {
+            session.invalidate_source_generation();
+        }
         // The step's entity delta is the only account of what it changed when
         // it restores a whole document snapshot; a whole-state bump leaves the
         // geometry journal unable to diff it (see `control_settle_inner`).

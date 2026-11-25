@@ -12,13 +12,14 @@ use serde_json::Value;
 pub struct IfccadSession(
     Option<Arc<Mutex<document::IfccadRoundtripContext>>>,
     Arc<BTreeMap<document::Handle, document::ifccad::IfccadPlotStyleSource>>,
-    Arc<Mutex<BTreeMap<(document::ifccad::IfccadExternalSourceId, String), ExternalSourceBytes>>>,
-    Arc<Mutex<BTreeMap<document::ifccad::IfccadExternalSourceId, String>>>,
+    pub(crate) Arc<Mutex<super::xref_sources::XrefSourceRegistry>>,
+    pub(crate) Arc<Mutex<BTreeMap<document::ifccad::IfccadExternalSourceId, String>>>,
 );
 
 /// Explicit browser choice, scoped to one open drawing and stored locator.
 #[derive(Clone, Debug)]
 pub struct ExternalSourceBytes {
+    pub resource_id: u64,
     pub file_name: String,
     pub bytes: Arc<Vec<u8>>,
 }
@@ -53,11 +54,7 @@ impl IfccadSession {
         path: &str,
     ) -> Option<ExternalSourceBytes> {
         let source = self.external_source(handle)?;
-        self.2
-            .lock()
-            .ok()?
-            .get(&(source.id, path.to_owned()))
-            .cloned()
+        self.resource_binding(1, source.id.0, path)
     }
 
     pub fn bind_external_source_bytes(
@@ -70,14 +67,18 @@ impl IfccadSession {
         let source = self
             .external_source(handle)
             .ok_or("Unknown native external source")?;
-        self.2
+        self.bind_resource_bytes(1, source.id.0, path, file_name, bytes)
+            .map(|_| ())
+    }
+
+    pub(crate) fn source_by_id(&self, id: u64) -> Option<document::ifccad::IfccadExternalSource> {
+        self.0
+            .as_ref()?
             .lock()
-            .map_err(|_| "External source bytes are unavailable")?
-            .insert(
-                (source.id, path.to_owned()),
-                ExternalSourceBytes { file_name, bytes },
-            );
-        Ok(())
+            .ok()?
+            .external_source_definitions()
+            .find(|(_, s)| s.id.0 == id)
+            .map(|(_, s)| s.clone())
     }
 
     pub fn has_native_context(&self) -> bool {
@@ -379,17 +380,15 @@ fn ifccad_plot_layout(doc: &Document, name: &str) -> Option<document::Handle> {
         })
 }
 
-/// Read an external native drawing without importing a recursive source graph.
-/// This does not change the main drawing's file-open or save encoding policy.
-pub fn read_ifccad_source(
-    bytes: &[u8],
-) -> Result<
-    (
-        document::ReadOutcome,
-        document::ifccad::IfccadExternalSourceContent,
-    ),
-    String,
-> {
+/// Parsed native source with its owning drawing context; no external IO.
+#[derive(Debug)]
+pub struct IfccadSourceRead {
+    pub outcome: document::ReadOutcome,
+    pub content: document::ifccad::IfccadExternalSourceContent,
+    pub context: document::IfccadRoundtripContext,
+}
+
+pub fn read_ifccad_source(bytes: &[u8]) -> Result<IfccadSourceRead, String> {
     if bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
         return Err("Zstd-compressed IFCCAD sources are unavailable in this host build".into());
     }
@@ -400,11 +399,12 @@ pub fn read_ifccad_source(
             document::ifccad::load_ifccad_cbor_bytes(bytes, Default::default())?.into_document()
         };
         let content = document::ifccad_external_source_content(&drawing)?;
-        let (outcome, _) = document::Ifcx.import_ifccad_preserving(&drawing)?;
-        Ok((
-            super::external_read_outcome(outcome.document, outcome.losses),
+        let (outcome, context) = document::Ifcx.import_ifccad_preserving(&drawing)?;
+        Ok(IfccadSourceRead {
+            outcome: super::external_read_outcome(outcome.document, outcome.losses),
             content,
-        ))
+            context,
+        })
     };
     read().map_err(|error| error.to_string())
 }

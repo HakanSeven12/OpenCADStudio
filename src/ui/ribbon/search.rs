@@ -44,7 +44,7 @@ const BOX_GAP: f32 = 5.0;
 /// The clear, collapse and keep-expanded buttons in the box.
 const BOX_BUTTON: f32 = 18.0;
 /// The magnifier button that stands for the box.
-const MAGNIFIER_W: f32 = 24.0;
+pub(super) const MAGNIFIER_W: f32 = 24.0;
 const MAGNIFIER_H: f32 = 20.0;
 /// Size of the typed text and the placeholder.
 const INPUT_SIZE: f32 = crate::ui::style::text::UI;
@@ -852,11 +852,9 @@ impl Ribbon {
         if start.is_nan() {
             return None;
         }
-        let rest = m::TITLE_NAME_ROOM
-            + BOX_W
-            + 2.0 * m::TITLE_BAR_PAD
-            + crate::ui::title_bar::buttons_width();
-        Some(start + rest <= self.win_w)
+        // As the name is placed: in the window's middle, so the box fits
+        // while the name keeps its room between the two ends.
+        Some(crate::ui::title_bar::name_room(self.win_w, start, BOX_W) >= m::TITLE_NAME_ROOM)
     }
 
     /// Whether the last view's choice between the box and its magnifier no

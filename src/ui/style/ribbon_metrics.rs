@@ -31,6 +31,9 @@ pub const TITLE_BAR_PAD: f32 = 6.0;
 /// Room kept for the drawing's name before the search box shrinks to its
 /// magnifier.
 pub const TITLE_NAME_ROOM: f32 = 240.0;
+/// Room kept for the drawing's name before the menus leave the title bar
+/// for a row of their own.
+pub const TITLE_NAME_MIN: f32 = 80.0;
 /// The invisible border that resizes a window without a system frame.
 pub const RESIZE_EDGE: f32 = 5.0;
 

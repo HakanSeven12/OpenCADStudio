@@ -439,6 +439,8 @@ pub struct Ribbon {
     /// The width the title bar's logo and Quick Access Toolbar took (`f32`
     /// bits), as last laid out; NaN before the first layout.
     title_start_w: Arc<AtomicU32>,
+    /// The start's width the name was last placed for (`f32` bits).
+    title_start_used: AtomicU32,
     /// The app draws the main window's title bar, which holds the logo, the
     /// Quick Access Toolbar and the search box; the tab row holds the tabs.
     in_title_bar: bool,
@@ -640,6 +642,7 @@ impl Ribbon {
             // Tests choose the mode themselves (`set_in_title_bar`).
             in_title_bar: cfg!(not(test)) && crate::ui::title_bar::drawn(),
             title_start_w: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
+            title_start_used: AtomicU32::new(0f32.to_bits()),
             narrow_shown: AtomicBool::new(false),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
@@ -1701,33 +1704,60 @@ impl Ribbon {
         menus: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
         let logo = PosReport::new(TAB_ROW_LOGO_ID, self.logo_button(false));
-        let mut start = row![logo].spacing(TAB_ROW_GAP).align_y(iced::Center);
+        let mut own = row![logo].spacing(TAB_ROW_GAP).align_y(iced::Center);
         if !(self.layout.qat_below && !closed) {
-            start = start.push(self.qat_row(is_start, undo_count, redo_count));
-        } else if let Some(menus) = menus {
+            own = own.push(self.qat_row(is_start, undo_count, redo_count));
+        }
+        // Right-clicked, the logo and the toolbar offer where the toolbar
+        // shows, as the tab row does; the menus keep their own presses.
+        let mut start = row![ribbon_menu::RightPress::for_target(
+            ribbon_menu::MenuTarget::TabRow,
+            own
+        )]
+        .spacing(TAB_ROW_GAP)
+        .align_y(iced::Center);
+        if let Some(menus) = menus {
             start = start.push(menus);
         }
-        // Right-clicked, it offers where the toolbar shows, as the tab row
-        // does; its width tells the search box how much room is left.
-        let start = ribbon_menu::RightPress::for_target(ribbon_menu::MenuTarget::TabRow, start);
+        // Its width tells the name and the search box how much room is left.
         PosReport::new(TITLE_START_ID, start)
             .report_width(self.title_start_w.clone(), 0.0)
             .into()
     }
 
-    /// Whether the pull-down menus go in the app's title bar: there is room
-    /// for them where the toolbar was, now that it shows below the ribbon.
-    pub fn menus_fit_title_bar(&self, closed: bool) -> bool {
-        self.in_title_bar && self.layout.qat_below && !closed
+    /// Whether the pull-down menus go in the app's title bar: where the
+    /// toolbar was, now that it shows below the ribbon, as long as the
+    /// window holds them beside the logo, the search magnifier, the window
+    /// buttons and a little of the drawing's name.
+    pub fn menus_fit_title_bar(&self, closed: bool, is_start: bool) -> bool {
+        if !(self.in_title_bar && self.layout.qat_below && !closed) {
+            return false;
+        }
+        let start = app_menu::COMPACT_W + TAB_ROW_GAP + crate::ui::menu_bar::menus_width(is_start);
+        crate::ui::title_bar::name_room(self.win_w, start, search::MAGNIFIER_W)
+            >= metrics::TITLE_NAME_MIN
     }
 
-    /// The widths around the drawing's name in the app's title bar.
+    /// The widths around the drawing's name in the app's title bar. The
+    /// start's width is remembered as used, so a view that measures it
+    /// differently asks for a fresh one (see [`Self::title_room_stale`]).
     pub fn title_bar_room(&self) -> crate::ui::title_bar::Room {
         let start = f32::from_bits(self.title_start_w.load(Ordering::Relaxed));
+        let start = if start.is_nan() { 0.0 } else { start };
+        self.title_start_used
+            .store(start.to_bits(), Ordering::Relaxed);
         crate::ui::title_bar::Room {
-            start: if start.is_nan() { 0.0 } else { start },
+            start,
             search: self.search_rest_width(),
         }
+    }
+
+    /// Whether the title bar's start was laid out at another width than the
+    /// name was placed for (the toolbar or the menus came or went).
+    fn title_room_stale(&self) -> bool {
+        let measured = f32::from_bits(self.title_start_w.load(Ordering::Relaxed));
+        let used = f32::from_bits(self.title_start_used.load(Ordering::Relaxed));
+        !measured.is_nan() && (measured - used).abs() > 0.5
     }
 
     /// The search box for the end of the app's title bar. Like the ribbon,
@@ -1739,7 +1769,7 @@ impl Ribbon {
         self.narrow_shown.store(self.narrow(), Ordering::Relaxed);
         let search = PosReport::new(TAB_ROW_SEARCH_ID, self.search_box());
         wheel::WheelTabs::new(search, false)
-            .refit_when(|| self.search_fit_stale())
+            .refit_when(|| self.search_fit_stale() || self.title_room_stale())
             .into()
     }
 
@@ -3253,8 +3283,19 @@ mod tests {
                 std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1, None));
                 let menus = iced::widget::text("File").into();
                 std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1, Some(menus)));
-                // The menus go up only while the toolbar is below the ribbon.
-                assert_eq!(ribbon.menus_fit_title_bar(closed), qat_below && !closed);
+                // The menus go up only while the toolbar is below the ribbon,
+                // and only where the window holds them.
+                ribbon.set_window_size((1920.0, 1080.0));
+                assert_eq!(
+                    ribbon.menus_fit_title_bar(closed, false),
+                    qat_below && !closed
+                );
+                ribbon.set_window_size((640.0, 1080.0));
+                assert!(!ribbon.menus_fit_title_bar(closed, false));
+                // The Start tab's three menus fit where all twelve do not.
+                if qat_below && !closed {
+                    assert!(ribbon.menus_fit_title_bar(closed, true));
+                }
                 std::hint::black_box(ribbon.title_bar_search());
                 std::hint::black_box(ribbon.view(None, closed, false, false, 3, 1, false, None));
                 let menu_row = iced::widget::text("File").into();
@@ -3298,14 +3339,12 @@ mod tests {
         // Before the title bar is laid out the window's width decides.
         ribbon.set_window_size((1024.0, 768.0));
         assert!(ribbon.narrow());
-        // Logo and toolbar 200 px wide: the box shows while the window also
-        // holds the name, the box and this desktop's window buttons.
+        // Logo and toolbar 200 px wide: the box shows while the name keeps
+        // its room between the two ends, as the title bar places it.
         ribbon.title_start_w.store(200f32.to_bits(), Relaxed);
         let need = 200.0
             + crate::ui::style::ribbon_metrics::TITLE_NAME_ROOM
-            + super::search::BOX_W
-            + 2.0 * crate::ui::style::ribbon_metrics::TITLE_BAR_PAD
-            + crate::ui::title_bar::buttons_width();
+            - crate::ui::title_bar::name_room(200.0, 200.0, super::search::BOX_W);
         ribbon.set_window_size((need, 768.0));
         assert!(!ribbon.narrow());
         ribbon.set_window_size((need - 1.0, 768.0));

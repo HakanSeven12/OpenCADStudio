@@ -118,14 +118,17 @@ pub fn view<'a>(
             text(name.to_owned())
                 .size(ui_text::UI_LARGE)
                 .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::End)
                 .style(|theme: &Theme| text::Style {
                     color: Some(chrome::strong(theme)),
                 }),
         )
         .push(
+            // Short of room, the product's name gives way first.
             text("— Open CAD Studio")
                 .size(ui_text::UI_LARGE)
                 .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::End)
                 .style(|theme: &Theme| text::Style {
                     color: Some(chrome::muted(theme)),
                 }),
@@ -135,16 +138,15 @@ pub fn view<'a>(
     // the wider of them reaches at rest. A collapsed search box that opens
     // for a moment then draws over the name instead of moving it.
     let buttons = layout();
-    let ends = room.ends(buttons);
-    let name_layer = container(title)
-        .center_x(Fill)
-        .center_y(Fill)
-        .padding(Padding {
+    let ends = room.ends();
+    // The clip holds the name between the ends: a container clips to its own
+    // bounds, so it sits inside the padding, not around it.
+    let name_layer =
+        container(container(title).center_x(Fill).center_y(Fill).clip(true)).padding(Padding {
             left: ends,
             right: ends,
             ..Padding::ZERO
-        })
-        .clip(true);
+        });
     let grab = grab(Space::new().width(Fill).height(Fill), pressed);
 
     let bar = row![
@@ -192,6 +194,11 @@ const MINIMIZE: &str = "M5 12h14";
 const MAXIMIZE: &str = "M5 5h14v14H5z";
 const RESTORE: &str = "M5 8h11v11H5z M8 5h11v11h-3";
 const CLOSE: &str = "M5 5l14 14M19 5L5 19";
+/// GNOME's and KDE's, a little smaller in their round buttons.
+const ROUND_MINIMIZE: &str = "M6 12h12";
+const ROUND_MAXIMIZE: &str = "M6 6h12v12H6z";
+const ROUND_RESTORE: &str = "M8 9h9v9H8z M10 6h8v8";
+const ROUND_CLOSE: &str = "M6.5 6.5l11 11M17.5 6.5l-11 11";
 
 /// The widths that decide where the drawing's name sits.
 #[derive(Debug, Clone, Copy, Default)]
@@ -204,21 +211,28 @@ pub struct Room {
 }
 
 impl Room {
-    /// How far the name keeps from each end of the bar: the wider of the
-    /// two ends with their window buttons.
-    fn ends(self, buttons: &ButtonLayout) -> f32 {
-        let group = |n: usize| {
-            let (w, gap, margin) = button_metrics(buttons.style);
-            if n == 0 {
-                0.0
-            } else {
-                n as f32 * w + (n - 1) as f32 * gap + margin
-            }
-        };
-        let left = group(buttons.left.len()) + leading_inset() + self.start;
-        let right = self.search + 2.0 * metrics::TITLE_BAR_PAD + group(buttons.right.len());
-        left.max(right) + metrics::TITLE_BAR_PAD
+    /// How far the name keeps from each end of the bar.
+    fn ends(self) -> f32 {
+        ends(self.start, self.search)
     }
+}
+
+/// How far the name keeps from each end of the bar, with a `start` (logo
+/// and toolbar or menus) and a `search` box this wide: the wider of the two
+/// ends with their window buttons, so the name stays in the window's middle.
+fn ends(start: f32, search: f32) -> f32 {
+    let buttons = layout();
+    let group = |n| platform::group_width(buttons.style, n);
+    let left = group(buttons.left.len()) + leading_inset() + start;
+    let right = search + 2.0 * metrics::TITLE_BAR_PAD + group(buttons.right.len());
+    left.max(right) + metrics::TITLE_BAR_PAD
+}
+
+/// The width left to the drawing's name in a window `window_w` wide, with a
+/// `start` and a `search` box this wide: the search box and the menus give
+/// way when it runs short.
+pub fn name_room(window_w: f32, start: f32, search: f32) -> f32 {
+    window_w - 2.0 * ends(start, search)
 }
 
 /// Which end of the bar a group of window buttons sits at.
@@ -278,6 +292,11 @@ fn icon(style: ButtonStyle, button: Button, maximized: bool) -> &'static str {
         (ButtonStyle::Breeze, Button::Minimize, _) => "M7 10l5 5 5-5",
         (ButtonStyle::Breeze, Button::Maximize, false) => "M7 14l5-5 5 5",
         (ButtonStyle::Breeze, Button::Maximize, true) => "M12 6.5l5.5 5.5-5.5 5.5-5.5-5.5z",
+        (ButtonStyle::Breeze, Button::Close, _) => ROUND_CLOSE,
+        (ButtonStyle::Adwaita, Button::Minimize, _) => ROUND_MINIMIZE,
+        (ButtonStyle::Adwaita, Button::Maximize, false) => ROUND_MAXIMIZE,
+        (ButtonStyle::Adwaita, Button::Maximize, true) => ROUND_RESTORE,
+        (ButtonStyle::Adwaita, Button::Close, _) => ROUND_CLOSE,
         (_, Button::Minimize, _) => MINIMIZE,
         (_, Button::Maximize, false) => MAXIMIZE,
         (_, Button::Maximize, true) => RESTORE,

@@ -3610,9 +3610,10 @@ bg={bg_ms:.1}ms n={view_count}"
             // With the toolbar below the ribbon, the pull-down menus take its
             // place in the title bar instead of a row of their own.
             let menus_in_title = self.show_menu_bar
-                && self
-                    .ribbon
-                    .menus_fit_title_bar(self.ribbon_closed || self.clean_screen);
+                && self.ribbon.menus_fit_title_bar(
+                    self.ribbon_closed || self.clean_screen,
+                    self.tabs[self.active_tab].is_start,
+                );
             // The app's own title bar heads the window, also on a clean
             // screen: it is the only way left to move or close it.
             if self.draws_title_bar() {
@@ -3623,7 +3624,8 @@ bg={bg_ms:.1}ms n={view_count}"
                         tab.is_start,
                         tab.history.undo_stack.len(),
                         tab.history.redo_stack.len(),
-                        menus_in_title.then(|| crate::ui::menu_bar::view(self.menu_context())),
+                        menus_in_title
+                            .then(|| crate::ui::menu_bar::view_inline(self.menu_context())),
                     ),
                     &tab.tab_display_name(),
                     tab.dirty,

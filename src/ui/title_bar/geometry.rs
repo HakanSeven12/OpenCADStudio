@@ -37,7 +37,8 @@ pub enum Edge {
 /// the bar.
 pub fn maximize_button(client: Rect, scale: f32) -> Rect {
     let w = (metrics::CAPTION_W * scale).round() as i32;
-    let h = (metrics::TITLE_BAR_H_WINDOWS * scale).round() as i32;
+    // Down, not to the nearest: the hit box never reaches past the drawn bar.
+    let h = (metrics::TITLE_BAR_H_WINDOWS * scale).floor() as i32;
     Rect {
         left: client.right - 2 * w,
         top: client.top,
@@ -90,9 +91,9 @@ mod tests {
                 bottom: 29
             }
         );
-        // 150 %: 46 × 1.5 = 69 px a button, 29 × 1.5 = 43.5 → 44 px high.
+        // 150 %: 46 × 1.5 = 69 px a button, 29 × 1.5 = 43.5 → 43 px high.
         let at_150 = maximize_button(CLIENT, 1.5);
-        assert_eq!((at_150.left, at_150.right, at_150.bottom), (862, 931, 44));
+        assert_eq!((at_150.left, at_150.right, at_150.bottom), (862, 931, 43));
         assert!(at_150.contains(900, 10));
         assert!(
             !at_150.contains(931, 10),

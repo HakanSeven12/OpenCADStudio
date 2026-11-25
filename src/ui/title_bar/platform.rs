@@ -150,13 +150,19 @@ pub fn buttons_width_of(layout: &ButtonLayout) -> f32 {
     if layout.style == ButtonStyle::System {
         return m::TRAFFIC_LIGHTS_W;
     }
-    let (w, gap, margin) = button_metrics(layout.style);
-    let count = layout.left.len() + layout.right.len();
-    let groups = usize::from(!layout.left.is_empty()) + usize::from(!layout.right.is_empty());
     m::TITLE_BAR_PAD
-        + count as f32 * w
-        + count.saturating_sub(groups) as f32 * gap
-        + groups as f32 * margin
+        + group_width(layout.style, layout.left.len())
+        + group_width(layout.style, layout.right.len())
+}
+
+/// The width a group of `count` window buttons takes in `style`, with the
+/// margin at its end of the bar; nothing without buttons.
+pub fn group_width(style: ButtonStyle, count: usize) -> f32 {
+    if count == 0 {
+        return 0.0;
+    }
+    let (w, gap, margin) = button_metrics(style);
+    count as f32 * w + (count - 1) as f32 * gap + margin
 }
 
 /// A button's width, the gap between buttons of a group and the margin at

@@ -58,6 +58,9 @@ pub enum ContentKind {
     Block,
     HatchPattern,
     View,
+    TextStyle,
+    DimStyle,
+    VisualStyle,
 }
 
 impl ContentKind {
@@ -68,6 +71,9 @@ impl ContentKind {
             Self::Block => "INSERT",
             Self::HatchPattern => "HATCH",
             Self::View => "VIEW",
+            Self::TextStyle => "STYLE",
+            Self::DimStyle => "DIMSTYLE",
+            Self::VisualStyle => "VISUALSTYLES",
         }
     }
 
@@ -77,6 +83,9 @@ impl ContentKind {
             Self::Block => t!("Block"),
             Self::HatchPattern => t!("Hatch"),
             Self::View => t!("View"),
+            Self::TextStyle => t!("Text Style"),
+            Self::DimStyle => t!("Dimension Style"),
+            Self::VisualStyle => t!("Visual Style"),
         }
     }
 }
@@ -281,7 +290,7 @@ pub struct CommandLine {
     /// replace normal command-name autocomplete, allowing commands to offer
     /// drawing-specific values such as layers, blocks or styles.
     pub contextual_suggestions: Vec<crate::command::CommandSuggestion>,
-    /// Layers, blocks, hatch patterns and named views that contain
+    /// Layers, blocks, hatch patterns, named views and styles that contain
     /// `content_input`, shown under the command names while no command runs.
     content_matches: Vec<ContentMatch>,
     /// The typed text that `content_matches` were found for. When the input
@@ -1799,7 +1808,7 @@ fn suggestion_row_style(theme: &Theme, status: button::Status, is_selected: bool
 
 /// The drawing names that contain `needle`, ignoring case, for the
 /// suggestion popup: names that start with it first, then by kind (layers,
-/// blocks, hatch patterns, views) and name; at most [`CONTENT_LIMIT`]. An
+/// blocks, hatch patterns, views, text, dimension and visual styles) and name; at most [`CONTENT_LIMIT`]. An
 /// AutoLISP line (`(`...) finds none.
 pub fn ranked_content<'a>(
     needle: &str,
@@ -2308,6 +2317,25 @@ mod tests {
         assert_eq!(line.autocomplete_cursor, Some(0));
         line.autocomplete_prev();
         assert!(line.selected_content().is_some());
+    }
+
+    #[test]
+    fn each_kind_of_drawing_name_has_the_icon_of_its_command() {
+        use super::ContentKind::*;
+        for kind in [
+            Layer,
+            Block,
+            HatchPattern,
+            View,
+            TextStyle,
+            DimStyle,
+            VisualStyle,
+        ] {
+            assert!(
+                crate::modules::registry::command_icon(kind.icon_command()).is_some(),
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]

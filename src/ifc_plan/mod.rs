@@ -10,15 +10,22 @@ use sha2::{Digest, Sha256};
 
 use section::{plan_at, SourceSegment};
 
-const CUT_LAYER: &str = "IFC-SNEDE";
-const PROJECTION_LAYER: &str = "IFC-ONDER";
-const TERRAIN_LAYER: &str = "IFC-TERREIN";
+pub(crate) const CUT_LAYER: &str = "IFC-CUT";
+pub(crate) const PROJECTION_LAYER: &str = "IFC-PROJECTION";
+pub(crate) const TERRAIN_LAYER: &str = "IFC-TERRAIN";
 pub(crate) const LAYERS: [(&str, i16); 3] =
     [(CUT_LAYER, 35), (PROJECTION_LAYER, 13), (TERRAIN_LAYER, 13)];
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) const TWO_WALLS_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/ifc-xref/two-walls.ifc"
+));
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Storey {
     pub id: u32,
+    pub global_id: Option<String>,
     pub name: String,
     pub elevation: f64,
 }
@@ -28,8 +35,8 @@ pub struct PlanModel {
     meshes: Vec<Mesh>,
     anchor: [f64; 3],
     pub(crate) storeys: Vec<Storey>,
-    project_global_id: Option<String>,
-    revision: String,
+    pub(crate) project_global_id: Option<String>,
+    pub(crate) revision: String,
     sources: BTreeMap<u32, IfcElement>,
 }
 
@@ -114,6 +121,7 @@ fn read_project_and_storeys(
         if let Some(elevation) = elevation.filter(|z| z.is_finite()) {
             storeys.push(Storey {
                 id,
+                global_id: storey.get_string(0).and_then(global_id),
                 name,
                 elevation,
             });

@@ -1320,11 +1320,12 @@ impl OpenCADStudio {
                             let handle = crate::sys::file_dialog()
                                 .set_title(crate::t!("Select External Reference File").as_ref())
                                 .add_filter(
-                                    crate::t!("CAD Files").as_ref(),
-                                    &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"],
+                                    crate::tr!("ifc2plan", "reference-files"),
+                                    &["dwg", "dxf", "bak", "ifc", "DWG", "DXF", "BAK", "IFC"],
                                 )
                                 .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
                                 .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+                                .add_filter("IFC (*.ifc)", &["ifc", "IFC"])
                                 .add_filter(crate::t!("Backup Files").as_ref(), &["bak", "BAK"])
                                 .pick_file()
                                 .await;

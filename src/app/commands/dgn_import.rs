@@ -26,6 +26,10 @@ pub(super) async fn pick(title: String, filters: Vec<(String, Vec<String>)>) -> 
         let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
         dialog = dialog.add_filter(name.as_str(), &extensions);
     }
+    pick_from(dialog).await
+}
+
+pub(super) async fn pick_from(dialog: rfd::AsyncFileDialog) -> Option<String> {
     let handle = dialog.pick_file().await?;
     let path = crate::sys::handle_path(&handle)
         .to_string_lossy()

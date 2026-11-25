@@ -7975,6 +7975,7 @@ dgn-import =
 
 ifc2plan =
     .title = IFC Floor Plan
+    .reference-files = CAD and IFC files
     .choose-file = Choose Another IFC…
     .choose-storey = Choose a storey
     .storey = Storey

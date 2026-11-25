@@ -1,16 +1,18 @@
 ---
-summary: Attaches a DWG or DXF drawing to the current drawing as an external reference.
+summary: Attaches a DWG or DXF drawing or an IFC floor plan as an external reference.
 related: XREF, ATTACH, XCLIP, XOPEN, XRELOAD, EXTERNALREFERENCES
 ribbon: Insert tab › Reference panel (Attach XREF)
 ---
 
 ## Usage
-1. Run `XATTACH`. In the file dialog, choose a drawing (DWG, DXF or backup file).
+1. Run `XATTACH`. In the file dialog, choose a DWG, DXF, backup drawing or IFC file.
 2. In the Attach External Reference dialog, check the settings and click **OK**.
 3. Answer the prompts for every value marked **Specify On-screen**:
    - `Specify insertion point or [Scale/X/Y/Z/Rotate/PScale/PX/PY/PZ/PRotate]:`
    - `Enter X scale factor, specify opposite corner, or [Corner/XYZ] <1>:` and `Enter Y scale factor <use X scale factor>:`
    - `Specify rotation angle <0>:`
+
+For an IFC file in the desktop app, choose the storey, cut height and viewing depth in the **IFC Floor Plan** dialog, then click **Attach**. The floor plan uses the `IFC-CUT`, `IFC-PROJECTION` and `IFC-TERRAIN` layers. OCS saves the source path and the floor plan settings in the host DWG or DXF. It regenerates the plan from the IFC when you reopen the drawing or run `XRELOAD`.
 
 ## Dialog
 | Setting | What it does |
@@ -33,6 +35,6 @@ ribbon: Insert tab › Reference panel (Attach XREF)
 | **Corner** / **XYZ** | At the scale prompt: set the scale by an opposite corner, or by X, Y and Z factors. |
 
 ## Notes
-- `XATTACH <file>` skips the file dialog and opens the Attach External Reference dialog for that file.
+- `XATTACH <file>` skips the file dialog and opens the settings for that file.
 - When [`FILEDIA`](FILEDIA-System-Variable) is 0, the command asks `-XREF  Enter name of file to attach:` on the command line instead.
 - The reference definition and its insertion are one undo step.

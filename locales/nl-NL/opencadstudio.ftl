@@ -7972,6 +7972,7 @@ dgn-import =
 
 ifc2plan =
     .title = IFC-plattegrond
+    .reference-files = CAD- en IFC-bestanden
     .choose-file = Ander IFC-bestand…
     .choose-storey = Kies een verdieping
     .storey = Verdieping

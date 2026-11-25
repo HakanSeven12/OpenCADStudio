@@ -1,5 +1,5 @@
 ---
-summary: Imports a file of another format (PDF, DGN, WMF, SVG, 3DS, SAT, IGES or STEP) into the drawing, choosing the importer by format.
+summary: Imports a file of another format (PDF, DGN, WMF, SVG, 3DS, SAT, IGES, STEP or IFC) into the drawing, choosing the importer by format.
 related: PDFIMPORT, DGNIMPORT, ACISIN, IMPORTOBJ, INSERT
 ribbon: Insert tab › Import panel
 ---

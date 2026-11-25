@@ -710,15 +710,23 @@ fn xref_inserts(doc: &Document, br_handle: Handle) -> HashSet<Handle> {
 /// own drawing (`xref_paths`). A file does not hold the copies, and their
 /// handles last one session; [`link_stored_references`] is the way back.
 fn store_references_by_source(doc: &mut Document, br_handle: Handle) {
-    let sources: HashMap<Handle, Handle> = match merged_copies().lock() {
-        Ok(map) => match map.get(&br_handle) {
-            Some(copies) if matches_block(doc, br_handle, copies) => copies
-                .iter()
-                .map(|(source, copy)| (*copy, *source))
-                .collect(),
-            _ => return,
-        },
-        Err(_) => return,
+    #[cfg(not(target_arch = "wasm32"))]
+    let ifc_keys = ifc_slice::source_keys(doc, br_handle);
+    #[cfg(target_arch = "wasm32")]
+    let ifc_keys = None;
+    let sources: HashMap<Handle, Handle> = if let Some(keys) = ifc_keys {
+        keys
+    } else {
+        match merged_copies().lock() {
+            Ok(map) => match map.get(&br_handle) {
+                Some(copies) if matches_block(doc, br_handle, copies) => copies
+                    .iter()
+                    .map(|(source, copy)| (*copy, *source))
+                    .collect(),
+                _ => return,
+            },
+            Err(_) => return,
+        }
     };
     let inserts = xref_inserts(doc, br_handle);
     if inserts.is_empty() {
@@ -1061,6 +1069,8 @@ fn resolve_xrefs_with_filter(
     session: Option<&ocs_save::IfccadSession>,
 ) -> Vec<XrefInfo> {
     let mut result = Vec::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    let ifc_views = ifc_slice::views(doc);
     // Auto-resolve every xref — frustum + LOD culling keep GPU cost bounded.
     let mut xref_entries: Vec<(String, String, Handle)> = Vec::new();
     for br in doc.block_records.iter() {
@@ -1101,6 +1111,8 @@ fn resolve_xrefs_with_filter(
             .map(|_| std::sync::atomic::AtomicU16::new(0))
             .collect(),
     );
+    #[cfg(not(target_arch = "wasm32"))]
+    let ifc_sources = ifc_slice::ReadBatch::default();
     let parsed: Vec<(String, String, Handle, XrefRead)> = xref_entries
         .into_par_iter()
         .enumerate()
@@ -1131,7 +1143,15 @@ fn resolve_xrefs_with_filter(
             let format = session
                 .and_then(|s| s.external_source(br_handle))
                 .map(|source| source.source.format());
-            let mut read = if let Some(bytes) =
+            #[cfg(not(target_arch = "wasm32"))]
+            let ifc_read = ifc_views
+                .get(&br_handle)
+                .map(|view| ifc_sources.read(&raw_path, base_dir, view));
+            #[cfg(target_arch = "wasm32")]
+            let ifc_read = None;
+            let mut read = if let Some(read) = ifc_read {
+                read
+            } else if let Some(bytes) =
                 session.and_then(|s| s.external_source_bytes(br_handle, &raw_path))
             {
                 let mut read = if bytes.resource_id == 1 {
@@ -1195,10 +1215,31 @@ fn resolve_xrefs_with_filter(
             (block_name, raw_path, br_handle, read)
         })
         .collect();
+    #[cfg(not(target_arch = "wasm32"))]
+    drop(ifc_sources);
 
+    #[cfg(not(target_arch = "wasm32"))]
+    let updated_ifc: Vec<_> = parsed
+        .iter()
+        .filter(|(_, _, handle, read)| {
+            ifc_views.contains_key(handle) && matches!(read.outcome.as_ref(), Some(Ok(_)))
+        })
+        .map(|(name, _, handle, _)| (name.clone(), *handle))
+        .collect();
+    #[cfg(not(target_arch = "wasm32"))]
+    for (_, handle) in &updated_ifc {
+        store_references_by_source(doc, *handle);
+    }
     merge_xref_reads_in_session(doc, parsed, &mut result, progress.as_ref(), session);
+    #[cfg(not(target_arch = "wasm32"))]
+    ifc_slice::warn_unresolved(doc, &updated_ifc, &mut result);
     result
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod ifc_probe;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod ifc_slice;
 
 /// What the read of one referenced drawing found, before the merge: the
 /// file it resolved to, the reader's outcome (none when no file was found)
@@ -1573,7 +1614,12 @@ pub fn merge_xref_reads_in_session(
                     remove_pipe_symbols(doc, &block_name);
                     ensure_block_entities(doc, &block_name);
                     merge_xref_into_block(doc, &block_name, br_handle, outcome.document);
-                    if let Some(previous) = previous {
+                    // IFC references have already gone through their saved source keys.
+                    // The session-wide DWG copy map is not authoritative for them.
+                    let is_ifc = Path::new(&raw_path)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("ifc"));
+                    if let Some(previous) = previous.filter(|_| !is_ifc) {
                         relink_reloaded_references(doc, br_handle, previous);
                     }
                     // The merged body landed above the pre-merge ENDBLK; any

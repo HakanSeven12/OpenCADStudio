@@ -6,11 +6,16 @@
 
 /// Height of the title bar the app draws over the ribbon.
 pub const TITLE_BAR_H: f32 = 32.0;
+/// On Windows: the height of the system's own title bar (43 px at 150 %),
+/// so the window buttons are the size Windows draws them.
+pub const TITLE_BAR_H_WINDOWS: f32 = 29.0;
 /// On macOS: the height of a window's title, where the traffic lights sit.
 pub const TITLE_BAR_H_MAC: f32 = 28.0;
 /// Width of a window button (minimize, maximize, close) and its icon size.
 pub const CAPTION_W: f32 = 46.0;
-pub const CAPTION_ICON: f32 = 14.0;
+/// The icons fill 16 of their 24 grid units: at 15 px they are 10 px
+/// across with 1 px lines, as Windows draws its own.
+pub const CAPTION_ICON: f32 = 15.0;
 /// GNOME's (Adwaita) round window buttons and their icons.
 pub const ADWAITA_BUTTON: f32 = 24.0;
 pub const ADWAITA_ICON: f32 = 12.0;

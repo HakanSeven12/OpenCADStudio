@@ -40,10 +40,13 @@ pub fn drawn() -> bool {
 }
 
 /// The bar's height: on macOS that of a window's title, so the traffic
-/// lights sit in its middle.
+/// lights sit in its middle; on Windows that of the system's title bar, so
+/// the window buttons match the system's.
 pub fn bar_height() -> f32 {
     if cfg!(target_os = "macos") {
         metrics::TITLE_BAR_H_MAC
+    } else if cfg!(target_os = "windows") {
+        metrics::TITLE_BAR_H_WINDOWS
     } else {
         metrics::TITLE_BAR_H
     }
@@ -173,10 +176,10 @@ fn grab<'a>(content: impl Into<Element<'a, Message>>, pressed: bool) -> Element<
 
 /// The Windows and Adwaita icons, on the 24-unit grid of
 /// [`crate::ui::icons::line_icon`].
-const MINIMIZE: &str = "M6 12h12";
-const MAXIMIZE: &str = "M6 6h12v12H6z";
-const RESTORE: &str = "M8 9h9v9H8z M10 6h8v8";
-const CLOSE: &str = "M6.5 6.5l11 11M17.5 6.5l-11 11";
+const MINIMIZE: &str = "M4 12h16";
+const MAXIMIZE: &str = "M4 4h16v16H4z";
+const RESTORE: &str = "M4 8h12v12H4z M8 4h12v12h-4";
+const CLOSE: &str = "M4 4l16 16M20 4L4 20";
 
 /// Which end of the bar a group of window buttons sits at.
 #[derive(Clone, Copy, PartialEq, Eq)]

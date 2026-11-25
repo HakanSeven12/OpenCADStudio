@@ -121,6 +121,8 @@ pub struct InterpolatePointCommand {
     entity_used: bool,
     /// The Entity option was asked for the crossing line.
     entity_cross: bool,
+    /// Perpendicular's Enter asked for the object: Esc goes back.
+    entity_from_foot: bool,
     a: DVec3,
     b: DVec3,
     /// The control line was given by slope or grade: the distance prompt has
@@ -158,6 +160,7 @@ impl InterpolatePointCommand {
             picked: None,
             entity_used: false,
             entity_cross: false,
+            entity_from_foot: false,
             a: DVec3::ZERO,
             b: DVec3::ZERO,
             by_grade: false,
@@ -268,16 +271,20 @@ impl InterpolatePointCommand {
                 }
                 out
             }
-            // Measured: whole elevation steps from the first toward the
-            // second elevation, short of it.
+            // Measured: whole steps short of the elevation difference, each
+            // placed by its share of the difference; the elevation adds the
+            // step as typed (with 20 then 10 and a step of 3, the first point
+            // is 30 along at 23).
             Value::Step => {
-                let diff = self.b.z - self.a.z;
-                let step = self.rise_step.abs() * diff.signum();
+                let diff = (self.b.z - self.a.z).abs();
+                let step = self.rise_step;
                 let mut out = Vec::new();
                 if step != 0.0 && diff != 0.0 {
                     let mut k = 1.0;
-                    while (k * step).abs() < diff.abs() - 1e-9 {
-                        out.push(self.at(h * k * step / diff));
+                    while k * step.abs() < diff - 1e-9 {
+                        let mut p = self.at(h * k * step.abs() / diff);
+                        p.z = self.a.z + k * step;
+                        out.push(p);
                         k += 1.0;
                     }
                 }
@@ -472,6 +479,7 @@ impl CadCommand for InterpolatePointCommand {
                 self.a = first.extend(0.0);
                 self.b = second.extend(0.0);
                 self.entity_used = true;
+                self.entity_from_foot = false;
                 self.step = Step::FirstElevation;
                 CmdResult::NeedPoint
             }
@@ -527,6 +535,7 @@ impl CadCommand for InterpolatePointCommand {
             }
             Step::Entity => {
                 if word == "P" || word == "POINTS" {
+                    self.entity_from_foot = false;
                     self.step = if self.entity_cross { Step::CrossFirst } else { Step::First };
                     return Some(CmdResult::NeedPoint);
                 }
@@ -604,9 +613,12 @@ impl CadCommand for InterpolatePointCommand {
                     if coordinate {
                         return None;
                     }
-                    // Measured: Enter starts the command over.
+                    // Measured: Enter asks for an object to take a new control
+                    // line from; Esc there comes back here.
                     if typed.is_empty() {
-                        self.step = Step::First;
+                        self.entity_from_foot = true;
+                        self.entity_cross = false;
+                        self.step = Step::Entity;
                         return Some(CmdResult::NeedPoint);
                     }
                     return Some(CmdResult::ReportError(t("Point or option keyword required.")));
@@ -674,9 +686,9 @@ impl CadCommand for InterpolatePointCommand {
                 let o = if typed.is_empty() { Some(self.offset) } else { number(typed) };
                 let Some(o) = o else { return Some(invalid_chars()) };
                 if self.step == Step::CrossOffset {
+                    // Measured: parallel lines end the command silently.
                     let Some(at) = self.crossing(o) else {
-                        self.step = Step::CrossFirst;
-                        return Some(CmdResult::NeedPoint);
+                        return Some(CmdResult::Done);
                     };
                     self.queue = VecDeque::from([at]);
                     self.step = Step::Description;
@@ -704,9 +716,15 @@ impl CadCommand for InterpolatePointCommand {
     }
 
     fn on_escape(&mut self) -> CmdResult {
-        // Measured: Esc at a description drops the remaining points and asks
-        // the value again; elsewhere it ends the command.
-        if self.step == Step::Description && self.kind != Kind::Intersection {
+        // Measured: Esc at a description of a several-point command drops
+        // the remaining points and asks the value again; a one-point
+        // command ends there, as everywhere else.
+        if self.step == Step::Entity && self.entity_from_foot {
+            self.entity_from_foot = false;
+            self.step = Step::Value(Value::Foot);
+            return CmdResult::ReportMessage(t("*Cancel*"));
+        }
+        if self.step == Step::Description && matches!(self.value_step(), Value::Count | Value::Spacing | Value::Step) {
             self.queue.clear();
             self.step = Step::Value(self.value_step());
             return CmdResult::ReportMessage(t("*Cancel*"));

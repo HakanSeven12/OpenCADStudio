@@ -1219,7 +1219,12 @@ pub(crate) fn word_runs<'t>(text: &'t str, face: &Face) -> Vec<(&'t str, bool)> 
         let mut buf = [0u8; 4];
         let shaped = requires_shaping(c.encode_utf8(&mut buf))
             || (shaped_run == Some(true)
-                && (c == LRM || unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::NSM));
+                && (c == LRM
+                    // Zero-width (non-)joiners pick a conjunct's form, so
+                    // they stay in the run they shape (Bengali `র‍্য`).
+                    || c == '\u{200C}'
+                    || c == '\u{200D}'
+                    || unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::NSM));
         match shaped_run {
             Some(prev) if prev != shaped => {
                 runs.push((&text[start..i], prev));
@@ -4624,3 +4629,4 @@ mod font_style_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

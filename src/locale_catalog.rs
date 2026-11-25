@@ -461,6 +461,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Enter an invalid indicator for Elevation <{}>:" => Some(("civil-cmd", "points-align-elevation-indicator")),
         "Enter an invalid indicator for Rod hi <{}>:" => Some(("civil-cmd", "points-align-rod-indicator")),
         "Enter an invalid indicator for Station Offset <{}>:" => Some(("civil-cmd", "points-align-station-indicator")),
+        "Please enter a value greater than or equal to 2.220446E-16 and  less than or equal to 1.000000E+24" => Some(("civil-cmd", "points-align-interval-range")),
+        "Specify second point <{}>:" => Some(("civil-cmd", "points-align-second-point")),
         "Random Points" => Some(("civil-cmd", "points-menu-random-points")),
         "On Grid" => Some(("civil-cmd", "points-menu-on-grid")),
         "Along Polyline/Contour" => Some(("civil-cmd", "points-menu-along-polyline-contour")),

@@ -428,7 +428,7 @@ impl OpenCADStudio {
         } else {
             std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
         };
-        crate::io::save_owned_as_version_atomic(
+        let saved = crate::io::save_owned_as_version_atomic(
             snapshot,
             &write_path,
             version,
@@ -439,7 +439,16 @@ impl OpenCADStudio {
             require_new_destination,
             (!path_changed).then_some(path.as_path()),
             self.tabs[i].ifccad_session.as_ref(),
-        )?;
+        );
+        if saved.is_err() && !path_changed {
+            // The save took the drawing handle for its replace; lock again.
+            if let Some(lease) = self.tabs[i].edit_lease.as_mut() {
+                if !lease.holds_drawing() {
+                    let _ = lease.refresh_drawing_lock(&path);
+                }
+            }
+        }
+        saved?;
 
         if set_current_path {
             self.tabs[i].current_path = Some(path.clone());

@@ -220,6 +220,18 @@ impl EditLease {
         self.drawing.as_ref().map(File::try_clone).transpose()
     }
 
+    /// Hand the drawing handle itself to a save. A network share refuses to
+    /// replace a file that still has an open handle (os error 5, #3636), so
+    /// the save verifies through it and drops it before the replace;
+    /// [`Self::refresh_drawing_lock`] locks the drawing again afterwards.
+    pub fn take_reader(&mut self) -> Option<File> {
+        self.drawing.take()
+    }
+
+    pub fn holds_drawing(&self) -> bool {
+        self.drawing.is_some()
+    }
+
     /// Atomic save replaces the path with a new file object. Move the platform
     /// lock to that new object; the sidecar remains locked throughout.
     pub fn refresh_drawing_lock(&mut self, path: &Path) -> Result<(), EditLeaseError> {

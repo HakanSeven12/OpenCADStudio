@@ -603,15 +603,7 @@ impl OpenCADStudio {
             }
         };
         let reader = if expected.is_some() {
-            match lease.as_deref() {
-                Some(lease) => lease.reader().map_err(|error| {
-                    crate::io::SaveFailure::other(format!(
-                        "could not verify {} before saving: {error}",
-                        path.display()
-                    ))
-                })?,
-                None => None,
-            }
+            lease.and_then(crate::io::edit_lock::EditLease::take_reader)
         } else {
             None
         };
@@ -1525,6 +1517,15 @@ impl OpenCADStudio {
         if outcome.result.is_ok() {
             if let Some(physical) = outcome.physical_path.as_deref() {
                 outcome.result = crate::io::verify_save_destination(&outcome.path, physical);
+            }
+        }
+        if outcome.result.is_err() {
+            // The save took the drawing handle for its replace; lock again.
+            let current = self.tabs[i].current_path.clone();
+            if let (Some(path), Some(lease)) = (current, self.tabs[i].edit_lease.as_mut()) {
+                if !lease.holds_drawing() {
+                    let _ = lease.refresh_drawing_lock(&path);
+                }
             }
         }
         if let Err(error) = &outcome.result {

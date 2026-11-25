@@ -1405,6 +1405,87 @@ impl HostApi for V4PluginHostApi {
         }
     }
 
+    fn panel_surface_publish(
+        &mut self,
+        panel_id: &str,
+        scene: crate::scene::PanelScene,
+    ) -> Result<crate::scene::SceneRevision, crate::scene::SurfaceReject> {
+        match self.request(PluginRequest::PanelSurfacePublish {
+            panel_id: panel_id.to_string(),
+            surface: crate::scene::PanelSurface::Scene(scene),
+        }) {
+            Ok(PluginResponse::PanelSurfacePublished(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected PanelSurfacePublish response: {other:?}");
+                Err(crate::scene::SurfaceReject {
+                    code: crate::scene::SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] PanelSurfacePublish request failed: {e}");
+                Err(crate::scene::SurfaceReject {
+                    code: crate::scene::SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
+    fn panel_widget_publish(
+        &mut self,
+        panel_id: &str,
+        surface: crate::widget::WidgetSurface,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        match self.request(PluginRequest::PanelSurfacePublish {
+            panel_id: panel_id.to_string(),
+            surface: crate::scene::PanelSurface::Widgets(surface),
+        }) {
+            Ok(PluginResponse::PanelWidgetPublished(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected PanelWidgetPublish response: {other:?}");
+                Err(crate::widget::WidgetReject {
+                    code: crate::widget::WidgetRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] PanelWidgetPublish request failed: {e}");
+                Err(crate::widget::WidgetReject {
+                    code: crate::widget::WidgetRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
+    fn panel_table_publish(
+        &mut self,
+        panel_id: &str,
+        surface: crate::tables::TableSurface,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        match self.request(PluginRequest::PanelSurfacePublish {
+            panel_id: panel_id.to_string(),
+            surface: crate::scene::PanelSurface::Tables(surface),
+        }) {
+            Ok(PluginResponse::PanelTablePublished(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected PanelTablePublish response: {other:?}");
+                Err(crate::tables::TableReject {
+                    code: crate::tables::TableRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] PanelTablePublish request failed: {e}");
+                Err(crate::tables::TableReject {
+                    code: crate::tables::TableRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
     fn update_panel(
         &mut self,
         panel_id: &str,

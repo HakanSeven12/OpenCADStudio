@@ -4993,7 +4993,12 @@ mod tests {
         use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas, sysfont};
 
         // Any installed TrueType family that draws 'H'; hosts without fonts skip.
+        // Names starting with a dot are macOS's hidden system faces, whose
+        // subset can fail and fall back to outlines.
         let Some((family, source)) = sysfont::families().iter().find_map(|family| {
+            if family.starts_with('.') {
+                return None;
+            }
             let face = Face::resolve(family);
             matches!(face, Face::Ttf { .. })
                 .then(|| face.glyph_source('H'))

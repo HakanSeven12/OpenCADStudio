@@ -2590,7 +2590,29 @@ fn entity_at_typed_point(
                         .max(0.0);
                     dx.hypot(dy)
                 }
-                None => continue,
+                // A 3D polyline answers by its edges in plan.
+                None => match entity {
+                    document::EntityType::Polyline3D(p) => {
+                        let mut v: Vec<glam::DVec2> = p.vertices.iter().map(|v| glam::DVec2::new(v.position.x, v.position.y)).collect();
+                        if p.is_closed() && v.len() > 2 {
+                            v.push(v[0]);
+                        }
+                        let q = point.truncate();
+                        let Some(d) = v
+                            .windows(2)
+                            .map(|w| {
+                                let ab = w[1] - w[0];
+                                let t = ((q - w[0]).dot(ab) / ab.length_squared().max(1e-24)).clamp(0.0, 1.0);
+                                (w[0] + ab * t).distance(q)
+                            })
+                            .reduce(f64::min)
+                        else {
+                            continue;
+                        };
+                        d
+                    }
+                    _ => continue,
+                },
             };
         // Of objects equally near, the one drawn last (on top) is found:
         // an alignment over its source polyline, a line over an alignment.

@@ -15,8 +15,7 @@ pub mod windows;
 
 use platform::button_metrics;
 pub use platform::{
-    double_click, layout, system_title_bar_forced, tiling_desktop, Button, ButtonLayout,
-    ButtonStyle, DoubleClick,
+    double_click, layout, tiling_desktop, Button, ButtonLayout, ButtonStyle, DoubleClick,
 };
 
 use iced::widget::{button, column, container, mouse_area, row, stack, text, Space};
@@ -28,15 +27,13 @@ use crate::ui::kit::{tooltip, TipPosition};
 use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 
 /// Whether the app draws the main window's title bar: on Windows, Linux and
-/// macOS, unless a tiling window manager arranges the windows or
-/// `OCS_SYSTEM_TITLEBAR=1` asks for the system's.
+/// macOS, unless a tiling window manager arranges the windows.
 pub fn drawn() -> bool {
     cfg!(any(
         target_os = "windows",
         target_os = "linux",
         target_os = "macos"
     )) && !tiling_desktop()
-        && !system_title_bar_forced()
 }
 
 /// The bar's height: on macOS that of a window's title, so the traffic

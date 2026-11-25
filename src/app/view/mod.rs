@@ -4119,6 +4119,12 @@ bg={bg_ms:.1}ms n={view_count}"
         if !self.draws_title_bar() {
             return top;
         }
+        // The system's 1 px window border in the ribbon's hairline colour.
+        #[cfg(target_os = "windows")]
+        {
+            let edge = crate::ui::style::chrome::edge(&self.active_theme).into_rgba8();
+            crate::ui::title_bar::windows::set_border_color(edge[0], edge[1], edge[2]);
+        }
         let controls: Element<'a, Message> = if covered {
             crate::ui::title_bar::controls(self.main_maximized, self.title_bar_pressed)
         } else {

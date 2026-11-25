@@ -678,6 +678,17 @@ impl Ribbon {
         }
     }
 
+    /// The tab row's height. Under the app's title bar the tabs need no room
+    /// above them, which a system title bar asked for: the row is as high as
+    /// a tab.
+    pub(super) fn tab_row_h(&self) -> f32 {
+        if self.in_title_bar {
+            metrics::TAB_H
+        } else {
+            TAB_ROW_H
+        }
+    }
+
     /// Whether the app's title bar holds the logo, the Quick Access Toolbar
     /// and the search box (see [`Self::title_bar_start`]); set from
     /// `title_bar::drawn` when the ribbon is made.
@@ -1491,7 +1502,8 @@ impl Ribbon {
                     tab
                 };
                 // Tabs stand on the bottom of the tab row, on the tool area.
-                let btn = container(tab).height(TAB_ROW_H).align_bottom(TAB_ROW_H);
+                let row_h = self.tab_row_h();
+                let btn = container(tab).height(row_h).align_bottom(row_h);
                 // Minimized to tabs, resting on a tab opens its tool area.
                 let btn: Element<'_, Message> = if self.layout.minimize == RibbonMinimize::Tabs {
                     mouse_area(btn)
@@ -1532,7 +1544,7 @@ impl Ribbon {
         let tabs = WrapFlow::new(tab_items)
             .spacing_x(metrics::TAB_GAP)
             .min_spacing_x(-6.0)
-            .row_h(TAB_ROW_H)
+            .row_h(self.tab_row_h())
             .center(self.layout.centered);
 
         // Centered, the tabs sit in the middle of the whole ribbon, not of
@@ -1572,7 +1584,7 @@ impl Ribbon {
                     .center_trail(self.layout.centered)
                     .center_span(span.clone())
                     .report_natural_width(self.tab_flow_natural.clone())
-                    .min_row_h(TAB_ROW_H)
+                    .min_row_h(self.tab_row_h())
                     .report_height(self.tab_bar_h.clone()),
             )
             .width(Length::Fill),

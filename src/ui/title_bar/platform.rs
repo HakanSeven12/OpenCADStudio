@@ -63,16 +63,6 @@ pub fn tiling_desktop() -> bool {
     *TILING.get_or_init(|| cfg!(target_os = "linux") && is_tiling(&desktop_names()))
 }
 
-/// `OCS_SYSTEM_TITLEBAR=1` keeps the system's title bar and frame, for a
-/// window manager the app does not recognise as tiling or a session where
-/// the app's own bar gets in the way (remote desktop, assistive tools).
-pub fn system_title_bar_forced() -> bool {
-    static FORCED: OnceLock<bool> = OnceLock::new();
-    *FORCED.get_or_init(|| {
-        std::env::var("OCS_SYSTEM_TITLEBAR").is_ok_and(|v| !v.is_empty() && v != "0")
-    })
-}
-
 /// Whether desktop `names` (`:`/`;` separated) name a tiling window manager.
 pub(super) fn is_tiling(names: &str) -> bool {
     has_desktop(

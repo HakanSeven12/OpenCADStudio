@@ -376,8 +376,8 @@ impl Ribbon {
                 bottom: metrics::MINIMIZE_BOTTOM,
                 ..Padding::ZERO
             })
-            .height(metrics::TAB_ROW_H)
-            .align_bottom(metrics::TAB_ROW_H)
+            .height(self.tab_row_h())
+            .align_bottom(self.tab_row_h())
             .into()
     }
 

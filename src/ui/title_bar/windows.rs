@@ -7,11 +7,15 @@
 //! kept in [`maximize_hovered`] for the button's style. The same hit test
 //! names the window's edges, so they resize it with the system's cursors
 //! and snapping, as a framed window's do.
+//!
+//! Windows 11 draws a 1 px border round the window; [`set_border_color`]
+//! gives it the app's dark hairline colour.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
+use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
@@ -33,6 +37,10 @@ static HOVERED: AtomicBool = AtomicBool::new(false);
 static MAXIMIZE_FREE: AtomicBool = AtomicBool::new(true);
 /// The window is subclassed: the system finds its edges.
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+/// The subclassed window, for its border colour.
+static WINDOW: AtomicIsize = AtomicIsize::new(0);
+/// The border colour last given to the system (`COLORREF`); none yet.
+static BORDER: AtomicU32 = AtomicU32::new(u32::MAX);
 /// The app's UI scale (`f32` bits), on top of the monitor's DPI.
 static UI_SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000);
 
@@ -67,7 +75,44 @@ pub fn install(hwnd: isize) -> bool {
     // UI thread that owns it; the procedure is a plain function.
     let ok = unsafe { SetWindowSubclass(hwnd as HWND, Some(procedure), SUBCLASS_ID, 0) } != 0;
     INSTALLED.store(ok, Ordering::Relaxed);
+    WINDOW.store(hwnd, Ordering::Relaxed);
+    BORDER.store(u32::MAX, Ordering::Relaxed);
     ok
+}
+
+/// Give the window's border (Windows 11 draws it, 1 px) this colour, as
+/// `r`, `g`, `b` in 0..=255; only when it changed. Windows 10 has no such
+/// border and ignores it.
+pub fn set_border_color(r: u8, g: u8, b: u8) {
+    let colorref = u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16;
+    let hwnd = WINDOW.load(Ordering::Relaxed);
+    if hwnd == 0 || BORDER.swap(colorref, Ordering::Relaxed) == colorref {
+        return;
+    }
+    /// `DWMWA_BORDER_COLOR`, Windows 11 and later.
+    const DWMWA_BORDER_COLOR: u32 = 34;
+    type SetAttribute = unsafe extern "system" fn(HWND, u32, *const std::ffi::c_void, u32) -> i32;
+    // Looked up at run time: dwmapi is there on every supported Windows,
+    // the attribute only on Windows 11, which reports anything else as an
+    // error that changes nothing.
+    let name: Vec<u16> = "dwmapi.dll\0".encode_utf16().collect();
+    // SAFETY: a system library and one of its exports, with its documented
+    // signature; the colour outlives the call.
+    unsafe {
+        let module = LoadLibraryW(name.as_ptr());
+        if module.is_null() {
+            return;
+        }
+        if let Some(proc) = GetProcAddress(module, b"DwmSetWindowAttribute\0".as_ptr()) {
+            let set: SetAttribute = std::mem::transmute(proc);
+            set(
+                hwnd as HWND,
+                DWMWA_BORDER_COLOR,
+                (&colorref as *const u32).cast(),
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
 }
 
 /// The client area and the scale from logical to client pixels: the
@@ -187,6 +232,7 @@ unsafe extern "system" fn procedure(
         // As Microsoft asks: the subclass goes before the window does.
         WM_NCDESTROY => {
             INSTALLED.store(false, Ordering::Relaxed);
+            WINDOW.store(0, Ordering::Relaxed);
             // SAFETY: removes this procedure from the window being destroyed.
             unsafe { RemoveWindowSubclass(hwnd, Some(procedure), SUBCLASS_ID) };
         }

@@ -4119,12 +4119,6 @@ bg={bg_ms:.1}ms n={view_count}"
         if !self.draws_title_bar() {
             return top;
         }
-        // The system's 1 px window border in the ribbon's hairline colour.
-        #[cfg(target_os = "windows")]
-        {
-            let edge = crate::ui::style::chrome::edge(&self.active_theme).into_rgba8();
-            crate::ui::title_bar::windows::set_border_color(edge[0], edge[1], edge[2]);
-        }
         let controls: Element<'a, Message> = if covered {
             crate::ui::title_bar::controls(self.main_maximized, self.title_bar_pressed)
         } else {
@@ -4136,8 +4130,28 @@ bg={bg_ms:.1}ms n={view_count}"
         crate::ui::title_bar::windows::set_maximize_free(
             !covered && !self.title_buttons_overlaid(),
         );
+        // A window without a system frame that is not maximized gets a 1 px
+        // border in the ribbon's dark hairline colour, so it stands apart
+        // from what lies behind it. Maximized it has none, but the same
+        // container, so no widget below loses its state.
+        let bordered = crate::ui::title_bar::frameless() && !self.main_maximized;
+        let line = if bordered {
+            crate::ui::icons::hairline()
+        } else {
+            0.0
+        };
+        let framed = container(iced::widget::stack![top, controls])
+            .padding(line)
+            .style(move |theme: &Theme| container::Style {
+                border: iced::Border {
+                    color: crate::ui::style::chrome::edge(theme),
+                    width: line,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
         crate::ui::title_bar::with_resize_edges(
-            iced::widget::stack![top, controls].into(),
+            framed.into(),
             crate::ui::title_bar::app_draws_edges() && !self.main_maximized,
         )
     }

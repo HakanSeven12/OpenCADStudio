@@ -2591,6 +2591,11 @@ fn entity_at_typed_point(
                         .max(0.0);
                     dx.hypot(dy)
                 }
+                // A COGO point answers by its location.
+                None if crate::entities::civil::cogo_point_position(entity, document).is_some() => {
+                    let p = crate::entities::civil::cogo_point_position(entity, document).unwrap_or_default();
+                    p.truncate().distance(point.truncate())
+                }
                 // A 3D polyline answers by its edges in plan.
                 None => match entity {
                     document::EntityType::Polyline3D(p) => {

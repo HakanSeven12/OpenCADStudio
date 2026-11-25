@@ -148,7 +148,8 @@ pub const TOOLS: &[Entry] = &[
 // ponytail: entries answer "not yet implemented" until their command lands;
 // drop each from here as it does.
 pub fn is_pending(cmd: &str) -> bool {
-    crate::modules::civil::point_intersect::Kind::of(cmd).is_none()
+    crate::modules::civil::point_interp::Kind::of(cmd).is_none()
+        && crate::modules::civil::point_intersect::Kind::of(cmd).is_none()
         && crate::modules::civil::point_alignment::Kind::of(cmd).is_none()
         && crate::modules::civil::point_surface::Kind::of(cmd).is_none()
         && crate::modules::civil::point_slope::Kind::of(cmd).is_none()

@@ -10970,6 +10970,7 @@ civil-cmd =
     .points-menu-high-low-point = 高/低點
     .points-menu-slope-grade-distance = 坡度/梯度 - 距離
     .points-menu-slope-grade-elevation = 坡度/梯度 - 高程
+    .points-slope-grade-echo-text = Grade: (percent): __ocs_fmt_0__
     .points-slope-count-invalid = 'Number of points' validation error.  Please enter an integer.
     .points-slope-add-ending = Add ending point [Yes/No] <Yes>:
     .points-slope-add-point = Add point [Yes/No] <Yes>:

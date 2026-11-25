@@ -487,6 +487,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "High/Low Point" => Some(("civil-cmd", "points-menu-high-low-point")),
         "Slope/Grade - Distance" => Some(("civil-cmd", "points-menu-slope-grade-distance")),
         "Slope/Grade - Elevation" => Some(("civil-cmd", "points-menu-slope-grade-elevation")),
+        "Grade: (percent): {}" => Some(("civil-cmd", "points-slope-grade-echo-text")),
         "'Number of points' validation error.  Please enter an integer." => Some(("civil-cmd", "points-slope-count-invalid")),
         "Add ending point [Yes/No] <Yes>:" => Some(("civil-cmd", "points-slope-add-ending")),
         "Add point [Yes/No] <Yes>:" => Some(("civil-cmd", "points-slope-add-point")),

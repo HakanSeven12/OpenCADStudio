@@ -10875,6 +10875,7 @@ civil-cmd =
     .points-menu-high-low-point = Yüksek/Alçak Nokta
     .points-menu-slope-grade-distance = Eğim - Mesafe
     .points-menu-slope-grade-elevation = Eğim - Kot
+    .points-slope-grade-echo-text = Eğim: (yüzde): __ocs_fmt_0__
     .points-slope-count-invalid = 'Nokta sayısı' doğrulama hatası.  Lütfen bir tam sayı girin.
     .points-slope-add-ending = Bitiş noktası eklensin mi [Evet/Hayır] <Evet>:
     .points-slope-add-point = Nokta eklensin mi [Evet/Hayır] <Evet>:

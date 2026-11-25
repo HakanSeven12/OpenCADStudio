@@ -45,10 +45,18 @@ fn slope_text(grade: f64) -> String {
     if grade == 0.0 { t("Horizontal") } else { format!("{:.2}:1", 100.0 / grade) }
 }
 
+/// A run:rise slope of 0 is vertical: the grade (percent) it stands for
+/// (measured: 10 along it rises 1e9).
+const VERTICAL: f64 = 1e10;
+
 /// The two lines a slope or grade answer echoes, the answered one first.
 fn echo(grade: f64, as_grade: bool) -> String {
     let slope = crate::tf!("Slope: (run:rise): {}", slope_text(grade)).into_owned();
-    let percent = crate::tf!("Grade: (percent): {:.2}", grade).into_owned();
+    let percent = if grade == VERTICAL {
+        crate::tf!("Grade: (percent): {}", t("Vertical")).into_owned()
+    } else {
+        crate::tf!("Grade: (percent): {:.2}", grade).into_owned()
+    };
     if as_grade { format!("{percent}\n{slope}") } else { format!("{slope}\n{percent}") }
 }
 
@@ -199,8 +207,8 @@ impl SlopePointCommand {
         }
     }
 
-    fn grade_given(&mut self, value: f64) -> CmdResult {
-        let grade = if self.as_grade { value } else if value == 0.0 { 0.0 } else { 100.0 / value };
+    /// `grade` in percent (a slope answer converted by the caller).
+    fn grade_given(&mut self, grade: f64) -> CmdResult {
         let line = echo(grade, self.as_grade);
         if self.step == (Step::Grade { second: false }) && self.kind == Kind::HighLow {
             self.first_grade = grade;
@@ -344,12 +352,14 @@ impl CadCommand for SlopePointCommand {
                     }
                     return Some(CmdResult::NeedPoint);
                 }
-                let value = if typed.is_empty() {
-                    let default = if second { self.first_grade } else { 0.0 };
-                    if self.as_grade || default == 0.0 { default } else { 100.0 / default }
+                // Enter keeps the default (horizontal before any grade).
+                let grade = if typed.is_empty() {
+                    if second { self.first_grade } else { 0.0 }
                 } else {
                     match number(typed) {
-                        Some(v) => v,
+                        Some(v) if self.as_grade => v,
+                        Some(v) if v == 0.0 => VERTICAL,
+                        Some(v) => 100.0 / v,
                         None if self.as_grade => {
                             return Some(CmdResult::ReportError(format!(
                                 "{}\n{retry}",
@@ -359,7 +369,7 @@ impl CadCommand for SlopePointCommand {
                         None => return Some(CmdResult::ReportError(format!("{}\n{retry}", t("Invalid input")))),
                     }
                 };
-                self.grade_given(value)
+                self.grade_given(grade)
             }
             Step::Distance => match number(typed) {
                 Some(d) if d < 0.0 => CmdResult::ReportError(t("'Distance' validation error.  Please enter a positive value.")),

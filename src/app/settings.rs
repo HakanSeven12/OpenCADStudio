@@ -855,6 +855,9 @@ pub struct UserSettings {
     pub pick_box: i32,
     /// APERTURE: object-snap capture radius in screen pixels.
     pub aperture: f32,
+    /// The Magnet of AUTOSNAP (bit 4): while an object snap marker shows,
+    /// the crosshairs are drawn on the snap point, not at the pointer.
+    pub autosnap_magnet: bool,
     /// HPASSOC: new hatches follow their boundary objects.
     pub hatch_associative: bool,
     /// HPGAPTOL: largest boundary gap HATCH/BOUNDARY picks treat as closed.
@@ -1532,6 +1535,8 @@ impl Default for UserSettings {
             cursor_size: 5,
             pick_box: 3,
             aperture: crate::snap::DEFAULT_OSNAP_RADIUS_PX,
+            // On, as AutoCAD's AUTOSNAP initial value 63.
+            autosnap_magnet: true,
             hatch_associative: true,
             hatch_gap_tolerance: 0.0,
             hatch_start_method: 0,
@@ -1964,6 +1969,19 @@ mod tests {
             let back: UserSettings = serde_json::from_str(&json).unwrap();
             assert_eq!(back.node_graph_links, links);
         }
+    }
+
+    #[test]
+    fn the_autosnap_magnet_defaults_to_on_and_round_trips() {
+        let old: UserSettings = serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        assert!(old.autosnap_magnet);
+        let settings = UserSettings {
+            autosnap_magnet: false,
+            ..UserSettings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: UserSettings = serde_json::from_str(&json).unwrap();
+        assert!(!back.autosnap_magnet);
     }
 
     #[test]

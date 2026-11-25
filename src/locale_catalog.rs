@@ -6698,6 +6698,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Requires two positive values (x,y) or one for both." => Some(("common", "requires-two-positive-values")),
         "Snap marker color" => Some(("common", "snap-marker-color")),
         "Snap marker size" => Some(("common", "snap-marker-size")),
+        "Magnet" => Some(("common", "autosnap-magnet")),
+        "The crosshairs lock onto the object snap point while its marker shows (AUTOSNAP)." => Some(("common", "autosnap-magnet-help")),
         "Command line text color" => Some(("common", "command-line-text-color")),
         "Operand" => Some(("common", "operand")),
         "{added} linetype(s) loaded." => Some(("common", "linetypes-loaded")),

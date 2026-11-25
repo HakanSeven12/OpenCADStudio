@@ -119,6 +119,7 @@ impl OpenCADStudio {
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
             aperture: self.snapper.osnap_radius_px,
+            autosnap_magnet: self.autosnap_magnet,
             hatch_associative: self.hatch_associative,
             hatch_gap_tolerance: self.hatch_gap_tolerance,
             hatch_start_method: self.hatch_prefs.method,
@@ -338,6 +339,7 @@ impl OpenCADStudio {
         self.zoom_factor_input = self.zoom_factor.to_string();
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
+        self.autosnap_magnet = s.autosnap_magnet;
         self.snapper.osnap_radius_px = if s.aperture.is_finite() {
             s.aperture.clamp(
                 crate::snap::MIN_OSNAP_RADIUS_PX,

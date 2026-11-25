@@ -310,6 +310,7 @@ impl OpenCADStudio {
                             qdim_snap_priority: self.quick_dimension_snap_priority,
                             annotation_auto_scale: self.annotation_auto_scale,
                             polar_increment_deg: self.polar_increment_deg,
+                            autosnap_magnet: self.autosnap_magnet,
                             show_viewcube: self.show_viewcube,
                             show_ucs_icon: self.show_ucs_icon,
                             ucs_icon_at_origin: self.ucs_icon_at_origin,

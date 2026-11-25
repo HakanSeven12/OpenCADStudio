@@ -2178,6 +2178,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         .is_some_and(|c| matches!(c.name(), "XLINE" | "RAY")),
                     snap_color: self.snap_marker_color,
                     snap_size: self.model_space.snap_marker_size as f32,
+                    magnet: self.autosnap_magnet,
                 },
                 // MATCHPROP paints properties onto destinations; it gets the
                 // paintbrush cursor instead of the crosshair.

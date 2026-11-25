@@ -11389,6 +11389,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::AutoSnapMagnetChanged(on) => {
+                self.autosnap_magnet = on;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::GripColorChanged(color) => {
                 self.model_space.grip_color = color;
                 self.sync_model_space_theme(false);

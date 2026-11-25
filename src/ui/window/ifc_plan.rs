@@ -19,6 +19,11 @@ pub enum IfcPlanMsg {
     Depth(String),
     Import,
     Generated(ReadTicket, Result<Arc<Vec<document::EntityType>>, String>),
+    #[cfg(not(target_arch = "wasm32"))]
+    XrefGenerated(
+        ReadTicket,
+        Result<Arc<crate::io::xref::ifc_slice::Ready>, String>,
+    ),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,8 +41,16 @@ pub(crate) struct PreviousIfcPlan {
     depth: String,
 }
 
+#[derive(Clone)]
+pub(crate) struct IfcXrefTarget {
+    pub path: std::path::PathBuf,
+    pub tab_id: u64,
+    pub document_generation: u64,
+}
+
 pub(crate) struct IfcPlanDialog {
     pub filename: String,
+    pub xref: Option<IfcXrefTarget>,
     pub model: Option<Arc<PlanModel>>,
     pub choices: Vec<StoreyChoice>,
     pub selected: Option<StoreyChoice>,
@@ -51,6 +64,7 @@ impl IfcPlanDialog {
     pub fn new(filename: String) -> Self {
         Self {
             filename,
+            xref: None,
             model: None,
             choices: Vec::new(),
             selected: None,
@@ -106,7 +120,7 @@ impl IfcPlanDialog {
 
     pub fn elevations(&self) -> Option<(f64, f64)> {
         let model = self.model.as_ref()?;
-        let offset: f64 = self.height.replace(',', ".").parse().ok()?;
+        let offset = self.cut_offset()?;
         let depth: f64 = self.depth.replace(',', ".").parse().ok()?;
         let choice = self.selected.as_ref()?;
         let base = if model.storeys.is_empty() {
@@ -116,6 +130,10 @@ impl IfcPlanDialog {
         };
         let elevation = base + offset;
         (elevation.is_finite() && depth.is_finite() && depth > 0.0).then_some((elevation, depth))
+    }
+
+    pub fn cut_offset(&self) -> Option<f64> {
+        self.height.replace(',', ".").parse().ok()
     }
 }
 
@@ -128,53 +146,53 @@ pub(crate) fn view(
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'_, Message> {
     let label = |title| text(title).size(12);
-    let mut controls = column![row![
-        text(&state.filename).size(13).width(Fill),
-        dialog_button_styled_opt(
-            crate::tr!("ifc2plan", "choose-file"),
-            (!state.pending).then(|| msg(IfcPlanMsg::Browse)),
-            button::secondary,
-        ),
+    let editable = !state.pending && state.model.is_some();
+    let storeys = pick_list(
+        state.selected.as_ref(),
+        state.choices.as_slice(),
+        |choice: &StoreyChoice| choice.label.clone(),
+    )
+    .placeholder(crate::tr!("ifc2plan", "choose-storey"))
+    .width(Fill);
+    let storeys = if editable {
+        storeys.on_select(|choice| msg(IfcPlanMsg::Storey(choice)))
+    } else {
+        storeys
+    };
+    let height = text_input("1.2", &state.height)
+        .on_input_maybe(editable.then_some(|s| msg(IfcPlanMsg::Height(s))))
+        .style(field_style)
+        .padding([6, 8]);
+    let depth = text_input("1.5", &state.depth)
+        .on_input_maybe(editable.then_some(|s| msg(IfcPlanMsg::Depth(s))))
+        .style(field_style)
+        .padding([6, 8]);
+
+    // A detached window is sized before the IFC load completes.
+    let mut controls = column![
+        row![
+            text(&state.filename).size(13).width(Fill),
+            dialog_button_styled_opt(
+                crate::tr!("ifc2plan", "choose-file"),
+                (!state.pending).then(|| msg(IfcPlanMsg::Browse)),
+                button::secondary,
+            ),
+        ]
+        .align_y(iced::Center)
+        .spacing(8),
+        column![label(crate::tr!("ifc2plan", "storey")), storeys].spacing(4),
+        row![
+            column![label(crate::tr!("ifc2plan", "height")), height]
+                .width(Fill)
+                .spacing(4),
+            column![label(crate::tr!("ifc2plan", "depth")), depth]
+                .width(Fill)
+                .spacing(4)
+        ]
+        .spacing(12),
     ]
-    .align_y(iced::Center)
-    .spacing(8)]
     .spacing(10);
 
-    if state.model.is_some() {
-        let storeys = pick_list(
-            state.selected.as_ref(),
-            state.choices.as_slice(),
-            |choice: &StoreyChoice| choice.label.clone(),
-        )
-        .placeholder(crate::tr!("ifc2plan", "choose-storey"))
-        .width(Fill);
-        let storeys = if state.pending {
-            storeys
-        } else {
-            storeys.on_select(|choice| msg(IfcPlanMsg::Storey(choice)))
-        };
-        let height = text_input("1.2", &state.height)
-            .on_input_maybe((!state.pending).then_some(|s| msg(IfcPlanMsg::Height(s))))
-            .style(field_style)
-            .padding([6, 8]);
-        let depth = text_input("1.5", &state.depth)
-            .on_input_maybe((!state.pending).then_some(|s| msg(IfcPlanMsg::Depth(s))))
-            .style(field_style)
-            .padding([6, 8]);
-        controls = controls
-            .push(column![label(crate::tr!("ifc2plan", "storey")), storeys].spacing(4))
-            .push(
-                row![
-                    column![label(crate::tr!("ifc2plan", "height")), height]
-                        .width(Fill)
-                        .spacing(4),
-                    column![label(crate::tr!("ifc2plan", "depth")), depth]
-                        .width(Fill)
-                        .spacing(4)
-                ]
-                .spacing(12),
-            );
-    }
     if state.pending {
         controls = controls.push(label(if state.model.is_some() {
             crate::tr!("ifc2plan", "generating")
@@ -198,7 +216,11 @@ pub(crate) fn view(
                 Space::new().width(Fill),
                 dialog_button(crate::t!("Cancel"), Message::CloseModal, false),
                 dialog_button_styled_opt(
-                    crate::tr!("ifc2plan", "create"),
+                    if state.xref.is_some() {
+                        crate::t!("Attach").into_owned()
+                    } else {
+                        crate::tr!("ifc2plan", "create")
+                    },
                     ready.then(|| msg(IfcPlanMsg::Import)),
                     button::primary,
                 ),
@@ -208,4 +230,70 @@ pub(crate) fn view(
         .padding(16)
         .width(sizing.width)
         .into()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::ui::modal::ModalSizing;
+    use iced_test::simulator::Simulator;
+
+    #[test]
+    fn ifc_plan_loaded_controls_fit_at_the_loading_window_height() {
+        let model =
+            Arc::new(crate::ifc_plan::load_model(crate::ifc_plan::TWO_WALLS_FIXTURE).unwrap());
+        let cancel = crate::t!("Cancel").into_owned();
+
+        for xref in [false, true] {
+            let mut state = IfcPlanDialog::new("two-walls.ifc".into());
+            state.xref = xref.then(|| IfcXrefTarget {
+                path: state.filename.clone().into(),
+                tab_id: 0,
+                document_generation: 0,
+            });
+
+            let loading_height = {
+                let mut loading = Simulator::with_size(
+                    iced::Settings::default(),
+                    (430.0, 285.0),
+                    view(&state, ModalSizing::INTRINSIC),
+                );
+                let footer = loading.find(cancel.as_str()).unwrap().bounds();
+                // The detached window includes the area below the footer label.
+                footer.y + footer.height + 16.0
+            };
+
+            state.set_model(model.clone());
+            state.selected = state.choices.first().cloned();
+            state.pending = false;
+            let mut loaded = Simulator::with_size(
+                iced::Settings::default(),
+                (430.0, loading_height),
+                view(&state, ModalSizing::FILL),
+            );
+            for label in [
+                crate::tr!("ifc2plan", "storey"),
+                crate::tr!("ifc2plan", "height"),
+                crate::tr!("ifc2plan", "depth"),
+            ] {
+                let target = loaded.find(label.as_str()).unwrap();
+                let visible = target.visible_bounds().expect("field must be visible");
+                let bounds = target.bounds();
+                assert!(
+                    visible.height + 0.01 >= bounds.height && visible.width + 0.01 >= bounds.width,
+                    "{label} is clipped: {visible:?} vs {bounds:?}"
+                );
+            }
+            let primary = if xref {
+                crate::t!("Attach").into_owned()
+            } else {
+                crate::tr!("ifc2plan", "create")
+            };
+            loaded.click(primary.as_str()).unwrap();
+            assert!(loaded.into_messages().any(|message| matches!(
+                message,
+                Message::ImportDialog(ImportDialogMsg::IfcPlan(IfcPlanMsg::Import))
+            )));
+        }
+    }
 }

@@ -13,7 +13,7 @@ use crate::modules::insert::xref_cmd::display_path;
 use crate::ui::window::xref_attach::{XrefAttachMsg, XrefAttachState};
 
 /// ATTACH's file types, in the reference order (the picker counts from 1).
-const ATTACH_FILTERS: [(&str, &[&str]); 8] = [
+const ATTACH_FILTERS: &[(&str, &[&str])] = &[
     ("All image files", IMAGE_EXTENSIONS),
     ("DWF files (*.dwfx; *.dwf)", &["dwfx", "dwf"]),
     ("MicroStation DGN (*.dgn)", &["dgn"]),
@@ -22,6 +22,8 @@ const ATTACH_FILTERS: [(&str, &[&str]); 8] = [
     ("Point Cloud (*.rcp; *.rcs)", &["rcp", "rcs"]),
     ("Drawing", &["dwg", "dxf", "ifccad", "ifcx", "cbor"]),
     ("All files (*.*)", &["*"]),
+    #[cfg(not(target_arch = "wasm32"))]
+    ("IFC (*.ifc)", &["ifc"]),
 ];
 const ALL_DGN_FILTER: u32 = 4;
 
@@ -244,6 +246,10 @@ impl OpenCADStudio {
         placement: XrefPlacement,
         label: &'static str,
     ) -> Task<Message> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::io::xref::ifc_slice::is_ifc(std::path::Path::new(&request.path)) {
+            return self.read_ifc_slice(std::path::Path::new(&request.path));
+        }
         self.start_xref_attach_with(i, request, placement, label, read_preview)
     }
 
@@ -500,6 +506,15 @@ impl OpenCADStudio {
         }
         let pending = self.begin_undo(i, "XATTACH", 1, false);
         let stem = path_to_block_name(&request.path);
+        #[cfg(not(target_arch = "wasm32"))]
+        let stem = if crate::io::xref::ifc_slice::is_ifc(std::path::Path::new(&request.path)) {
+            let doc = &mut self.tabs[i].scene.document;
+            crate::io::xref::ifc_slice::ensure_app(doc);
+            let taken: Vec<_> = doc.block_records.iter().map(|block| block.name.as_str()).collect();
+            crate::modules::insert::xattach::unique_block_name(&stem, &taken)
+        } else {
+            stem
+        };
         let name = crate::modules::insert::xattach::prepare_named_xref_definition_with(
             &mut self.tabs[i].scene,
             &request,
@@ -511,14 +526,7 @@ impl OpenCADStudio {
             self.tabs[i].xref_relative_on_save.insert(name.clone());
         }
         if let document::EntityType::Insert(insert) = &mut entity {
-            let doc = &self.tabs[i].scene.document;
-            let source_units = doc.block_records.get(&name).map(|r| r.units).unwrap_or(0);
-            let factor =
-                crate::app::properties::insert_unit_scale(doc.header.insertion_units, source_units)
-                    .unwrap_or(1.0);
-            insert.set_x_scale(insert.x_scale() * factor);
-            insert.set_y_scale(insert.y_scale() * factor);
-            insert.set_z_scale(insert.z_scale() * factor);
+            // The entity commit applies INSUNITS using this block definition.
             insert.block_name = name.clone();
         }
         if let Some(content) = source_content {
@@ -578,12 +586,35 @@ impl OpenCADStudio {
         self.refresh_xref_report(i);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn place_ifc_slice(
+        &mut self,
+        i: usize,
+        path: &std::path::Path,
+        view: &crate::io::xref::ifc_slice::View,
+        read: crate::io::xref::XrefRead,
+    ) {
+        let mut insert = document::entities::Insert::new("", document::types::Vector3::ZERO);
+        view.set_on_insert(&mut insert);
+        let request = XrefAttachRequest {
+            path: path.to_string_lossy().into_owned(),
+            overlay: false,
+            path_type: Pathtype::Relative,
+        };
+        self.place_xref_attach(i, request, document::EntityType::Insert(insert), Some(read));
+        self.post_ref_op(i);
+    }
+
     /// Opens the Attach External Reference dialog for `path`; the file's
     /// units and thumbnail are read off the UI thread.
     pub(in crate::app) fn open_xref_attach_dialog(
         &mut self,
         path: std::path::PathBuf,
     ) -> Task<Message> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::io::xref::ifc_slice::is_ifc(&path) {
+            return self.read_ifc_slice(&path);
+        }
         let i = self.active_tab;
         let existing: Vec<(String, String)> = self.tabs[i]
             .scene
@@ -740,7 +771,7 @@ impl OpenCADStudio {
                 // Any file picked under "All DGN Files" is a DGN.
                 let known = [
                     "dwg", "dxf", "ifccad", "ifcx", "cbor", "pdf", "dwf", "dwfx", "dgn", "rcp",
-                    "rcs",
+                    "rcs", "ifc",
                 ];
                 if crate::sys::attach_filter() == ALL_DGN_FILTER
                     && !known.contains(&ext.as_str())
@@ -1086,6 +1117,83 @@ mod xref_attach_read_tests {
         let (_, unit) = read_attach_file(path.to_str().unwrap());
         std::fs::remove_file(path).unwrap();
         assert_eq!(unit, 6);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn probe_ifc_attach(app: &mut OpenCADStudio, path: &std::path::Path, storey: usize) -> document::Handle {
+        use crate::ui::window::{ifc_plan::IfcPlanMsg, import_dialogs::ImportDialogMsg};
+        let before = references(app, app.active_tab);
+        let task = app.dispatch_xref_attach(&format!("XATTACH \"{}\"", path.display()), app.active_tab).unwrap();
+        app.drive_headless_task(task).unwrap();
+        let state = app.import_dialogs.ifc_plan.as_ref().expect("IFC slice settings");
+        assert!(state.error.is_none(), "{:?}", state.error);
+        let choice = state.choices[storey].clone();
+        let level = choice.label.clone();
+        let _ = app.update(Message::ImportDialog(ImportDialogMsg::IfcPlan(IfcPlanMsg::Storey(choice))));
+        let task = app.update(Message::ImportDialog(ImportDialogMsg::IfcPlan(IfcPlanMsg::Import)));
+        app.drive_headless_task(task).unwrap();
+        if let Some(state) = app.import_dialogs.ifc_plan.as_ref() {
+            assert!(state.error.is_none(), "{:?}", state.error);
+        }
+        let doc = &app.tabs[app.active_tab].scene.document;
+        assert_eq!(references(app, app.active_tab), before + 1);
+        let block = doc.block_records.iter().filter(|br| br.flags.is_xref)
+            .max_by_key(|br| br.handle.value()).unwrap();
+        let count = doc.entities().filter(|e| e.common().owner_handle == block.handle
+            && matches!(e, document::EntityType::Line(_))).count();
+        assert!(count > 0);
+        println!("IFC slice {level}: {count} XREF lines");
+        block.handle
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn direct_ifc_xref_attaches_through_xattach_dialog() {
+        let (mut app, path) = source_and_host("ifc-slice-ui");
+        let ifc = std::path::Path::new(&path).with_extension("ifc");
+        std::fs::write(&ifc, crate::ifc_plan::TWO_WALLS_FIXTURE).unwrap();
+        let active = app.active_tab;
+        app.tabs[active].scene.document.header.insertion_units = 6; // metres
+        let _ = probe_ifc_attach(&mut app, &ifc, 0);
+        assert_eq!(app.active_tab, active);
+        assert_eq!(inserts(&app, active), 1);
+        let _ = probe_ifc_attach(&mut app, &ifc, 0);
+        assert_eq!(inserts(&app, active), 2, "two slices can have independent XREF definitions");
+        for entity in app.tabs[active].scene.document.entities() {
+            if let document::EntityType::Insert(insert) = entity {
+                assert_eq!(
+                    [insert.x_scale(), insert.y_scale(), insert.z_scale()],
+                    [0.001; 3],
+                    "an IFC slice in millimetres is converted to metres once",
+                );
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn direct_ifc_xref_does_not_attach_after_switching_drawings() {
+        use crate::ui::window::{ifc_plan::IfcPlanMsg, import_dialogs::ImportDialogMsg};
+
+        let scratch = tempfile::tempdir().unwrap();
+        let ifc = scratch.path().join("two-walls.ifc");
+        std::fs::write(&ifc, crate::ifc_plan::TWO_WALLS_FIXTURE).unwrap();
+        let mut app = OpenCADStudio::new_for_test();
+        let target = app.active_tab;
+        let task = app.open_xref_attach_dialog(ifc);
+        app.drive_headless_task(task).unwrap();
+
+        let task = app.update(Message::TabNew);
+        app.drive_headless_task(task).unwrap();
+        let other = app.active_tab;
+        assert_ne!(target, other);
+
+        let task = app.update(Message::ImportDialog(ImportDialogMsg::IfcPlan(
+            IfcPlanMsg::Import,
+        )));
+        app.drive_headless_task(task).unwrap();
+        assert_eq!(references(&app, target), 0);
+        assert_eq!(references(&app, other), 0);
     }
 
     /// The window's unit for a file in `units`, as the window shows it.

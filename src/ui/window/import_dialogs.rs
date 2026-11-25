@@ -271,7 +271,7 @@ pub const FORMATS: [ImportFormat; 23] = [
         1,
         Support::Yes,
     ),
-    format("IFC (*.ifc)", "*.ifc", &["ifc"], 2, Support::Yes),
+    format("IFC (*.ifc)", "*.ifc", &["ifc"], 1, Support::Yes),
     format("All Files", "*.*", &["*"], 2, Support::ByExtension),
 ];
 

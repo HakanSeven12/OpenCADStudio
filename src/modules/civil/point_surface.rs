@@ -158,7 +158,12 @@ pub struct SurfacePointCommand {
     /// After `Yes` at the change prompt the grid is asked again from its
     /// rotation, then its base point.
     again: bool,
+    /// The grid asks its next base point without the rotation.
+    repeat: bool,
 }
+
+/// The X spacing every grid prompt offers (measured: not the last one).
+const GRID_X_DEFAULT: f64 = 5.0;
 
 impl SurfacePointCommand {
     pub fn new(kind: Kind, document: &document::Document) -> Self {
@@ -179,6 +184,7 @@ impl SurfacePointCommand {
             distance: 10.0,
             first_point: None,
             again: false,
+            repeat: false,
         };
         if c.surfaces.len() == 1 {
             c.surface = Some(0);
@@ -225,8 +231,13 @@ impl SurfacePointCommand {
     fn ask_next(&mut self) -> CmdResult {
         if self.queue.is_empty() {
             match self.kind {
-                // The grid ends with its points (measured).
-                Kind::Grid => return CmdResult::Done,
+                // Measured: after its points the grid names the surface
+                // again and asks a new base point (the rotation is kept).
+                Kind::Grid => {
+                    self.step = Step::Base;
+                    self.repeat = true;
+                    return CmdResult::ReportMessage(self.intro().unwrap_or_default());
+                }
                 Kind::Random => self.step = Step::Location,
                 _ => self.step = Step::Polyline,
             }
@@ -361,7 +372,7 @@ impl CadCommand for SurfacePointCommand {
             Step::Location => t("Please specify a location for the new point:"),
             Step::Base => t("Specify a grid basepoint:"),
             Step::Rotation => crate::tf!("Grid rotation <{:.4} (d)>:", self.rotation.to_degrees()).into_owned(),
-            Step::XSpacing => crate::tf!("Grid X spacing <{:.4}>:", self.x_spacing).into_owned(),
+            Step::XSpacing => crate::tf!("Grid X spacing <{:.4}>:", GRID_X_DEFAULT).into_owned(),
             Step::YSpacing => crate::tf!("Grid Y spacing <{:.4}>:", self.y_spacing).into_owned(),
             Step::UpperRight => t("Specify the upper right location for the grid:"),
             Step::Change => t("Change the size or rotation of the grid/grid squares [Yes/No] <No>:"),
@@ -461,11 +472,8 @@ impl CadCommand for SurfacePointCommand {
             },
             Step::Base => {
                 self.base = pt;
-                self.step = Step::Rotation;
-                if self.again {
-                    self.again = false;
-                    self.step = Step::XSpacing;
-                }
+                self.step = if self.again || self.repeat { Step::XSpacing } else { Step::Rotation };
+                self.again = false;
                 CmdResult::NeedPoint
             }
             Step::UpperRight => match self.grid(pt) {
@@ -540,7 +548,7 @@ impl CadCommand for SurfacePointCommand {
                 }
                 let value = if typed.is_empty() {
                     match self.step {
-                        Step::XSpacing => self.x_spacing,
+                        Step::XSpacing => GRID_X_DEFAULT,
                         Step::YSpacing => self.y_spacing,
                         _ => self.distance,
                     }
@@ -579,10 +587,11 @@ impl CadCommand for SurfacePointCommand {
                 };
                 self.description = d.clone();
                 let (at, z) = self.queue.pop_front()?;
-                if let CmdResult::Done = self.ask_next() {
-                    return Some(CmdResult::AddCogoPoints { points: vec![(at, d, Some(z))], lines: Vec::new(), done: true });
-                }
-                Some(CmdResult::AddCogoPoint { position: at, description: d, elevation: Some(z), echo: false, then: None })
+                let then = match self.ask_next() {
+                    CmdResult::ReportMessage(line) => Some(line),
+                    _ => None,
+                };
+                Some(CmdResult::AddCogoPoint { position: at, description: d, elevation: Some(z), echo: false, then })
             }
         }
     }

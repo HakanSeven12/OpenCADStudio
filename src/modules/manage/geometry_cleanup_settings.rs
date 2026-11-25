@@ -20,7 +20,7 @@ pub const MIN_TOLERANCE: f64 = 0.0001;
 const ABSOLUTE_ANGLE: &str = "absolute-angle";
 const RELATIVE_ANGLE: &str = "relative-angle";
 
-/// The angle rows of a new profile (AutoCAD's): 0° and 90° for each angle
+/// The angle rows of a new profile: 0° and 90° for each angle
 /// type, with a tolerance of 5°.
 const DEFAULT_ANGLES: [(&str, &str); 4] = [
     (ABSOLUTE_ANGLE, "0"),

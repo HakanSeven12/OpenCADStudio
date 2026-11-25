@@ -107,7 +107,7 @@ fn a_tolerance_of_zero_in_a_file_becomes_the_minimum() {
 }
 
 #[test]
-fn the_proposed_settings_have_the_angle_rows_of_autocad() {
+fn the_proposed_settings_have_the_default_angle_rows() {
     assert_eq!(
         CleanupSettings::proposed(0.4),
         CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap()

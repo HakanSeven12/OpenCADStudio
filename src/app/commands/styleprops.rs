@@ -903,6 +903,16 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
 
+            // ── SNAPANG — bare form asks for a number or two points ─────
+            // The picked direction becomes the angle; `SNAPANG <value>` and
+            // SETVAR still set it through the variable arm below.
+            "SNAPANG" => {
+                use crate::modules::view::snapang_cmd::SnapAngCommand;
+                let c = SnapAngCommand::new(self.snap_angle_deg);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+
             // ── SETVAR — read / write system variables ───────────────────
             // SETVAR <name>          → report the value
             // SETVAR <name> <value>  → set it
@@ -5085,6 +5095,59 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
+    }
+
+    /// Through the messages the command line sends when the user presses Enter.
+    fn typed(app: &mut OpenCADStudio, line: &str) {
+        let _ = app.update(crate::app::Message::CommandInput(line.to_string()));
+        let _ = app.update(crate::app::Message::CommandSubmit);
+    }
+
+    /// Bare `SNAPANG` takes a typed angle, or the direction of two points as
+    /// an angle prompt does in other CAD programs; Enter keeps the angle.
+    #[test]
+    fn snapang_takes_a_typed_angle_or_two_points() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        typed(&mut app, "SNAPANG");
+        assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "SNAPANG");
+        typed(&mut app, "30");
+        assert_eq!(app.snap_angle_deg, 30.0);
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        // Two points: the second one relative to the first.
+        typed(&mut app, "SNAPANG");
+        typed(&mut app, "100,100");
+        assert!(
+            app.tabs[i].active_cmd.is_some(),
+            "waits for the second point"
+        );
+        typed(&mut app, "@10<135");
+        assert!(
+            (app.snap_angle_deg - 135.0).abs() < 1e-3,
+            "{}",
+            app.snap_angle_deg
+        );
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        // Enter keeps it, and so does text that is neither.
+        typed(&mut app, "SNAPANG");
+        typed(&mut app, "ABC");
+        assert!(app.tabs[i].active_cmd.is_some(), "asks again");
+        typed(&mut app, "");
+        assert!(app.tabs[i].active_cmd.is_none());
+        assert!((app.snap_angle_deg - 135.0).abs() < 1e-3);
+
+        // One line, as a script or the automation feeder sends it.
+        let _ = app.run_command_line("SNAPANG 0,0 0,10");
+        assert!(
+            (app.snap_angle_deg - 90.0).abs() < 1e-3,
+            "{}",
+            app.snap_angle_deg
+        );
+        let _ = app.run_command_line("SNAPANG 15");
+        assert_eq!(app.snap_angle_deg, 15.0);
     }
 
     /// `SETVAR ZOOMFACTOR` is the system variable, so it keeps the range

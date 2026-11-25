@@ -16,6 +16,7 @@ pub mod plot_window;
 mod properties_palette;
 pub mod quick_print;
 mod sheetset;
+pub mod snapang_cmd;
 mod tile_horiz;
 mod tile_vert;
 mod tool_palettes;

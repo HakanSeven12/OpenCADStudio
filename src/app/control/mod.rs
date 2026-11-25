@@ -2,7 +2,7 @@
 use super::{Message, OpenCADStudio};
 use crate::command::{InputKind, StepInput};
 use iced::Task;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{collections::VecDeque, sync::OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 mod transport;
@@ -1185,13 +1185,12 @@ impl OpenCADStudio {
             let mut busy = failure("command_busy", "An interactive command is already active");
             busy["command"] = json!(tab.active_cmd.as_ref().map(|command| command.name()));
             busy["document_id"] = json!(tab.id);
-            busy["owner_client_id"] = json!(
-                self.control
-                    .owner
-                    .as_ref()
-                    .filter(|(owner_tab, _)| *owner_tab == tab.id)
-                    .map(|(_, owner)| owner.clone())
-            );
+            busy["owner_client_id"] = json!(self
+                .control
+                .owner
+                .as_ref()
+                .filter(|(owner_tab, _)| *owner_tab == tab.id)
+                .map(|(_, owner)| owner.clone()));
             return (busy, Task::none());
         }
         if (matches!(op, "run" | "start" | "input") || offscreen_capture_req) && tab.is_start {
@@ -1500,10 +1499,16 @@ impl OpenCADStudio {
             "panel_input" => self.control_panel_input(req)?,
             "panel_button" => self.control_panel_button(req)?,
             "panel_action" => self.control_panel_action(req)?,
-            // S08: the surface facade's activation rides the same route as
-            // the GUI gesture (one PanelEventRouter, one delivery); the
-            // control envelope owns request_id idempotency.
-            "plugin_panel_action" => return Err(self.automation_op_inner(&req.to_string())),
+            // The surface facade's activation rides the same route as the GUI
+            // gesture; the control envelope owns request_id idempotency.
+            "plugin_panel_action" => {
+                let result = self.automation_op_inner(&req.to_string());
+                if result["ok"] != true {
+                    return Err(result);
+                }
+                self.set_control_result(result);
+                Task::none()
+            }
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
             "dgn_import" => self.control_dgn_import(req)?,
@@ -2647,12 +2652,10 @@ mod tests {
         );
         let started = request(&mut app, json!({"op":"start","cmd":"LINE"}));
         assert_eq!(started["status"], "waiting_input");
-        assert!(
-            started["state"]["command"]["accepts"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("point"))
-        );
+        assert!(started["state"]["command"]["accepts"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("point")));
         assert_eq!(
             started["state"]["command"]["input_example"]["kind"],
             "point"
@@ -2677,12 +2680,10 @@ mod tests {
         );
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 1);
         request(&mut app, json!({"op":"select","type":"LINE"}));
-        assert!(
-            !app.control_properties()["sections"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(!app.control_properties()["sections"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         let changed = request(&mut app, json!({"op":"property","field":"color","value":1}));
         assert_eq!(changed["ok"], true, "{changed}");
         assert_eq!(
@@ -2705,7 +2706,7 @@ mod tests {
     #[test]
     fn control_dynamic_text_reads_back_in_every_length_format() {
         use crate::app::block_parameter_properties::parse_value;
-        use crate::entities::common::{UnitContext, set_unit_context};
+        use crate::entities::common::{set_unit_context, UnitContext};
 
         set_unit_context(UnitContext {
             lunits: 5,
@@ -2726,9 +2727,9 @@ mod tests {
     fn control_property_reads_dynamic_rows_as_scalars_and_sets_them_by_id() {
         use crate::scene::block_actions as actions;
         use crate::scene::block_distance_parameter as distance;
-        use document::EntityType;
         use document::entities::{Insert, Line};
         use document::types::Vector3;
+        use document::EntityType;
 
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
@@ -2874,9 +2875,9 @@ mod tests {
     #[test]
     fn control_property_sets_dynamic_visibility_with_tooltip() {
         use crate::scene::block_visibility;
-        use document::EntityType;
         use document::entities::{Insert, Line};
         use document::types::Vector3;
+        use document::EntityType;
 
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
@@ -2958,11 +2959,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let handle =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let before = app.control_state()["selection_revision"].as_u64().unwrap();
         let selected = app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
         assert_eq!(selected["ok"], true, "{selected}");
@@ -3041,11 +3042,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let handle =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         request(&mut app, json!({"op":"run","cmd":"ALIGN"}));
         let malformed = request(
@@ -3194,11 +3195,11 @@ mod tests {
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
         request(&mut app, json!({"op":"run","cmd":"CIRCLE 5,5 2"}));
-        let circle =
-            request(&mut app, json!({"op":"query","type":"Circle"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let circle = request(&mut app, json!({"op":"query","type":"Circle"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let constraints = |app: &OpenCADStudio| {
             app.tabs[app.active_tab]
                 .scene
@@ -3347,13 +3348,13 @@ mod tests {
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,5 4,5"}));
-        let handles: Vec<String> =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|entity| entity["handle"].as_str().unwrap().to_string())
-                .collect();
+        let handles: Vec<String> = request(&mut app, json!({"op":"query","type":"Line"}))
+            ["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect();
         assert_eq!(handles.len(), 2);
         let constraints = |app: &OpenCADStudio| {
             app.tabs[app.active_tab]
@@ -3421,11 +3422,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let handle =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let revision = |app: &OpenCADStudio| app.tabs[app.active_tab].scene.geometry_epoch;
         let mut moved: Vec<(&str, u64)> = Vec::new();
         let mut check = |app: &mut OpenCADStudio, label: &'static str, before: u64| {
@@ -3513,11 +3514,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let handle =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         request(&mut app, json!({"op":"select","handles":[&handle]}));
         request(&mut app, json!({"op":"run","cmd":"GCHORIZONTAL"}));
         let id = app.tabs[app.active_tab]
@@ -3526,11 +3527,9 @@ mod tests {
             .and_then(|set| set.constraints.last())
             .map(|constraint| constraint.id)
             .expect("the horizontal constraint was created");
-        assert!(
-            app.tabs[app.active_tab]
-                .scene
-                .is_parametric_constraint_visible(ParametricScope::ModelSpace, id)
-        );
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .is_parametric_constraint_visible(ParametricScope::ModelSpace, id));
 
         let hidden = request(&mut app, json!({"op":"run","cmd":"GCHIDE"}));
         assert_eq!(hidden["ok"], true, "{hidden}");
@@ -3604,11 +3603,9 @@ mod tests {
             .and_then(|set| set.constraints.last())
             .map(|constraint| constraint.id)
             .expect("the horizontal constraint was created in the definition");
-        assert!(
-            app.tabs[i]
-                .scene
-                .is_parametric_constraint_visible(ParametricScope::Block(definition), id)
-        );
+        assert!(app.tabs[i]
+            .scene
+            .is_parametric_constraint_visible(ParametricScope::Block(definition), id));
 
         let hidden = request(&mut app, json!({"op":"start","cmd":"GCHIDE"}));
         assert_eq!(hidden["ok"], true, "{hidden}");
@@ -3632,13 +3629,13 @@ mod tests {
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,5 10,5"}));
-        let handles: Vec<String> =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|entity| entity["handle"].as_str().unwrap().to_string())
-                .collect();
+        let handles: Vec<String> = request(&mut app, json!({"op":"query","type":"Line"}))
+            ["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect();
         for handle in &handles {
             request(&mut app, json!({"op":"select","handles":[handle]}));
             request(&mut app, json!({"op":"run","cmd":"GCHORIZONTAL"}));
@@ -3656,11 +3653,9 @@ mod tests {
             request(&mut app, json!({"op":"select","handles":[handle]}));
             request(&mut app, json!({"op":"run","cmd":"GCHIDE"}));
         }
-        assert!(ids.iter().all(|id| {
-            !app.tabs[app.active_tab]
-                .scene
-                .is_parametric_constraint_visible(ParametricScope::ModelSpace, *id)
-        }));
+        assert!(ids.iter().all(|id| !app.tabs[app.active_tab]
+            .scene
+            .is_parametric_constraint_visible(ParametricScope::ModelSpace, *id)));
 
         request(&mut app, json!({"op":"select","handles":[&handles[0]]}));
         request(&mut app, json!({"op":"run","cmd":"GCRESET"}));
@@ -3729,11 +3724,11 @@ mod tests {
             .iter()
             .map(|entity| entity["handle"].as_str().unwrap().to_string())
             .collect();
-        let circle =
-            request(&mut app, json!({"op":"query","type":"Circle"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let circle = request(&mut app, json!({"op":"query","type":"Circle"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let constraints = |app: &OpenCADStudio| {
             app.tabs[app.active_tab]
                 .scene
@@ -3828,11 +3823,11 @@ mod tests {
         // One object the distance alias cannot measure: refuse, and name the
         // objects it does accept.
         request(&mut app, json!({"op":"run","cmd":"POINT 5,5"}));
-        let point =
-            request(&mut app, json!({"op":"query","type":"Point"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let point = request(&mut app, json!({"op":"query","type":"Point"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         request(&mut app, json!({"op":"select","handles":[&point]}));
         let unmeasurable = request(&mut app, json!({"op":"run","cmd":"DCONSTRAINT"}));
         assert_eq!(
@@ -4006,11 +4001,9 @@ mod tests {
             "a repeated answer leaves no phantom undo step: {undone}"
         );
         request(&mut app, json!({"op":"run","cmd":"REDO"}));
-        assert!(
-            app.tabs[app.active_tab]
-                .scene
-                .dimension_is_annotational(dimension)
-        );
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .dimension_is_annotational(dimension));
 
         // And back, so the conversion works both ways.
         request(
@@ -4655,12 +4648,10 @@ mod tests {
         assert_eq!(measurement["bounds"], json!({"min":min,"max":max}));
         for field in ["min", "max"] {
             for axis in 0..3 {
-                assert!(
-                    measurement["bounds"][field][axis]
-                        .as_f64()
-                        .unwrap()
-                        .is_finite()
-                );
+                assert!(measurement["bounds"][field][axis]
+                    .as_f64()
+                    .unwrap()
+                    .is_finite());
             }
         }
         assert!(measurement["mesh"].is_null());
@@ -4962,9 +4953,9 @@ mod tests {
     #[test]
     fn block_edit_changes_dialog_is_answerable_through_the_automation_bridge() {
         use crate::app::ModalKind;
-        use document::EntityType;
         use document::entities::{Insert, Line};
         use document::types::Vector3;
+        use document::EntityType;
 
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
@@ -5016,9 +5007,9 @@ mod tests {
     #[test]
     fn write_block_dialog_is_answerable_through_the_automation_bridge() {
         use crate::app::ModalKind;
-        use document::EntityType;
         use document::entities::Line;
         use document::types::Vector3;
+        use document::EntityType;
 
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
@@ -5802,12 +5793,11 @@ mod tests {
 
         // The pick itself stays entity-based: selecting the line + Enter still
         // answers the request — the marker must not break selection.
-        let handle =
-            app.automation_op(r#"{"op":"query","type":"LINE","detail":"summary"}"#)["entities"][0]
-                ["handle"]
-                .as_str()
-                .unwrap()
-                .to_owned();
+        let handle = app.automation_op(r#"{"op":"query","type":"LINE","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let value = u64::from_str_radix(&handle, 16).unwrap();
         app.tabs[i]
             .scene
@@ -5823,23 +5813,21 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,10"}));
-        let line =
-            app.automation_op(r#"{"op":"query","type":"LINE","detail":"summary"}"#)["entities"][0]
-                ["handle"]
-                .as_str()
-                .unwrap()
-                .to_owned();
+        let line = app.automation_op(r#"{"op":"query","type":"LINE","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         // A title-block-style definition with one placed reference.
         request(
             &mut app,
             json!({"op":"block_define","name":"A3","base":[0,0],"handles":[line]}),
         );
-        let insert =
-            app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)["entities"]
-                [0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_owned();
+        let insert = app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         app.automation_op(&format!(r#"{{"op":"select","handles":["{insert}"]}}"#));
         let read = request(&mut app, json!({"op":"get_selection"}));
         assert_eq!(read["status"], "completed", "{read}");
@@ -5999,12 +5987,10 @@ mod tests {
             } else {
                 assert!(flags.len() > 1);
                 assert!(flags[model_index]);
-                assert!(
-                    flags
-                        .iter()
-                        .enumerate()
-                        .all(|(index, vp)| { index == model_index || !vp })
-                );
+                assert!(flags
+                    .iter()
+                    .enumerate()
+                    .all(|(index, vp)| { index == model_index || !vp }));
             }
             let _ = std::fs::remove_file(&path);
         }
@@ -6611,11 +6597,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let first =
-            app.control_request(json!({"op":"query","type":"Line"})).0["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let first = app.control_request(json!({"op":"query","type":"Line"})).0["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         request(&mut app, json!({"op":"run","cmd":"LINE 20,0 30,0"}));
         let lines = app.control_request(json!({"op":"query","type":"Line"})).0;
         let second = lines["entities"]

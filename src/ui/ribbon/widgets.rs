@@ -492,6 +492,9 @@ pub(super) fn is_active_tool(id: &str, active_tool: &Option<String>, state: &Tog
         "FILETAB" => state.show_file_tabs,
         "LAYOUTTAB" => state.show_layout_tabs,
         "TOGGLEGROUPS" => state.group_selection,
+        "SURFACEASSOCIATIVITY" => crate::scene::model::sweep_model::surface_associativity(),
+        "SURFACEMODELINGMODE" => crate::app::surface_modeling_mode() == 1,
+        "SURFACEAUTOTRIM" => crate::modules::mesh::var("SURFACEAUTOTRIM") != 0.0,
         id => active_tool.as_deref() == Some(id) || super::text_editor::lit(id),
     }
 }

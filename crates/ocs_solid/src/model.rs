@@ -878,7 +878,16 @@ pub fn aabb(brep: &Brep) -> Option<crate::geometry::Aabb> {
 /// A closed polyhedron: `faces` polygons (vertex indices running counter-clockwise seen from
 /// outside) on `vertices`, assembled into a solid.
 pub fn faceted_solid(vertices: &[[f64; 3]], faces: &[Vec<usize>]) -> Option<Brep> {
-    use solidcore_step::assembly::{Assembly, Bound, Kind};
+    faceted(vertices, faces, solidcore_step::assembly::Kind::Solid)
+}
+
+/// A surface model of planar `faces` on `vertices`, open or closed.
+pub fn faceted_sheet(vertices: &[[f64; 3]], faces: &[Vec<usize>]) -> Option<Brep> {
+    faceted(vertices, faces, solidcore_step::assembly::Kind::Model)
+}
+
+fn faceted(vertices: &[[f64; 3]], faces: &[Vec<usize>], kind: solidcore_step::assembly::Kind) -> Option<Brep> {
+    use solidcore_step::assembly::{Assembly, Bound};
     static TRACED: crate::geometry::Traced = crate::geometry::Traced;
     let mut assembly = Assembly::new(1e-6, Some(&TRACED));
     let ids: Vec<u32> = vertices.iter().map(|p| assembly.add_vertex(*p).ok()).collect::<Option<_>>()?;
@@ -914,5 +923,5 @@ pub fn faceted_solid(vertices: &[[f64; 3]], faces: &[Vec<usize>]) -> Option<Brep
         let added = assembly.add_face(index as u64, surface, vec![Bound::Edges(uses)], Some(0), true).ok()?;
         shell.push((added, true));
     }
-    assembly.finish(0, String::new(), vec![shell], Kind::Solid).ok().map(|solid| solid.brep)
+    assembly.finish(0, String::new(), vec![shell], kind).ok().map(|solid| solid.brep)
 }

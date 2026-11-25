@@ -23,6 +23,22 @@ fn tool(id: &'static str, label: &'static str, icon: IconKind) -> RibbonItem {
     })
 }
 
+macro_rules! model_icon {
+    ($name:literal) => {
+        IconKind::Svg(include_bytes!(concat!("../../../assets/icons/model/", $name, ".svg")))
+    };
+}
+
+/// A tool `id` that runs `command` (a menu macro: `;` is Enter).
+fn command(id: &'static str, command: &'static str, label: &'static str, icon: IconKind) -> ToolDef {
+    ToolDef {
+        id,
+        label,
+        icon,
+        event: ModuleEvent::Command(command.to_string()),
+    }
+}
+
 fn small(id: &'static str, label: &'static str, icon: IconKind) -> RibbonItem {
     RibbonItem::LabeledTool(ToolDef {
         id,
@@ -53,6 +69,8 @@ pub const COMMANDS: &[&str] = &[
     "CVREBUILD",
     "3DEDITBAR",
     "PROJECTGEOMETRY",
+    "OFFSETEDGE",
+    "EXTRACTINTERSECTIONS",
     "ANALYSISZEBRA",
     "ANALYSISCURVATURE",
     "ANALYSISDRAFT",
@@ -79,6 +97,10 @@ const EXTRACT_OPTIONS: &[Opt] = &[
 
 const CV_OPTIONS: &[Opt] = &[
     Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Direction of the control vertex row (0 U, 1 V)", kind: OptKind::Number },
+];
+
+const CORNER_OPTIONS: &[Opt] = &[
+    Opt { label: "Corner", keyword: "C", key: "rounded", prompt: "Corner type (0 sharp, 1 rounded)", kind: OptKind::Number },
 ];
 
 const ANALYSIS_OPTIONS: &[Opt] = &[
@@ -149,6 +171,12 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Picks { prompt: "Select point on a NURBS surface:", slot: 0, once: true },
             Step::Point { prompt: "Specify new location:" },
         ],
+        "OFFSETEDGE" => vec![
+            Step::Picks { prompt: "Select face:", slot: 0, once: true },
+            Step::Point { prompt: "Specify through point:" },
+            Step::Accept { prompt: "Press Enter to create the offset or [Corner]:", options: CORNER_OPTIONS },
+        ],
+        "EXTRACTINTERSECTIONS" => vec![Step::Objects { prompt: "Select surfaces or solids:", filter: Bodies, slot: 0 }],
         "PROJECTGEOMETRY" => vec![
             Step::Objects { prompt: "Select curves to project:", filter: Curves, slot: 0 },
             Step::Picks { prompt: "Select a surface or solid face to project onto:", slot: 0, once: true },
@@ -179,48 +207,62 @@ impl CadModule for SurfaceModule {
                     title: "Create",
                     tools: vec![
                         tool("SURFNETWORK", "Network", icon!("network")),
-                        tool("PLANESURF", "Planar", icon!("planesurf")),
+                        RibbonItem::LabeledTool(command("LOFT", "LOFT;MO;SU", "Loft", model_icon!("loft"))),
+                        RibbonItem::LabeledTool(command("SWEEP", "SWEEP;MO;SU", "Sweep", model_icon!("sweep"))),
+                        small("PLANESURF", "Planar", icon!("planesurf")),
+                        RibbonItem::LabeledTool(command("EXTRUDE", "EXTRUDE;MO;SU", "Extrude", model_icon!("extrude"))),
+                        RibbonItem::LabeledTool(command("REVOLVE", "REVOLVE;MO;SU", "Revolve", model_icon!("revolve"))),
                         tool("SURFBLEND", "Blend", icon!("blend")),
                         tool("SURFPATCH", "Patch", icon!("patch")),
                         tool("SURFOFFSET", "Offset", icon!("offset")),
+                        RibbonItem::LargeTool(command("SURFACEASSOCIATIVITY", "SURFACEASSOCIATIVITY TOGGLE", "Surface Associativity", icon!("associativity"))),
+                        RibbonItem::LargeTool(command("SURFACEMODELINGMODE", "SURFACEMODELINGMODE TOGGLE", "NURBS Creation", icon!("nurbscreation"))),
                     ],
                 },
                 RibbonGroup {
                     title: "Edit",
                     tools: vec![
                         tool("SURFFILLET", "Fillet", icon!("fillet")),
-                        small("SURFTRIM", "Trim", icon!("trim")),
+                        tool("SURFTRIM", "Trim", icon!("trim")),
                         small("SURFUNTRIM", "Untrim", icon!("untrim")),
                         small("SURFEXTEND", "Extend", icon!("extend")),
-                        tool("SURFSCULPT", "Sculpt", icon!("sculpt")),
+                        small("SURFSCULPT", "Sculpt", icon!("sculpt")),
+                        small("EXTRACTINTERSECTIONS", "Extract Intersections", icon!("extractintersections")),
+                        small("OFFSETEDGE", "Offset Edge", icon!("offsetedge")),
                     ],
                 },
                 RibbonGroup {
                     title: "Control Vertices",
                     tools: vec![
-                        small("CVSHOW", "Show CV", icon!("cvshow")),
-                        small("CVHIDE", "Hide CV", icon!("cvhide")),
-                        small("CONVTONURBS", "Convert to NURBS", icon!("convtonurbs")),
+                        tool("3DEDITBAR", "CV Edit Bar", icon!("editbar")),
+                        tool("CONVTONURBS", "Convert to NURBS", icon!("convtonurbs")),
+                        tool("CVSHOW", "Show CV", icon!("cvshow")),
+                        tool("CVHIDE", "Hide CV", icon!("cvhide")),
                         small("CVREBUILD", "Rebuild", icon!("cvrebuild")),
                         small("CVADD", "Add", icon!("cvadd")),
                         small("CVREMOVE", "Remove", icon!("cvremove")),
-                        tool("3DEDITBAR", "CV Edit Bar", icon!("editbar")),
                     ],
                 },
                 RibbonGroup {
                     title: "Curves",
+                    tools: vec![tool("SURFEXTRACTCURVE", "Extract Isolines", icon!("extractcurve"))],
+                },
+                RibbonGroup {
+                    title: "Project Geometry",
                     tools: vec![
-                        tool("SURFEXTRACTCURVE", "Extract", icon!("extractcurve")),
-                        tool("PROJECTGEOMETRY", "Project Geometry", icon!("projectgeometry")),
+                        RibbonItem::LargeTool(command("SURFACEAUTOTRIM", "SURFACEAUTOTRIM TOGGLE", "Auto Trim", icon!("autotrim"))),
+                        RibbonItem::LabeledTool(command("PROJECTGEOMETRY UCS", "PROJECTGEOMETRY UCS", "Project to UCS", icon!("projectucs"))),
+                        RibbonItem::LabeledTool(command("PROJECTGEOMETRY VIEW", "PROJECTGEOMETRY VIEW", "Project to View", icon!("projectview"))),
+                        RibbonItem::LabeledTool(command("PROJECTGEOMETRY POINTS", "PROJECTGEOMETRY POINTS", "Project to 2 Points", icon!("project2points"))),
                     ],
                 },
                 RibbonGroup {
                     title: "Analysis",
                     tools: vec![
+                        tool("ANALYSISOPTIONS", "Analysis Options", icon!("analysisoptions")),
                         small("ANALYSISZEBRA", "Zebra", icon!("zebra")),
                         small("ANALYSISCURVATURE", "Curvature", icon!("curvature")),
                         small("ANALYSISDRAFT", "Draft", icon!("draft")),
-                        small("ANALYSISOPTIONS", "Analysis Options", icon!("analysisoptions")),
                     ],
                 },
             ]

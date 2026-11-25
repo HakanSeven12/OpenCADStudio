@@ -62,6 +62,12 @@ fn tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
     }
 }
 
+/// The tool run in Solid mode: the Surface tab's tools leave the creation mode at Surface.
+fn solid_mode(mut tool: ToolDef) -> ToolDef {
+    tool.event = ModuleEvent::Command(format!("{};MO;SO", tool.id));
+    tool
+}
+
 impl CadModule for ModelModule {
     fn id(&self) -> &'static str {
         "model"
@@ -93,10 +99,10 @@ impl CadModule for ModelModule {
                             ],
                             default: "BOX",
                         },
-                        RibbonItem::LargeTool(tool("EXTRUDE", "Extrude", EXTRUDE_ICON)),
-                        RibbonItem::LargeTool(tool("REVOLVE", "Revolve", REVOLVE_ICON)),
-                        RibbonItem::LargeTool(tool("LOFT", "Loft", LOFT_ICON)),
-                        RibbonItem::LargeTool(tool("SWEEP", "Sweep", SWEEP_ICON)),
+                        RibbonItem::LargeTool(solid_mode(tool("EXTRUDE", "Extrude", EXTRUDE_ICON))),
+                        RibbonItem::LargeTool(solid_mode(tool("REVOLVE", "Revolve", REVOLVE_ICON))),
+                        RibbonItem::LargeTool(solid_mode(tool("LOFT", "Loft", LOFT_ICON))),
+                        RibbonItem::LargeTool(solid_mode(tool("SWEEP", "Sweep", SWEEP_ICON))),
                         RibbonItem::LargeTool(tool("PRESSPULL", "Presspull", PRESSPULL_ICON)),
                     ],
                 },

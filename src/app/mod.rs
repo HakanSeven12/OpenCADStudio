@@ -98,7 +98,13 @@ mod model_ops;
 mod civil;
 mod civil_packages;
 mod civil_query;
+mod meshing;
 mod surfacing;
+
+/// SURFACEMODELINGMODE: 0 makes procedural surfaces, 1 NURBS surfaces.
+pub(crate) fn surface_modeling_mode() -> i16 {
+    surfacing::modeling_mode()
+}
 mod solid_edit_ops;
 mod mtext_editor;
 pub(crate) use mtext_editor::prefs as mtext_prefs;

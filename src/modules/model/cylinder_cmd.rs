@@ -73,6 +73,8 @@ pub struct CylinderCommand {
     minor_radius: f64,
     remembered: Defaults,
     plane: WorkingPlane,
+    /// MESH CYLINDER: a mesh of the cylinder's size instead of a solid.
+    mesh: bool,
 }
 
 impl Default for CylinderCommand {
@@ -91,6 +93,21 @@ impl CylinderCommand {
             minor_radius: remembered.minor_radius,
             remembered,
             plane: WorkingPlane::default(),
+            mesh: false,
+        }
+    }
+
+    /// The command making a mesh cylinder.
+    pub fn as_mesh(mut self) -> Self {
+        self.mesh = true;
+        self
+    }
+
+    fn finish(&self, result: CmdResult) -> CmdResult {
+        if self.mesh {
+            crate::modules::mesh::mesh_instead(result)
+        } else {
+            result
         }
     }
 
@@ -219,12 +236,12 @@ impl CylinderCommand {
         let mut entity = Solid3D::new();
         entity.set_sat_document(&document);
         entity.wires = solid_model::edge_wires(&solid);
-        CmdResult::CommitSolid {
+        self.finish(CmdResult::CommitSolid {
             entity: EntityType::Solid3D(entity),
             solid: Box::new(solid),
             history,
             erase_source: None,
-        }
+        })
     }
 
     fn commit_height(&self, height: f64) -> CmdResult {

@@ -351,6 +351,15 @@ impl MeasuredCurve {
     }
 }
 
+/// `n` equal-length steps along the curve `entity`: its n + 1 points (the last the first
+/// again on a closed curve), and whether it is closed.
+pub fn points_along(entity: &EntityType, n: usize) -> Option<(Vec<[f64; 3]>, bool)> {
+    let (curve, total) = measurable(entity)?;
+    let n = n.max(1);
+    let points = (0..=n).map(|k| curve.point_at_distance(total * k as f64 / n as f64)).collect();
+    Some((points, curve.is_closed()))
+}
+
 fn measurable(entity: &EntityType) -> Option<(MeasuredCurve, f64)> {
     let (curve, total) = if let Some(curve) = entity_curve(entity) {
         let total = curve.length();

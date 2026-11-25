@@ -142,7 +142,7 @@ fn entity_record_curves(entity: &EntityType) -> Option<Vec<Span>> {
 
 impl OpenCADStudio {
     /// The B-rep of a surface, solid or region.
-    fn surfacing_body(&mut self, i: usize, handle: Handle) -> Option<Brep> {
+    pub(super) fn surfacing_body(&mut self, i: usize, handle: Handle) -> Option<Brep> {
         self.tabs[i].scene.restore_solid_models(&[handle]);
         if let Some(body) = self.tabs[i].scene.solid_models.get(&handle) {
             return Some(body.clone());
@@ -210,7 +210,7 @@ impl OpenCADStudio {
     }
 
     /// The face of `handle`'s body at `point` (its only face for a one-face surface).
-    fn surfacing_face(&mut self, i: usize, handle: Handle, point: DVec3) -> Option<(Brep, u32)> {
+    pub(super) fn surfacing_face(&mut self, i: usize, handle: Handle, point: DVec3) -> Option<(Brep, u32)> {
         let body = self.surfacing_body(i, handle)?;
         let face = ocs_solid::model::face_at_point(&body, point.to_array(), f64::INFINITY)
             .or_else(|| (body.faces.len() == 1).then_some(0))?;
@@ -236,6 +236,8 @@ impl OpenCADStudio {
         let name = request.command;
         let outcome = if crate::modules::civil::COMMANDS.contains(&name) {
             self.civil(i, &request)
+        } else if super::meshing::is_mesh_command(name) {
+            self.meshing(i, &request)
         } else {
             self.surfacing(i, &request)
         };
@@ -507,7 +509,18 @@ impl OpenCADStudio {
                 let (handle, point) = picked(0).ok_or("no target picked")?;
                 let (body, face) = self.surfacing_face(i, handle, point).ok_or("the target is no surface or solid face")?;
                 let curves: Vec<Span> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
-                let direction = self.surfacing_ucs_z(i).to_array();
+                let direction = match req.value("project", 0.0) as i32 {
+                    1 => {
+                        let camera = self.tabs[i].scene.camera.borrow().clone();
+                        (camera.rotation * glam::Vec3::NEG_Z).as_dvec3()
+                    }
+                    2 => match req.points[..] {
+                        [from, to, ..] if from.distance(to) > 0.0 => to - from,
+                        _ => return Err(crate::t!("The two points must differ.").into_owned()),
+                    },
+                    _ => self.surfacing_ucs_z(i),
+                }
+                .to_array();
                 let projected = surfacing::project(&body, face, &curves, direction).map_err(refused)?;
                 let entities: Vec<EntityType> = projected
                     .iter()
@@ -517,9 +530,31 @@ impl OpenCADStudio {
                     return Err(crate::t!("Nothing projects onto the target.").into_owned());
                 }
                 self.push_undo_snapshot(i, name);
+                // SURFACEAUTOTRIM: a surface loses the area the projected curves enclose.
+                let trimmed = crate::modules::mesh::var("SURFACEAUTOTRIM") != 0.0
+                    && matches!(self.tabs[i].scene.document.get_entity(handle), Some(EntityType::Surface(_)))
+                    && {
+                        let middle = projected
+                            .iter()
+                            .filter_map(|(c, span)| ocs_solid::geometry::point_on(c, (span[0] + span[1]) / 2.0))
+                            .fold((DVec3::ZERO, 0usize), |(sum, n), p| (sum + DVec3::from_array(p), n + 1));
+                        let inside = (middle.0 / middle.1.max(1) as f64).to_array();
+                        surfacing::trim(&body, face, &projected, inside)
+                            .ok()
+                            .is_some_and(|cut| self.surfacing_replace(i, handle, cut, None))
+                    };
+                if trimmed {
+                    return Ok(crate::t!("The surface was trimmed by the projected curves.").into_owned());
+                }
                 let count = self.commit_new_curves(entities);
                 Ok(crate::tf!("{count} curve(s) projected.").into_owned())
             }
+            "OFFSETEDGE" => {
+                let (handle, at) = picked(0).ok_or("no face picked")?;
+                let through = *req.points.first().ok_or("no through point")?;
+                self.offset_edge(i, handle, at, through, req.value("rounded", 0.0) != 0.0)
+            }
+            "EXTRACTINTERSECTIONS" => self.extract_intersections(i, &req.objects[0]),
             "ANALYSISZEBRA" | "ANALYSISCURVATURE" | "ANALYSISDRAFT" => {
                 let mode = match name {
                     "ANALYSISZEBRA" => crate::scene::analysis::Mode::Zebra,
@@ -588,14 +623,24 @@ impl OpenCADStudio {
             .chain(crate::modules::civil::COMMANDS)
             .copied()
             .find(|c| *c == verb)?;
-        let steps = crate::modules::surface::steps(name).or_else(|| crate::modules::civil::steps(name))?;
+        let mut steps = crate::modules::surface::steps(name).or_else(|| crate::modules::civil::steps(name))?;
+        // PROJECTGEOMETRY projects along the UCS z axis, the view direction, or two points.
+        let project = match rest.to_ascii_uppercase().as_str() {
+            "V" | "VIEW" => 1.0,
+            "P" | "POINTS" => 2.0,
+            _ => 0.0,
+        };
+        if name == "PROJECTGEOMETRY" && project == 2.0 {
+            steps.push(crate::modules::surface::command::Step::Point { prompt: "Specify start point of direction:" });
+            steps.push(crate::modules::surface::command::Step::Point { prompt: "Specify end point of direction:" });
+        }
         let selected = self.tabs[i]
             .scene
             .selected_entities()
             .into_iter()
             .map(|(handle, entity)| (handle, entity.clone()))
             .collect();
-        let mut command = crate::modules::surface::command::SurfaceCommand::new(name, steps, selected);
+        let mut command = crate::modules::surface::command::SurfaceCommand::new(name, steps, selected).with_value("project", project);
         if command.ready() {
             return Some(self.handle_surfacing(command.take_request()));
         }

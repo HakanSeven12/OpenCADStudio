@@ -340,7 +340,7 @@ impl super::OpenCADStudio {
         self.add_solid_model_inner(entity, solid, history, true)
     }
 
-    fn add_solid_model_preserving_style(
+    pub(super) fn add_solid_model_preserving_style(
         &mut self,
         entity: EntityType,
         solid: Brep,
@@ -425,7 +425,7 @@ impl super::OpenCADStudio {
         self.add_surface_model_inner(entity, surface, false)
     }
 
-    fn add_surface_model_inner(
+    pub(super) fn add_surface_model_inner(
         &mut self,
         mut entity: EntityType,
         surface: Brep,

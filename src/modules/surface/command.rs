@@ -37,6 +37,15 @@ pub enum Filter {
     Paths,
     /// Lines, 2D and 3D polylines; a step of them may be passed with none selected.
     OptionalPaths,
+    /// Subdivision meshes.
+    Meshes,
+    /// Subdivision meshes, polygon meshes and polyface meshes.
+    AnyMeshes,
+    /// What converts to a subdivision mesh: solids, surfaces, regions, 3D faces, polygon and
+    /// polyface meshes.
+    MeshSources,
+    /// What converts to a surface: meshes, solids and regions.
+    SurfaceSources,
 }
 
 /// The Civil 3D class of `entity`, if it is one.
@@ -78,6 +87,15 @@ impl Filter {
             Filter::SampleLineGroups => |e| civil_class(e) == Some("AECC_SAMPLE_LINE_GROUP"),
             Filter::TinSurfaces => |e| civil_class(e) == Some("AECC_TIN_SURFACE"),
             Filter::FeatureLines => |e| civil_class(e) == Some("AECC_FEATURE_LINE"),
+            Filter::Meshes => |e| matches!(e, EntityType::Mesh(_)),
+            Filter::AnyMeshes => |e| matches!(e, EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_)),
+            Filter::MeshSources => crate::modules::mesh::mesh_source,
+            Filter::SurfaceSources => |e| {
+                matches!(
+                    e,
+                    EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_) | EntityType::Solid3D(_) | EntityType::Region(_)
+                )
+            },
             Filter::Paths | Filter::OptionalPaths => |e| {
                 matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Polyline3D(_))
             },
@@ -317,11 +335,18 @@ impl CadCommand for SurfaceCommand {
             ) => {
                 crate::t!(prompt).into_owned()
             }
-            Some(Step::Value { prompt, key, default }) => format!(
-                "{} <{}>:",
-                crate::t!(prompt),
-                crate::entities::common::format_length(self.current(key, default))
-            ),
+            Some(Step::Value { prompt, key, default }) => {
+                let current = self.current(key, default);
+                let shown = if key == "crease" && current < 0.0 {
+                    crate::t!("Always").into_owned()
+                } else if matches!(key, "start" | "angle" | "level" | "crease") || key.starts_with("DIVMESH") {
+                    // Counts and angles, not lengths.
+                    format!("{current}")
+                } else {
+                    crate::entities::common::format_length(current)
+                };
+                format!("{} <{}>:", crate::t!(prompt), shown)
+            }
             None => String::new(),
         }
     }
@@ -366,6 +391,11 @@ impl CadCommand for SurfaceCommand {
             return Some(CmdResult::NeedPoint);
         }
         match self.step()? {
+            // A crease value may be Always: sharp at every smoothness level.
+            Step::Value { key: "crease", .. } if "ALWAYS".starts_with(&text.to_ascii_uppercase()) => {
+                self.set("crease", -1.0);
+                Some(self.advance())
+            }
             Step::Value { key, .. } => match number(text) {
                 Some(value) => {
                     self.set(key, value);

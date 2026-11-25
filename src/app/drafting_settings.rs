@@ -76,6 +76,25 @@ impl OpenCADStudio {
         self.dyn_mode.abs() & 2 != 0
     }
 
+    /// Show a toggle made outside the open Drafting Settings dialog (the
+    /// status bar, F7, F9) in it: in the checkbox and in the state that the
+    /// dialog opened with, so OK does not set the old state back and the
+    /// toggle alone does not ask to discard changes.
+    pub(in crate::app) fn show_toggle_in_drafting_settings(
+        &mut self,
+        set: impl Fn(&mut DraftingSettingsState),
+    ) {
+        for state in [
+            &mut self.drafting_settings_state,
+            &mut self.drafting_settings_saved,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            set(state);
+        }
+    }
+
     pub(super) fn drafting_settings_dirty(&self) -> bool {
         match (&self.drafting_settings_state, &self.drafting_settings_saved) {
             (Some(curr), Some(saved)) => curr.is_dirty(saved),

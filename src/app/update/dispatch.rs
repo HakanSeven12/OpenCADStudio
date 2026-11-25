@@ -5867,6 +5867,8 @@ impl OpenCADStudio {
             Message::ToggleGridSnap => {
                 self.snapper.toggle_grid_snap();
                 self.sync_vport_display(self.active_tab);
+                let snap_on = self.snapper.grid_snap();
+                self.show_toggle_in_drafting_settings(|state| state.snap_on = snap_on);
                 Task::none()
             }
             Message::ToggleIsometricDrafting => {
@@ -5908,6 +5910,8 @@ impl OpenCADStudio {
             Message::ToggleGrid => {
                 self.show_grid ^= true;
                 self.sync_vport_display(self.active_tab);
+                let grid_on = self.show_grid;
+                self.show_toggle_in_drafting_settings(|state| state.grid_on = grid_on);
                 Task::none()
             }
             Message::ToggleOrtho => {

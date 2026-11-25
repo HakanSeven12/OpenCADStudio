@@ -408,7 +408,13 @@ impl OpenCADStudio {
                     session.saved_active = Some(name);
                 }
             }
-            LayerWalkMsg::ColumnGrab(col) => {
+            LayerWalkMsg::ColumnGrab(col, shown) => {
+                // The drag starts from the width the column shows: a Name
+                // column giving way to a narrow pallet would otherwise jump
+                // to its full width. From then on it keeps the width set.
+                if let Some(w) = self.layer_walk_col_w.get_mut(col) {
+                    *w = shown;
+                }
                 // The dock's pointer capture feeds the drag (see `on_dock`).
                 self.dock_drag = Some(crate::ui::dock::DockDrag::WalkColumn(col));
                 self.dock_drag_last = None;

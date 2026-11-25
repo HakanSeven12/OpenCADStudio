@@ -439,13 +439,11 @@ impl OpenCADStudio {
                     for (kind, list) in lists.iter().enumerate() {
                         let scene = &mut self.tabs[i].scene;
                         gone[kind] = match kind {
-                            pk::BLOCKS => list
-                                .iter()
-                                // The service erases the definition, its
-                                // members, both delimiters and any stale
-                                // draw-order table, as a delete does.
-                                .filter(|n| crate::scene::block_service::erase(scene, n).is_some())
-                                .count(),
+                            // The service erases the definitions, their
+                            // members, both delimiters and any stale
+                            // draw-order table, as a delete does, all in one
+                            // pass.
+                            pk::BLOCKS => crate::scene::block_service::erase_unreferenced(scene, list),
                             pk::ZERO_LENGTH | pk::EMPTY_TEXT => {
                                 let handles: Vec<document::Handle> =
                                     list.iter().filter_map(|n| pk::item_handle(n)).collect();

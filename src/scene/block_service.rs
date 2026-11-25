@@ -377,16 +377,56 @@ fn extension_dictionary(
 /// referenced), so this is one evaluation of the fixed point.
 pub fn purge_candidates(document: &Document, open_edits: &[Handle]) -> Vec<String> {
     let dynamic = dynamic_block_handles(document);
+    let (handles, names) = referenced_blocks(document);
     document
         .block_records
         .iter()
         .filter(|record| {
             protected_reason(document, record, &dynamic).is_none()
                 && !open_edits.contains(&record.handle)
-                && references_of(document, &record.name).is_empty()
+                && !handles.contains(&record.handle)
+                && !names.contains(&record.name.to_ascii_uppercase())
+                && dynamic_variant_references(document, record).is_empty()
         })
         .map(|record| record.name.clone())
         .collect()
+}
+
+/// Every block handle and (upper-case) name the drawing references, in one
+/// pass: what [`references_of`] finds for one record, for all of them. A
+/// per-record scan made PURGE quadratic in blocks x entities (#3231).
+fn referenced_blocks(document: &Document) -> (HashSet<Handle>, HashSet<String>) {
+    let mut handles = HashSet::new();
+    let mut names = HashSet::new();
+    for entity in document.entities() {
+        for use_ in entity_block_uses(document, entity, 1.0) {
+            if !use_.block.is_null() {
+                handles.insert(use_.block);
+            }
+            names.insert(use_.insert.block_name.to_ascii_uppercase());
+        }
+    }
+    for style in document.dim_styles.iter() {
+        handles.extend([style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk]);
+        for name in [&style.dimblk_name, &style.dimblk1_name, &style.dimblk2_name] {
+            names.insert(name.to_ascii_uppercase());
+        }
+    }
+    for object in document.objects.values() {
+        if let ObjectType::MultiLeaderStyle(style) = object {
+            handles.extend(style.arrowhead_handle);
+            handles.extend(style.block_content_handle);
+        }
+    }
+    for line_type in document.line_types.iter() {
+        for symbol in crate::scene::convert::dgn_linestyle::symbol_blocks(document, &line_type.name)
+        {
+            handles.insert(symbol.block);
+        }
+    }
+    handles.remove(&Handle::NULL);
+    names.remove("");
+    (handles, names)
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -460,22 +500,40 @@ pub fn delete(
 pub fn erase(scene: &mut Scene, name: &str) -> Option<usize> {
     let stored = scene.document.block_records.get(name.trim())?.name.clone();
     let references = references_of(&scene.document, &stored);
-    Some(erase_definition(scene, &stored, &references))
+    let inserts: Vec<Handle> = references
+        .iter()
+        .filter(|reference| reference.kind == BlockReferenceKind::Insert)
+        .map(|reference| reference.source)
+        .collect();
+    Some(erase_definitions(scene, &[stored], &inserts))
 }
 
-/// Erase the definition named `stored`: its members, both markers and the
-/// referencing INSERTs in `references`. Returns how many entities went.
-fn erase_definition(scene: &mut Scene, stored: &str, references: &[BlockReference]) -> usize {
-    let Some(record) = scene.document.block_records.get(stored) else {
-        return 0;
-    };
-    let mut victims: Vec<Handle> = record.entity_handles.clone();
-    victims.push(record.block_entity_handle);
-    victims.push(record.block_end_handle);
-    for reference in references {
-        if reference.kind == BlockReferenceKind::Insert {
-            victims.push(reference.source);
+/// Erase several definitions [`purge_candidates`] cleared, in one pass over
+/// the drawing (one at a time, PURGE re-scanned it per block, #3231).
+/// Returns how many of the records were there and went.
+pub fn erase_unreferenced(scene: &mut Scene, names: &[String]) -> usize {
+    let stored: Vec<String> = names
+        .iter()
+        .filter_map(|name| scene.document.block_records.get(name.trim()))
+        .map(|record| record.name.clone())
+        .collect();
+    erase_definitions(scene, &stored, &[]);
+    stored.len()
+}
+
+/// Erase the definitions named `stored`: their members, both markers and the
+/// referencing `inserts`. Returns how many entities went.
+fn erase_definitions(scene: &mut Scene, stored: &[String], inserts: &[Handle]) -> usize {
+    let mut victims: Vec<Handle> = inserts.to_vec();
+    for name in stored {
+        if let Some(record) = scene.document.block_records.get(name) {
+            victims.extend_from_slice(&record.entity_handles);
+            victims.push(record.block_entity_handle);
+            victims.push(record.block_end_handle);
         }
+    }
+    if victims.is_empty() && stored.is_empty() {
+        return 0;
     }
     victims.sort_unstable();
     victims.dedup();
@@ -503,10 +561,12 @@ fn erase_definition(scene: &mut Scene, stored: &str, references: &[BlockReferenc
         scene.document.remove_entity(handle);
         scene.clear_derived_caches_for(handle);
     }
-    scene.document.block_records.remove(stored);
+    for name in stored {
+        scene.document.block_records.remove(name);
+    }
     drop_orphaned_draw_order_tables(&mut scene.document);
     scene.invalidate_dependency_index();
-    scene.bump_entities_restyled_with_block_deps(&removed_changes, &[], &[stored.to_string()]);
+    scene.bump_entities_restyled_with_block_deps(&removed_changes, &[], stored);
     erased
 }
 

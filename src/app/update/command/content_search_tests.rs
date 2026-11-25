@@ -398,7 +398,7 @@ fn undo_takes_back_a_text_or_dimension_style_made_current_from_the_suggestions()
 }
 
 #[test]
-fn an_autocad_visual_style_name_draws_the_closest_style() {
+fn a_drawing_visual_style_name_draws_the_closest_style() {
     use document::entities::ViewportRenderMode;
     let mut app = fresh_app();
     let i = app.active_tab;

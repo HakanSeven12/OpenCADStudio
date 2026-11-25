@@ -48,7 +48,7 @@ impl OpenCADStudio {
                 .iter()
                 .map(|style| (ContentKind::DimStyle, style.name.as_str(), None));
             // The visual styles by the names the picker shows, then by
-            // AutoCAD's names for the drawing's styles (Realistic, …).
+            // the names of the drawing's own styles (Realistic, …).
             let visual_names: Vec<String> = VISUAL_STYLES
                 .iter()
                 .map(|style| crate::t!(style.label).into_owned())
@@ -120,7 +120,7 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(self.active_tab, "CDIMSTY");
                 self.dispatch_then_answer("CDIMSTY", &[&name])
             }
-            // The command the ribbon's visual style list runs. An AutoCAD
+            // The command the ribbon's visual style list runs. A drawing style
             // name runs the closest of the modes, as the menu bar's Realistic
             // does. A visual style is view state: it takes no undo step.
             ContentKind::VisualStyle => match self.visual_style_command(&name) {
@@ -131,7 +131,7 @@ impl OpenCADStudio {
     }
 
     /// The command that draws the visual style `name`: a name the picker
-    /// shows, or AutoCAD's name for one of the drawing's styles.
+    /// shows, or the name of one of the drawing's own styles.
     fn visual_style_command(&self, name: &str) -> Option<&'static str> {
         let mode = match VISUAL_STYLES
             .iter()

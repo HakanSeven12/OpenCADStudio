@@ -439,6 +439,8 @@ impl OpenCADStudio {
             // Nothing placed yet — the grip simply stays hot.
             return Task::none();
         }
+        // A typed `<angle` holds for this placement only.
+        self.angle_override = None;
         if self.tabs[i].grip_copy {
             return self.commit_active_grip_edit_as_copy(grip);
         }

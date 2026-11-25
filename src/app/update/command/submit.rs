@@ -185,7 +185,26 @@ impl OpenCADStudio {
                         .iter()
                         .any(|field| field.buffer.is_some());
 
-                    let target = if let Some(point) = point_override {
+                    // The command line answers a hot grip as it answers a
+                    // command's point prompt: `<angle`, or a coordinate, with
+                    // `@` measured from the grip.
+                    let typed = self.command_line.input.trim().to_string();
+                    if !dyn_locked
+                        && point_override.is_none()
+                        && grip.mode == GripEditMode::Stretch
+                        && self.try_angle_override(&typed)
+                    {
+                        self.command_line.input.clear();
+                        return Task::none();
+                    }
+                    let typed_point =
+                        parse_coord(&typed)
+                            .filter(|_| !dyn_locked)
+                            .map(|(coord, kind)| {
+                                self.typed_coordinate_wcs(i, coord, kind, Some(grip.origin_world))
+                            });
+
+                    let target = if let Some(point) = point_override.or(typed_point) {
                         Some(point)
                     } else if matches!(grip.mode, GripEditMode::RectangleResize) {
                         grip.rectangle_frame
@@ -227,9 +246,12 @@ impl OpenCADStudio {
                         crate::app::expr_eval::eval_number(text.trim()).map(|dist| {
                             let cursor = self.tabs[i].last_cursor_world;
 
-                            // If the cursor is following OTRACK or Extension,
+                            // A typed `<angle` runs from the grip. If the
+                            // cursor is following OTRACK or Extension,
                             // preserve the existing reference-ray behaviour.
-                            if let Some((base, dir)) = self.active_distance_ray(i) {
+                            if let Some(dir) = self.angle_override {
+                                grip.origin_world + dir * dist
+                            } else if let Some((base, dir)) = self.active_distance_ray(i) {
                                 base + dir * dist
                             } else {
                                 let direction = cursor - grip.origin_world;
@@ -609,26 +631,7 @@ impl OpenCADStudio {
                 // default lives in the DYN tooltip path — see
                 // `dyn_resolve_point`; command-line coordinates stay
                 // absolute regardless of the DYN setting.)
-                let want_relative = kind.is_relative();
-                let ucs = self.tabs[i].active_ucs.clone().filter(|_| !kind.is_world());
-                let wcs_pt = match (want_relative, self.relative_input_base(i)) {
-                    (true, Some(base)) => {
-                        // Offset from the last point, rotated by the
-                        // UCS axes (no origin translation).
-                        let offset = match &ucs {
-                            Some(u) => ucs_rotate_vec(coord, u),
-                            None => coord,
-                        };
-                        base + offset
-                    }
-                    _ => {
-                        // Absolute: typed coordinates are in active UCS.
-                        match &ucs {
-                            Some(u) => ucs_to_wcs(coord, u),
-                            None => coord,
-                        }
-                    }
-                };
+                let wcs_pt = self.typed_coordinate_wcs(i, coord, kind, self.relative_input_base(i));
                 // An object snap override typed before the point snaps it.
                 let (wcs_pt, snapped) = match self.typed_override_snap(i, wcs_pt) {
                     Some(Err(())) => return self.focus_cmd_input(),

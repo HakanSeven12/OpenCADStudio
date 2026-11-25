@@ -302,6 +302,8 @@ impl OpenCADStudio {
         if !had_grip {
             return false;
         }
+        // A typed `<angle` does not outlive the grip it was typed at.
+        self.angle_override = None;
 
         // An Add-Leader arrow being placed is still provisional.
         if let Some((handle, grip_id)) = self.grip_add_provisional.take() {

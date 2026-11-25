@@ -927,6 +927,26 @@ fn try_find_in_view(app: &OpenCADStudio, label: &str) -> Option<iced::Point> {
     }
 }
 
+/// Centre of the drawing tab named `name`: the lowest text `name` in the real
+/// view, the title bar showing the same name above it.
+fn find_tab_in_view(app: &OpenCADStudio, name: &str) -> iced::Point {
+    use iced_test::core::widget;
+    use iced_test::runtime::user_interface::{Cache, UserInterface};
+    use iced_test::Selector;
+    let mut renderer = headless_renderer();
+    let mut ui = UserInterface::build(app.view_main(), VIEW_SIZE, Cache::default(), &mut renderer);
+    let mut find = Selector::find_all(name);
+    ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+    let widget::operation::Outcome::Some(targets) = widget::Operation::finish(&find) else {
+        panic!("{name} not found")
+    };
+    targets
+        .iter()
+        .filter_map(|t| t.visible_bounds().map(|b| b.center()))
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap_or_else(|| panic!("{name} not found"))
+}
+
 /// Drive the real view through iced's `UserInterface` with the pointer at
 /// `at`: feed `events` one at a time, and between events hand the
 /// published messages to the app and rebuild the view while keeping the
@@ -3002,7 +3022,7 @@ fn the_docks_run_up_to_the_ribbon_beside_the_drawing_tabs() {
                 .1
         };
         assert_eq!(app.dock_workspace_size().1, vp_h(&app) + km::TAB_BAR_H);
-        let tab = find_in_view(&app, &name);
+        let tab = find_tab_in_view(&app, &name);
         assert!(tab.x > left && tab.x < VIEW_SIZE.width - right, "{tab:?}");
         let title = find_in_view(&app, "PROPERTIES");
         assert!(title.y < tab.y + km::TAB_BAR_H, "{title:?} beside {tab:?}");
@@ -3010,7 +3030,7 @@ fn the_docks_run_up_to_the_ribbon_beside_the_drawing_tabs() {
         let _ = app.update(Message::DocTabsAboveDocks(true));
         assert!(app.file_tabs_above_docks);
         assert_eq!(app.dock_workspace_size().1, vp_h(&app));
-        let tab_above = find_in_view(&app, &name);
+        let tab_above = find_tab_in_view(&app, &name);
         let title = find_in_view(&app, "PROPERTIES");
         assert!(tab_above.x < tab.x, "{tab_above:?}");
         assert!(

@@ -828,6 +828,9 @@ impl Ribbon {
     /// in the menu row. The widths do not depend on the box, so the answer
     /// does not flip as the box comes and goes.
     fn tab_row_holds_box(&self) -> Option<bool> {
+        if self.in_title_bar {
+            return self.title_bar_holds_box();
+        }
         if !self.search_in_tab_row.load(Ordering::Relaxed) {
             return None;
         }
@@ -838,6 +841,19 @@ impl Ribbon {
         }
         let (logo, _) = self.tab_span.insets();
         Some(logo + flow + super::TAB_ROW_GAP + BOX_W + super::TAB_BAR_PAD_RIGHT <= self.win_w)
+    }
+
+    /// Whether the app's title bar holds its start (logo and toolbar), room
+    /// for the drawing's name, the full box and the window buttons, in the
+    /// window as wide as it is now; `None` before the first layout.
+    fn title_bar_holds_box(&self) -> Option<bool> {
+        use crate::ui::style::ribbon_metrics as m;
+        let start = f32::from_bits(self.title_start_w.load(Ordering::Relaxed));
+        if start.is_nan() {
+            return None;
+        }
+        let rest = m::TITLE_NAME_ROOM + BOX_W + 3.0 * m::TITLE_BAR_PAD + 3.0 * m::CAPTION_W;
+        Some(start + rest <= self.win_w)
     }
 
     /// Whether the last view's choice between the box and its magnifier no

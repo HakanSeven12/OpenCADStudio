@@ -2,6 +2,21 @@
 //! reference proportions (100 % scale). Ribbon widget code takes its
 //! numbers from here; the colours are in `chrome`.
 
+// ── Title bar ──────────────────────────────────────────────────────────────
+
+/// Height of the title bar the app draws over the ribbon.
+pub const TITLE_BAR_H: f32 = 32.0;
+/// Width of a window button (minimize, maximize, close) and its icon size.
+pub const CAPTION_W: f32 = 46.0;
+pub const CAPTION_ICON: f32 = 14.0;
+/// Room the title bar leaves at its start and before the search box.
+pub const TITLE_BAR_PAD: f32 = 6.0;
+/// Room kept for the drawing's name before the search box shrinks to its
+/// magnifier.
+pub const TITLE_NAME_ROOM: f32 = 240.0;
+/// The invisible border that resizes a window without a system frame.
+pub const RESIZE_EDGE: f32 = 5.0;
+
 // ── Tab row ────────────────────────────────────────────────────────────────
 
 /// Height of the tab row; the tabs stand at its bottom.

@@ -240,6 +240,7 @@ const RIBBON_ID: &str = "ribbon_whole";
 /// block, which report their widths so the tabs center in the whole row.
 const TAB_ROW_LOGO_ID: &str = "ribbon_tab_row_logo";
 const TAB_ROW_SEARCH_ID: &str = "ribbon_tab_row_search";
+const TITLE_START_ID: &str = "ribbon_title_bar_start";
 /// The gap between the tab row's blocks, and the tab row's right padding.
 const TAB_ROW_GAP: f32 = 6.0;
 const TAB_BAR_PAD_RIGHT: f32 = 6.0;
@@ -435,6 +436,12 @@ pub struct Ribbon {
     tab_flow_natural: Arc<AtomicU32>,
     /// The search box ends the tab row (no menu row), as last viewed.
     search_in_tab_row: AtomicBool,
+    /// The width the title bar's logo and Quick Access Toolbar took (`f32`
+    /// bits), as last laid out; NaN before the first layout.
+    title_start_w: Arc<AtomicU32>,
+    /// The app draws the main window's title bar, which holds the logo, the
+    /// Quick Access Toolbar and the search box; the tab row holds the tabs.
+    in_title_bar: bool,
     /// Whether the last view showed the search box as its magnifier
     /// (`narrow`), to see when the layout since has changed that.
     narrow_shown: AtomicBool,
@@ -630,6 +637,8 @@ impl Ribbon {
             tab_span: CenterSpan::default(),
             tab_flow_natural: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             search_in_tab_row: AtomicBool::new(true),
+            in_title_bar: false,
+            title_start_w: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             narrow_shown: AtomicBool::new(false),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
@@ -663,6 +672,12 @@ impl Ribbon {
             qat_cache: qat::QatLooks::default(),
             float_ui: floating::FloatUi::default(),
         }
+    }
+
+    /// Whether the app's title bar holds the logo, the Quick Access Toolbar
+    /// and the search box (see [`Self::title_bar_start`]).
+    pub fn set_in_title_bar(&mut self, on: bool) {
+        self.in_title_bar = on;
     }
 
     /// The window size changed.
@@ -1386,7 +1401,7 @@ impl Ribbon {
         // Below the ribbon it has a row of its own, except while the ribbon
         // is closed, when it comes back to the top row.
         let qat_below = self.layout.qat_below && !closed;
-        let lead: Element<'_, Message> = if qat_below {
+        let lead: Element<'_, Message> = if qat_below || self.in_title_bar {
             Space::new().into()
         } else {
             self.qat_row(is_start, undo_count, redo_count)
@@ -1521,15 +1536,19 @@ impl Ribbon {
         // or opens moves the tabs at once. With the menu row the large logo
         // starts the ribbon and the tab row ends at its right padding.
         let span = self.tab_span.clone();
-        if menu_row.is_some() {
+        if menu_row.is_some() || self.in_title_bar {
             span.after()
                 .store(TAB_BAR_PAD_RIGHT.to_bits(), Ordering::Relaxed);
         }
-        self.search_in_tab_row
-            .store(menu_row.is_none(), Ordering::Relaxed);
+        if self.in_title_bar {
+            span.before().store(0f32.to_bits(), Ordering::Relaxed);
+        }
+        // In the title bar the logo and the search box are not the tab row's.
+        let own_ends = menu_row.is_none() && !self.in_title_bar;
+        self.search_in_tab_row.store(own_ends, Ordering::Relaxed);
         self.narrow_shown.store(self.narrow(), Ordering::Relaxed);
         let mut tab_row = row![].spacing(TAB_ROW_GAP).align_y(iced::Center);
-        if menu_row.is_none() {
+        if own_ends {
             // As far from the window's edge as the large logo's artwork; the
             // button's 1 px border sits inside that.
             let logo = container(self.logo_button(false)).padding(Padding {
@@ -1553,7 +1572,7 @@ impl Ribbon {
             .width(Length::Fill),
         );
         // Without the menu row the search box ends the tab row.
-        if menu_row.is_none() {
+        if own_ends {
             tab_row = tab_row.push(
                 PosReport::new(TAB_ROW_SEARCH_ID, self.search_box())
                     .report_width(span.after(), TAB_ROW_GAP + TAB_BAR_PAD_RIGHT),
@@ -1575,6 +1594,28 @@ impl Ribbon {
         let tab_bar = ribbon_menu::RightPress::for_target(ribbon_menu::MenuTarget::TabRow, tab_bar);
         let tab_bar = PosReport::new(minimize::TAB_BAR_ID, tab_bar);
         let top: Element<'a, Message> = match menu_row {
+            // The title bar holds the logo and the search box: the menu row
+            // runs the full width over the tabs.
+            // Closed, only the menu row is left under the title bar.
+            Some(menu_row) if self.in_title_bar && closed => container(menu_row)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(chrome::bar(theme))),
+                    ..Default::default()
+                })
+                .width(Fill)
+                .into(),
+            Some(menu_row) if self.in_title_bar => column![
+                container(menu_row)
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(chrome::bar(theme))),
+                        ..Default::default()
+                    })
+                    .width(Fill),
+                tab_bar
+            ]
+            .into(),
+            // Closed, the tab row has nothing left to show.
+            None if self.in_title_bar && closed => Space::new().into(),
             Some(menu_row) => row![
                 PosReport::new(
                     TAB_ROW_LOGO_ID,
@@ -1641,6 +1682,41 @@ impl Ribbon {
             ..Default::default()
         })
         .into()
+    }
+
+    /// The start of the app's title bar: the compact logo and, unless it
+    /// shows below the ribbon, the Quick Access Toolbar.
+    pub fn title_bar_start(
+        &self,
+        closed: bool,
+        is_start: bool,
+        undo_count: usize,
+        redo_count: usize,
+    ) -> Element<'_, Message> {
+        let logo = PosReport::new(TAB_ROW_LOGO_ID, self.logo_button(false));
+        let mut start = row![logo].spacing(TAB_ROW_GAP).align_y(iced::Center);
+        if !(self.layout.qat_below && !closed) {
+            start = start.push(self.qat_row(is_start, undo_count, redo_count));
+        }
+        // Right-clicked, it offers where the toolbar shows, as the tab row
+        // does; its width tells the search box how much room is left.
+        let start = ribbon_menu::RightPress::for_target(ribbon_menu::MenuTarget::TabRow, start);
+        PosReport::new(TITLE_START_ID, start)
+            .report_width(self.title_start_w.clone(), 0.0)
+            .into()
+    }
+
+    /// The search box for the end of the app's title bar. Like the ribbon,
+    /// it asks for a fresh view when the room it was sized for changed
+    /// without a resize (a toolbar that grew), also on a clean screen,
+    /// where the ribbon is not built.
+    pub fn title_bar_search(&self) -> Element<'_, Message> {
+        self.search_in_tab_row.store(false, Ordering::Relaxed);
+        self.narrow_shown.store(self.narrow(), Ordering::Relaxed);
+        let search = PosReport::new(TAB_ROW_SEARCH_ID, self.search_box());
+        wheel::WheelTabs::new(search, false)
+            .refit_when(|| self.search_fit_stale())
+            .into()
     }
 
     /// The style lists the style combos show.
@@ -3138,6 +3214,55 @@ mod tests {
                 std::hint::black_box(view);
             }
         }
+    }
+
+    #[test]
+    fn the_ribbon_under_the_app_title_bar_builds_in_every_state() {
+        let mut ribbon = Ribbon::default();
+        ribbon.set_in_title_bar(true);
+        for qat_below in [false, true] {
+            ribbon.set_layout(RibbonLayout {
+                qat_below,
+                ..RibbonLayout::default()
+            });
+            for closed in [false, true] {
+                std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1));
+                std::hint::black_box(ribbon.title_bar_search());
+                std::hint::black_box(ribbon.view(None, closed, false, false, 3, 1, false, None));
+                let menu_row = iced::widget::text("File").into();
+                std::hint::black_box(ribbon.view(
+                    Some(menu_row),
+                    closed,
+                    false,
+                    false,
+                    3,
+                    1,
+                    false,
+                    None,
+                ));
+            }
+        }
+        // The search box is the title bar's, never the tab row's.
+        assert!(!ribbon
+            .search_in_tab_row
+            .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn the_title_bar_keeps_the_full_search_box_while_it_has_room() {
+        let mut ribbon = Ribbon::default();
+        ribbon.set_in_title_bar(true);
+        // Before the title bar is laid out the window's width decides.
+        ribbon.set_window_size((1024.0, 768.0));
+        assert!(ribbon.narrow());
+        // Logo and toolbar 200 px wide: 1024 px hold the name, the box and
+        // the window buttons; 700 px do not.
+        ribbon
+            .title_start_w
+            .store(200f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        assert!(!ribbon.narrow());
+        ribbon.set_window_size((700.0, 768.0));
+        assert!(ribbon.narrow());
     }
 
     #[test]

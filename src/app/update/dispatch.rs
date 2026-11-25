@@ -5555,7 +5555,17 @@ impl OpenCADStudio {
                 self.vp_size = ((w - 440.0).max(200.0), h);
                 self.win_size = (w, h);
                 self.ribbon.set_window_size((w, h));
-                Task::none()
+                // A resize may have maximized or restored the window (a
+                // double click, a snap, the system menu): the title bar's
+                // maximize button follows.
+                match self.main_window {
+                    Some(id) if self.draws_title_bar() => {
+                        iced::window::is_maximized(id).map(|max| {
+                            Message::TitleBar(crate::ui::title_bar::TitleBarMsg::Maximized(max))
+                        })
+                    }
+                    _ => Task::none(),
+                }
             }
 
             Message::ViewCubeSnap(region) => self.on_view_cube_snap(region),
@@ -11040,7 +11050,7 @@ impl OpenCADStudio {
             }
             Message::OptionsRestoreDefaults => {
                 self.options_restore_defaults();
-                Task::none()
+                self.sync_window_frame()
             }
             Message::OptionsOk => {
                 self.options_apply();
@@ -11055,12 +11065,14 @@ impl OpenCADStudio {
                 }
                 self.options_discard();
                 self.close_active_modal();
-                Task::none()
+                // A reverted "Use the system title bar" takes the frame along.
+                self.sync_window_frame()
             }
             Message::OptionsCloseDiscard => {
                 self.options_discard();
                 self.close_active_modal();
-                Task::none()
+                // A reverted "Use the system title bar" takes the frame along.
+                self.sync_window_frame()
             }
             Message::OptionsCloseKeep => {
                 self.options_close_confirm = false;
@@ -11569,6 +11581,14 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+
+            Message::SystemTitleBarChanged(system) => {
+                self.system_title_bar = system;
+                self.persist_settings_if_changed();
+                self.sync_window_frame()
+            }
+
+            Message::TitleBar(msg) => self.on_title_bar(msg),
 
             Message::RibbonVisibleChanged(shown) => {
                 self.ribbon_closed = !shown;

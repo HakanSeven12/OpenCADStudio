@@ -3607,6 +3607,12 @@ bg={bg_ms:.1}ms n={view_count}"
             // menu bar and status bar stay so commands remain reachable and
             // the mode can be toggled back off.
             let mut col = column![];
+            // With the toolbar below the ribbon, the pull-down menus take its
+            // place in the title bar instead of a row of their own.
+            let menus_in_title = self.show_menu_bar
+                && self
+                    .ribbon
+                    .menus_fit_title_bar(self.ribbon_closed || self.clean_screen);
             // The app's own title bar heads the window, also on a clean
             // screen: it is the only way left to move or close it.
             if self.draws_title_bar() {
@@ -3617,6 +3623,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         tab.is_start,
                         tab.history.undo_stack.len(),
                         tab.history.redo_stack.len(),
+                        menus_in_title.then(|| crate::ui::menu_bar::view(self.menu_context())),
                     ),
                     &tab.tab_display_name(),
                     tab.dirty,
@@ -3644,7 +3651,7 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 col = col.push(
                     self.ribbon.view(
-                        self.show_menu_bar
+                        (self.show_menu_bar && !menus_in_title)
                             .then(|| crate::ui::menu_bar::view(self.menu_context())),
                         self.ribbon_closed,
                         is_paper,

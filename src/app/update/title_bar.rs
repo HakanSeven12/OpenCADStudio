@@ -60,6 +60,8 @@ mod tests {
     fn app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.main_window = Some(iced::window::Id::unique());
+        // As in the app, where the ribbon reads it from `title_bar::drawn`.
+        app.ribbon.set_in_title_bar(app.draws_title_bar());
         app
     }
 
@@ -73,6 +75,12 @@ mod tests {
             std::hint::black_box(app.view_main());
             let _ = app.update_root(Message::OptionsCloseDiscard);
         }
+        // The toolbar below the ribbon: the menus take its place on top.
+        app.show_menu_bar = true;
+        let mut layout = app.ribbon.layout().clone();
+        layout.qat_below = true;
+        app.ribbon.set_layout(layout);
+        std::hint::black_box(app.view_main());
         // A clean screen with the menu bar keeps the title bar on top.
         app.clean_screen = true;
         app.show_menu_bar = true;

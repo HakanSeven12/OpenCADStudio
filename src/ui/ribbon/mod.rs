@@ -1689,17 +1689,23 @@ impl Ribbon {
 
     /// The start of the app's title bar: the compact logo and, unless it
     /// shows below the ribbon, the Quick Access Toolbar.
-    pub fn title_bar_start(
-        &self,
+    ///
+    /// `menus`: the pull-down menus, which take the toolbar's place while it
+    /// shows below the ribbon (see [`Self::menus_fit_title_bar`]).
+    pub fn title_bar_start<'a>(
+        &'a self,
         closed: bool,
         is_start: bool,
         undo_count: usize,
         redo_count: usize,
-    ) -> Element<'_, Message> {
+        menus: Option<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
         let logo = PosReport::new(TAB_ROW_LOGO_ID, self.logo_button(false));
         let mut start = row![logo].spacing(TAB_ROW_GAP).align_y(iced::Center);
         if !(self.layout.qat_below && !closed) {
             start = start.push(self.qat_row(is_start, undo_count, redo_count));
+        } else if let Some(menus) = menus {
+            start = start.push(menus);
         }
         // Right-clicked, it offers where the toolbar shows, as the tab row
         // does; its width tells the search box how much room is left.
@@ -1707,6 +1713,12 @@ impl Ribbon {
         PosReport::new(TITLE_START_ID, start)
             .report_width(self.title_start_w.clone(), 0.0)
             .into()
+    }
+
+    /// Whether the pull-down menus go in the app's title bar: there is room
+    /// for them where the toolbar was, now that it shows below the ribbon.
+    pub fn menus_fit_title_bar(&self, closed: bool) -> bool {
+        self.in_title_bar && self.layout.qat_below && !closed
     }
 
     /// The widths around the drawing's name in the app's title bar.
@@ -3238,7 +3250,11 @@ mod tests {
                 ..RibbonLayout::default()
             });
             for closed in [false, true] {
-                std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1));
+                std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1, None));
+                let menus = iced::widget::text("File").into();
+                std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1, Some(menus)));
+                // The menus go up only while the toolbar is below the ribbon.
+                assert_eq!(ribbon.menus_fit_title_bar(closed), qat_below && !closed);
                 std::hint::black_box(ribbon.title_bar_search());
                 std::hint::black_box(ribbon.view(None, closed, false, false, 3, 1, false, None));
                 let menu_row = iced::widget::text("File").into();

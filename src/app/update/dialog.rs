@@ -536,7 +536,7 @@ impl OpenCADStudio {
         // Capture every table record needed by the top-level entities and their
         // nested block definitions. Importing only the definitions leaves
         // source-only layers, linetypes, and text/dimension styles dangling.
-        let deps = crate::app::ClipboardDeps::capture(&doc, &entities);
+        let deps = crate::app::ClipboardDeps::capture_drawing(&doc, &entities);
         // Capture the imported file's nested block definitions once. When a
         // name collides with a block already in the active drawing, we must
         // *preserve both*: keep the destination's block and import the file's
@@ -1366,6 +1366,53 @@ mod tests {
             .document
             .layers
             .contains("Imported Fixtures"));
+    }
+
+    /// Inserting a drawing brings every layer of it, also those nothing is
+    /// drawn on yet, with their state and the linetype they name; layers of
+    /// the drawing's xrefs stay behind, and a layer the destination already
+    /// has keeps the destination's settings.
+    #[test]
+    fn import_document_as_block_brings_every_layer() {
+        use document::tables::{Layer, LineType};
+
+        let mut app = fresh();
+        let i = app.active_tab;
+        let mut doc = foreign_doc(&app);
+        let mut dashed = LineType::new("OCS_TEST_DASHED");
+        dashed.handle = doc.allocate_handle();
+        let _ = doc.line_types.add(dashed);
+        let mut empty = Layer::new("Empty Frozen");
+        empty.handle = doc.allocate_handle();
+        empty.flags.frozen = true;
+        empty.line_type = "OCS_TEST_DASHED".to_string();
+        doc.layers.add(empty).unwrap();
+        let mut xref = Layer::new("Site|Walls");
+        xref.handle = doc.allocate_handle();
+        xref.flags.xref_dependent = true;
+        doc.layers.add(xref).unwrap();
+        let mut shared = Layer::new("Shared");
+        shared.handle = doc.allocate_handle();
+        shared.flags.frozen = true;
+        doc.layers.add(shared).unwrap();
+        let mut own = Layer::new("Shared");
+        own.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.layers.add(own).unwrap();
+
+        app.import_document_as_block(doc, "Fixture".to_string())
+            .unwrap();
+        let dest = &app.tabs[i].scene.document;
+        let layer = dest.layers.get("Empty Frozen").expect("the empty layer comes along");
+        assert!(layer.flags.frozen, "with its state");
+        assert!(
+            dest.line_types.contains("OCS_TEST_DASHED"),
+            "the layer's linetype comes with it"
+        );
+        assert!(!dest.layers.contains("Site|Walls"), "xref layers stay behind");
+        assert!(
+            !dest.layers.get("Shared").unwrap().flags.frozen,
+            "an existing layer keeps the destination's settings"
+        );
     }
 
     /// A foreign document whose model space INSERTs a `Fixture` block, whose

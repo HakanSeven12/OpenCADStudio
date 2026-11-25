@@ -3314,6 +3314,10 @@ impl OpenCADStudio {
                 {
                     return Task::none();
                 }
+                let (cycled, moved) = self.cycle_object_snap();
+                if cycled {
+                    return Task::batch([moved, self.focus_cmd_input()]);
+                }
 
                 let i = self.active_tab;
                 let n = self.tabs[i].dyn_fields.len();
@@ -3323,7 +3327,7 @@ impl OpenCADStudio {
                     // to the constrained point now (#356).
                     self.refresh_active_cmd_preview(i);
                 }
-                self.focus_cmd_input()
+                Task::batch([moved, self.focus_cmd_input()])
             }
 
             Message::DynTabPrev => {

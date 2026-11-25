@@ -156,6 +156,7 @@ impl OpenCADStudio {
         // accepted snaps must not leak into it.
         self.clear_accepted_snaps();
         self.snapper.clear_override();
+        self.snapper.end_cycle();
         // Starting a command restarts the right-click cycle, so its first
         // right-click acts as Enter rather than opening the context menu.
         self.tabs[i]

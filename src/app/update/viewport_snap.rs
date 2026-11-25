@@ -467,6 +467,45 @@ impl OpenCADStudio {
         }
         self.accepted_snaps.push(accepted);
     }
+
+    /// Tab at a point prompt: show the next object snap under the cursor,
+    /// in the order the snap engine ranks them, then the other snap points
+    /// of the object under the cursor. After the last one the cycle starts
+    /// again. Returns `false` when Tab keeps its dynamic-input job: a value
+    /// is typed, or fewer than two snaps are found.
+    pub(in crate::app) fn cycle_object_snap(&mut self) -> (bool, iced::Task<crate::app::Message>) {
+        let i = self.active_tab;
+        let typed = !self.command_line.input.is_empty()
+            || self.tabs[i].dyn_fields.iter().any(|field| field.locked());
+        let current = self.tabs[i]
+            .snap_result
+            .filter(|hit| hit.snap_type != SnapType::Grid);
+        let pointer = self.tabs[i].scene.selection.borrow().input.last_move_pos;
+        let (false, Some(current), Some(pointer)) = (typed, current, pointer) else {
+            return (false, iced::Task::none());
+        };
+        self.snapper.skip_in_cycle(&current, pointer);
+        let moved = self.resnap_at(pointer);
+        let next = self.tabs[i].snap_result;
+        if next.is_some_and(|hit| {
+            hit.snap_type != SnapType::Grid
+                && (hit.snap_type != current.snap_type || hit.world != current.world)
+        }) {
+            return (true, moved);
+        }
+        // Nothing is left: start again from the first snap.
+        let stepped = self.snapper.cycle_len() > 1;
+        self.snapper.end_cycle();
+        (stepped, iced::Task::batch([moved, self.resnap_at(pointer)]))
+    }
+
+    /// Snap again at `pointer` (canvas pixels) with the full pass: the
+    /// throttled pass leaves out intersections.
+    fn resnap_at(&mut self, pointer: Point) -> iced::Task<crate::app::Message> {
+        self.snap_dwell = None;
+        self.on_viewport_move(pointer)
+    }
+
     /// Query visible viewport geometry with a canvas-pixel cursor and sheet point.
     /// Returns paper coordinates and canvas pixels, plus the source viewport frame.
     pub(in crate::app) fn paper_viewport_snap(

@@ -341,6 +341,7 @@ impl OpenCADStudio {
         let typing =
             self.table_cell_editor.is_some() && self.tabs[self.active_tab].active_cmd.is_none();
         let started = Instant::now();
+        self.snapper.keep_cycle_near(p);
         let task = self.on_viewport_move_inner(p);
         let index = self.command_interaction_index_task();
         let cost = started.elapsed();

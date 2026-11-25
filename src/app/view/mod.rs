@@ -4114,10 +4114,11 @@ bg={bg_ms:.1}ms n={view_count}"
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };
-        // macOS keeps its frame, which resizes the window itself.
+        // macOS keeps its frame, which resizes the window itself, and on
+        // Windows the system's hit test finds the edges (`title_bar::windows`).
         crate::ui::title_bar::with_resize_edges(
             iced::widget::stack![top, controls].into(),
-            crate::ui::title_bar::frameless() && !self.main_maximized,
+            cfg!(target_os = "linux") && crate::ui::title_bar::frameless() && !self.main_maximized,
         )
     }
 

@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = Menyu satrini körsatiş (MENUBAR)
     .window-minimize = Kichraytiriş
     .window-maximize = Kattalaştiriş
+    .window-restore = Oldingi ölçamga qaytariş
     .options-window-elements = Oyna elementlari
     .menu-viewports = Köriniş oynalari
     .menu-view-twist = Körinişni buraş

@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = Hiện thanh menu (MENUBAR)
     .window-minimize = Thu nhỏ
     .window-maximize = Phóng to
+    .window-restore = Khôi phục kích thước
     .options-window-elements = Thành phần cửa sổ
     .menu-viewports = Khung nhìn
     .menu-view-twist = Xoay chế độ xem

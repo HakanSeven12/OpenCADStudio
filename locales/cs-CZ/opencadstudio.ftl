@@ -553,6 +553,7 @@ common =
     .options-show-menu-bar = Zobrazit řádek nabídek (MENUBAR)
     .window-minimize = Minimalizovat
     .window-maximize = Maximalizovat
+    .window-restore = Obnovit z maximalizace
     .options-window-elements = Prvky okna
     .menu-viewports = Výřezy
     .menu-view-twist = Natočení pohledu

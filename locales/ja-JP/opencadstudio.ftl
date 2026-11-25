@@ -539,6 +539,7 @@ common =
     .options-show-menu-bar = メニュー バーを表示 (MENUBAR)
     .window-minimize = 最小化
     .window-maximize = 最大化
+    .window-restore = 元のサイズに戻す
     .options-window-elements = ウィンドウの要素
     .menu-viewports = ビューポート
     .menu-view-twist = ビューのねじれ

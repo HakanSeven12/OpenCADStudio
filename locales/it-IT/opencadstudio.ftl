@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = Mostra la barra dei menu (MENUBAR)
     .window-minimize = Riduci a icona
     .window-maximize = Ingrandisci
+    .window-restore = Ripristina giù
     .options-window-elements = Elementi della finestra
     .menu-viewports = Finestre
     .menu-view-twist = Rotazione vista

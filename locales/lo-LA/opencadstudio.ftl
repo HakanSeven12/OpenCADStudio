@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = ສະແດງແຖບເມນູ (MENUBAR)
     .window-minimize = ຫຍໍ້ລົງ
     .window-maximize = ຂະຫຍາຍເຕັມ
+    .window-restore = ຄືນຂະໜາດເດີມ
     .options-window-elements = ອົງປະກອບໜ້າຕ່າງ
     .menu-viewports = ຊ່ອງມອງ
     .menu-view-twist = ບິດມຸມມອງ

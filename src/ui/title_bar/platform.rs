@@ -115,8 +115,18 @@ fn detect() -> ButtonLayout {
             right,
         };
     }
-    // GNOME and the other GTK desktops keep their order in this key; without
-    // it (no gsettings), GNOME's own default.
+    // Other desktops (Xfce, Cinnamon, MATE, ...) keep their buttons in
+    // settings of their own; GNOME's key would mostly hold its default,
+    // close only. They get all three buttons on the right.
+    if !has_desktop(&names, &["gnome", "budgie", "pantheon", "unity", "ubuntu"]) {
+        return ButtonLayout {
+            style: ButtonStyle::Adwaita,
+            left: Vec::new(),
+            right: ALL.to_vec(),
+        };
+    }
+    // The GNOME family keeps its order in this key; without it (no
+    // gsettings), GNOME's own default.
     let setting = std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.wm.preferences", "button-layout"])
         .output()
@@ -211,9 +221,70 @@ pub(super) fn parse_kwinrc(kwinrc: &str) -> (Vec<Button>, Vec<Button>) {
     )
 }
 
+/// What a double click on the title bar does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoubleClick {
+    Maximize,
+    Minimize,
+    Nothing,
+}
+
+/// What a double click on the title bar does here: on macOS as set in
+/// System Settings (Desktop & Dock), elsewhere it maximizes.
+pub fn double_click() -> DoubleClick {
+    static ACTION: OnceLock<DoubleClick> = OnceLock::new();
+    *ACTION.get_or_init(|| {
+        if !cfg!(target_os = "macos") {
+            return DoubleClick::Maximize;
+        }
+        let read = |key: &str| {
+            std::process::Command::new("defaults")
+                .args(["read", "-g", key])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        };
+        parse_double_click(
+            read("AppleActionOnDoubleClick").as_deref(),
+            read("AppleMiniaturizeOnDoubleClick").as_deref(),
+        )
+    })
+}
+
+/// macOS's `AppleActionOnDoubleClick` (`Maximize`, `Minimize`, `None`),
+/// or before it the older `AppleMiniaturizeOnDoubleClick` (`1`); unset, the
+/// window zooms.
+pub(super) fn parse_double_click(action: Option<&str>, miniaturize: Option<&str>) -> DoubleClick {
+    match action.map(str::trim) {
+        Some("Minimize") => DoubleClick::Minimize,
+        Some("None") => DoubleClick::Nothing,
+        Some(_) => DoubleClick::Maximize,
+        None if miniaturize.map(str::trim) == Some("1") => DoubleClick::Minimize,
+        None => DoubleClick::Maximize,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_tiling, parse_gnome_layout, parse_kwinrc, Button::*};
+    use super::{
+        is_tiling, parse_double_click, parse_gnome_layout, parse_kwinrc, Button::*, DoubleClick,
+    };
+
+    #[test]
+    fn the_mac_double_click_setting_is_read() {
+        assert_eq!(parse_double_click(None, None), DoubleClick::Maximize);
+        assert_eq!(
+            parse_double_click(Some("Maximize\n"), None),
+            DoubleClick::Maximize
+        );
+        assert_eq!(
+            parse_double_click(Some("Minimize\n"), None),
+            DoubleClick::Minimize
+        );
+        assert_eq!(parse_double_click(Some("None"), None), DoubleClick::Nothing);
+        assert_eq!(parse_double_click(None, Some("1")), DoubleClick::Minimize);
+    }
 
     #[test]
     fn tiling_window_managers_are_recognised() {

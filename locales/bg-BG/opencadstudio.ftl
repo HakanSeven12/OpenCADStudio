@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = Показване на лентата с менюта (MENUBAR)
     .window-minimize = Минимизиране
     .window-maximize = Максимизиране
+    .window-restore = Възстановяване на размера
     .options-window-elements = Елементи на прозореца
     .menu-viewports = Прозорци
     .menu-view-twist = Завъртане на изгледа

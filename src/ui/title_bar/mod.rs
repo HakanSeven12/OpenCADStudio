@@ -12,7 +12,9 @@ mod platform;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-pub use platform::{layout, tiling_desktop, Button, ButtonLayout, ButtonStyle};
+pub use platform::{
+    double_click, layout, tiling_desktop, Button, ButtonLayout, ButtonStyle, DoubleClick,
+};
 
 use iced::widget::{button, column, container, mouse_area, row, stack, text, Space};
 use iced::window::Direction;
@@ -32,6 +34,16 @@ pub fn drawn() -> bool {
     )) && !tiling_desktop()
 }
 
+/// The bar's height: on macOS that of a window's title, so the traffic
+/// lights sit in its middle.
+pub fn bar_height() -> f32 {
+    if cfg!(target_os = "macos") {
+        metrics::TITLE_BAR_H_MAC
+    } else {
+        metrics::TITLE_BAR_H
+    }
+}
+
 /// Whether the main window opens without a system frame: where the app draws
 /// the title bar, except on macOS, which keeps the frame for its traffic
 /// lights and its resizing.
@@ -48,8 +60,10 @@ pub enum TitleBarMsg {
     Move,
     /// The press ended without moving the window.
     Release,
-    /// Double click on the empty space, or the maximize button.
+    /// The maximize button.
     ToggleMaximize,
+    /// Double click on the empty space: as the desktop does it.
+    DoubleClick,
     Minimize,
     Close,
     /// An edge of a window without a frame was pressed: resize that way.
@@ -114,7 +128,7 @@ pub fn view<'a>(
         captions(buttons, &buttons.right, maximized, Side::Right),
     ]
     .align_y(iced::Center)
-    .height(Length::Fixed(metrics::TITLE_BAR_H));
+    .height(Length::Fixed(bar_height()));
 
     container(bar)
         .width(Fill)
@@ -132,7 +146,7 @@ fn grab<'a>(content: impl Into<Element<'a, Message>>, pressed: bool) -> Element<
     let mut grab = mouse_area(content)
         .on_press(Message::TitleBar(TitleBarMsg::Press))
         .on_release(Message::TitleBar(TitleBarMsg::Release))
-        .on_double_click(Message::TitleBar(TitleBarMsg::ToggleMaximize));
+        .on_double_click(Message::TitleBar(TitleBarMsg::DoubleClick));
     if pressed {
         grab = grab
             .on_move(|_| Message::TitleBar(TitleBarMsg::Move))
@@ -253,18 +267,13 @@ fn system_hover(button: Button) -> bool {
 fn caption<'a>(style: ButtonStyle, which: Button, maximized: bool) -> Element<'a, Message> {
     let (msg, tip) = match which {
         Button::Minimize => (TitleBarMsg::Minimize, crate::t!("Minimize")),
-        Button::Maximize if maximized => (TitleBarMsg::ToggleMaximize, crate::t!("Restore")),
+        Button::Maximize if maximized => (TitleBarMsg::ToggleMaximize, crate::t!("Restore Down")),
         Button::Maximize => (TitleBarMsg::ToggleMaximize, crate::t!("Maximize")),
         Button::Close => (TitleBarMsg::Close, crate::t!("Close")),
     };
     let close = which == Button::Close;
     let (w, h, icon_size, radius) = match style {
-        ButtonStyle::Windows => (
-            metrics::CAPTION_W,
-            metrics::TITLE_BAR_H,
-            metrics::CAPTION_ICON,
-            0.0,
-        ),
+        ButtonStyle::Windows => (metrics::CAPTION_W, bar_height(), metrics::CAPTION_ICON, 0.0),
         ButtonStyle::Adwaita => (
             metrics::ADWAITA_BUTTON,
             metrics::ADWAITA_BUTTON,
@@ -331,7 +340,7 @@ pub fn controls<'a>(maximized: bool, pressed: bool) -> Element<'a, Message> {
         captions(buttons, &buttons.right, maximized, Side::Right),
     ]
     .align_y(iced::Center)
-    .height(Length::Fixed(metrics::TITLE_BAR_H));
+    .height(Length::Fixed(bar_height()));
     column![bar, Space::new().height(Fill)].into()
 }
 

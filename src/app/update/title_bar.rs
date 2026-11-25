@@ -4,7 +4,7 @@
 use iced::Task;
 
 use crate::app::{Message, OpenCADStudio};
-use crate::ui::title_bar::TitleBarMsg;
+use crate::ui::title_bar::{DoubleClick, TitleBarMsg};
 
 impl OpenCADStudio {
     pub(in crate::app) fn on_title_bar(&mut self, msg: TitleBarMsg) -> Task<Message> {
@@ -26,6 +26,14 @@ impl OpenCADStudio {
             TitleBarMsg::Release => {
                 self.title_bar_pressed = false;
                 Task::none()
+            }
+            TitleBarMsg::DoubleClick => {
+                self.title_bar_pressed = false;
+                match crate::ui::title_bar::double_click() {
+                    DoubleClick::Maximize => self.on_title_bar(TitleBarMsg::ToggleMaximize),
+                    DoubleClick::Minimize => iced::window::minimize(id, true),
+                    DoubleClick::Nothing => Task::none(),
+                }
             }
             TitleBarMsg::ToggleMaximize => {
                 self.title_bar_pressed = false;

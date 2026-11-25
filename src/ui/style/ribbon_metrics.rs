@@ -6,6 +6,8 @@
 
 /// Height of the title bar the app draws over the ribbon.
 pub const TITLE_BAR_H: f32 = 32.0;
+/// On macOS: the height of a window's title, where the traffic lights sit.
+pub const TITLE_BAR_H_MAC: f32 = 28.0;
 /// Width of a window button (minimize, maximize, close) and its icon size.
 pub const CAPTION_W: f32 = 46.0;
 pub const CAPTION_ICON: f32 = 14.0;

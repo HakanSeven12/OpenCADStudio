@@ -549,6 +549,7 @@ common =
     .options-show-menu-bar = Menubalk tonen (MENUBAR)
     .window-minimize = Minimaliseren
     .window-maximize = Maximaliseren
+    .window-restore = Vorige grootte
     .options-window-elements = Vensterelementen
     .menu-viewports = Viewports
     .menu-view-twist = Weergave draaien

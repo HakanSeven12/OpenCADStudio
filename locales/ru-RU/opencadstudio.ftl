@@ -552,6 +552,7 @@ common =
     .options-show-menu-bar = Показывать строку меню (MENUBAR)
     .window-minimize = Свернуть
     .window-maximize = Развернуть
+    .window-restore = Свернуть в окно
     .options-window-elements = Элементы окна
     .menu-viewports = Видовые экраны
     .menu-view-twist = Поворот вида

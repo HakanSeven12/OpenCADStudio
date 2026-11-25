@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = 顯示功能表列（MENUBAR）
     .window-minimize = 最小化
     .window-maximize = 最大化
+    .window-restore = 還原
     .options-window-elements = 視窗元素
     .menu-viewports = 視埠
     .menu-view-twist = 視圖旋轉

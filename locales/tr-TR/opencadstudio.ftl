@@ -534,6 +534,7 @@ common =
     .options-show-menu-bar = Menü çubuğunu göster (MENUBAR)
     .window-minimize = Simge durumuna küçült
     .window-maximize = Ekranı kapla
+    .window-restore = Önceki boyutuna getir
     .options-window-elements = Pencere Öğeleri
     .menu-viewports = Görünüm Pencereleri
     .menu-view-twist = Görünümü Döndür

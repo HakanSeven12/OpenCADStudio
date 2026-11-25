@@ -536,6 +536,7 @@ common =
     .options-show-menu-bar = 显示菜单栏 (MENUBAR)
     .window-minimize = 最小化
     .window-maximize = 最大化
+    .window-restore = 向下还原
     .options-window-elements = 窗口元素
     .menu-viewports = 视口
     .menu-view-twist = 视图扭曲

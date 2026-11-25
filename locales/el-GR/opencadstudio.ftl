@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = Εμφάνιση γραμμής μενού (MENUBAR)
     .window-minimize = Ελαχιστοποίηση
     .window-maximize = Μεγιστοποίηση
+    .window-restore = Επαναφορά μεγέθους
     .options-window-elements = Στοιχεία παραθύρου
     .menu-viewports = Παράθυρα προβολής
     .menu-view-twist = Στρέψη όψης

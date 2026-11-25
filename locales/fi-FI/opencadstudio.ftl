@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = Näytä valikkorivi (MENUBAR)
     .window-minimize = Pienennä
     .window-maximize = Suurenna
+    .window-restore = Palauta koko
     .options-window-elements = Ikkunan osat
     .menu-viewports = Näkymäikkunat
     .menu-view-twist = Näkymän kierto

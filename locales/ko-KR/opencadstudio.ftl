@@ -548,6 +548,7 @@ common =
     .options-show-menu-bar = 메뉴 막대 표시 (MENUBAR)
     .window-minimize = 최소화
     .window-maximize = 최대화
+    .window-restore = 이전 크기로 복원
     .options-window-elements = 창 요소
     .menu-viewports = 뷰포트
     .menu-view-twist = 뷰 비틀기

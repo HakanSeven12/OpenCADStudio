@@ -4019,6 +4019,12 @@ impl OpenCADStudio {
         // up once via the first-launch prompt below (when the user hasn't been
         // asked yet) and afterwards managed entirely by the FILEASSOC command.
         crate::sys::startup_times::mark("boot: begin");
+        // The desktop's window buttons (a `gsettings` call on GNOME) are read
+        // while the rest starts, not in the first view.
+        std::thread::spawn(|| {
+            crate::ui::title_bar::layout();
+            crate::ui::title_bar::double_click();
+        });
         let state = Self::new();
         crate::sys::startup_times::mark("boot: App constructed");
         let (id, open_task) = window::open(window::Settings {

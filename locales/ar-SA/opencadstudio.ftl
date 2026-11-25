@@ -561,6 +561,7 @@ common =
     .options-show-menu-bar = إظهار شريط القوائم (MENUBAR)
     .window-minimize = تصغير
     .window-maximize = تكبير
+    .window-restore = استعادة الحجم
     .options-window-elements = عناصر النافذة
     .menu-viewports = منافذ العرض
     .menu-view-twist = تدوير العرض

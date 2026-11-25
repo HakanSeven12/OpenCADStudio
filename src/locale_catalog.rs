@@ -5181,6 +5181,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Show the menu bar (MENUBAR)" => Some(("common", "options-show-menu-bar")),
         "Minimize" => Some(("common", "window-minimize")),
         "Maximize" => Some(("common", "window-maximize")),
+        "Restore Down" => Some(("common", "window-restore")),
         "Show the ribbon (RIBBON / RIBBONCLOSE)" => Some(("common", "options-show-ribbon")),
         "New hatches follow their boundaries (HPASSOC)" => Some(("common", "options-hpassoc")),
         "Arc Length" => Some(("common", "menu-arc-length")),

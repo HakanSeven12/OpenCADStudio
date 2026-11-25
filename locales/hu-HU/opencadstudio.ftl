@@ -541,6 +541,7 @@ common =
     .options-show-menu-bar = Menüsor megjelenítése (MENUBAR)
     .window-minimize = Kis méret
     .window-maximize = Teljes méret
+    .window-restore = Előző méret
     .options-window-elements = Ablakelemek
     .menu-viewports = Nézetablakok
     .menu-view-twist = Nézet elforgatása

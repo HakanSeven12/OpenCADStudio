@@ -565,8 +565,16 @@ pub(crate) fn render_pdf_document(
     // Serialise through lopdf ourselves and Flate-compress the streams.
     // Gradient fills paint with `sh`, which printpdf has no operation for:
     // they go out as custom operations, which its default "secure" mode drops.
+    // printpdf's default image optimization shrinks every image over 2 MB of
+    // raw pixels and re-encodes colour images as JPEG: a 300 DPI raster came
+    // out blurred (#3635). Keep the pixels emit_image chose and Flate them.
     let save_options = PdfSaveOptions {
         secure: false,
+        image_optimization: Some(printpdf::ImageOptimizationOptions {
+            max_image_size: None,
+            format: Some(printpdf::ImageCompression::Flate),
+            ..Default::default()
+        }),
         ..PdfSaveOptions::default()
     };
     let mut lo = printpdf::to_lopdf_doc(&doc, &save_options, &mut warnings);

@@ -499,11 +499,17 @@ impl OpenCADStudio {
             [DynComponent::X, DynComponent::Y] if relative => {
                 Some(rel(glam::DVec3::new(val(0, dx), val(1, dy), 0.0)))
             }
+            [DynComponent::X, DynComponent::Y] if self.dyn_coord_wcs => {
+                Some(glam::DVec3::new(val(0, w.x), val(1, w.y), 0.0))
+            }
             [DynComponent::X, DynComponent::Y] => {
                 Some(xf.to_wcs(glam::DVec3::new(val(0, w_ucs.x), val(1, w_ucs.y), 0.0)))
             }
             [DynComponent::X, DynComponent::Y, DynComponent::Z] if relative => {
                 Some(rel(glam::DVec3::new(val(0, dx), val(1, dy), val(2, dz))))
+            }
+            [DynComponent::X, DynComponent::Y, DynComponent::Z] if self.dyn_coord_wcs => {
+                Some(glam::DVec3::new(val(0, w.x), val(1, w.y), val(2, w.z)))
             }
             [DynComponent::X, DynComponent::Y, DynComponent::Z] => Some(xf.to_wcs(
                 glam::DVec3::new(val(0, w_ucs.x), val(1, w_ucs.y), val(2, w_ucs.z)),
@@ -751,6 +757,7 @@ impl OpenCADStudio {
                         self.tabs[i].dyn_active = 0;
                         self.dyn_user_reshaped = false;
                         self.dyn_coord_absolute = self.dyn_pointer_absolute;
+                        self.dyn_coord_wcs = false;
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
                         self.snapper.clear_override();
@@ -826,6 +833,7 @@ impl OpenCADStudio {
         self.last_point = Some(pt);
         self.dyn_user_reshaped = false;
         self.dyn_coord_absolute = self.dyn_pointer_absolute;
+        self.dyn_coord_wcs = false;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
         self.snapper.clear_override();
@@ -1068,6 +1076,42 @@ mod tests {
             app.tabs[i].dyn_fields = comps.into_iter().map(DynFieldEntry::new).collect();
             app.tabs[i].dyn_fields[0].buffer = Some("5".into());
             assert_eq!(app.dyn_resolve_point(), Some(DVec3::new(1.0, 2.0, 8.0)));
+        }
+    }
+
+    /// #3641: in the tooltip a second point's `x,y` is relative, and a
+    /// leading `*` makes it absolute (world) instead.
+    #[test]
+    fn a_typed_star_makes_the_tooltip_point_absolute() {
+        use crate::app::Message;
+        use crate::command::StepInput;
+        for (typed, end) in [
+            ("5,7", DVec3::new(15.0, 17.0, 0.0)),
+            ("*5,7", DVec3::new(5.0, 7.0, 0.0)),
+        ] {
+            let mut app = OpenCADStudio::new_for_test();
+            let _ = app.automation_op(r#"{"op":"new"}"#);
+            app.dyn_input = true;
+            let i = app.active_tab;
+            let _ = app.run_command_line("LINE");
+            let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
+            app.last_point = Some(DVec3::new(10.0, 10.0, 0.0));
+            app.tabs[i].last_cursor_world = DVec3::new(30.0, 10.0, 0.0);
+            app.sync_dyn_fields();
+            for c in typed.chars() {
+                let _ = app.update(Message::CommandAppendChar(c.to_string()));
+            }
+            let _ = app.update(Message::CommandSubmit);
+            let line = app.tabs[i]
+                .scene
+                .document
+                .entities()
+                .find_map(|e| match e {
+                    document::EntityType::Line(l) => Some(l.end),
+                    _ => None,
+                })
+                .expect("a line");
+            assert_eq!(DVec3::new(line.x, line.y, line.z), end, "{typed}");
         }
     }
 

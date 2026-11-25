@@ -144,6 +144,7 @@ impl OpenCADStudio {
         self.angle_override = None;
         self.dyn_user_reshaped = false;
         self.dyn_coord_absolute = self.dyn_pointer_absolute;
+        self.dyn_coord_wcs = false;
         self.grip_hover = None;
         self.grip_popup = None;
         self.grip_pending = None;
@@ -1018,6 +1019,7 @@ impl OpenCADStudio {
             self.last_point = Some(*point);
             self.dyn_user_reshaped = false;
             self.dyn_coord_absolute = self.dyn_pointer_absolute;
+            self.dyn_coord_wcs = false;
             self.sync_dyn_fields();
             self.reset_tracking_after_point();
             self.push_ucs_to_cmd(i);
@@ -1953,12 +1955,9 @@ impl OpenCADStudio {
     /// starts with `@`, through the active UCS otherwise.
     fn typed_wcs(&self, i: usize, token: &str) -> Option<glam::DVec3> {
         let (coord, kind) = crate::app::helpers::parse_coord(token)?;
-        let ucs = &self.tabs[i].active_ucs;
+        let ucs = &self.tabs[i].active_ucs.clone().filter(|_| !kind.is_world());
         Some(
-            match (
-                matches!(kind, crate::app::helpers::CoordKind::Relative),
-                self.last_point,
-            ) {
+            match (kind.is_relative(), self.last_point) {
                 (true, Some(base)) => {
                     base + match ucs {
                         Some(value) => crate::app::helpers::ucs_rotate_vec(coord, value),
@@ -2279,11 +2278,8 @@ impl OpenCADStudio {
             // Match the GUI command line: typed coordinates are in the active
             // UCS (relative offsets are rotated by the UCS axes), so a multi-
             // token `LINE 0,0 10,10` under a rotated UCS lands correctly.
-            let ucs = self.tabs[i].active_ucs.clone();
-            let wcs = match (
-                matches!(kind, crate::app::helpers::CoordKind::Relative),
-                self.relative_input_base(i),
-            ) {
+            let ucs = self.tabs[i].active_ucs.clone().filter(|_| !kind.is_world());
+            let wcs = match (kind.is_relative(), self.relative_input_base(i)) {
                 (true, Some(base)) => {
                     base + match &ucs {
                         Some(u) => crate::app::helpers::ucs_rotate_vec(coord, u),

@@ -1257,6 +1257,8 @@ pub(super) struct OpenCADStudio {
     /// coordinates and typing `@` selects relative coordinates again.
     /// Cleared after a point is committed or a new command starts.
     dyn_coord_absolute: bool,
+    /// With `dyn_coord_absolute`: typed `*`, the coordinates are world ones.
+    dyn_coord_wcs: bool,
     /// Grip the cursor is currently dwelling on. Set when the cursor
     /// stops within `GRIP_THRESHOLD_PX` of a grip; cleared when it
     /// drifts away. The instant lets `ViewportMove` detect when the
@@ -3141,6 +3143,7 @@ impl OpenCADStudio {
             pane_move_from: None,
             dyn_user_reshaped: false,
             dyn_coord_absolute: false,
+            dyn_coord_wcs: false,
             grip_hover: None,
             #[cfg(not(target_arch = "wasm32"))]
             plugin_grip_hover: None,

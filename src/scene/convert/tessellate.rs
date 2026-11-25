@@ -353,9 +353,7 @@ fn geometric_center(entity: &EntityType) -> Option<glam::DVec3> {
 /// doc(hidden) public only so `benches/wires_rebuild_stages.rs` can time the
 /// production double-single split stage in isolation.
 #[doc(hidden)]
-pub fn points_to_ds(
-    src: impl IntoIterator<Item = [f64; 3]>,
-) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
+pub fn points_to_ds(src: impl IntoIterator<Item = [f64; 3]>) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     let it = src.into_iter();
     let (lo, hi) = it.size_hint();
     let cap = hi.unwrap_or(lo);
@@ -2597,7 +2595,13 @@ fn tessellate_wires(
                                 plinegen: true,
                                 geom: std::sync::Arc::new(crate::scene::WireGeom {
                                     points: base.points[start..end].to_vec(),
-                                    points_low: base.points_low.iter().skip(start).take(end - start).collect::<Vec<_>>().into(),
+                                    points_low: base
+                                        .points_low
+                                        .iter()
+                                        .skip(start)
+                                        .take(end - start)
+                                        .collect::<Vec<_>>()
+                                        .into(),
                                     pattern_stations: Vec::new(),
                                     snap_pts: Vec::new(),
                                     tangent_geoms: Vec::new(),
@@ -3161,7 +3165,6 @@ fn custom_arrow_from_block(
         || record.is_paper_space()
         || record.flags.is_xref
         || record.flags.is_xref_overlay
-        || record.flags.is_external
     {
         return None;
     }
@@ -3199,6 +3202,41 @@ fn custom_arrow_from_block(
             lines,
             fill,
         })
+    }
+}
+
+#[cfg(test)]
+mod external_arrow_tests {
+    use super::*;
+    #[test]
+    fn an_external_dependent_ordinary_block_remains_a_custom_arrow() {
+        let mut doc = Document::new();
+        let mut record = document::tables::BlockRecord::new("XREF|ARROW");
+        record.handle = doc.allocate_handle();
+        let handle = record.handle;
+        doc.block_records.add(record).unwrap();
+        let mut line = document::entities::Line::from_coords(-1., 0., 0., 0., 0., 0.);
+        line.common.owner_handle = handle;
+        doc.add_entity(EntityType::Line(line)).unwrap();
+        assert!(custom_arrow_from_block(
+            &doc,
+            doc.block_records.get("XREF|ARROW").unwrap(),
+            1.,
+            false
+        )
+        .is_some());
+        doc.block_records
+            .get_mut("XREF|ARROW")
+            .unwrap()
+            .flags
+            .is_external = true;
+        assert!(custom_arrow_from_block(
+            &doc,
+            doc.block_records.get("XREF|ARROW").unwrap(),
+            1.,
+            false
+        )
+        .is_some());
     }
 }
 
@@ -4213,7 +4251,10 @@ mod tests {
         assert!(fills(0x00).is_empty(), "no background");
         let own = fills(0x01);
         assert_eq!(own.len(), 1, "a fill of its own colour");
-        assert!(own[0].bg_adapt.is_none(), "its own colour is not the canvas");
+        assert!(
+            own[0].bg_adapt.is_none(),
+            "its own colour is not the canvas"
+        );
         let window = fills(0x03);
         assert_eq!(window.len(), 1, "a fill of the window's colour");
         assert!(

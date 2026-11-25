@@ -112,6 +112,9 @@ pub(super) fn reference_json(document: &Document, entry: &ReferenceEntry) -> Val
         "saved_path": entry.saved_path.clone(),
         "resolved_path": entry.found_at.clone(),
         "parent_id": entry.parent_key.map(|key| format!("{key:X}")),
+        "owner_resource": entry.owner_resource.map(|id| id.to_string()),
+        "source_id": entry.source_id.map(|id| id.to_string()),
+        "diagnostic": entry.diagnostic,
         "nested": entry.parent_key.is_some(),
         "size_bytes": entry.size_bytes,
         "modified_unix_ms": modified_unix_ms(entry.modified),
@@ -243,7 +246,7 @@ impl OpenCADStudio {
             .as_deref()
             .and_then(Path::parent)
             .unwrap_or_else(|| Path::new("."));
-        let mut entry = crate::io::xref::collect_direct_entry_with_prev(
+        let entry = crate::io::xref::collect_direct_entry_with_prev(
             &self.tabs[i].scene.document,
             base_dir,
             self.tabs[i].xref_unloaded.as_set(),
@@ -256,11 +259,12 @@ impl OpenCADStudio {
                 "The reference disappeared during the operation",
             )
         })?;
+        let mut entries = vec![entry];
         crate::io::xref::apply_native_source_status(
-            std::slice::from_mut(&mut entry),
+            &mut entries,
             self.tabs[i].ifccad_session.as_ref(),
         );
-        Ok(reference_json(&self.tabs[i].scene.document, &entry))
+        Ok(reference_json(&self.tabs[i].scene.document, &entries[0]))
     }
 
     fn saved_host_dir(&self, i: usize) -> Result<PathBuf, Value> {
@@ -305,70 +309,134 @@ impl OpenCADStudio {
         req: &Value,
     ) -> Result<Task<Message>, Value> {
         use base64::Engine;
-        validate_fields(req, &["source_id", "file_name", "data_base64"])?;
-        let id = req["source_id"]
-            .as_str()
-            .and_then(|s| s.parse::<u64>().ok().filter(|id| id.to_string() == s))
-            .ok_or_else(|| {
-                failure(
-                    "invalid_source",
-                    "source_id must be an exact decimal string",
-                )
-            })?;
-        let file_name = req["file_name"]
-            .as_str()
-            .filter(|s| {
-                !s.is_empty() && !s.contains(['/', '\\', '\0', ':']) && !matches!(*s, "." | "..")
-            })
-            .ok_or_else(|| failure("invalid_source", "Choose a drawing filename"))?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(req["data_base64"].as_str().unwrap_or_default())
-            .map_err(|e| failure("invalid_source", e))?;
-        if bytes.is_empty() {
-            return Err(failure("invalid_source", "The drawing is empty"));
+        validate_fields(
+            req,
+            &[
+                "source_id",
+                "file_name",
+                "data_base64",
+                "owner_resource",
+                "reuse_resource",
+                "locator",
+            ],
+        )?;
+        fn exact_id(value: &Value) -> Option<u64> {
+            let text = value.as_str()?;
+            text.parse::<u64>().ok().filter(|id| id.to_string() == text)
         }
+        let id = exact_id(&req["source_id"]).ok_or_else(|| {
+            failure(
+                "invalid_source",
+                "source_id must be an exact decimal string",
+            )
+        })?;
+        let owner = match req.get("owner_resource") {
+            None => 1,
+            Some(value) => {
+                exact_id(value).ok_or_else(|| failure("invalid_source", "Invalid source owner"))?
+            }
+        };
         let i = self.active_tab;
         let session = self.tabs[i]
             .ifccad_session
             .clone()
             .ok_or_else(|| failure("invalid_source", "This tab has no native source context"))?;
-        let (handle, name, path) = self.tabs[i]
+        let source = session.resource_source(owner, id).ok_or_else(|| {
+            failure(
+                "invalid_source",
+                "Source does not belong to this drawing resource",
+            )
+        })?;
+        let path =
+            document::external_source_location_to_cad_path(&source.location).unwrap_or_else(|_| {
+                match &source.location {
+                    document::ifccad::IfccadExternalSourceLocation::UriReference { uri } => {
+                        uri.clone()
+                    }
+                    document::ifccad::IfccadExternalSourceLocation::SearchFileName {
+                        file_name,
+                    } => file_name.clone(),
+                }
+            });
+        if req
+            .get("locator")
+            .is_some_and(|value| value.as_str() != Some(path.as_str()))
+        {
+            return Err(failure(
+                "invalid_source",
+                "Source location changed; refresh the reference list",
+            ));
+        }
+        let checkpoint = session
+            .source_registry_checkpoint()
+            .map_err(|e| failure("invalid_source", e))?;
+        let resource = if let Some(value) = req.get("reuse_resource") {
+            if req.get("data_base64").is_some() {
+                return Err(failure(
+                    "invalid_source",
+                    "Choose a drawing or reuse a source, not both",
+                ));
+            }
+            let resource = exact_id(value)
+                .ok_or_else(|| failure("invalid_source", "Invalid reused resource"))?;
+            session
+                .reuse_source_resource(owner, id, &path, resource)
+                .map_err(|e| failure("invalid_source", e))?;
+            resource
+        } else {
+            let name = req["file_name"]
+                .as_str()
+                .filter(|s| {
+                    !s.is_empty()
+                        && !s.contains(['/', '\\', '\0', ':'])
+                        && !matches!(*s, "." | "..")
+                })
+                .ok_or_else(|| failure("invalid_source", "Choose a drawing filename"))?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(req["data_base64"].as_str().unwrap_or_default())
+                .map_err(|e| failure("invalid_source", e))?;
+            if bytes.is_empty() {
+                return Err(failure("invalid_source", "The drawing is empty"));
+            }
+            session
+                .bind_resource_bytes(owner, id, &path, name.into(), std::sync::Arc::new(bytes))
+                .map_err(|e| failure("invalid_source", e))?
+        };
+        let base = self.tabs[i]
+            .current_path
+            .as_deref()
+            .and_then(Path::parent)
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
+        // All occurrences depending on a resource are replaced together. The
+        // root definitions remain the only editable/persisted associations.
+        let roots = self.tabs[i]
             .scene
             .document
             .block_records
             .iter()
-            .find_map(|r| {
-                session
-                    .external_source(r.handle)
-                    .filter(|s| s.id.0 == id)
-                    .map(|_| (r.handle, r.name.clone(), r.xref_path.clone()))
-            })
-            .ok_or_else(|| failure("invalid_source", "Source does not belong to this drawing"))?;
-        let read = crate::io::xref::read_source_bytes(file_name, &bytes);
-        let mut infos = Vec::new();
-        crate::io::xref::merge_xref_reads_in_session(
+            .filter(|r| session.external_source(r.handle).is_some())
+            .map(|r| r.handle)
+            .collect();
+        let merges = crate::io::xref::capture_reference_merges(&roots);
+        let before = self.tabs[i].scene.document.clone();
+        let infos = crate::io::xref::resolve_xrefs_for_keys_in_session(
             &mut self.tabs[i].scene.document,
-            vec![(name, path.clone(), handle, read)],
-            &mut infos,
-            None,
+            &base,
+            &roots,
             Some(&session),
         );
-        let info = infos
-            .pop()
-            .ok_or_else(|| failure("xref_load_failed", "No source result"))?;
-        if info.status != crate::io::xref::XrefStatus::Loaded {
-            return Err(load_failed(&info));
+        if let Some(failed) = infos
+            .iter()
+            .find(|info| info.status == crate::io::xref::XrefStatus::Failed)
+        {
+            self.tabs[i].scene.document = before;
+            crate::io::xref::restore_reference_merges(merges);
+            session.restore_source_registry(checkpoint);
+            return Err(load_failed(failed));
         }
-        session
-            .bind_external_source_bytes(
-                handle,
-                &path,
-                file_name.to_owned(),
-                std::sync::Arc::new(bytes),
-            )
-            .map_err(|e| failure("invalid_source", e))?;
         self.post_ref_op(i);
-        self.set_control_result(json!({"source_id":id.to_string(),"source_status":"loaded","found_at":file_name,"other_drawing":info.other_drawing,"diagnostics":info.diagnostics}));
+        self.set_control_result(json!({"source_id":id.to_string(),"owner_resource":owner.to_string(),"resource_id":resource.to_string(),"source_status":"loaded","other_drawing":infos.iter().any(|info|info.other_drawing),"nested_sources":session.nested_source_rows().into_iter().map(|(root,r)|json!({"rootSourceId":session.external_source(root).map(|s|s.id.0.to_string()),"name":r.name,"ownerResource":r.owner_resource.map(|id|id.to_string()),"sourceId":r.source_id.to_string(),"locator":r.locator,"status":r.status,"diagnostic":r.diagnostic})).collect::<Vec<_>>(),"diagnostics":infos.iter().flat_map(|info|info.diagnostics.iter()).collect::<Vec<_>>(),"resources":session.source_resource_choices().into_iter().map(|(id,name)|json!({"id":id.to_string(),"name":name})).collect::<Vec<_>>()}));
         Ok(Task::none())
     }
 

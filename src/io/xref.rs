@@ -9,7 +9,31 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+mod graph;
+#[cfg(test)]
+mod graph_tests;
 mod source_read;
+
+pub(crate) struct ReferenceMergeCheckpoint(Vec<(Handle, Option<HashMap<Handle, Handle>>)>);
+pub(crate) fn capture_reference_merges(handles: &HashSet<Handle>) -> ReferenceMergeCheckpoint {
+    ReferenceMergeCheckpoint(
+        merged_copies()
+            .lock()
+            .map(|m| handles.iter().map(|h| (*h, m.get(h).cloned())).collect())
+            .unwrap_or_default(),
+    )
+}
+pub(crate) fn restore_reference_merges(checkpoint: ReferenceMergeCheckpoint) {
+    if let Ok(mut copies) = merged_copies().lock() {
+        for (handle, previous) in checkpoint.0 {
+            if let Some(previous) = previous {
+                copies.insert(handle, previous);
+            } else {
+                copies.remove(&handle);
+            }
+        }
+    }
+}
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod native_attachment_tests {
@@ -98,7 +122,7 @@ mod native_attachment_tests {
     }
 
     #[test]
-    fn native_ifccad_source_nested_failure_keeps_previous_body() {
+    fn corrupt_native_source_failure_keeps_previous_body() {
         let (mut host, root, session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
         let record = host.block_records.get("grondplan").unwrap().clone();
         let keys = [record.handle].into_iter().collect();
@@ -125,7 +149,7 @@ mod native_attachment_tests {
                 record.handle,
                 &record.xref_path,
                 "nested.ifccad".into(),
-                Arc::new(include_bytes!("../../crates/ocs_save/tests/fixtures/xref.ifcx").to_vec()),
+                Arc::new(b"malformed native source".to_vec()),
             )
             .unwrap();
         let infos = resolve_xrefs_for_keys_in_session(&mut host, &root, &keys, Some(&session));
@@ -135,7 +159,7 @@ mod native_attachment_tests {
             infos[0]
                 .diagnostics
                 .iter()
-                .any(|message| message.contains("nested")),
+                .any(|message| !message.is_empty()),
             "{:?}",
             infos[0].diagnostics
         );
@@ -168,7 +192,7 @@ mod native_attachment_tests {
         let keys = [record.handle].into_iter().collect();
         let infos = resolve_xrefs_for_keys_in_session(&mut host, &root, &keys, Some(&session));
         std::fs::remove_dir_all(&root).unwrap();
-        assert_eq!(infos[0].status, XrefStatus::Failed);
+        assert_eq!(infos[0].status, XrefStatus::Loaded);
         assert!(
             infos[0]
                 .diagnostics
@@ -1081,6 +1105,14 @@ fn resolve_xrefs_with_filter(
         .into_par_iter()
         .enumerate()
         .map(|(xref_index, (block_name, raw_path, br_handle))| {
+            let guard = (
+                raw_path.clone(),
+                doc.block_records
+                    .iter()
+                    .find(|r| r.handle == br_handle)
+                    .is_some_and(|r| r.flags.is_xref_unloaded),
+                session.map_or(0, |s| s.source_generation()),
+            );
             let units = std::sync::Arc::clone(&parse_units);
             let nested_progress = progress.as_ref().map(|progress| {
                 let progress = std::sync::Arc::clone(progress);
@@ -1099,15 +1131,40 @@ fn resolve_xrefs_with_filter(
             let format = session
                 .and_then(|s| s.external_source(br_handle))
                 .map(|source| source.source.format());
-            let read = if let Some(bytes) =
+            let mut read = if let Some(bytes) =
                 session.and_then(|s| s.external_source_bytes(br_handle, &raw_path))
             {
-                read_source_bytes_for_format(
-                    &bytes.file_name,
-                    &bytes.bytes,
-                    format.unwrap_or_else(|| source_read::inferred_format(&bytes.bytes)),
-                    nested_progress,
-                )
+                let mut read = if bytes.resource_id == 1 {
+                    let mut read = read_source_bytes_for_format(
+                        &bytes.file_name,
+                        &bytes.bytes,
+                        format.unwrap_or(document::ifccad::IfccadExternalSourceFormat::Ifccad),
+                        None,
+                    );
+                    read.content = session
+                        .and_then(|s| s.external_source(br_handle))
+                        .map(|s| s.source);
+                    read.outcome = Some(Ok(document::ReadOutcome::new(
+                        Document::new(),
+                        document::ReadStats {
+                            record_stream_read: true,
+                            stream_completed: true,
+                            source_records: 1,
+                            decoded_source_records: 1,
+                            ..Default::default()
+                        },
+                    )));
+                    read
+                } else {
+                    read_source_bytes_for_format(
+                        &bytes.file_name,
+                        &bytes.bytes,
+                        format.unwrap_or_else(|| source_read::inferred_format(&bytes.bytes)),
+                        nested_progress,
+                    )
+                };
+                read.resource_id = Some(bytes.resource_id);
+                read
             } else if cfg!(target_arch = "wasm32")
                 && session.and_then(|s| s.external_source(br_handle)).is_some()
             {
@@ -1116,6 +1173,12 @@ fn resolve_xrefs_with_filter(
                     outcome: None,
                     source_sha256: None,
                     content: None,
+                    context: None,
+                    resource_id: None,
+                    nested_rows: Vec::new(),
+                    graph_diagnostics: Vec::new(),
+                    guard: None,
+                    circular_root: false,
                 }
             } else {
                 read_xref_file_for_format(&raw_path, base_dir, nested_progress, format)
@@ -1128,6 +1191,7 @@ fn resolve_xrefs_with_filter(
                     .sum();
                 progress(completed, total_units);
             }
+            read.guard = Some(guard);
             (block_name, raw_path, br_handle, read)
         })
         .collect();
@@ -1145,6 +1209,12 @@ pub struct XrefRead {
     outcome: Option<Result<document::ReadOutcome, String>>,
     source_sha256: Option<String>,
     content: Option<document::ifccad::IfccadExternalSourceContent>,
+    context: Option<document::IfccadRoundtripContext>,
+    resource_id: Option<u64>,
+    nested_rows: Vec<ocs_save::ExternalReferenceRow>,
+    graph_diagnostics: Vec<String>,
+    guard: Option<(String, bool, u64)>,
+    circular_root: bool,
 }
 
 impl XrefRead {
@@ -1222,6 +1292,12 @@ fn read_xref_file_for_format(
             ))),
             source_sha256: None,
             content: None,
+            context: None,
+            resource_id: None,
+            nested_rows: Vec::new(),
+            graph_diagnostics: Vec::new(),
+            guard: None,
+            circular_root: false,
         };
     }
     let resolved = resolve_path(raw_path, base_dir);
@@ -1230,6 +1306,7 @@ fn read_xref_file_for_format(
         .as_ref()
         .and_then(|path| crate::io::edit_lock::FileFingerprint::capture(path).ok());
     let mut content = None;
+    let mut context = None;
     #[cfg(not(target_arch = "wasm32"))]
     let outcome = resolved.as_ref().map(|path| {
         use document::ifccad::IfccadExternalSourceFormat;
@@ -1255,6 +1332,7 @@ fn read_xref_file_for_format(
             progress,
         );
         content = read.content;
+        context = read.context;
         read.outcome
             .unwrap_or_else(|| Err("Source read returned no outcome".into()))
             .and_then(|outcome| super::finalize_loaded_outcome(path, outcome))
@@ -1282,6 +1360,7 @@ fn read_xref_file_for_format(
                 let read =
                     read_source_bytes_for_format(&path.to_string_lossy(), &bytes, format, progress);
                 content = read.content;
+                context = read.context;
                 read.outcome
                     .unwrap_or_else(|| Err("Source read returned no outcome".into()))
             }
@@ -1315,6 +1394,12 @@ fn read_xref_file_for_format(
         outcome,
         source_sha256,
         content,
+        context,
+        resource_id: None,
+        nested_rows: Vec::new(),
+        graph_diagnostics: Vec::new(),
+        guard: None,
+        circular_root: false,
     }
 }
 
@@ -1340,27 +1425,47 @@ pub fn merge_xref_reads_in_session(
     let xref_count = parsed.len();
     let total_units = xref_count.saturating_mul(2000);
     result.reserve(parsed.len());
-    for (merge_index, (block_name, raw_path, br_handle, read)) in parsed.into_iter().enumerate() {
+    for (merge_index, (block_name, raw_path, br_handle, mut read)) in parsed.into_iter().enumerate()
+    {
+        if read
+            .guard
+            .as_ref()
+            .is_some_and(|(path, unloaded, generation)| {
+                session.map_or(0, |s| s.source_generation()) != *generation
+                    || !doc.block_records.iter().any(|r| {
+                        r.handle == br_handle
+                            && r.xref_path == *path
+                            && r.flags.is_xref_unloaded == *unloaded
+                    })
+            })
+        {
+            result.push(XrefInfo {
+                name: block_name,
+                path: raw_path,
+                status: XrefStatus::Failed,
+                diagnostics: vec![
+                    "Reference changed while loading; obsolete source result ignored".into(),
+                ],
+                read_stats: None,
+                source_sha256: None,
+                other_drawing: false,
+            });
+            continue;
+        }
+        if let Err(error) = graph::prepare_read(doc, br_handle, &raw_path, &mut read, session) {
+            read.outcome = Some(Err(error));
+        }
         let source_content = read.source_content();
         let XrefRead {
             resolved,
             outcome: xref_outcome,
             source_sha256,
+            nested_rows,
+            graph_diagnostics,
+            circular_root,
             ..
         } = read;
-        let self_reference =
-            resolved
-                .as_ref()
-                .zip(doc.source_path.as_ref())
-                .is_some_and(|(found, host)| {
-                    std::fs::canonicalize(found)
-                        .ok()
-                        .zip(std::fs::canonicalize(host).ok())
-                        .is_some_and(|(a, b)| a == b)
-                });
-        let xref_outcome = if self_reference {
-            Some(Err("Direct self-reference is unsupported".into()))
-        } else {
+        let xref_outcome = {
             xref_outcome.map(|outcome| {
                 outcome.and_then(|outcome| {
                     if let Some(record) = doc.block_records.iter().find(|r| r.handle == br_handle) {
@@ -1368,7 +1473,7 @@ pub fn merge_xref_reads_in_session(
                             .map_err(|e| e.to_string())?;
                     }
                     if let Some(session) = session {
-                        if session.external_source(br_handle).is_some() {
+                        if !circular_root && session.external_source(br_handle).is_some() {
                             let content = source_content
                                 .as_ref()
                                 .ok_or("Source format metadata is unavailable")?;
@@ -1401,6 +1506,7 @@ pub fn merge_xref_reads_in_session(
                         .iter()
                         .map(|diagnostic| diagnostic.message.clone()),
                 );
+                diagnostics.extend(graph_diagnostics);
                 if recovered {
                     (XrefStatus::Failed, diagnostics, Some(outcome.stats))
                 } else {
@@ -1476,6 +1582,9 @@ pub fn merge_xref_reads_in_session(
                     crate::scene::normalize_block_terminators(doc);
                     if visretain {
                         restore_dependent_layers(doc, &block_name, kept_layers);
+                    }
+                    if let Some(session) = session {
+                        session.set_nested_source_rows(br_handle, nested_rows);
                     }
                     (XrefStatus::Loaded, diagnostics, Some(outcome.stats))
                 }
@@ -1955,6 +2064,7 @@ fn import_xref_symbols(
         let new = naming.name_for(SymbolKind::Block, &old);
         let mut cloned = br.clone();
         cloned.name = new.clone();
+        cloned.flags.is_external = matches!(naming, SymbolNaming::MergePipe { .. });
         cloned.entity_handles.clear();
         cloned.insert_handles.clear();
         cloned.layout = Handle::NULL;
@@ -2188,6 +2298,25 @@ fn merge_xref_into_block(
     br_handle: Handle,
     xref_doc: Document,
 ) {
+    merge_xref_block_content(doc, xref_block_name, br_handle, xref_doc, true);
+}
+
+fn merge_xref_display_block(
+    doc: &mut Document,
+    xref_block_name: &str,
+    br_handle: Handle,
+    xref_doc: Document,
+) {
+    merge_xref_block_content(doc, xref_block_name, br_handle, xref_doc, false);
+}
+
+fn merge_xref_block_content(
+    doc: &mut Document,
+    xref_block_name: &str,
+    br_handle: Handle,
+    xref_doc: Document,
+    track: bool,
+) {
     let prefix = xref_block_name;
 
     // Carry the xref's INSUNITS onto the host BlockRecord. Used at INSERT
@@ -2228,10 +2357,12 @@ fn merge_xref_into_block(
     // The unremapped-handle count is ignored on the load path (BIND reports
     // it per bind).
     let (_, entity_handle_map) = merge_source_entities(doc, &xref_doc, br_handle, &maps);
-    if let Ok(mut merged) = merged_copies().lock() {
-        merged.insert(br_handle, entity_handle_map.clone());
+    if track {
+        if let Ok(mut merged) = merged_copies().lock() {
+            merged.insert(br_handle, entity_handle_map.clone());
+        }
+        link_stored_references(doc, br_handle, &entity_handle_map);
     }
-    link_stored_references(doc, br_handle, &entity_handle_map);
 
     // ── Draw-order overrides (shared helper) ──────────────────────────────
     copy_xref_sortents(
@@ -2351,13 +2482,11 @@ pub use crate::io::xref_model::child_key;
 /// through this fn, and the palette keys rows off `(key, saved_path)`, so
 /// nested rows keep resolving.
 ///
-/// Nested enumeration (SPIKE5): each LOADED DwgXref whose file resolved is
-/// opened read-only and its *direct* xref block-records are appended as child
-/// entries (no geometry merge). Parsed docs live in a per-path
-/// cache inside the call; already-seen normalized `saved_path`s are skipped,
-/// so a self- or cyclic reference enumerates once and never recurses. A
-/// nested file that fails to parse is skipped silently. Synchronous by
-/// design; async stat is Task 8.
+/// Nested rows use the same finite production traversal as dependent graphics.
+/// Parsed resources and the active ancestor chain remain separate, so shared
+/// descendants are not cycles. A direct self-reference reports Circular on its
+/// own row; a closing edge deeper in the graph reports it on that nested row.
+/// Native sessions replace filesystem-derived rows with their owner-scoped report.
 pub fn collect_entries(
     doc: &document::Document,
     base_dir: &Path,
@@ -2379,16 +2508,41 @@ pub fn collect_entries_with_prev(
 
 /// Apply explicit per-tab source choices to the existing manager/report rows.
 pub fn apply_native_source_status(
-    entries: &mut [crate::io::xref_model::ReferenceEntry],
+    entries: &mut Vec<crate::io::xref_model::ReferenceEntry>,
     session: Option<&ocs_save::IfccadSession>,
 ) {
     use crate::io::xref_model::{RefKind, RefStatus};
     let Some(session) = session else {
         return;
     };
-    for entry in entries {
+    let roots: HashSet<u64> = session
+        .nested_source_rows()
+        .iter()
+        .map(|(h, _)| h.value())
+        .collect();
+    let mut remove: HashSet<u64> = HashSet::default();
+    loop {
+        let before = remove.len();
+        for entry in entries.iter() {
+            if entry
+                .parent_key
+                .is_some_and(|p| roots.contains(&p) || remove.contains(&p))
+            {
+                remove.insert(entry.key);
+            }
+        }
+        if before == remove.len() {
+            break;
+        }
+    }
+    entries.retain(|e| !remove.contains(&e.key));
+    for entry in entries.iter_mut() {
         if entry.kind != RefKind::DwgXref || entry.parent_key.is_some() {
             continue;
+        }
+        if let Some(source) = session.external_source(Handle::new(entry.key)) {
+            entry.owner_resource = Some(1);
+            entry.source_id = Some(source.id.0);
         }
         if let Some(source) =
             session.external_source_bytes(Handle::new(entry.key), &entry.saved_path)
@@ -2396,7 +2550,16 @@ pub fn apply_native_source_status(
             entry.found_at = Some(source.file_name);
             entry.size_bytes = Some(source.bytes.len() as u64);
             if entry.status != RefStatus::Unloaded {
-                entry.status = RefStatus::Loaded;
+                // Resource 1 is the current drawing, explicitly reused in the
+                // browser. Report its cycle on this authored row, not a fake child.
+                if source.resource_id == 1 {
+                    entry.status = RefStatus::Circular;
+                    entry.diagnostic = Some(
+                        "Circular XREF: direct self-reference interrupted for this session".into(),
+                    );
+                } else if entry.status != RefStatus::Circular {
+                    entry.status = RefStatus::Loaded;
+                }
             }
         } else if cfg!(target_arch = "wasm32")
             && session.external_source(Handle::new(entry.key)).is_some()
@@ -2408,6 +2571,54 @@ pub fn apply_native_source_status(
             }
         }
     }
+    let active_roots: HashSet<u64> = entries
+        .iter()
+        .filter(|e| {
+            e.parent_key.is_none()
+                && e.status != RefStatus::Unloaded
+                && e.status != RefStatus::NotFound
+        })
+        .map(|e| e.key)
+        .collect();
+    for (root, row) in session.nested_source_rows() {
+        if !active_roots.contains(&root.value()) {
+            continue;
+        }
+        let entry = reference_entry_from_row(row);
+        entries.push(entry);
+    }
+}
+
+fn reference_entry_from_row(
+    row: ocs_save::ExternalReferenceRow,
+) -> crate::io::xref_model::ReferenceEntry {
+    use crate::io::xref_model::{RefKind, RefStatus};
+    let mut entry = crate::io::xref_model::ReferenceEntry::new(row.key, row.name, RefKind::DwgXref);
+    entry.parent_key = Some(row.parent_key);
+    entry.saved_path = row.locator;
+    entry.found_at = row.found_at;
+    entry.owner_resource = row.owner_resource;
+    entry.source_id = Some(row.source_id);
+    entry.diagnostic = row.diagnostic;
+    entry.status = match row.status.as_str() {
+        "Loaded" => RefStatus::Loaded,
+        "Circular" => RefStatus::Circular,
+        "Unloaded" => RefStatus::Unloaded,
+        "Failed" => RefStatus::Failed,
+        "Stale" => RefStatus::Stale,
+        "Unreferenced" => RefStatus::Unreferenced,
+        _ => RefStatus::NotFound,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(meta) = entry
+        .found_at
+        .as_ref()
+        .and_then(|path| std::fs::metadata(path).ok())
+    {
+        entry.size_bytes = Some(meta.len());
+        entry.modified = meta.modified().ok();
+    }
+    entry
 }
 
 /// Resolve one host-owned row without applying the manager's nested-row
@@ -2434,8 +2645,7 @@ fn collect_entries_impl(
     deduplicate_nested: bool,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
     use crate::io::xref_model::{
-        child_key, decide_status, normalize_lexical, RefKind, RefStatus, RefType, ReferenceEntry,
-        UnloadKey,
+        decide_status, normalize_lexical, RefKind, RefStatus, RefType, ReferenceEntry, UnloadKey,
     };
     use document::objects::ObjectType;
 
@@ -2645,71 +2855,48 @@ fn collect_entries_impl(
         entries.push(entry);
     }
 
-    // ── Nested enumeration: full transitive closure, read-only, no merge ──
-    // Paths stored in a nested drawing are relative to *that drawing*, not to
-    // the host.  The work queue carries each parent's resolved file so every
-    // level gets the correct base directory.  `seen` is keyed by resolved
-    // absolute identity and breaks A→B→A cycles as well as shared closures.
-    let mut seen: HashSet<String> = HashSet::default();
-    let mut work: Vec<(u64, PathBuf)> = Vec::new();
-    for e in &entries {
-        if e.kind == RefKind::DwgXref && matches!(e.status, RefStatus::Loaded | RefStatus::Stale) {
-            if let Some(found) = &e.found_at {
-                let path = PathBuf::from(found);
-                seen.insert(normalize_lexical(&path.to_string_lossy()));
-                work.push((e.key, path));
+    // Use the same typed production traversal as geometry loading. Native
+    // tab reports replace these rows in apply_native_source_status, including
+    // explicitly selected browser resources which have no filesystem path.
+    let roots = entries.clone();
+    for root in roots.iter().filter(|e| {
+        e.kind == RefKind::DwgXref
+            && e.parent_key.is_none()
+            && matches!(e.status, RefStatus::Loaded | RefStatus::Stale)
+    }) {
+        let Some(path) = &root.found_at else {
+            continue;
+        };
+        let mut read = read_xref_file_for_format(path, base_dir, None, None);
+        if graph::prepare_read(
+            doc,
+            Handle::new(root.key),
+            &root.saved_path,
+            &mut read,
+            None,
+        )
+        .is_err()
+        {
+            continue;
+        }
+        if read.circular_root {
+            if let Some(entry) = entries.iter_mut().find(|e| e.key == root.key) {
+                entry.status = RefStatus::Circular;
+                entry.diagnostic = read.graph_diagnostics.first().cloned();
             }
         }
-    }
-    // Cached nested documents are shared via `Arc`: the enumeration below is
-    // strictly read-only, so a hit clones the pointer instead of deep-copying
-    // the whole document (entities, objects, block records) per access.
-    let mut nested_cache: HashMap<String, Arc<Document>> = HashMap::default();
-    while let Some((parent_key, parent_path)) = work.pop() {
-        let cache_key = normalize_lexical(&parent_path.to_string_lossy());
-        let nested_doc = if let Some(cached) = nested_cache.get(&cache_key) {
-            Arc::clone(cached)
-        } else {
-            match super::load_file(&parent_path) {
-                Ok(nested) => {
-                    let shared = Arc::new(nested);
-                    nested_cache.insert(cache_key, Arc::clone(&shared));
-                    shared
-                }
-                Err(_) => continue,
+        for row in read.nested_rows {
+            let mut entry = reference_entry_from_row(row);
+            entry.status = decide_status(
+                entry.status,
+                entry.modified,
+                prev.get(&entry.key).copied(),
+                false,
+            );
+            if unloaded.contains(&UnloadKey::Nested(entry.key)) {
+                entry.status = RefStatus::Unloaded;
             }
-        };
-        let parent_dir = parent_path.parent().unwrap_or(base_dir);
-        for br in nested_doc.block_records.iter() {
-            if !(br.flags.is_xref || br.flags.is_xref_overlay) {
-                continue;
-            }
-            let key = child_key(parent_key, &br.name, &br.xref_path);
-            let mut child = ReferenceEntry::new(key, br.name.clone(), RefKind::DwgXref);
-            child.parent_key = Some(parent_key);
-            child.ref_type = if br.flags.is_xref_overlay {
-                RefType::Overlay
-            } else {
-                RefType::Attach
-            };
-            child.saved_path = br.xref_path.clone();
-            if unloaded.contains(&UnloadKey::Nested(key)) {
-                child.status = RefStatus::Unloaded;
-            } else {
-                stat_into(&mut child, &br.xref_path, parent_dir);
-                // Nested baselines live in the same stat cache under the
-                // child's high-bit-tagged key, which can never alias a host
-                // handle (see `child_key`) — so the lookup below is safe.
-                child.status =
-                    decide_status(child.status, child.modified, prev.get(&key).copied(), false);
-            }
-            if let Some(found) = &child.found_at {
-                let resolved_id = normalize_lexical(found);
-                if seen.insert(resolved_id) {
-                    work.push((key, PathBuf::from(found)));
-                }
-            }
-            entries.push(child);
+            entries.push(entry);
         }
     }
 
@@ -2718,10 +2905,14 @@ fn collect_entries_impl(
     // parent (#2838). A top-level row the host never inserts itself, whose
     // file the walk found under a parent, is that nested row.
     if deduplicate_nested {
-        let nested_files: HashSet<String> = entries
+        let nested_files: HashSet<graph::XrefResourceId> = entries
             .iter()
             .filter(|e| e.parent_key.is_some())
-            .filter_map(|e| e.found_at.as_deref().map(normalize_lexical))
+            .filter_map(|e| {
+                e.found_at
+                    .as_deref()
+                    .map(|path| graph::desktop_identity(Path::new(path)))
+            })
             .collect();
         // The host's copy of a nested record keeps the path it had where the
         // parent was last saved (another machine's folder), so it may resolve
@@ -2755,9 +2946,9 @@ fn collect_entries_impl(
                 || e.kind != RefKind::DwgXref
                 || inserted.contains(&e.name.to_uppercase())
                 || !(nested_names.contains(&e.name.to_uppercase())
-                    || e.found_at
-                        .as_deref()
-                        .is_some_and(|found| nested_files.contains(&normalize_lexical(found))))
+                    || e.found_at.as_deref().is_some_and(|found| {
+                        nested_files.contains(&graph::desktop_identity(Path::new(found)))
+                    }))
         });
     }
 
@@ -4479,12 +4670,27 @@ mod tests {
     fn write_nested_fixture(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
         // mid.dwgxrefs inner.dwg; both must parse (enumeration reads the
         // mid file's block-record table). Returns (mid, inner) abs paths.
-        std::fs::write(dir.join("inner.dwg"), b"inner-bytes").unwrap();
+        let mut inner = document::Document::new();
+        inner
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                0., 0., 0., 1., 0., 0.,
+            )))
+            .unwrap();
+        std::fs::write(
+            dir.join("inner.dwg"),
+            crate::io::save_to_bytes(&inner, "dwg", inner.version).unwrap(),
+        )
+        .unwrap();
         let mut mid = document::Document::new();
         let mut br = document::tables::BlockRecord::new("INNER");
         br.flags.is_xref = true;
         br.xref_path = dir.join("inner.dwg").to_string_lossy().into_owned();
         mid.block_records.add(br).unwrap();
+        mid.add_entity(EntityType::Insert(document::entities::Insert::new(
+            "INNER",
+            Vector3::ZERO,
+        )))
+        .unwrap();
         let bytes = crate::io::save_to_bytes(&mid, "dwg", mid.version).unwrap();
         std::fs::write(dir.join("mid.dwg"), &bytes).unwrap();
         (dir.join("mid.dwg"), dir.join("inner.dwg"))

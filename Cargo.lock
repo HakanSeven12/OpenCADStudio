@@ -3197,7 +3197,7 @@ dependencies = [
 [[package]]
 name = "ifccad"
 version = "2026.47.0"
-source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=cd79dfc81873f236c81df205088cb33ae4217960#cd79dfc81873f236c81df205088cb33ae4217960"
+source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=785590abb669c38afb700b339d36cc8cc0c18161#785590abb669c38afb700b339d36cc8cc0c18161"
 dependencies = [
  "base64 0.22.1",
  "fpmath",
@@ -4837,7 +4837,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=64e872a4e16e5d7f071411fc5d76048a1a5d77fa#64e872a4e16e5d7f071411fc5d76048a1a5d77fa"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=a7577b9a8a0d4c43ba61bd33fb07b49a5b85b2d1#a7577b9a8a0d4c43ba61bd33fb07b49a5b85b2d1"
 dependencies = [
  "acadrust",
  "ifccad",

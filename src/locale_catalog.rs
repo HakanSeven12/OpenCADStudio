@@ -5369,7 +5369,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Usage: XREF Path Find <old> <new>" => Some(("insert", "usage-xref-path-find")),
         "Usage: XREF Pathtype <Full|Relative|None> [pattern]" => Some(("insert", "usage-xref-pathtype")),
         "{} reference(s) not found — open the reference manager with EXTERNALREFERENCES." => Some(("insert", "xref-missing-open-xrefman")),
-        " (nested — not rendered)" => Some(("insert", "xref-nested-not-rendered")),
+        " (nested)" => Some(("insert", "xref-nested")),
         "Change Path:" => Some(("insert", "change-path")),
         "Date" => Some(("insert", "date")),
         "Details" => Some(("insert", "details")),

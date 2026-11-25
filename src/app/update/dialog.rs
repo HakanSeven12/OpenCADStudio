@@ -832,6 +832,9 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn post_ref_op(&mut self, i: usize) {
+        if let Some(session) = &self.tabs[i].ifccad_session {
+            session.invalidate_source_generation();
+        }
         self.tabs[i].scene.populate_hatches_from_document();
         self.tabs[i].scene.populate_images_from_document();
         // Image/PDF unload is intentionally session-only (the file formats do

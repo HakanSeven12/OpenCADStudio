@@ -582,3 +582,6 @@ mod tests {
         assert_eq!(a, b);
     }
 }
+
+mod xref_sources;
+pub use xref_sources::{ExternalDrawingSnapshot, ExternalReferenceRow, SourceRegistryCheckpoint};

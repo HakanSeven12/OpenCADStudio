@@ -22,6 +22,7 @@ pub(super) fn read(
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
 ) -> XrefRead {
     let mut content = None;
+    let mut context = None;
     let outcome = match format {
         IfccadExternalSourceFormat::Dwg => {
             let mut reader = document::DwgReader::from_stream(std::io::Cursor::new(bytes.to_vec()));
@@ -35,12 +36,11 @@ pub(super) fn read(
                 .and_then(|reader| reader.read_with_stats())
                 .map_err(|error| error.to_string())
         }
-        IfccadExternalSourceFormat::Ifccad => {
-            ocs_save::read_ifccad_source(bytes).map(|(outcome, metadata)| {
-                content = Some(metadata);
-                outcome
-            })
-        }
+        IfccadExternalSourceFormat::Ifccad => ocs_save::read_ifccad_source(bytes).map(|source| {
+            content = Some(source.content);
+            context = Some(source.context);
+            source.outcome
+        }),
     }
     .and_then(|outcome| {
         if !outcome.stats.has_usable_drawing_data() {
@@ -53,5 +53,11 @@ pub(super) fn read(
         outcome: Some(outcome),
         source_sha256: None,
         content,
+        context,
+        resource_id: None,
+        nested_rows: Vec::new(),
+        graph_diagnostics: Vec::new(),
+        guard: None,
+        circular_root: false,
     }
 }

@@ -520,6 +520,9 @@ mod stretch_shift_click_tests;
 mod grip_mtp_tests;
 
 #[cfg(test)]
+mod grip_typed_point_tests;
+
+#[cfg(test)]
 mod pointer_move_coalescing_tests;
 
 #[cfg(test)]

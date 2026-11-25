@@ -768,7 +768,11 @@ impl OpenCADStudio {
                     .history_panel(&self.history_content, width, chrome)
             }
             crate::ui::dock::PanelId::Plugin(num) => {
-                if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
+                // A plugin body sizes to its content; the pallet's width
+                // makes it fill and reflow with the group (#3649).
+                let body: Element<'a, Message> = if let Some(panel_id) =
+                    self.plugin_panel_by_num.get(&num)
+                {
                     if let Some(state) = self.plugin_panels.get(panel_id) {
                         // A panel may own a scene AND a widget surface side
                         // by side (finding F1): the widget view wins the
@@ -816,7 +820,8 @@ impl OpenCADStudio {
                     }
                 } else {
                     Space::new().into()
-                }
+                };
+                container(body).width(Length::Fixed(width)).into()
             }
         }
     }

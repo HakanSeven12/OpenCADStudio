@@ -2652,7 +2652,7 @@ common =
     .specify-point-or-enter-arc-length = Specify point or enter arc length:
     .specify-point-or-enter-radius = Specify point or enter radius:
     .specify-replacement-path-xref-path-find-old-new = Specify replacement path: XREF Path Find <old> <new>
-    .specify-second-point = Specify second point:
+    .specify-second-point = Zweiten Punkt angeben:
     .specify-the-shell-offset-distance = Specify the shell offset distance <__ocs_fmt_0__>:
     .specify-thickness = Specify thickness
     .specify-window = Specify window
@@ -10094,7 +10094,7 @@ text-style =
     .oblique-large = Obliquing angle too large.
     .yes-or-no = Yes or No, please.
     .numeric-value = Requires numeric value.
-    .angle-two-points = Requires valid numeric angle or two points.
+    .angle-two-points = Gültiger numerischer Winkel oder zwei Punkte erforderlich.
     .info-new = -STYLE  New style.
     .info-existing = -STYLE  Existing style.
     .info-full-font = {" "}Full font name = { $font }

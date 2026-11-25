@@ -124,6 +124,8 @@ pub struct IntersectionPointCommand {
     /// The picked lot line's or feature line's geometry, read from the
     /// drawing it was picked in.
     site_line: Option<Curve>,
+    /// Which legs are lot or feature lines (their nodes are not merged).
+    site_legs: [bool; 2],
     /// The picked object's curve and the side a positive offset moves it
     /// to: +1 right, -1 left (see `on_entity_pick`).
     object: Option<(Curve, f64)>,
@@ -375,8 +377,10 @@ fn pieces(curve: &Curve, direction: bool) -> Vec<(Curve, bool, u8)> {
 /// writes them (measured): piece by piece along the first shape, then
 /// along the second; two pieces' points along the higher ranked one (the
 /// second's on a tie). Two circles give the point left of the first
-/// centre → second centre line first.
-fn meets(a: &Curve, a_direction: bool, b: &Curve, b_direction: bool) -> Vec<DVec3> {
+/// centre → second centre line first. A polyline's joint is met once; a
+/// lot line's or feature line's segments are separate, so the node they
+/// share is met by each (measured) — `joints_once` false.
+fn meets(a: &Curve, a_direction: bool, b: &Curve, b_direction: bool, joints_once: bool) -> Vec<DVec3> {
     let tolerance = Tolerance::new(1e-9);
     let mut found: Vec<DVec3> = Vec::new();
     for (pa, ra_reversed, ra) in pieces(a, a_direction) {
@@ -391,8 +395,7 @@ fn meets(a: &Curve, a_direction: bool, b: &Curve, b_direction: bool) -> Vec<DVec
             }
             for c in crossings {
                 let p = DVec3::new(c.point[0], c.point[1], 0.0);
-                // A point where two segments join is met once.
-                if !found.iter().any(|q| q.distance(p) < 1e-7) {
+                if !joints_once || !found.iter().any(|q| q.distance(p) < 1e-7) {
                     found.push(p);
                 }
             }
@@ -432,6 +435,7 @@ impl IntersectionPointCommand {
             quadrant: 1,
             picked: None,
             site_line: None,
+            site_legs: [false; 2],
             object: None,
             queue: VecDeque::new(),
             description: None,
@@ -448,6 +452,7 @@ impl IntersectionPointCommand {
         self.leg = leg;
         if leg == 0 {
             self.first = None;
+            self.site_legs = [false; 2];
         }
         self.at = None;
         self.radius = 0.0;
@@ -488,7 +493,7 @@ impl IntersectionPointCommand {
         let first = self.first.take().flatten();
         let legs = self.kind.legs();
         let points = match (first, shape) {
-            (Some(a), Some(b)) => meets(&a, legs[0] == Leg::Direction, &b, legs[1] == Leg::Direction),
+            (Some(a), Some(b)) => meets(&a, legs[0] == Leg::Direction, &b, legs[1] == Leg::Direction, !self.site_legs.contains(&true)),
             _ => Vec::new(),
         };
         self.found(points)
@@ -613,6 +618,7 @@ impl CadCommand for IntersectionPointCommand {
     fn on_entity_pick(&mut self, _handle: Handle, pick: DVec3) -> CmdResult {
         let alignment = self.current() == Leg::Alignment;
         let site_line = self.site_line.take().filter(|_| !alignment);
+        self.site_legs[self.leg] = site_line.is_some();
         let Some(curve) = site_line.or_else(|| self.picked.take().filter(|e| alignment || alignment_curve(e).is_none()).and_then(|e| if alignment { alignment_curve(&e) } else { entity_curve_xy(&e) })) else {
             return CmdResult::ReportError(t("ERROR: Invalid selection set!"));
         };

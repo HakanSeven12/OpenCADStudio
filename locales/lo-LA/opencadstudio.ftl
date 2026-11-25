@@ -1844,6 +1844,7 @@ common =
     .dynamic-ucs-on = UCS ແບບໄດນາມິກ: ເປີດ
     .dynamic-ucs-off = UCS ແບບໄດນາມິກ: ປິດ
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = ທັດແພດ: ເລື່ອນເພື່ອຍ້າຍມຸມມອງ, Ctrl+ເລື່ອນ ຫຼື ບີບເພື່ອຊູມ
+    .numeric-keypad-decimal-key-always-types-a-point = ແປ້ນຕົວເລກ: ປຸ່ມທົດສະນິຍົມພິມຈຸດສະເໝີ (ປິດ: ຕົວອັກສອນຂອງຮູບແບບແປ້ນ, ເຄື່ອງໝາຍຈຸດ-ຂີດຈຶ່ງແຍກພິກັດ)
     .interface-scale = ຂະໜາດສ່ວນຕິດຕໍ່
     .zoom-factor = ຕົວຄູນການຊູມ
     .how-far-one-wheel-notch-zooms-zoomfactor = ໄລຍະຊູມຕໍ່ການໝຸນລໍ້ເມົາສ໌ໜຶ່ງຄລິກ (ZOOMFACTOR).

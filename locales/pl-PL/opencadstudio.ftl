@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = Dynamiczny LUW: wł.
     .dynamic-ucs-off = Dynamiczny LUW: wył.
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: przewijanie przesuwa widok, Ctrl+przewijanie lub szczypanie powiększa
+    .numeric-keypad-decimal-key-always-types-a-point = Klawiatura numeryczna: klawisz dziesiętny zawsze wpisuje kropkę (wył.: znak układu klawiatury, wtedy przecinek rozdziela współrzędne)
     .interface-scale = Skala interfejsu
     .zoom-factor = Współczynnik powiększenia
     .how-far-one-wheel-notch-zooms-zoomfactor = O ile powiększa jedno kliknięcie kółka (ZOOMFACTOR).

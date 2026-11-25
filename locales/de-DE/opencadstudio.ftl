@@ -1839,6 +1839,7 @@ common =
     .dynamic-ucs-on = Dynamisches BKS: ein
     .dynamic-ucs-off = Dynamisches BKS: aus
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: Scrollen verschiebt, Strg+Scrollen oder Zusammenziehen zoomt
+    .numeric-keypad-decimal-key-always-types-a-point = Ziffernblock: Die Dezimaltaste gibt immer einen Punkt ein (aus: das Zeichen des Tastaturlayouts, ein Komma trennt dann Koordinaten)
     .interface-scale = Oberflächenskalierung
     .zoom-factor = Zoomfaktor
     .how-far-one-wheel-notch-zooms-zoomfactor = Wie weit eine Radrastung zoomt (ZOOMFACTOR).

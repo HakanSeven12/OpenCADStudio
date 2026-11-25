@@ -6588,6 +6588,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Dynamic UCS: on" => Some(("common", "dynamic-ucs-on")),
         "Dynamic UCS: off" => Some(("common", "dynamic-ucs-off")),
         "Touchpad: scroll pans, Ctrl+scroll or pinch zooms" => Some(("common", "touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms")),
+        "Numeric keypad: the decimal key always types a point (off: the layout's character, so a comma separates coordinates)" => Some(("common", "numeric-keypad-decimal-key-always-types-a-point")),
         "Interface scale" => Some(("common", "interface-scale")),
         "Zoom factor" => Some(("common", "zoom-factor")),
         "How far one wheel notch zooms (ZOOMFACTOR)." => Some(("common", "how-far-one-wheel-notch-zooms-zoomfactor")),

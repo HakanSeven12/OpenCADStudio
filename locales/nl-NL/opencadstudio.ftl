@@ -1837,6 +1837,7 @@ common =
     .dynamic-ucs-on = Dynamisch GCS: aan
     .dynamic-ucs-off = Dynamisch GCS: uit
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: scrollen verschuift, Ctrl+scrollen of knijpen zoomt
+    .numeric-keypad-decimal-key-always-types-a-point = Numeriek toetsenbord: de decimaaltoets typt altijd een punt (uit: het teken van de indeling, een komma scheidt dan coördinaten)
     .interface-scale = Interfaceschaal
     .zoom-factor = Zoomfactor
     .how-far-one-wheel-notch-zooms-zoomfactor = Hoeveel één wielklik zoomt (ZOOMFACTOR).

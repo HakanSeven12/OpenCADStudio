@@ -1825,6 +1825,7 @@ common =
     .dynamic-ucs-on = Dinamik UCS: açık
     .dynamic-ucs-off = Dinamik UCS: kapalı
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Dokunmatik yüzey: kaydırma kaydırır, Ctrl+kaydırma veya sıkıştırma yakınlaştırır
+    .numeric-keypad-decimal-key-always-types-a-point = Sayısal tuş takımı: ondalık tuşu her zaman nokta yazar (kapalı: klavye düzeninin karakteri, böylece virgül koordinatları ayırır)
     .interface-scale = Arayüz ölçeği
     .zoom-factor = Yakınlaştırma çarpanı
     .how-far-one-wheel-notch-zooms-zoomfactor = Bir tekerlek adımının ne kadar yakınlaştıracağı (ZOOMFACTOR).

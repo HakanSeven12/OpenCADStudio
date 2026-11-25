@@ -1840,6 +1840,7 @@ common =
     .dynamic-ucs-on = Δυναμικό UCS: ενεργό
     .dynamic-ucs-off = Δυναμικό UCS: ανενεργό
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Επιφάνεια αφής: η κύλιση μετακινεί, Ctrl+κύλιση ή τσίμπημα κάνει ζουμ
+    .numeric-keypad-decimal-key-always-types-a-point = Αριθμητικό πληκτρολόγιο: το δεκαδικό πλήκτρο γράφει πάντα τελεία (ανενεργό: ο χαρακτήρας της διάταξης, οπότε το κόμμα χωρίζει συντεταγμένες)
     .interface-scale = Κλίμακα διεπαφής
     .zoom-factor = Συντελεστής ζουμ
     .how-far-one-wheel-notch-zooms-zoomfactor = Πόσο ζουμάρει ένα σκαλί του τροχού (ZOOMFACTOR).

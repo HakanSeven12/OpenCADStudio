@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = Dynaaminen UCS: päällä
     .dynamic-ucs-off = Dynaaminen UCS: pois
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Kosketuslevy: vieritys panoroi, Ctrl+vieritys tai nipistys zoomaa
+    .numeric-keypad-decimal-key-always-types-a-point = Numeronäppäimistö: desimaalinäppäin kirjoittaa aina pisteen (pois: asettelun merkki, jolloin pilkku erottaa koordinaatit)
     .interface-scale = Käyttöliittymän skaalaus
     .zoom-factor = Zoomauskerroin
     .how-far-one-wheel-notch-zooms-zoomfactor = Kuinka paljon yksi rullan pykälä zoomaa (ZOOMFACTOR).

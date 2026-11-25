@@ -572,10 +572,13 @@ pub(crate) fn window_event_with_context(
             // The numpad decimal key emits the OS-layout separator
             // (a comma on German/European layouts), which the
             // coordinate parser rejects. Force it to a decimal point
-            // from the physical key, independent of layout. A key an input
-            // method composes arrives without text: it is the method's, and
-            // the focused field keeps it (#2835).
+            // from the physical key, independent of layout, unless the
+            // user keeps the layout's character (Options › User
+            // Preferences; there a comma separates coordinates, #3641).
+            // A key an input method composes arrives without text: it is
+            // the method's, and the focused field keeps it (#2835).
             if !shortcut_modifier
+                && keypad_decimal_point()
                 && status == Status::Ignored
                 && text.as_deref().is_some_and(|t| !t.is_empty())
                 && matches!(
@@ -6487,4 +6490,17 @@ impl OpenCADStudio {
             )
         })
     }
+}
+
+static KEYPAD_DECIMAL_POINT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+/// Whether the numeric keypad's decimal key always types a decimal point
+/// (`true`) or the character the keyboard layout gives it.
+pub fn keypad_decimal_point() -> bool {
+    KEYPAD_DECIMAL_POINT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_keypad_decimal_point(on: bool) {
+    KEYPAD_DECIMAL_POINT.store(on, std::sync::atomic::Ordering::Relaxed);
 }

@@ -1826,6 +1826,7 @@ common =
     .dynamic-ucs-on = 动态 UCS：开
     .dynamic-ucs-off = 动态 UCS：关
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = 触控板：滚动平移，Ctrl+滚动或捏合缩放
+    .numeric-keypad-decimal-key-always-types-a-point = 数字小键盘：小数点键始终输入句点（关闭：使用键盘布局的字符，逗号分隔坐标）
     .interface-scale = 界面缩放
     .zoom-factor = 缩放系数
     .how-far-one-wheel-notch-zooms-zoomfactor = 滚轮每格的缩放幅度 (ZOOMFACTOR)。

@@ -342,6 +342,8 @@ pub enum Message {
     /// F6 / UCSDETECT: toggle the dynamic UCS.
     ToggleDynamicUcs,
     TouchpadPanChanged(bool),
+    /// Options: the keypad decimal key always types a point.
+    KeypadDecimalPointChanged(bool),
     /// Options: show the pull-down menus (MENUBAR).
     MenuBarChanged(bool),
     /// Options: show the ribbon (RIBBON / RIBBONCLOSE).

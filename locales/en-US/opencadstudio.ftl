@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = Dynamic UCS: on
     .dynamic-ucs-off = Dynamic UCS: off
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: scroll pans, Ctrl+scroll or pinch zooms
+    .numeric-keypad-decimal-key-always-types-a-point = Numeric keypad: the decimal key always types a point (off: the layout's character, so a comma separates coordinates)
     .interface-scale = Interface scale
     .zoom-factor = Zoom factor
     .how-far-one-wheel-notch-zooms-zoomfactor = How far one wheel notch zooms (ZOOMFACTOR).

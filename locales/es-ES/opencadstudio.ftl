@@ -1839,6 +1839,7 @@ common =
     .dynamic-ucs-on = SCP dinámico: activado
     .dynamic-ucs-off = SCP dinámico: desactivado
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Panel táctil: el desplazamiento encuadra, Ctrl+desplazamiento o pellizco hace zoom
+    .numeric-keypad-decimal-key-always-types-a-point = Teclado numérico: la tecla decimal escribe siempre un punto (desactivado: el carácter de la distribución, así una coma separa coordenadas)
     .interface-scale = Escala de la interfaz
     .zoom-factor = Factor de zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = Cuánto amplía un paso de la rueda (ZOOMFACTOR).

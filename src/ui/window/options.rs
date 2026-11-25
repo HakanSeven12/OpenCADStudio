@@ -78,6 +78,8 @@ pub struct AppPrefs {
     pub navigation_style: crate::app::settings::NavigationStyle,
     /// Scroll pans and Ctrl+scroll zooms (touchpads).
     pub touchpad_pan: bool,
+    /// The numeric keypad's decimal key always types a decimal point.
+    pub keypad_decimal_point: bool,
     /// Interface scale in percent.
     pub ui_scale_percent: u16,
     /// ZOOMFACTOR. The slider sets the range the system variable has; the
@@ -1558,6 +1560,18 @@ pub fn view_window<'a>(
                 .on_toggle(Message::TouchpadPanChanged)
                 .size(15),
             text(crate::t!("Touchpad: scroll pans, Ctrl+scroll or pinch zooms")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        row![
+            iced::widget::checkbox(prefs.keypad_decimal_point)
+                .on_toggle(Message::KeypadDecimalPointChanged)
+                .size(15),
+            text(crate::t!(
+                "Numeric keypad: the decimal key always types a point (off: the layout's character, so a comma separates coordinates)"
+            ))
+            .size(12),
         ]
         .spacing(8)
         .align_y(iced::Center),

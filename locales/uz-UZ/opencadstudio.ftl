@@ -1838,6 +1838,7 @@ common =
     .dynamic-ucs-on = Dinamik UCS: yoniq
     .dynamic-ucs-off = Dinamik UCS: öçiq
     .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Taçpad: aylantiriş siljitadi, Ctrl+aylantiriş yoki çimçilaş masştablaydi
+    .numeric-keypad-decimal-key-always-types-a-point = Raqamli klaviatura: o‘nlik tugmasi doim nuqta yozadi (o‘chiq: tartibning belgisi, shunda vergul koordinatalarni ajratadi)
     .interface-scale = Interfeys masştabi
     .zoom-factor = Masştablaş koeffitsiyenti
     .how-far-one-wheel-notch-zooms-zoomfactor = Ğildirakning bir qadami qança masştablaşi (ZOOMFACTOR).

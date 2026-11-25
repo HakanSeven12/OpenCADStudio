@@ -11600,6 +11600,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::KeypadDecimalPointChanged(enabled) => {
+                crate::app::view::set_keypad_decimal_point(enabled);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::UiScaleChanged(percent) => {
                 self.ui_scale_percent = crate::app::settings::clamp_ui_scale(percent);
                 self.persist_settings_if_changed();

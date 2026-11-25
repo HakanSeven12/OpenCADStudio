@@ -467,8 +467,15 @@ impl CadCommand for InterpolatePointCommand {
             }
             // Measured: the end nearer the pick is the first control point
             // (the end one when both are as near).
+            // Measured: a pick on nothing goes back to the point prompt.
             Step::Entity => {
-                let Some(&(s, e)) = self.ends.get(&handle) else { return CmdResult::NeedPoint };
+                let Some(&(s, e)) = self.ends.get(&handle) else {
+                    if handle == Handle::NULL {
+                        self.entity_from_foot = false;
+                        self.step = if self.entity_cross { Step::CrossFirst } else { Step::First };
+                    }
+                    return CmdResult::NeedPoint;
+                };
                 let p = _pick.truncate();
                 let (first, second) = if p.distance(s) < p.distance(e) { (s, e) } else { (e, s) };
                 if self.entity_cross {
@@ -511,16 +518,14 @@ impl CadCommand for InterpolatePointCommand {
                 CmdResult::ReportError(format!("{}\n{}", t("*Invalid selection*"), t("Expects a point or Window/Crossing/BOX/Fence/WPolygon/CPolygon/AUto")))
             }
             Step::First | Step::CrossFirst => {
-                if word == "E" || word == "ENTITY" {
+                // Measured: Enter is the Entity option.
+                if word.is_empty() || word == "E" || word == "ENTITY" {
                     self.entity_cross = self.step == Step::CrossFirst;
                     self.step = Step::Entity;
                     return Some(CmdResult::NeedPoint);
                 }
                 if coordinate {
                     return None;
-                }
-                if typed.is_empty() {
-                    return Some(CmdResult::NeedPoint);
                 }
                 CmdResult::ReportError(t("Point or option keyword required."))
             }

@@ -676,7 +676,6 @@ impl OpenCADStudio {
     pub(in crate::app) fn corridor_range_picked(&mut self, args: &str) {
         let i = self.active_tab;
         self.tabs[i].active_cmd = None;
-        let doc = &self.tabs[i].scene.document;
         let Some(w) = self.point_tools.corridor.as_mut() else { return };
         let parts: Vec<&str> = args.split_whitespace().collect();
         match parts[..] {
@@ -691,16 +690,14 @@ impl OpenCADStudio {
                     None => w.error = Some(crate::t!("The alignment picked is not a baseline of this corridor.").into_owned()),
                 }
             }
-            [which, x, y] => {
-                let alignment = doc.get_entity(Handle::new(w.baselines.get(w.baseline).map_or(0, |b| b.3)));
-                if let (Some(e), Ok(x), Ok(y)) = (alignment, x.parse::<f64>(), y.parse::<f64>()) {
-                    if let Some(s) = crate::modules::civil::point_alignment::station_on(e, [x, y]) {
-                        let text = crate::modules::civil::point_alignment::format_station(s);
-                        if which.eq_ignore_ascii_case("end") {
-                            w.end = text;
-                        } else {
-                            w.start = text;
-                        }
+            ["cancel"] => self.command_line.push_output(&crate::t!("*Cancel*")),
+            [which, s] => {
+                if let Ok(s) = s.parse::<f64>() {
+                    let text = crate::modules::civil::point_alignment::format_station(s);
+                    if which.eq_ignore_ascii_case("end") {
+                        w.end = text;
+                    } else {
+                        w.start = text;
                     }
                 }
             }
@@ -1142,6 +1139,17 @@ impl OpenCADStudio {
                 }
             }
             PointToolMsg::CorridorOk => self.corridor_points_ok(),
+            // A handle of the range bar let go at a station.
+            PointToolMsg::RangeDrag(end, s) => {
+                if let Some(w) = corridor {
+                    let text = crate::modules::civil::point_alignment::format_station(s);
+                    if end {
+                        w.end = text;
+                    } else {
+                        w.start = text;
+                    }
+                }
+            }
             PointToolMsg::PickBaseline | PointToolMsg::PickStation(_) => {
                 use crate::command::CadCommand;
                 let station = match message {
@@ -1149,7 +1157,14 @@ impl OpenCADStudio {
                     _ => None,
                 };
                 self.active_modal = None;
-                let c = crate::modules::civil::point_pick::CorridorRangePickCommand::new(station);
+                // A station is taken along the baseline's alignment, within
+                // its station range.
+                let baseline = self.point_tools.corridor.as_ref().and_then(|w| w.baselines.get(w.baseline).cloned());
+                let alignment = baseline
+                    .as_ref()
+                    .and_then(|b| self.tabs[i].scene.document.get_entity(Handle::new(b.3)).cloned());
+                let range = baseline.map_or((0.0, 0.0), |b| (b.1, b.2));
+                let c = crate::modules::civil::point_pick::CorridorRangePickCommand::new(station, alignment, range);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }

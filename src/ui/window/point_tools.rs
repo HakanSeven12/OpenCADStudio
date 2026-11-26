@@ -2,7 +2,7 @@
 //! Points and Replace Legacy Point Blocks: what each converts and how a
 //! point number already in use is settled.
 
-use iced::widget::{Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input};
+use iced::widget::{Space, button, canvas, checkbox, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
@@ -106,6 +106,8 @@ pub enum PointToolMsg {
     PickBaseline,
     /// Pick the start (false) or end (true) station in the drawing.
     PickStation(bool),
+    /// The range bar's start (false) or end (true) handle let go at a station.
+    RangeDrag(bool, f64),
     CorridorOk,
     // Create Blocks from COGO Points
     Spatial(Spatial),
@@ -241,29 +243,114 @@ fn step<'a>(n: u8, title: String, count: Option<String>, content: impl Into<Elem
     container(column![head, content.into()].spacing(10)).padding([10, 12]).width(Fill).style(card_style).into()
 }
 
-/// The baseline's station range as a bar, the stations taken filled.
-fn range_bar<'a>(lo: f64, hi: f64, taken: (f64, f64)) -> Element<'a, Message> {
-    let span = (hi - lo).max(1e-9);
-    let part = |v: f64| ((v.clamp(lo, hi) - lo) / span * 1000.0).round() as u16;
-    let (a, b) = (part(taken.0), part(taken.1));
-    let track = |fill: bool, w: u16| -> Element<'a, Message> {
-        container(Space::new().height(Length::Fixed(6.0)))
-            .width(Length::FillPortion(w.max(1)))
-            .style(move |t: &iced::Theme| container::Style {
-                background: Some(iced::Background::Color(if fill { t.palette().primary.base.color } else { t.palette().background.base.color })),
-                border: iced::Border { radius: 3.0.into(), ..Default::default() },
-                ..Default::default()
-            })
-            .into()
-    };
-    let mut bar = row![].align_y(iced::Center);
-    if a > 0 {
-        bar = bar.push(track(false, a));
+/// The baseline's station range as a bar, the stations taken filled; with a
+/// specified range its start and end handles drag along it.
+struct RangeBar {
+    lo: f64,
+    hi: f64,
+    taken: (f64, f64),
+    enabled: bool,
+}
+
+/// The handle being dragged (false start, true end) and where it is.
+#[derive(Default)]
+struct RangeDragState {
+    drag: Option<(bool, f64)>,
+}
+
+const HANDLE: f32 = 6.0;
+
+impl RangeBar {
+    fn x_of(&self, s: f64, width: f32) -> f32 {
+        let span = (self.hi - self.lo).max(1e-9);
+        HANDLE + ((s.clamp(self.lo, self.hi) - self.lo) / span) as f32 * (width - 2.0 * HANDLE)
     }
-    bar = bar.push(track(true, b.saturating_sub(a)));
-    if b < 1000 {
-        bar = bar.push(track(false, 1000 - b));
+
+    fn station_at(&self, x: f32, width: f32) -> f64 {
+        let t = f64::from((x - HANDLE) / (width - 2.0 * HANDLE).max(1.0)).clamp(0.0, 1.0);
+        ((self.lo + t * (self.hi - self.lo)) * 100.0).round() / 100.0
     }
+
+    /// The taken range with a dragged handle where it is.
+    fn shown(&self, state: &RangeDragState) -> (f64, f64) {
+        match state.drag {
+            Some((false, s)) => (s, self.taken.1),
+            Some((true, s)) => (self.taken.0, s),
+            None => self.taken,
+        }
+    }
+}
+
+impl canvas::Program<Message> for RangeBar {
+    type State = RangeDragState;
+
+    fn update(&self, state: &mut RangeDragState, event: &iced::Event, bounds: iced::Rectangle, cursor: iced::mouse::Cursor) -> Option<canvas::Action<Message>> {
+        use iced::mouse::{Button, Event};
+        if !self.enabled {
+            state.drag = None;
+            return None;
+        }
+        let x = |p: iced::Point| p.x - bounds.x;
+        match event {
+            iced::Event::Mouse(Event::ButtonPressed(Button::Left)) => {
+                let p = cursor.position_over(bounds)?;
+                // The handle nearer the press; an end handle still on its
+                // start takes a press to the right of it.
+                let (a, b) = (self.x_of(self.taken.0, bounds.width), self.x_of(self.taken.1, bounds.width));
+                let end = (x(p) - b).abs() < (x(p) - a).abs() || (a == b && x(p) > a);
+                state.drag = Some((end, self.station_at(x(p), bounds.width)));
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::Mouse(Event::CursorMoved { position }) => {
+                let (end, _) = state.drag?;
+                let s = self.station_at(x(*position), bounds.width);
+                // A handle does not pass the other.
+                let s = if end { s.max(self.taken.0) } else { s.min(self.taken.1) };
+                state.drag = Some((end, s));
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::Mouse(Event::ButtonReleased(Button::Left)) => {
+                let (end, s) = state.drag.take()?;
+                let s = if end { s.max(self.taken.0) } else { s.min(self.taken.1) };
+                Some(canvas::Action::publish(msg(PointToolMsg::RangeDrag(end, s))).and_capture())
+            }
+            _ => None,
+        }
+    }
+
+    fn mouse_interaction(&self, state: &RangeDragState, bounds: iced::Rectangle, cursor: iced::mouse::Cursor) -> iced::mouse::Interaction {
+        if state.drag.is_some() {
+            iced::mouse::Interaction::Grabbing
+        } else if self.enabled && cursor.is_over(bounds) {
+            iced::mouse::Interaction::Grab
+        } else {
+            Default::default()
+        }
+    }
+
+    fn draw(&self, state: &RangeDragState, renderer: &iced::Renderer, theme: &iced::Theme, bounds: iced::Rectangle, _cursor: iced::mouse::Cursor) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let (w, y) = (bounds.width, bounds.height / 2.0);
+        let palette = theme.palette();
+        let bar = |frame: &mut canvas::Frame, a: f32, b: f32, color: iced::Color| {
+            frame.fill(&canvas::Path::rounded_rectangle(iced::Point::new(a, y - 3.0), iced::Size::new((b - a).max(0.0), 6.0), 3.0.into()), color);
+        };
+        bar(&mut frame, HANDLE, w - HANDLE, palette.background.base.color);
+        let (s, e) = self.shown(state);
+        let (a, b) = (self.x_of(s, w), self.x_of(e, w));
+        bar(&mut frame, a, b, palette.primary.base.color);
+        if self.enabled {
+            for x in [a, b] {
+                frame.fill(&canvas::Path::circle(iced::Point::new(x, y), HANDLE), palette.primary.base.color);
+                frame.fill(&canvas::Path::circle(iced::Point::new(x, y), HANDLE - 2.0), palette.background.base.text);
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+fn range_bar<'a>(lo: f64, hi: f64, taken: (f64, f64), enabled: bool) -> Element<'a, Message> {
+    let bar = canvas(RangeBar { lo, hi, taken, enabled }).width(Fill).height(Length::Fixed(2.0 * HANDLE + 2.0));
     let stations = row![
         small(crate::modules::civil::point_alignment::format_station(lo)).style(muted_style),
         Space::new().width(Fill),
@@ -309,7 +396,7 @@ pub fn view_corridor<'a>(state: &'a CorridorPointsWindow, sizing: crate::ui::mod
             ]
             .spacing(8)
             .align_y(iced::Center),
-            range_bar(lo, hi, taken),
+            range_bar(lo, hi, taken, on),
             row![
                 small(t!("Start station")).style(muted_style),
                 container(field(&state.start, on, |s| msg(PointToolMsg::Start(s)))).width(Length::Fixed(130.0)),

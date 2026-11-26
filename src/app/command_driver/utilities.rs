@@ -1661,10 +1661,57 @@ impl OpenCADStudio {
                 .collect();
             return Some(self.feed_command(StepInput::SelectionComplete(handles)));
         }
+        // The name Named asked for: the members of that selection set that
+        // are in this space join the set (or leave it in Remove mode); an
+        // unknown name asks again and Enter gives up on the set.
+        if std::mem::take(&mut self.selection_named_set_pending) {
+            let name = text.trim();
+            if name.is_empty() {
+                let found = 0;
+                self.command_line
+                    .push_info(crate::tf!("{found} found").as_ref());
+                reprompt(self);
+                return Some(Task::none());
+            }
+            let Some(recall) = self.tabs[i].scene.named_selection_recall(name) else {
+                self.command_line
+                    .push_error(crate::t!("Invalid selection set name.").as_ref());
+                self.command_line
+                    .push_info(crate::t!("Enter selection set name:").as_ref());
+                self.selection_named_set_pending = true;
+                return Some(Task::none());
+            };
+            self.report_named_selection_left_out(&recall);
+            let add = recall.selectable;
+            let remove = self.select_remove_mode;
+            self.selection_group_named = true;
+            self.last_pick = Some((add.clone(), remove));
+            for handle in add {
+                if remove {
+                    self.tabs[i].scene.deselect_entity(handle);
+                } else {
+                    self.tabs[i].scene.select_entity(handle, false);
+                }
+            }
+            self.refresh_properties();
+            let handles: Vec<Handle> = self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect();
+            return Some(self.feed_command(StepInput::SelectionComplete(handles)));
+        }
         if let "G" | "GROUP" = kw.as_str() {
             self.selection_group_pending = true;
             self.command_line
                 .push_info(crate::t!("Enter group name:").as_ref());
+            return Some(Task::none());
+        }
+        if let "N" | "NAMED" = kw.as_str() {
+            self.selection_named_set_pending = true;
+            self.command_line
+                .push_info(crate::t!("Enter selection set name:").as_ref());
             return Some(Task::none());
         }
         // SUbobject: picks take faces, edges and vertices of 3D objects
@@ -1705,7 +1752,7 @@ impl OpenCADStudio {
             self.command_line
                 .push_error(crate::t!("*Invalid selection*").as_ref());
             self.command_line.push_info(
-                crate::t!("Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object")
+                crate::t!("Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Named/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object")
                     .as_ref(),
             );
             if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {

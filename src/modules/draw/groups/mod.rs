@@ -1,6 +1,7 @@
 pub mod group;
 pub mod ungroup;
 pub mod groupedit;
+pub mod namedsel;
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 

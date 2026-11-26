@@ -119,8 +119,6 @@ pub(super) struct State {
     /// can detect highlight changes without polling the full selection.
     selection_revision: u64,
     pub(super) routing: bool,
-    /// Session-scoped named handle sets for selection_set_save/load.
-    selection_sets: std::collections::BTreeMap<String, Vec<document::Handle>>,
     /// Live `user_select` request — the client asked the person at the screen
     /// to pick entities; Some until that person answers with Enter/Escape.
     pub(super) user_select: Option<UserSelectSession>,

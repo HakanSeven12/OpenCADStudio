@@ -1109,3 +1109,17 @@ mod tests {
         assert_eq!(p.geometry_stations(), vec![0.0, 90.0, 150.0, 240.0]);
     }
 }
+
+/// The station of `p` on alignment `e`: its foot on the plan geometry,
+/// from the alignment's start station (raw, before station equations).
+pub(crate) fn station_on(e: &EntityType, p: [f64; 2]) -> Option<f64> {
+    let curve = crate::modules::civil::point_intersect::alignment_curve(e)?;
+    let EntityType::Extended(x) = e else { return None };
+    let ExtendedEntityData::Arch(data) = &x.data else { return None };
+    let Curve::Polyline(pl) = &curve else { return None };
+    let mut lw = LwPolyline::new();
+    lw.vertices = pl.vertices.iter().map(|v| LwVertex::with_bulge(Vector2::new(v.position[0], v.position[1]), v.bulge)).collect();
+    let length = entity_curve(&EntityType::LwPolyline(lw))?.length();
+    let travelled = crate::modules::civil::point_intersect::travelled_fraction(&curve, p) * length;
+    Some(data.alignment_start_station().unwrap_or(0.0) + travelled)
+}

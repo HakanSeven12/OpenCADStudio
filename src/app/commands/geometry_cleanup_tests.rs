@@ -868,7 +868,8 @@ fn import_reads_a_full_file_and_export_writes_its_angle_rows_back() {
     );
     let dialog = app.geometry_cleanup.dialog.as_ref().unwrap();
     assert_eq!(dialog.rows[0].1, "0.4");
-    assert_eq!(dialog.hidden.len(), 4);
+    let angles = dialog.opened.angle_tolerances();
+    assert_eq!(angles.absolute.len() + angles.relative.len(), 4);
     assert_eq!(
         dialog.file.as_deref(),
         Some(source.display().to_string().as_str())

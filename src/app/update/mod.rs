@@ -261,6 +261,9 @@ impl OpenCADStudio {
         if self.active_modal == Some(BlockCycleOrder) {
             self.block_cycle_order = None;
         }
+        if self.active_modal == Some(GeometryCleanupSettings) {
+            self.geometry_cleanup.dialog = None;
+        }
         // Plot Style opened from PLOT behaves as a child modal.
         // Closing it restores the parent Plot dialog instead of returning
         // to the drawing.

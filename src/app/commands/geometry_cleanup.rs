@@ -346,7 +346,7 @@ impl OpenCADStudio {
             GeometryCleanupMsg::SettingsImport => {
                 return Task::perform(
                     async {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title(crate::t!("Import Geometry Cleanup Settings").as_ref())
                             .add_filter(
                                 crate::t!("Geometry Cleanup Settings").as_ref(),
@@ -386,9 +386,12 @@ impl OpenCADStudio {
             GeometryCleanupMsg::SettingsExport => {
                 return Task::perform(
                     async {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title(crate::t!("Export Geometry Cleanup Settings").as_ref())
-                            .add_filter(crate::t!("Geometry Cleanup Settings").as_ref(), &["gcs"])
+                            .add_filter(
+                                crate::t!("Geometry Cleanup Settings").as_ref(),
+                                &["gcs", "GCS"],
+                            )
                             .set_file_name("GeometryCleanup.gcs")
                             .save_file()
                             .await

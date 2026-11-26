@@ -6724,6 +6724,7 @@ manage =
     .geometry-cleanup = 幾何清理
     .geometry-cleanup-absolute-angle = Absolute Angle
     .geometry-cleanup-add-error-type = 新增錯誤類型
+    .geometry-cleanup-bad-tolerance = The tolerance of __ocs_fmt_0__ is __ocs_fmt_1__: it must be a number of 0 or more.
     .geometry-cleanup-browse = 瀏覽
     .geometry-cleanup-cannot-fix = 無法以此方式修正此錯誤。
     .geometry-cleanup-empty = 選取物件以尋找間隙、超過延伸與未達延伸。

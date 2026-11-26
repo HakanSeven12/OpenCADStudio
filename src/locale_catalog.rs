@@ -4038,6 +4038,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Geometry Cleanup Settings" => Some(("manage", "geometry-cleanup-settings")),
         "The settings file cannot be read: {}" => Some(("manage", "geometry-cleanup-settings-unreadable")),
         "The settings file cannot be written: {}" => Some(("manage", "geometry-cleanup-settings-unwritable")),
+        "The tolerance of {} is {}: it must be a number of 0 or more." => Some(("manage", "geometry-cleanup-bad-tolerance")),
         "Undershoot" => Some(("manage", "geometry-cleanup-undershoot")),
         "Absolute Angle" => Some(("manage", "geometry-cleanup-absolute-angle")),
         "Relative Angle" => Some(("manage", "geometry-cleanup-relative-angle")),

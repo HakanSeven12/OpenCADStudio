@@ -5,7 +5,7 @@
 
 use crate::app::Message;
 use crate::modules::manage::geometry_cleanup_settings::{
-    clean_tolerance, kind_of, CleanupSettings, ToleranceRow, MIN_TOLERANCE,
+    clean_tolerance, CleanupSettings, MIN_TOLERANCE,
 };
 use crate::t;
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
@@ -28,9 +28,10 @@ pub struct SettingsDialog {
     pub proposed: f64,
     /// The last imported file, for display.
     pub file: Option<String>,
-    /// The rows that are not length types (the angle types): kept and
-    /// written back, not shown.
-    pub hidden: Vec<ToleranceRow>,
+    /// The settings that the dialog opened with. The rows that it does not
+    /// show (the angle types) and the fields that OCS does not know are
+    /// written back from them.
+    pub opened: CleanupSettings,
 }
 
 impl SettingsDialog {
@@ -39,26 +40,21 @@ impl SettingsDialog {
             .into_iter()
             .filter_map(|kind| Some((kind, shown(settings.tolerance(kind)?))))
             .collect();
-        let hidden = settings
-            .tolerances
-            .iter()
-            .filter(|row| kind_of(&row.name).is_none())
-            .cloned()
-            .collect();
         Self {
             rows,
             proposed,
             file,
-            hidden,
+            opened: settings.clone(),
         }
     }
 
     /// The settings of the dialog, or `None` while a box does not hold a
     /// number.
     pub fn parsed(&self) -> Option<CleanupSettings> {
-        let mut settings = CleanupSettings {
-            tolerances: self.hidden.clone(),
-        };
+        let mut settings = self.opened.clone();
+        for kind in self.removed() {
+            settings.set(kind, None);
+        }
         for (kind, value) in &self.rows {
             let tolerance = clean_tolerance(value.trim().parse::<f64>().ok()?)?;
             settings.set(*kind, Some(tolerance));

@@ -638,7 +638,8 @@ impl CadCommand for StretchCommand {
             Step::Base => t!("STRETCH  Specify base point:").into_owned(),
             Step::Target { base } => {
                 let bx = format!("{:.3}", base.x);
-                let bz = format!("{:.3}", base.z);
+                // The catalog key keeps its old `bz` name; the value is the Y.
+                let bz = format!("{:.3}", base.y);
                 t!(
                     "STRETCH  Specify new point  [base %{bx},%{bz}]:",
                     bx = bx,

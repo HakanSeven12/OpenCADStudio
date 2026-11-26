@@ -50,15 +50,45 @@ fn is_surface(e: &EntityType) -> bool {
     matches!(e, EntityType::Extended(x) if matches!(&x.data, ExtendedEntityData::Arch(a) if a.dxf_name == "AECC_TIN_SURFACE"))
 }
 
-/// A TIN surface: its name and drawn triangles.
+/// A TIN surface: its name, drawn triangles and the contours its style shows.
 struct Surface {
     handle: Handle,
     name: String,
     triangles: Vec<[DVec3; 3]>,
+    contours: Vec<Vec<DVec3>>,
+}
+
+/// The distance from `p` to the polyline through `run`, in plan.
+fn run_distance(run: &[DVec3], p: DVec2) -> f64 {
+    run.windows(2)
+        .map(|w| {
+            let (a, b) = (w[0].truncate(), w[1].truncate());
+            let ab = b - a;
+            let t = ((p - a).dot(ab) / ab.length_squared().max(1e-24)).clamp(0.0, 1.0);
+            (a + ab * t).distance(p)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// The points every `distance` along `run` from its start, measured in 3D.
+fn along(run: &[DVec3], distance: f64) -> Vec<DVec2> {
+    let mut out = Vec::new();
+    let mut walked = 0.0;
+    let mut k = 0u32;
+    for w in run.windows(2) {
+        let len = w[0].distance(w[1]);
+        while distance * f64::from(k) <= walked + len + 1e-9 {
+            let at = distance * f64::from(k) - walked;
+            out.push(w[0].lerp(w[1], if len > 0.0 { at / len } else { 0.0 }).truncate());
+            k += 1;
+        }
+        walked += len;
+    }
+    out
 }
 
 impl Surface {
-    fn of(e: &EntityType) -> Option<Surface> {
+    fn of(e: &EntityType, document: &document::Document) -> Option<Surface> {
         let EntityType::Extended(x) = e else { return None };
         let ExtendedEntityData::Arch(a) = &x.data else { return None };
         if a.dxf_name != "AECC_TIN_SURFACE" {
@@ -80,7 +110,11 @@ impl Surface {
             .visible_triangles()
             .map(|tri| tri.map(|v| DVec3::new(v.x, v.y, v.z)))
             .collect();
-        Some(Surface { handle: x.common.handle, name, triangles })
+        let contours = crate::entities::civil::surface_contours(a, document)
+            .into_iter()
+            .map(|run| run.into_iter().map(|[x, y, z]| DVec3::new(x, y, z)).collect())
+            .collect();
+        Some(Surface { handle: x.common.handle, name, triangles, contours })
     }
 
     /// The distance from `p` to the surface's border (the triangle edges
@@ -173,7 +207,7 @@ pub const PICK_SURFACE: &str = "_PICKSURFACE";
 
 impl SurfacePointCommand {
     pub fn new(kind: Kind, document: &document::Document) -> Self {
-        let surfaces: Vec<Surface> = document.entities().filter_map(Surface::of).collect();
+        let surfaces: Vec<Surface> = document.entities().filter_map(|e| Surface::of(e, document)).collect();
         let mut c = SurfacePointCommand {
             kind,
             step: Step::Surface,
@@ -273,14 +307,31 @@ impl SurfacePointCommand {
         (0..=nv).flat_map(|j| (0..=nu).map(move |i| (i, j))).map(|(i, j)| base + u * self.x_spacing * f64::from(i) + v * self.y_spacing * f64::from(j)).collect()
     }
 
-    /// The surface whose border lies within the pick box of `pick`.
-    fn border_hit(&self, pick: DVec3) -> Option<usize> {
+    /// The pick box half size around `pick`, in drawing units.
+    fn tolerance(&self, pick: DVec3) -> Option<f64> {
         let c = self.context.as_ref()?;
         use crate::scene::view::projection::project_screen;
         let a = project_screen(c.view, c.eye, c.bounds, pick)?;
         let b = project_screen(c.view, c.eye, c.bounds, pick + DVec3::X)?;
         let per_px = 1.0 / f64::from(((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()).max(1e-12);
-        let tolerance = f64::from(c.aperture_px) * per_px;
+        Some(f64::from(c.aperture_px) * per_px)
+    }
+
+    /// The chosen surface's shown contour nearest `pick` within the pick box.
+    fn contour_hit(&self, pick: DVec3) -> Option<&[DVec3]> {
+        let tolerance = self.tolerance(pick)?;
+        self.chosen()?
+            .contours
+            .iter()
+            .map(|run| (run, run_distance(run, pick.truncate())))
+            .filter(|&(_, d)| d <= tolerance)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(run, _)| run.as_slice())
+    }
+
+    /// The surface whose border lies within the pick box of `pick`.
+    fn border_hit(&self, pick: DVec3) -> Option<usize> {
+        let tolerance = self.tolerance(pick)?;
         self.surfaces
             .iter()
             .enumerate()
@@ -303,22 +354,7 @@ impl SurfacePointCommand {
         match e {
             EntityType::Polyline3D(p) => {
                 let v = vertices3d(p.vertices.iter().map(|v| DVec3::new(v.position.x, v.position.y, v.position.z)).collect(), p.is_closed());
-                if self.kind == Kind::Vertices {
-                    return Some(v.iter().map(|p| p.truncate()).collect());
-                }
-                let mut out = Vec::new();
-                let mut walked = 0.0;
-                let mut k = 0u32;
-                for w in v.windows(2) {
-                    let len = w[0].distance(w[1]);
-                    while self.distance * f64::from(k) <= walked + len + 1e-9 {
-                        let along = self.distance * f64::from(k) - walked;
-                        out.push(w[0].lerp(w[1], if len > 0.0 { along / len } else { 0.0 }).truncate());
-                        k += 1;
-                    }
-                    walked += len;
-                }
-                Some(out)
+                Some(self.run_points(&v))
             }
             EntityType::LwPolyline(p) if self.kind == Kind::Vertices => Some(p.vertices.iter().map(|v| DVec2::new(v.location.x, v.location.y)).collect()),
             EntityType::Polyline2D(p) if self.kind == Kind::Vertices => Some(p.vertices.iter().map(|v| DVec2::new(v.location.x, v.location.y)).collect()),
@@ -332,6 +368,14 @@ impl SurfacePointCommand {
                 }).collect())
             }
             _ => None,
+        }
+    }
+
+    /// A run's vertices, or its points every distance (by the command).
+    fn run_points(&self, run: &[DVec3]) -> Vec<DVec2> {
+        match self.kind {
+            Kind::Vertices => run.iter().map(|p| p.truncate()).collect(),
+            _ => along(run, self.distance),
         }
     }
 
@@ -451,9 +495,17 @@ impl CadCommand for SurfacePointCommand {
                 }
             }
             _ => {
-                // A pick on the surface (its border) ends the command
-                // (measured with no contours drawn).
-                if self.border_hit(pick).is_some() || picked.as_ref().is_some_and(is_surface) {
+                // A pick on the surface's border ends the command; on one of
+                // the contours its style shows, that contour is used from its
+                // start (measured).
+                if self.border_hit(pick).is_some() {
+                    return CmdResult::Done;
+                }
+                if let Some(points) = self.contour_hit(pick).map(|run| self.run_points(run)) {
+                    self.queue_on_surface(points);
+                    return self.ask_next();
+                }
+                if picked.as_ref().is_some_and(is_surface) {
                     return CmdResult::Done;
                 }
                 let Some(e) = picked else { return CmdResult::ReportError(t("ERROR: Invalid selection set!")) };
@@ -666,8 +718,15 @@ mod tests {
 
     #[test]
     fn a_triangle_gives_its_plane_and_nothing_outside() {
-        let s = Surface { handle: Handle::NULL, name: "S".into(), triangles: vec![[DVec3::new(0.0, 0.0, 10.0), DVec3::new(10.0, 0.0, 20.0), DVec3::new(0.0, 10.0, 30.0)]] };
+        let s = Surface { handle: Handle::NULL, name: "S".into(), contours: Vec::new(), triangles: vec![[DVec3::new(0.0, 0.0, 10.0), DVec3::new(10.0, 0.0, 20.0), DVec3::new(0.0, 10.0, 30.0)]] };
         assert!((s.elevation(DVec2::new(2.0, 3.0)).unwrap() - (10.0 + 2.0 + 6.0)).abs() < 1e-9);
         assert!(s.elevation(DVec2::new(8.0, 8.0)).is_none());
+    }
+
+    #[test]
+    fn a_contour_is_walked_from_its_start() {
+        let run = [DVec3::new(0.0, 0.0, 5.0), DVec3::new(30.0, 0.0, 5.0), DVec3::new(30.0, 25.0, 5.0)];
+        assert_eq!(along(&run, 20.0), vec![DVec2::new(0.0, 0.0), DVec2::new(20.0, 0.0), DVec2::new(30.0, 10.0)]);
+        assert!((run_distance(&run, DVec2::new(31.0, 12.0)) - 1.0).abs() < 1e-12);
     }
 }

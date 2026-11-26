@@ -435,7 +435,7 @@ viewport =
 
 plugin-busy =
     .prompt = ກຳລັງແລ່ນ { $command } …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = ຄຳສັ່ງຂອງປລັກອິນກຳລັງເຮັດວຽກ. ໜ້າຕ່າງຈະຕອບສະໜອງອີກຄັ້ງເມື່ອມັນສຳເລັດ.
 
 gpu =

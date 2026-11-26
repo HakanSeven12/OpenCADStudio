@@ -435,7 +435,7 @@ viewport =
 
 plugin-busy =
     .prompt = Εκτελείται { $command } …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Εκτελείται εντολή πρόσθετου. Το παράθυρο θα αποκριθεί ξανά όταν ολοκληρωθεί.
 
 gpu =

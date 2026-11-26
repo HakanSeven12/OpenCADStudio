@@ -436,7 +436,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } on käynnissä …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Laajennuksen komento on käynnissä. Ikkuna vastaa taas, kun se on valmis.
 
 gpu =

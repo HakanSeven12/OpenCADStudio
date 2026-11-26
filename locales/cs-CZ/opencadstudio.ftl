@@ -438,7 +438,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } běží …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Probíhá příkaz zásuvného modulu. Okno bude znovu reagovat, až skončí.
 
 gpu =

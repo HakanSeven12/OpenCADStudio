@@ -435,7 +435,7 @@ viewport =
 
 plugin-busy =
     .prompt = Đang chạy { $command } …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Một lệnh của plugin đang chạy. Cửa sổ sẽ phản hồi lại khi lệnh hoàn tất.
 
 gpu =

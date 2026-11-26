@@ -436,7 +436,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } en cours …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Une commande de plugin est en cours. La fenêtre répondra de nouveau une fois qu’elle sera terminée.
 
 gpu =

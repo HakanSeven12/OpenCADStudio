@@ -436,7 +436,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } выполняется …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Выполняется команда подключаемого модуля. Окно снова будет реагировать после её завершения.
 
 gpu =

@@ -436,7 +436,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } działa …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Trwa wykonywanie polecenia wtyczki. Okno znów zareaguje po jego zakończeniu.
 
 gpu =

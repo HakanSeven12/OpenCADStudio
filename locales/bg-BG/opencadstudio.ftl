@@ -436,7 +436,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } се изпълнява …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Изпълнява се команда на приставка. Прозорецът ще реагира отново, когато тя приключи.
 
 gpu =

@@ -433,7 +433,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } çalışıyor …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Bir eklenti komutu çalışıyor. Pencere, komut bittiğinde yeniden yanıt verecek.
 
 gpu =

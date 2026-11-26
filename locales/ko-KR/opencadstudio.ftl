@@ -436,7 +436,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } 실행 중…
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = 플러그인 명령이 실행 중입니다. 완료되면 창이 다시 응답합니다.
 
 gpu =

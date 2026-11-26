@@ -435,7 +435,7 @@ viewport =
 
 plugin-busy =
     .prompt = 正在執行 { $command }…
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = 外掛程式命令正在執行。完成後視窗將恢復回應。
 
 gpu =

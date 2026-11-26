@@ -435,7 +435,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } bajarilmoqda …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Plagin buyrug‘i bajarilmoqda. U tugagach, oyna yana javob beradi.
 
 gpu =

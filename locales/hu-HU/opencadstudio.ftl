@@ -429,7 +429,7 @@ viewport =
 
 plugin-busy =
     .prompt = { $command } fut …
-    .pill = ⏳ { $command }
+    .pill = { $command }
     .pill-tip = Egy bővítményparancs fut. Az ablak a befejezése után ismét reagál.
 
 gpu =

@@ -1597,6 +1597,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     vec![crate::ui::overlay::UcsIconParams {
                         view_proj: vp_cam.view_proj_rte(full),
                         bounds: full,
+                        canvas: (vw, vh),
                         axes: (ux.as_vec3(), uy.as_vec3(), uz.as_vec3()),
                         origin_screen,
                         hover: self.ucs_icon_hover,
@@ -1637,6 +1638,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             crate::ui::overlay::UcsIconParams {
                                 view_proj: cam.view_proj_rte(b),
                                 bounds: b,
+                                canvas: (vw, vh),
                                 axes: (ux.as_vec3(), uy.as_vec3(), uz.as_vec3()),
                                 origin_screen,
                                 hover: i == active && self.ucs_icon_hover,

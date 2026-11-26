@@ -1317,6 +1317,11 @@ pub struct UcsIconParams {
     pub view_proj: Mat4,
     /// Viewport bounds (used for NDC → pixel conversion).
     pub bounds: iced::Rectangle,
+    /// The viewport size `bounds` and `origin_screen` were computed from when
+    /// the view was built. The canvas can be laid out at another size on the
+    /// frame the overlay is drawn (the size is measured during layout, after
+    /// the view is built), so the icon is refitted to the real canvas.
+    pub canvas: (f32, f32),
     /// The active UCS axis directions in world space (X, Y, Z). Plain WCS is
     /// `(Vec3::X, Vec3::Y, Vec3::Z)`; a UCS rotates the tripod to match.
     pub axes: (Vec3, Vec3, Vec3),
@@ -3417,12 +3422,19 @@ impl canvas::Program<Message> for SelectionCanvas {
 
             // ── UCS icon (one per Model pane) ─────────────────────────────────
             for ucs in &self.ucs_icons {
+                let (ucs_bounds, ucs_origin) = fit_ucs_icon_to_canvas(
+                    ucs.canvas,
+                    bounds.size(),
+                    ucs.bounds,
+                    ucs.origin_screen,
+                );
+                ucs_icon_debug(ucs.canvas, bounds.size(), ucs_bounds, ucs.view_proj, ucs.axes, ucs_origin);
                 draw_ucs_icon(
                     frame,
                     ucs.view_proj,
-                    ucs.bounds,
+                    ucs_bounds,
                     ucs.axes,
-                    ucs.origin_screen,
+                    ucs_origin,
                     ucs.hover,
                     ucs.selected,
                     self.crosshair_bg,
@@ -4915,6 +4927,77 @@ fn axes_segments(
 // drawn as outlined circles with reduced opacity.
 
 const UCS_ICON_MARGIN: f32 = 50.0;
+
+/// Refit an icon's rectangle and tracked origin from the viewport size the
+/// view was built with (`canvas`) to the size the overlay canvas really has
+/// (`actual`). The corner anchor is `(x + 50, y + max(h - 50, 50))`: built from
+/// a transient size (a layout probe, a dialog closing) it lands at the top.
+pub fn fit_ucs_icon_to_canvas(
+    canvas: (f32, f32),
+    actual: iced::Size,
+    bounds: iced::Rectangle,
+    origin: Option<Point>,
+) -> (iced::Rectangle, Option<Point>) {
+    let ok = |v: f32| v.is_finite() && v >= 1.0;
+    if !(ok(canvas.0) && ok(canvas.1) && ok(actual.width) && ok(actual.height)) {
+        return (bounds, origin);
+    }
+    let (sx, sy) = (actual.width / canvas.0, actual.height / canvas.1);
+    if (sx - 1.0).abs() < 1e-3 && (sy - 1.0).abs() < 1e-3 {
+        return (bounds, origin);
+    }
+    let fitted = iced::Rectangle {
+        x: bounds.x * sx,
+        y: bounds.y * sy,
+        width: bounds.width * sx,
+        height: bounds.height * sy,
+    };
+    let origin = origin.map(|p| {
+        Point::new(
+            fitted.x + (p.x - bounds.x) * sx,
+            fitted.y + (p.y - bounds.y) * sy,
+        )
+    });
+    (fitted, origin)
+}
+
+static LAST_WINDOW_CLOSE: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+
+/// A window or dialog closed: for two seconds the UCS icon logs each frame
+/// when `OCS_DEBUG_UCSICON=1`.
+pub fn note_window_close() {
+    if let Ok(mut at) = LAST_WINDOW_CLOSE.lock() {
+        *at = Some(std::time::Instant::now());
+    }
+}
+
+fn ucs_icon_debug(
+    built_for: (f32, f32),
+    actual: iced::Size,
+    bounds: iced::Rectangle,
+    vp: Mat4,
+    axes: (Vec3, Vec3, Vec3),
+    origin: Option<Point>,
+) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("OCS_DEBUG_UCSICON").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let recent = LAST_WINDOW_CLOSE
+        .lock()
+        .ok()
+        .and_then(|at| *at)
+        .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(2));
+    if !recent {
+        return;
+    }
+    let anchor = ucs_icon_geometry(vp, bounds, axes, origin).map(|(o, at_origin, _)| (o, at_origin));
+    eprintln!(
+        "[ucsicon] built_for={built_for:?} canvas={:?} rect={bounds:?} origin={origin:?} anchor={anchor:?}",
+        (actual.width, actual.height)
+    );
+}
 const UCS_ICON_LEN: f32 = 38.0; // longest axis arm in screen pixels
 const UCS_ICON_TIP: f32 = 7.0; // arrowhead size in pixels
 const UCS_GRIP_BOX: f32 = 7.0; // selected-grip square size in pixels
@@ -5004,6 +5087,18 @@ fn ucs_icon_geometry(
             mk(zdx, zdy, zlen, zdepth),
         ],
     ))
+}
+
+/// Where the icon is anchored for the given rectangle (test seam).
+#[cfg(test)]
+fn ucs_icon_anchor(bounds: iced::Rectangle, origin: Option<Point>) -> Option<Point> {
+    ucs_icon_geometry(
+        Mat4::IDENTITY,
+        bounds,
+        (Vec3::X, Vec3::Y, Vec3::Z),
+        origin,
+    )
+    .map(|(o, _, _)| o)
 }
 
 /// Screen grip targets for the UCS icon, or `None` when it is pinned to the
@@ -7704,5 +7799,41 @@ mod match_cursor_glyph_tests {
         assert_eq!(destination, MatchCursorGlyph::Destination);
         assert_ne!(source, destination);
         assert_eq!(MatchCursorGlyph::for_state(false, true), MatchCursorGlyph::None);
+    }
+}
+
+#[cfg(test)]
+mod ucs_icon_canvas_fit_tests {
+    use super::{fit_ucs_icon_to_canvas, ucs_icon_anchor};
+    use iced::{Point, Rectangle, Size};
+
+    /// The view is built from a transient viewport height (a layout probe on
+    /// the frame a dialog closes); the canvas the overlay is drawn into is the
+    /// real one. The icon must stay at the bottom-left of the real canvas.
+    #[test]
+    fn the_ucs_icon_stays_bottom_left_when_the_view_was_built_from_a_transient_size() {
+        let real = Size::new(1600.0, 860.0);
+        let built_for = (1600.0, 90.0);
+        let rect = Rectangle { x: 0.0, y: 0.0, width: built_for.0, height: built_for.1 };
+        // Unfitted, the corner formula puts it at the top (y = 50).
+        assert_eq!(ucs_icon_anchor(rect, None).unwrap().y, 50.0);
+        let (fitted, origin) = fit_ucs_icon_to_canvas(built_for, real, rect, None);
+        let anchor = ucs_icon_anchor(fitted, origin).unwrap();
+        assert_eq!(anchor, Point::new(50.0, 810.0));
+    }
+
+    #[test]
+    fn a_tracked_origin_scales_with_the_canvas_and_matching_sizes_change_nothing() {
+        let rect = Rectangle { x: 100.0, y: 0.0, width: 800.0, height: 400.0 };
+        let (same, _) = fit_ucs_icon_to_canvas((1000.0, 400.0), Size::new(1000.0, 400.0), rect, None);
+        assert_eq!(same, rect);
+        let (fitted, origin) = fit_ucs_icon_to_canvas(
+            (1000.0, 400.0),
+            Size::new(2000.0, 800.0),
+            rect,
+            Some(Point::new(300.0, 100.0)),
+        );
+        assert_eq!(fitted, Rectangle { x: 200.0, y: 0.0, width: 1600.0, height: 800.0 });
+        assert_eq!(origin, Some(Point::new(600.0, 200.0)));
     }
 }

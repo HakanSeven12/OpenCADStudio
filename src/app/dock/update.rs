@@ -18,8 +18,21 @@ impl OpenCADStudio {
             DockMsg::IconPress(id) => {
                 // An icon press shows the icon's group and may also start
                 // dragging the pallet; a plain click never passes the drag
-                // threshold.
-                if self.dock.show_group_of(id) {
+                // threshold. On an edge that does not auto-hide, a press on
+                // a folded edge unfolds it, and a click on the icon of the
+                // group it shows folds it (on release, if it was no drag).
+                let mut changed = false;
+                self.dock_fold_on_release = None;
+                if let Some((side, gi)) = self.dock.location(id) {
+                    if !self.dock.edge_auto_hide(side) {
+                        if self.dock.folded(side) {
+                            changed = self.dock.set_folded(side, false);
+                        } else if self.dock_shown_group(side) == Some(gi) {
+                            self.dock_fold_on_release = Some(side);
+                        }
+                    }
+                }
+                if self.dock.show_group_of(id) || changed {
                     self.save_config();
                 }
                 self.dock_begin(DockDrag::moving(id, None), Some(id));
@@ -306,6 +319,13 @@ impl OpenCADStudio {
             self.dock_clear_hover();
         }
         let mut changed = false;
+        // A plain click on the icon of the group its edge shows: fold the
+        // edge.
+        if let Some(side) = self.dock_fold_on_release.take() {
+            if !dragged && matches!(self.dock_drag, Some(DockDrag::Move { group: None, .. })) {
+                changed |= self.dock.set_folded(side, true);
+            }
+        }
         match self.dock_drag.take() {
             Some(DockDrag::Move {
                 group: Some((side, gi)),
@@ -578,6 +598,11 @@ impl OpenCADStudio {
     pub(crate) fn dock_reveal(&mut self, id: crate::ui::dock::PanelId) {
         self.dock.show_group_of(id);
         self.dock_peek = Some(id);
+        if let Some((side, _)) = self.dock.location(id) {
+            if self.dock.set_folded(side, false) {
+                self.save_config();
+            }
+        }
     }
 
     /// Open or close pallet `id`, running its usual open path (refreshes,
@@ -1010,15 +1035,17 @@ impl OpenCADStudio {
     }
 
     /// Whether `side` draws its shown group beside the icon strip: always,
-    /// unless the edge auto-hides and none of the group's icons is hovered.
+    /// unless the edge is folded, or it auto-hides and none of the group's
+    /// icons is hovered.
     pub(crate) fn dock_edge_expanded(&self, side: crate::app::config::DockSide) -> bool {
         let Some(gi) = self.dock_shown_group(side) else {
             return false;
         };
-        !self.dock.edge_auto_hide(side)
-            || self
-                .dock_peek
-                .is_some_and(|e| self.dock_group_visible(side, gi).contains(&e))
+        if !self.dock.edge_auto_hide(side) {
+            return !self.dock.folded(side);
+        }
+        self.dock_peek
+            .is_some_and(|e| self.dock_group_visible(side, gi).contains(&e))
     }
 
     /// On-screen width of group `gi` on `side`.

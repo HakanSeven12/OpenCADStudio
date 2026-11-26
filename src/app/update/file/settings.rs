@@ -236,7 +236,6 @@ impl OpenCADStudio {
                 v
             },
             plugin_repos: self.plugin_repos.clone(),
-            literal_spaces: self.command_line.literal_spaces,
             command_history_height: self.command_line.history_height,
             osmode: crate::app::settings::osmode_from_snaps(
                 self.snapper.enabled.iter(),
@@ -505,7 +504,6 @@ impl OpenCADStudio {
         self.gpu_warning_silenced = s.gpu_warning_silenced.clone();
         self.disabled_plugins = s.disabled_plugins.iter().cloned().collect();
         self.plugin_repos = s.plugin_repos.clone();
-        self.command_line.literal_spaces = s.literal_spaces;
         self.command_line.history_height = if s.command_history_height.is_finite() {
             s.command_history_height.clamp(
                 crate::ui::command_line::HISTORY_HEIGHT_MIN,

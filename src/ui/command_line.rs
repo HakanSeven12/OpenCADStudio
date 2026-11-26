@@ -1222,8 +1222,9 @@ impl CommandLine {
         // Literal-space toggle: while active, every line behaves as if it
         // started with `>` — Space stays in the line instead of submitting, so
         // arguments with spaces (text strings, paths, `UCS Z 90` as one line)
-        // can be typed. Persists until toggled off; a hand-typed leading `>`
-        // lights the button too (same mode, one line only).
+        // can be typed. Lasts until toggled off or the app closes (a lit
+        // toggle carried across sessions left Space "broken", #3646); a
+        // hand-typed leading `>` lights the button too (one line only).
         let literal_active = self.literal_spaces || self.input.starts_with('>');
         let literal_btn = button(text(">").size(ui_text::UI))
             .on_press(Message::CommandLiteralToggle)

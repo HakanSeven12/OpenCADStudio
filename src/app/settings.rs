@@ -1123,10 +1123,6 @@ pub struct UserSettings {
     /// Linked plugin source repositories (`owner/repo`) the marketplace installs
     /// from.
     pub plugin_repos: Vec<String>,
-    /// Command-line literal-space mode: when on, Space stays in the input
-    /// instead of submitting (as if every line started with `>`), until the
-    /// user toggles it back off.
-    pub literal_spaces: bool,
     /// Height of the expanded command-history editor in logical pixels.
     pub command_history_height: f32,
     /// Running object-snap set + master toggle as an `$OSMODE`-style bitmask.
@@ -1644,7 +1640,6 @@ impl Default for UserSettings {
             gpu_warning_silenced: String::new(),
             disabled_plugins: Vec::new(),
             plugin_repos: Vec::new(),
-            literal_spaces: false,
             command_history_height: crate::ui::command_line::HISTORY_HEIGHT_DEFAULT,
             // Snapper::default(): END|MID|CEN|NODE|QUAD|INT (63), master on.
             // Object snap is a drafting aid users expect to be live from the

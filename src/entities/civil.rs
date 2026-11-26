@@ -766,7 +766,7 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
     use crate::entities::common::ro_prop;
     let EntityType::Extended(e) = entity else { return Vec::new() };
     let ExtendedEntityData::Arch(data) = &e.data else { return Vec::new() };
-    let Some(point) = cogo_point_of(data, document) else { return other_properties(data, document) };
+    let Some(point) = cogo_point_of(data, document) else { return other_properties(data, e.common.handle.value(), document) };
     vec![crate::scene::model::object::PropSection {
         title: crate::t!("Class").into_owned(),
         props: vec![
@@ -790,7 +790,7 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
 
 /// Read-only rows of the civil records the codec names: sample lines, view frames, match
 /// lines, survey figures and networks, superelevation views.
-fn other_properties(data: &ArchEntityData, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
+fn other_properties(data: &ArchEntityData, handle: u64, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
     use crate::entities::common::ro_prop;
     // The name of the civil record `h` (its third text, an alignment's fourth).
     let name_of = |h: u64| match document.get_entity(Handle::new(h)) {
@@ -802,6 +802,22 @@ fn other_properties(data: &ArchEntityData, document: &document::Document) -> Vec
     };
     let row = |label: &str, field: &'static str, value: String| ro_prop(crate::t!(label).as_ref(), field, value);
     let rows = match data.dxf_name.as_str() {
+        // A parcel's name: the stored one, else its style's name template
+        // resolves it from the style's name and the parcel's number — a
+        // document-level read, so parcels whose record stores no name
+        // (Parcel-2C's) still name themselves here.
+        "AECC_PARCEL" => {
+            let mut rows = document::classes::civil::parcel_name(document, Handle::new(handle))
+                .filter(|name| !name.is_empty())
+                .map(|name| vec![row("Name", "ext_civil_name", name)])
+                .unwrap_or_default();
+            if let Some((_, description)) = data.face_name() {
+                if !description.is_empty() {
+                    rows.push(row("Description", "ext_civil_description", description));
+                }
+            }
+            rows
+        }
         "AECC_SAMPLE_LINE" => vec![
             row("Name", "ext_civil_name", data.decode().strings.get(2).cloned().unwrap_or_default()),
             row("Station", "ext_civil_station", data.sample_line_station().map(|s| format!("{s:.3}")).unwrap_or_default()),

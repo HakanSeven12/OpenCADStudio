@@ -57,6 +57,75 @@ impl std::fmt::Display for ChoiceOption {
 }
 
 /// Shared helper to apply `DialogValue` updates to dialog or panel control state maps.
+/// What the Browse button of a dialog or panel path field picks.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PickTarget {
+    /// A file (`FilePicker`): saved or opened, with its extension filter.
+    File { save: bool, extensions: Vec<String> },
+    /// A folder (`FolderPicker`, API v32).
+    Folder,
+}
+
+/// The pick target of path field `id` among `controls`, searching rows,
+/// columns and field groups.
+pub fn pick_target(controls: &[DialogControl], id: &str) -> Option<PickTarget> {
+    controls.iter().find_map(|c| match c {
+        DialogControl::FilePicker {
+            id: cid,
+            extensions,
+            save,
+            ..
+        } if cid == id => Some(PickTarget::File {
+            save: *save,
+            extensions: extensions.clone(),
+        }),
+        DialogControl::FolderPicker { id: cid, .. } if cid == id => Some(PickTarget::Folder),
+        DialogControl::Fields { controls, .. }
+        | DialogControl::Row { controls, .. }
+        | DialogControl::Column { controls, .. } => pick_target(controls, id),
+        _ => None,
+    })
+}
+
+/// Open the system's dialog for `target`, starting in `start` where that is a
+/// folder. A browser picks files only, so a folder pick there gives nothing.
+pub async fn pick_path(
+    target: PickTarget,
+    start: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    match target {
+        PickTarget::File { save, extensions } => {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if !extensions.is_empty() {
+                let ext_strs: Vec<&str> = extensions.iter().map(|s| s.as_str()).collect();
+                dialog = dialog.add_filter("Files", &ext_strs);
+            }
+            let handle = if save {
+                dialog.save_file().await
+            } else {
+                dialog.pick_file().await
+            };
+            handle.map(|h| crate::sys::handle_path(&h))
+        }
+        #[cfg(target_arch = "wasm32")]
+        PickTarget::Folder => {
+            let _ = start;
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        PickTarget::Folder => {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if let Some(dir) = start.filter(|d| d.is_dir()) {
+                dialog = dialog.set_directory(dir);
+            }
+            dialog
+                .pick_folder()
+                .await
+                .map(|h| crate::sys::handle_path(&h))
+        }
+    }
+}
+
 pub fn apply_control_value_updates(
     values: HashMap<String, DialogValue>,
     text_values: &mut HashMap<String, String>,
@@ -210,6 +279,9 @@ impl PluginDialogState {
                     color_values.insert(id.clone(), *default);
                 }
                 DialogControl::FilePicker {
+                    id, default_path, ..
+                }
+                | DialogControl::FolderPicker {
                     id, default_path, ..
                 } => {
                     file_values.insert(id.clone(), default_path.clone());
@@ -412,6 +484,9 @@ impl PluginDialogState {
                 Some((id.clone(), DialogValue::Color(val)))
             }
             DialogControl::FilePicker {
+                id, default_path, ..
+            }
+            | DialogControl::FolderPicker {
                 id, default_path, ..
             } => {
                 let val = self
@@ -792,7 +867,8 @@ impl<'a> FormControlView<'a> {
                 .width(Fill)
                 .into()
             }
-            DialogControl::FilePicker { id, label, .. } => {
+            DialogControl::FilePicker { id, label, .. }
+            | DialogControl::FolderPicker { id, label, .. } => {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
@@ -1129,7 +1205,8 @@ impl<'a> FormControlView<'a> {
                 .spacing(4)
                 .into()
             }
-            DialogControl::FilePicker { id, label, .. } => {
+            DialogControl::FilePicker { id, label, .. }
+            | DialogControl::FolderPicker { id, label, .. } => {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
@@ -1774,5 +1851,77 @@ mod tests {
         assert_eq!(panel.choice_option_text("p_choice", 1), "Beta");
         assert!(panel.disabled_controls.contains("p_btn"));
         assert!(panel.hidden_controls.contains("p_choice"));
+    }
+
+    /// A folder field (API v32) holds its path like a file field and
+    /// answers it as a `FilePath`; its Browse button picks a folder, found
+    /// inside rows and field groups too.
+    #[test]
+    fn a_folder_picker_holds_its_path_and_picks_a_folder() {
+        let folder = DialogControl::FolderPicker {
+            id: "out".to_string(),
+            label: "Folder".to_string(),
+            default_path: "/plots".to_string(),
+        };
+        let file = DialogControl::FilePicker {
+            id: "src".to_string(),
+            label: "File".to_string(),
+            default_path: String::new(),
+            filter_name: "Drawings".to_string(),
+            extensions: vec!["dwg".to_string()],
+            save: true,
+        };
+        let row = DialogControl::row(vec![file, folder]);
+        let mut state = PluginDialogState::new(DialogDef::new("Export").with_control(row.clone()));
+        assert_eq!(state.file_values.get("out").unwrap(), "/plots");
+        state
+            .file_values
+            .insert("out".to_string(), "/plots/2026".to_string());
+        assert_eq!(
+            state.collect_response_map().get("out"),
+            Some(&DialogValue::FilePath("/plots/2026".to_string()))
+        );
+
+        let controls = [DialogControl::Fields {
+            id: "paths".to_string(),
+            title: None,
+            controls: vec![row],
+            collapsed: false,
+        }];
+        assert_eq!(pick_target(&controls, "out"), Some(PickTarget::Folder));
+        assert_eq!(
+            pick_target(&controls, "src"),
+            Some(PickTarget::File {
+                save: true,
+                extensions: vec!["dwg".to_string()],
+            })
+        );
+        assert_eq!(pick_target(&controls, "paths"), None);
+    }
+
+    /// A dialog draws a folder field like a file field – its label, the
+    /// path and a Browse button – and Browse asks to pick for that field.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_folder_picker_shows_its_path_and_a_browse_button() {
+        use iced_test::simulator::Simulator;
+        let state = PluginDialogState::new(DialogDef::new("Export").with_control(
+            DialogControl::FolderPicker {
+                id: "out".to_string(),
+                label: "Output folder".to_string(),
+                default_path: "/plots".to_string(),
+            },
+        ));
+        let mut ui = Simulator::with_size(iced::Settings::default(), (700.0, 400.0), state.view());
+        ui.find("Output folder").expect("the label");
+        ui.find("/plots").expect("the path");
+        ui.click("Browse...").expect("the Browse button");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::PluginDialogFilePick(id) if id == "out")),
+            "{messages:?}"
+        );
     }
 }

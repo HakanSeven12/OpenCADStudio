@@ -311,6 +311,17 @@ pub enum DialogControl {
         #[serde(default)]
         height: Option<f32>,
     },
+    /// Folder picker (API v32): a path entry with a Browse button that opens
+    /// the system's folder dialog. Its value is a [`DialogValue::FilePath`];
+    /// it reports `"change"` for typed text and `"pick"` for a picked folder,
+    /// as [`DialogControl::FilePicker`] does. Appended for the same wire
+    /// reason as [`DialogControl::StyledText`]: a v31 host cannot decode it,
+    /// so a plugin that sends it declares v32.
+    FolderPicker {
+        id: String,
+        label: String,
+        default_path: String,
+    },
 }
 
 fn default_true() -> bool {
@@ -332,6 +343,7 @@ impl DialogControl {
             | Self::Choice { id, .. }
             | Self::Color { id, .. }
             | Self::FilePicker { id, .. }
+            | Self::FolderPicker { id, .. }
             | Self::Fields { id, .. }
             | Self::Table { id, .. }
             | Self::Button { id, .. } => Some(id.as_str()),
@@ -683,7 +695,8 @@ pub enum DialogActionResponse {
 /// - [`DialogControl::Choice`] produces [`DialogValue::Choice`], carrying both the
 ///   selected `index` and its current `text`.
 /// - [`DialogControl::Color`] produces [`DialogValue::Color`].
-/// - [`DialogControl::FilePicker`] produces [`DialogValue::FilePath`].
+/// - [`DialogControl::FilePicker`] and [`DialogControl::FolderPicker`] produce
+///   [`DialogValue::FilePath`].
 /// - [`DialogControl::Table`] produces [`DialogValue::Table`] with every current row
 ///   and cell string; table cells do not have separate `raw_text` entries.
 /// - [`DialogControl::Fields`] produces [`DialogValue::Fields`], whose map is built by
@@ -707,9 +720,10 @@ pub struct PanelSnapshot {
     /// An unreadable value is omitted only with a corresponding entry in `errors`;
     /// the host never silently supplies the panel declaration's default instead.
     pub values: HashMap<String, DialogValue>,
-    /// Exact current text of every `Text`, `Number`, and `FilePicker` control, keyed
-    /// by control id, including controls reached through nested containers. Number
-    /// text is preserved verbatim even when it is partial or malformed.
+    /// Exact current text of every `Text`, `Number`, `FilePicker` and `FolderPicker`
+    /// control, keyed by control id, including controls reached through nested
+    /// containers. Number text is preserved verbatim even when it is partial or
+    /// malformed.
     pub raw_text: HashMap<String, String>,
     /// Read-back problems, including duplicate or missing fields, values whose shape
     /// does not match the declared control, and malformed input. An empty vector is a
@@ -852,6 +866,23 @@ mod tests {
             serde_json::to_value(TextStyle::Danger).expect("style json"),
             serde_json::json!("danger")
         );
+    }
+
+    #[test]
+    fn folder_picker_roundtrips_and_is_appended_to_the_wire_enum() {
+        // API v32: after the v19 tail, so every older variant keeps its tag.
+        let folder = DialogControl::FolderPicker {
+            id: "out".to_string(),
+            label: "Folder".to_string(),
+            default_path: "/plots".to_string(),
+        };
+        let bytes = bincode::serialize(&folder).expect("serialize control");
+        assert_eq!(u32::from_le_bytes(bytes[..4].try_into().unwrap()), 15);
+        assert_eq!(folder.id(), Some("out"));
+        let dialog = DialogDef::new("Export").with_control(folder);
+        let bytes = bincode::serialize(&dialog).expect("serialize dialog");
+        let restored: DialogDef = bincode::deserialize(&bytes).expect("deserialize dialog");
+        assert_eq!(dialog, restored);
     }
 
     #[test]

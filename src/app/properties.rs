@@ -4004,11 +4004,16 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     .take(limit as usize + 1)
                     .count()
                     > limit as usize;
-            let selected = if over_limit {
+            let mut selected = if over_limit {
                 Vec::new()
             } else {
                 self.tabs[i].scene.selected_entities()
             };
+            // The MTEXT open in the in-place editor shows the editor's frame
+            // and ruler, not its own grips.
+            if let Some(editing) = self.tabs[i].scene.mtext_editor_hidden() {
+                selected.retain(|entry| entry.0 != editing);
+            }
             let single_handle = (selected.len() == 1
                 && !self.tabs[i].scene.is_layer_locked(selected[0].0)
                 && !self.tabs[i].scene.is_reference_only(selected[0].0)

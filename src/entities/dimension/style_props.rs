@@ -137,19 +137,25 @@ pub fn style_sections(
     };
     let linetype =
         |code, inherited| linetype_name(document, ov::handle(data, code).unwrap_or(inherited));
+    // A tick size draws ticks at both ends whatever the arrow blocks are.
+    let ticks = real(ov::DIMTSZ, s.dimtsz) > 0.0;
     let arrow_1 = if matches!(dimension, Dimension::Radius(_) | Dimension::LargeRadial(_)) {
         block_name(
             document,
             ov::handle(data, ov::DIMLDRBLK).unwrap_or(s.dimldrblk),
             "Closed filled",
         )
+    } else if ticks {
+        "Oblique".to_string()
     } else if s.dimsah {
         arrow_name(ov::DIMBLK1, s.dimblk1, &s.dimblk1_name)
     } else {
         // Separate arrows off: both ends draw DIMBLK, as the renderer does.
         block_name(document, s.dimblk, &s.dimblk_name)
     };
-    let arrow_2 = if s.dimsah {
+    let arrow_2 = if ticks {
+        "Oblique".to_string()
+    } else if s.dimsah {
         arrow_name(ov::DIMBLK2, s.dimblk2, &s.dimblk2_name)
     } else {
         block_name(document, s.dimblk, &s.dimblk_name)

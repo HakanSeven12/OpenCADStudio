@@ -820,6 +820,11 @@ fn apply_property(doc: &mut Document, handle: Handle, field: &str, value: &str) 
             set(doc, handle, other, Some(XDataValue::Handle(both)));
             set(doc, handle, DIMSAH, Some(XDataValue::Integer16(1)));
         }
+        // A tick size overrides the arrow blocks, so picking an arrow turns
+        // the ticks off. (#3679)
+        if code != DIMLDRBLK && inherited_real(doc, handle, DIMTSZ) > 0.0 {
+            set(doc, handle, DIMTSZ, Some(XDataValue::Real(0.0)));
+        }
         set(doc, handle, code, Some(XDataValue::Handle(resolved)));
         return true;
     }

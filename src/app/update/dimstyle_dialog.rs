@@ -634,9 +634,16 @@ impl OpenCADStudio {
         } else {
             member_of.unwrap_or_else(|| self.dimstyle_selected.clone())
         };
+        let arrow = |s: &DimStyle, handle| {
+            if s.dimtsz > 0.0 {
+                "Oblique".to_string()
+            } else {
+                crate::entities::arrowheads::label(doc, handle)
+            }
+        };
         let arrows_of = |s: &DimStyle| PreviewArrows {
-            first: crate::entities::arrowheads::label(doc, if s.dimsah { s.dimblk1 } else { s.dimblk }),
-            second: crate::entities::arrowheads::label(doc, if s.dimsah { s.dimblk2 } else { s.dimblk }),
+            first: arrow(s, if s.dimsah { s.dimblk1 } else { s.dimblk }),
+            second: arrow(s, if s.dimsah { s.dimblk2 } else { s.dimblk }),
             leader: crate::entities::arrowheads::label(doc, s.dimldrblk),
         };
         let shown_arrows = shown.as_ref().map(arrows_of).unwrap_or_default();
@@ -1401,6 +1408,10 @@ impl OpenCADStudio {
             return;
         };
         let d = &mut e.draft;
+        // A tick size overrides the arrow blocks. (#3679)
+        if slot < 2 {
+            d.dimtsz = 0.0;
+        }
         match slot {
             // The first arrowhead sets the second too while they match; a
             // second that differs stays.

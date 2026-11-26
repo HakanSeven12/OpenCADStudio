@@ -265,10 +265,7 @@ fn main() {
         let (world, items, queries) = build_quadtree_fixture();
         let mut expected_total = None;
         for _ in 0..WARMUP {
-            let mut tree = QuadTree::new(world);
-            for &(h, aabb) in &items {
-                tree.insert(h, aabb);
-            }
+            let tree = QuadTree::from_items(world, items.iter().copied());
             let total: usize = queries.iter().map(|&q| tree.query_rect(q).len()).sum();
             expected_total = Some(total);
         }
@@ -278,10 +275,7 @@ fn main() {
         let mut samples_ms = Vec::with_capacity(RUNS);
         for _ in 0..RUNS {
             let start = Instant::now();
-            let mut tree = QuadTree::new(black_box(world));
-            for &(h, aabb) in black_box(&items) {
-                tree.insert(h, aabb);
-            }
+            let tree = QuadTree::from_items(black_box(world), black_box(&items).iter().copied());
             let mut total = 0usize;
             for &q in black_box(&queries) {
                 let mut res = tree.query_rect(q);

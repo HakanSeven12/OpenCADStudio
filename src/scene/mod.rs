@@ -548,7 +548,7 @@ impl Scene {
             {
                 continue;
             }
-            for tri in lod.indices.chunks_exact(3) {
+            let mut evaluate_triangle = |tri: &[u32]| {
                 let mut v = [glam::DVec3::ZERO; 3];
                 let mut ok = true;
                 for (slot, index) in v.iter_mut().zip(tri.iter()) {
@@ -573,11 +573,11 @@ impl Scene {
                     }
                 }
                 if !ok {
-                    continue;
+                    return;
                 }
                 let [a, b, c] = v;
                 let (Some(sa), Some(sb), Some(sc)) = (project(a), project(b), project(c)) else {
-                    continue;
+                    return;
                 };
                 // Per-triangle screen reject before any 3D work.
                 let (tx0, ty0) = (sa[0].min(sb[0]).min(sc[0]), sa[1].min(sb[1]).min(sc[1]));
@@ -587,7 +587,7 @@ impl Scene {
                     || cursor[1] < ty0 - aperture_px
                     || cursor[1] > ty1 + aperture_px
                 {
-                    continue;
+                    return;
                 }
                 if want_nearest {
                     let (q, d2, w) = closest_point_on_tri_2d(cursor, sa, sb, sc);
@@ -610,6 +610,57 @@ impl Scene {
                             );
                         }
                     }
+                }
+            };
+            if let Some(bvh) = set.geometry_triangle_bvh(0) {
+                use parry3d_f64::partitioning::TraversalAction;
+
+                let aperture_rect = [
+                    cursor[0] - aperture_px,
+                    cursor[1] - aperture_px,
+                    cursor[0] + aperture_px,
+                    cursor[1] + aperture_px,
+                ];
+                let node_reaches_aperture = |node: &parry3d_f64::partitioning::BvhNode| -> bool {
+                    let mins = node.mins();
+                    let maxs = node.maxs();
+                    let mut nx0 = f32::INFINITY;
+                    let mut ny0 = f32::INFINITY;
+                    let mut nx1 = f32::NEG_INFINITY;
+                    let mut ny1 = f32::NEG_INFINITY;
+                    for x in [mins.x, maxs.x] {
+                        for y in [mins.y, maxs.y] {
+                            for z in [mins.z, maxs.z] {
+                                let Some(s) = project(glam::DVec3::new(x, y, z)) else {
+                                    return true;
+                                };
+                                nx0 = nx0.min(s[0]);
+                                ny0 = ny0.min(s[1]);
+                                nx1 = nx1.max(s[0]);
+                                ny1 = ny1.max(s[1]);
+                            }
+                        }
+                    }
+                    nx1 >= aperture_rect[0]
+                        && nx0 <= aperture_rect[2]
+                        && ny1 >= aperture_rect[1]
+                        && ny0 <= aperture_rect[3]
+                };
+                bvh.traverse(|node| {
+                    if !node_reaches_aperture(node) {
+                        return TraversalAction::Prune;
+                    }
+                    if let Some(tri_idx) = node.leaf_data() {
+                        let start = (tri_idx as usize) * 3;
+                        if let Some(tri) = lod.indices.get(start..start + 3) {
+                            evaluate_triangle(tri);
+                        }
+                    }
+                    TraversalAction::Continue
+                });
+            } else {
+                for tri in lod.indices.chunks_exact(3) {
+                    evaluate_triangle(tri);
                 }
             }
         }
@@ -2469,6 +2520,7 @@ fn transform_block_mesh_lod_set(
         std::sync::Arc::new(model::mesh_model::MeshInstanceSource {
             handle: set.entity_handle().unwrap_or(Handle::new(0)),
             lods: set.lods.clone(),
+            triangle_bvhs: model::mesh_model::new_triangle_bvh_slots(set.lods.len()),
             edge_verts: set.edge_verts.clone(),
             edge_verts_low: set.edge_verts_low.clone(),
             curved_gens: set.curved_gens.clone(),
@@ -2496,6 +2548,7 @@ fn transform_block_mesh_lod_set(
     }
     MeshLodSet {
         lods: Vec::new(),
+        triangle_bvhs: Default::default(),
         effective_layer: set.effective_layer.clone(),
         material: set.material.clone(),
         face_materials: set.face_materials.clone(),
@@ -10964,9 +11017,11 @@ impl Scene {
             meshes.iter().filter_map(|set| {
                 (set.entity_handle()? == target).then_some(())?;
                 let mesh = set.geometry_lods().first()?;
+                let bvh = set.geometry_triangle_bvh(0);
                 Some((
                     target,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -10991,9 +11046,11 @@ impl Scene {
             meshes.iter().filter_map(|set| {
                 let handle = set.entity_handle()?;
                 let mesh = set.geometry_lods().first()?;
+                let bvh = set.geometry_triangle_bvh(0);
                 Some((
                     handle,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -11110,9 +11167,11 @@ impl Scene {
             meshes.iter().filter_map(|set| {
                 let handle = set.entity_handle()?;
                 let mesh = set.geometry_lods().first()?;
+                let bvh = set.geometry_triangle_bvh(0);
                 Some((
                     handle,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -11160,14 +11219,16 @@ impl Scene {
             cursor,
             sets.iter().filter_map(|(handle, set)| {
                 let lods = set.geometry_lods();
-                let mesh = if coarse_lod {
-                    lods.last()?
-                } else {
-                    lods.first()?
-                };
+                if lods.is_empty() {
+                    return None;
+                }
+                let lod_idx = if coarse_lod { lods.len() - 1 } else { 0 };
+                let mesh = lods.get(lod_idx)?;
+                let bvh = set.geometry_triangle_bvh(lod_idx);
                 Some((
                     *handle,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -13231,10 +13292,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             None => [-1.0, -1.0, 1.0, 1.0],
         };
         let t_tree_start = perf.then(iced::time::Instant::now);
-        let mut tree = pick::quadtree::QuadTree::new(root);
-        for (h, ab) in items {
-            tree.insert(h, ab);
-        }
+        let tree = pick::quadtree::QuadTree::from_items(root, items);
         let tree_ms = crate::perf::elapsed_ms(t_tree_start);
 
         if perf {

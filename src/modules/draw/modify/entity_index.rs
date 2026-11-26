@@ -74,16 +74,15 @@ impl ModifyEntityIndex {
         } else {
             let span = (world[2] - world[0]).max(world[3] - world[1]).max(1.0);
             let pad = span * 1.0e-9 + 1.0e-6;
-            let mut tree = QuadTree::new([
-                world[0] - pad,
-                world[1] - pad,
-                world[2] + pad,
-                world[3] + pad,
-            ]);
-            for (handle, aabb) in bounded {
-                tree.insert(handle, aabb);
-            }
-            Some(tree)
+            Some(QuadTree::from_items(
+                [
+                    world[0] - pad,
+                    world[1] - pad,
+                    world[2] + pad,
+                    world[3] + pad,
+                ],
+                bounded,
+            ))
         };
 
         Self {

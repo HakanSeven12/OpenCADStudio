@@ -193,45 +193,47 @@ pub(crate) fn square_around(centre: [f64; 2], r: f64) -> [f64; 4] {
 /// unconditionally retained to preserve exact kernel semantics.
 
 pub struct TrimAabbIndex {
-    entries: Vec<(usize, [f64; 4])>,
-    prefix_max_x: Vec<f64>,
+    bvh: parry2d_f64::partitioning::Bvh,
     always: Vec<usize>,
 }
 
 impl TrimAabbIndex {
     pub fn new(bounds: impl IntoIterator<Item = Option<[f64; 4]>>) -> Self {
-        let mut entries = Vec::new();
+        use parry2d_f64::bounding_volume::Aabb;
+        use parry2d_f64::math::Vector;
+        use parry2d_f64::partitioning::{Bvh, BvhBuildStrategy};
+
+        let mut leaves = Vec::new();
         let mut always = Vec::new();
         for (index, bounds) in bounds.into_iter().enumerate() {
             match bounds.filter(|box_| box_.iter().all(|value| value.is_finite())) {
-                Some(bounds) => entries.push((index, bounds)),
+                Some([x0, y0, x1, y1]) => leaves.push((
+                    index,
+                    Aabb::new(
+                        Vector::new(x0.min(x1), y0.min(y1)),
+                        Vector::new(x0.max(x1), y0.max(y1)),
+                    ),
+                )),
                 None => always.push(index),
             }
         }
-        entries.sort_unstable_by(|a, b| a.1[0].total_cmp(&b.1[0]));
-        let mut prefix_max_x = Vec::with_capacity(entries.len());
-        let mut max_x = f64::NEG_INFINITY;
-        for (_, bounds) in &entries {
-            max_x = max_x.max(bounds[2]);
-            prefix_max_x.push(max_x);
-        }
         Self {
-            entries,
-            prefix_max_x,
+            bvh: Bvh::from_iter(BvhBuildStrategy::Binned, leaves),
             always,
         }
     }
 
     pub fn overlapping(&self, target: [f64; 4]) -> Vec<usize> {
-        let end = self
-            .entries
-            .partition_point(|(_, aabb)| aabb[0] <= target[2]);
-        let start = self.prefix_max_x[..end].partition_point(|x| *x < target[0]);
+        use parry2d_f64::bounding_volume::Aabb;
+        use parry2d_f64::math::Vector;
+
         let mut indices = self.always.clone();
-        for &(index, aabb) in &self.entries[start..end] {
-            if aabb[2] >= target[0] && aabb[1] <= target[3] && aabb[3] >= target[1] {
-                indices.push(index);
-            }
+        if target.iter().all(|value| value.is_finite()) {
+            let query = Aabb::new(
+                Vector::new(target[0].min(target[2]), target[1].min(target[3])),
+                Vector::new(target[0].max(target[2]), target[1].max(target[3])),
+            );
+            indices.extend(self.bvh.intersect_aabb(&query).map(|id| id as usize));
         }
         // The kernel/contact logic previously saw entities in document order.
         // Maintain that ordering for coincident cuts and endpoint priority.

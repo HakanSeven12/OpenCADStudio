@@ -101,6 +101,9 @@ impl MeshMetrics {
 #[derive(Clone, Debug)]
 pub struct MeshLodSet {
     pub lods: Vec<MeshModel>,
+    /// Cached triangle BVHs (`parry3d_f64::partitioning::Bvh`) aligned with
+    /// `lods` for fast 3D raycast picking and face snapping.
+    pub triangle_bvhs: std::sync::Arc<[std::sync::OnceLock<parry3d_f64::partitioning::Bvh>]>,
     /// Fully resolved display/export layer for this placement. Geometry and
     /// instance sources remain shared and placement-independent.
     pub effective_layer: Option<std::sync::Arc<str>>,
@@ -182,12 +185,56 @@ pub struct DisplayLod {
 pub struct MeshInstanceSource {
     pub handle: document::Handle,
     pub lods: Vec<MeshModel>,
+    pub triangle_bvhs: std::sync::Arc<[std::sync::OnceLock<parry3d_f64::partitioning::Bvh>]>,
     pub edge_verts: Vec<[f32; 3]>,
     pub edge_verts_low: Vec<[f32; 3]>,
     pub curved_gens: Vec<CurvedGen>,
     /// The display LODs of `lods[0]`, shared by every placement of this
     /// geometry (see [`MeshLodSet::display_lods`]).
     pub display_lods: std::sync::Arc<[DisplayLod]>,
+}
+
+pub fn new_triangle_bvh_slots(
+    count: usize,
+) -> std::sync::Arc<[std::sync::OnceLock<parry3d_f64::partitioning::Bvh>]> {
+    (0..count)
+        .map(|_| std::sync::OnceLock::new())
+        .collect::<Vec<_>>()
+        .into()
+}
+
+pub fn build_mesh_triangle_bvh(mesh: &MeshModel) -> parry3d_f64::partitioning::Bvh {
+    use parry3d_f64::bounding_volume::Aabb;
+    use parry3d_f64::math::Vector;
+    use parry3d_f64::partitioning::{Bvh, BvhBuildStrategy};
+
+    let tri_count = mesh.indices.len() / 3;
+    if tri_count == 0 || mesh.verts.is_empty() {
+        return Bvh::new();
+    }
+    let vert = |idx: usize| -> Option<Vector> {
+        let hi = *mesh.verts.get(idx)?;
+        let low = mesh.verts_low.get(idx).copied().unwrap_or([0.0; 3]);
+        let p = Vector::new(
+            hi[0] as f64 + low[0] as f64,
+            hi[1] as f64 + low[1] as f64,
+            hi[2] as f64 + low[2] as f64,
+        );
+        p.is_finite().then_some(p)
+    };
+    let leaves = mesh
+        .indices
+        .chunks_exact(3)
+        .enumerate()
+        .filter_map(|(tri_idx, tri)| {
+            let a = vert(tri[0] as usize)?;
+            let b = vert(tri[1] as usize)?;
+            let c = vert(tri[2] as usize)?;
+            let mins = a.min(b).min(c);
+            let maxs = a.max(b).max(c);
+            Some((tri_idx, Aabb::new(mins, maxs)))
+        });
+    Bvh::from_iter(BvhBuildStrategy::Binned, leaves)
 }
 
 /// 3D bounds of every LOD's vertices: `([min_x, min_y, max_x, max_y], [min_z, max_z])`.
@@ -252,8 +299,10 @@ impl MeshLodSet {
     pub fn from_lods(lods: Vec<MeshModel>) -> Self {
         let (world_aabb, z_aabb) = compute_mesh_aabb(&lods);
         let metrics = compute_mesh_metrics(&lods);
+        let triangle_bvhs = new_triangle_bvh_slots(lods.len());
         Self {
             lods,
+            triangle_bvhs,
             effective_layer: None,
             material: None,
             face_materials: rustc_hash::FxHashMap::default(),
@@ -314,12 +363,17 @@ impl MeshLodSet {
         let (xy, z) = compute_mesh_aabb(&self.lods);
         self.world_aabb = xy;
         self.z_aabb = z;
+        self.triangle_bvhs = new_triangle_bvh_slots(self.lods.len());
     }
 
     pub fn prepare_instance_source(&mut self, handle: document::Handle) {
+        if self.triangle_bvhs.len() != self.lods.len() {
+            self.triangle_bvhs = new_triangle_bvh_slots(self.lods.len());
+        }
         self.instance_source = Some(std::sync::Arc::new(MeshInstanceSource {
             handle,
             lods: self.lods.clone(),
+            triangle_bvhs: self.triangle_bvhs.clone(),
             edge_verts: self.edge_verts.clone(),
             edge_verts_low: self.edge_verts_low.clone(),
             curved_gens: self.curved_gens.clone(),
@@ -335,6 +389,16 @@ impl MeshLodSet {
         self.instance_source
             .as_ref()
             .map_or(self.lods.as_slice(), |source| source.lods.as_slice())
+    }
+
+    pub fn geometry_triangle_bvh(&self, lod_index: usize) -> Option<&parry3d_f64::partitioning::Bvh> {
+        let (lods, bvhs) = match &self.instance_source {
+            Some(source) => (source.lods.as_slice(), &source.triangle_bvhs),
+            None => (self.lods.as_slice(), &self.triangle_bvhs),
+        };
+        let mesh = lods.get(lod_index)?;
+        let lock = bvhs.get(lod_index)?;
+        Some(lock.get_or_init(|| build_mesh_triangle_bvh(mesh)))
     }
 
     pub fn geometry_edges(&self) -> (&[[f32; 3]], &[[f32; 3]]) {

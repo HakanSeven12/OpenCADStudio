@@ -1,5 +1,9 @@
 // Spatial index for 2D entities. Each leaf holds up to `LEAF_CAPACITY`
 // items; on overflow the node splits into 4 children and re-distributes.
+// Straddling items that accumulate at internal nodes beyond `LEAF_CAPACITY`
+// are promoted into a node-local `rstar::RTree` so straddler-heavy drawings
+// keep O(log N) query times while ordinary bounded entities enjoy fast O(1)
+// quadrant descent.
 //
 // Items are keyed by `document::Handle`. AABBs are stored in WCS f64
 // (NOT world_offset-subtracted) so changing `world_offset` doesn't
@@ -9,44 +13,53 @@
 //   - `QuadTree::new(world_bounds)` — build an empty tree spanning a
 //     fixed root rect. Items outside the root are clamped: they go into
 //     the root's overflow list and surface on every query.
+//   - `QuadTree::from_items(world_bounds, items)` — bulk-build a tree
+//     and pack internal straddler buckets into R*-trees via `RTree::bulk_load`.
 //   - `insert(handle, aabb)`, `remove(handle)`, `update(handle, aabb)`
 //   - `query_rect(aabb) -> Vec<Handle>` — returns every handle whose
 //     stored AABB intersects `aabb`, plus all overflow handles.
 //   - `len()` / `is_empty()` for sanity.
-//
-// This is a flat-vector (Vec-of-nodes) implementation: node indices
-// are `usize`, child links are `Option<u32>` to keep nodes compact and
-// cache-friendly. No rebalancing — once split, nodes don't merge back
-// (rare in CAD workflows where most edits are local and few entities
-// move long distances).
 
 use document::Handle;
+use rstar::{RTree, RTreeObject, AABB};
 
 pub type Aabb = [f64; 4]; // [xmin, ymin, xmax, ymax]
 
-/// Items per leaf before it splits. Tuned: too small → deep tree, lots
-/// of nodes; too large → poor culling per leaf. 32 is a typical sweet
-/// spot for CAD-style content (many small entities in clusters).
+/// Items per leaf before it splits.
 const LEAF_CAPACITY: usize = 32;
+
+/// Minimum straddlers at an internal node before building a node-local R*-tree.
+const STRADDLER_RTREE_THRESHOLD: usize = 64;
 
 /// Hard cap on tree depth — prevents pathological recursion when many
 /// items pile up at the same point.
 const MAX_DEPTH: u8 = 16;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Item {
     handle: Handle,
     aabb: Aabb,
 }
 
+impl RTreeObject for Item {
+    type Envelope = AABB<[f64; 2]>;
+
+    #[inline]
+    fn envelope(&self) -> Self::Envelope {
+        AABB::from_corners([self.aabb[0], self.aabb[1]], [self.aabb[2], self.aabb[3]])
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Node {
     bounds: Aabb,
-    /// Items stored at this node. Only populated when the node is a
-    /// leaf, OR when a child split would put a straddling item at the
-    /// parent level (straddlers stay at the current node — they don't
-    /// fit cleanly into one quadrant).
+    /// Items stored at this node (either a leaf's items, or straddlers at
+    /// an internal node when below `STRADDLER_RTREE_THRESHOLD`).
     items: Vec<Item>,
+    /// When an internal node accumulates many straddling items (e.g., long
+    /// grid/section lines crossing quadrant midlines), they are indexed in
+    /// an R*-tree (`rstar::RTree`) instead of scanned linearly on every query.
+    straddler_rtree: Option<RTree<Item>>,
     /// 4 children: NW, NE, SW, SE. `None` until the node splits.
     children: Option<[u32; 4]>,
     depth: u8,
@@ -55,9 +68,11 @@ struct Node {
 #[derive(Debug, Clone)]
 pub struct QuadTree {
     nodes: Vec<Node>,
-    /// `handle → (node_idx, item_idx_within_node)` so removal/update
-    /// is O(1) without walking the tree.
+    /// `handle → (node_idx, item_idx_within_node)` for O(1) lookup.
+    /// When `item_idx == u32::MAX`, the item is stored in `nodes[node_idx].straddler_rtree`.
     locator: rustc_hash::FxHashMap<Handle, (u32, u32)>,
+    /// Stored AABB for items promoted into a node's `straddler_rtree`.
+    rtree_aabbs: rustc_hash::FxHashMap<Handle, Aabb>,
     /// Items whose AABB falls outside the root bounds. Surfaced on
     /// every query — small set in practice (typically empty for
     /// well-bounded drawings).
@@ -69,23 +84,40 @@ impl QuadTree {
         let root = Node {
             bounds: world_bounds,
             items: Vec::new(),
+            straddler_rtree: None,
             children: None,
             depth: 0,
         };
         Self {
             nodes: vec![root],
             locator: rustc_hash::FxHashMap::default(),
+            rtree_aabbs: rustc_hash::FxHashMap::default(),
             overflow: Vec::new(),
         }
     }
 
-    // `len` / `is_empty` / `remove` / `update` are part of the public
-    // quadtree API and exercised by the unit tests, but production
-    // callers haven't landed yet (Scene::add/erase/transform paths
-    // still trigger an epoch-based full rebuild rather than mutating
-    // the index in place). The `#[allow(dead_code)]` is intentional —
-    // dropping them would shrink the public surface only to put it
-    // back once incremental updates ship.
+    pub fn from_items(
+        world_bounds: Aabb,
+        items: impl IntoIterator<Item = (Handle, Aabb)>,
+    ) -> Self {
+        let iter = items.into_iter();
+        let cap = iter.size_hint().0;
+        let mut tree = Self::new(world_bounds);
+        tree.locator.reserve(cap);
+        for (handle, aabb) in iter {
+            tree.insert_without_rtree_promote(handle, aabb);
+        }
+        // Bulk-load any internal node that accumulated >= STRADDLER_RTREE_THRESHOLD straddlers.
+        for node_idx in 0..tree.nodes.len() {
+            if tree.nodes[node_idx].children.is_some()
+                && tree.nodes[node_idx].items.len() >= STRADDLER_RTREE_THRESHOLD
+            {
+                tree.promote_node_straddlers(node_idx as u32);
+            }
+        }
+        tree
+    }
+
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.locator.len() + self.overflow.len()
@@ -97,39 +129,69 @@ impl QuadTree {
     }
 
     pub fn insert(&mut self, handle: Handle, aabb: Aabb) {
+        let node_idx = self.insert_without_rtree_promote(handle, aabb);
+        if let Some(idx) = node_idx {
+            if self.nodes[idx as usize].children.is_some()
+                && self.nodes[idx as usize].straddler_rtree.is_none()
+                && self.nodes[idx as usize].items.len() >= STRADDLER_RTREE_THRESHOLD
+            {
+                self.promote_node_straddlers(idx);
+            }
+        }
+    }
+
+    fn insert_without_rtree_promote(&mut self, handle: Handle, aabb: Aabb) -> Option<u32> {
         let aabb = normalize_aabb(aabb);
         if !aabb.iter().all(|x| x.is_finite()) || !aabb_contained(self.nodes[0].bounds, aabb) {
             self.overflow.push(Item { handle, aabb });
-            return;
+            return None;
         }
         let node_idx = self.descend_to_leaf(0, aabb);
-        let item_idx = self.nodes[node_idx as usize].items.len() as u32;
-        self.nodes[node_idx as usize]
-            .items
-            .push(Item { handle, aabb });
+        let node = &mut self.nodes[node_idx as usize];
+        if let Some(rtree) = node.straddler_rtree.as_mut() {
+            rtree.insert(Item { handle, aabb });
+            self.locator.insert(handle, (node_idx, u32::MAX));
+            self.rtree_aabbs.insert(handle, aabb);
+            return Some(node_idx);
+        }
+        let item_idx = node.items.len() as u32;
+        node.items.push(Item { handle, aabb });
         self.locator.insert(handle, (node_idx, item_idx));
 
-        // Split only LEAF nodes. Internal nodes accumulate straddlers
-        // (items whose AABB crosses a child boundary); calling split on
-        // an internal node would overwrite its `children` pointer and
-        // orphan the entire existing subtree. Straddlers can't fit
-        // smaller children anyway, so splitting is futile here.
         if self.nodes[node_idx as usize].items.len() > LEAF_CAPACITY
             && self.nodes[node_idx as usize].depth < MAX_DEPTH
             && self.nodes[node_idx as usize].children.is_none()
         {
             self.split(node_idx);
         }
+        Some(node_idx)
+    }
+
+    fn promote_node_straddlers(&mut self, node_idx: u32) {
+        let items = std::mem::take(&mut self.nodes[node_idx as usize].items);
+        self.rtree_aabbs.reserve(items.len());
+        for item in &items {
+            self.locator.insert(item.handle, (node_idx, u32::MAX));
+            self.rtree_aabbs.insert(item.handle, item.aabb);
+        }
+        self.nodes[node_idx as usize].straddler_rtree = Some(RTree::bulk_load(items));
     }
 
     #[allow(dead_code)]
     pub fn remove(&mut self, handle: Handle) -> bool {
         if let Some((node_idx, item_idx)) = self.locator.remove(&handle) {
-            let node = &mut self.nodes[node_idx as usize];
-            // swap_remove: re-locate whoever took the moved item's slot.
-            node.items.swap_remove(item_idx as usize);
-            if let Some(moved) = node.items.get(item_idx as usize) {
-                self.locator.insert(moved.handle, (node_idx, item_idx));
+            if item_idx == u32::MAX {
+                if let Some(aabb) = self.rtree_aabbs.remove(&handle) {
+                    if let Some(rtree) = self.nodes[node_idx as usize].straddler_rtree.as_mut() {
+                        rtree.remove(&Item { handle, aabb });
+                    }
+                }
+            } else {
+                let node = &mut self.nodes[node_idx as usize];
+                node.items.swap_remove(item_idx as usize);
+                if let Some(moved) = node.items.get(item_idx as usize) {
+                    self.locator.insert(moved.handle, (node_idx, item_idx));
+                }
             }
             return true;
         }
@@ -149,14 +211,41 @@ impl QuadTree {
 
     pub fn query_rect(&self, query: Aabb) -> Vec<Handle> {
         let mut out = Vec::new();
-        // Overflow always surfaces — these items have no usable spatial
-        // info (out-of-root) so we can't cull them spatially.
         for i in &self.overflow {
             if aabb_intersects(i.aabb, query) {
                 out.push(i.handle);
             }
         }
-        self.query_node(0, query, &mut out);
+        let envelope = AABB::from_corners([query[0], query[1]], [query[2], query[3]]);
+        let mut stack = [0u32; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let node_idx = stack[sp];
+            let node = &self.nodes[node_idx as usize];
+            if !aabb_intersects(node.bounds, query) {
+                continue;
+            }
+            if let Some(rtree) = &node.straddler_rtree {
+                out.extend(
+                    rtree
+                        .locate_in_envelope_intersecting(envelope)
+                        .map(|item| item.handle),
+                );
+            } else {
+                for i in &node.items {
+                    if aabb_intersects(i.aabb, query) {
+                        out.push(i.handle);
+                    }
+                }
+            }
+            if let Some(children) = node.children {
+                for c in children {
+                    stack[sp] = c;
+                    sp += 1;
+                }
+            }
+        }
         out
     }
 
@@ -168,8 +257,6 @@ impl QuadTree {
             let Some(children) = node.children else {
                 return node_idx;
             };
-            // Pick the child that fully contains `aabb`; if `aabb`
-            // straddles a split boundary, stash it at the current node.
             let mut fits_child: Option<u32> = None;
             for &c in &children {
                 if aabb_contained(self.nodes[c as usize].bounds, aabb) {
@@ -202,6 +289,7 @@ impl QuadTree {
             self.nodes.push(Node {
                 bounds: b,
                 items: Vec::new(),
+                straddler_rtree: None,
                 children: None,
                 depth,
             });
@@ -235,23 +323,6 @@ impl QuadTree {
             }
         }
         self.nodes[node_idx as usize].items = keep_at_parent;
-    }
-
-    fn query_node(&self, node_idx: u32, query: Aabb, out: &mut Vec<Handle>) {
-        let node = &self.nodes[node_idx as usize];
-        if !aabb_intersects(node.bounds, query) {
-            return;
-        }
-        for i in &node.items {
-            if aabb_intersects(i.aabb, query) {
-                out.push(i.handle);
-            }
-        }
-        if let Some(children) = node.children {
-            for c in children {
-                self.query_node(c, query, out);
-            }
-        }
     }
 }
 
@@ -309,17 +380,13 @@ mod tests {
     #[test]
     fn split_on_overflow() {
         let mut t = QuadTree::new([0.0, 0.0, 100.0, 100.0]);
-        // Push beyond LEAF_CAPACITY (=32) into different quadrants
-        // so the split actually distributes them.
         for i in 0..40u64 {
             let x = (i as f64) * 0.5;
             let y = (i as f64) * 0.5;
             t.insert(h(i), [x, y, x + 0.1, y + 0.1]);
         }
         assert_eq!(t.len(), 40);
-        // The root should have split — there are children now.
         assert!(t.nodes.len() > 1);
-        // All items recoverable.
         let hits = t.query_rect([0.0, 0.0, 100.0, 100.0]);
         assert_eq!(hits.len(), 40);
     }
@@ -349,35 +416,22 @@ mod tests {
     #[test]
     fn out_of_bounds_goes_to_overflow() {
         let mut t = QuadTree::new([0.0, 0.0, 100.0, 100.0]);
-        // Way outside root.
         t.insert(h(1), [1000.0, 1000.0, 1010.0, 1010.0]);
-        // Query a region that doesn't touch the overflow item — but
-        // overflow always surfaces only if its AABB intersects.
         let near = t.query_rect([0.0, 0.0, 50.0, 50.0]);
         assert!(near.is_empty());
-        // Query that does intersect the overflow item.
         let far = t.query_rect([900.0, 900.0, 1100.0, 1100.0]);
         assert_eq!(far, vec![h(1)]);
     }
 
     #[test]
     fn many_straddlers_dont_orphan_subtree() {
-        // Regression: previously, when straddlers piled up at an
-        // internal node and exceeded LEAF_CAPACITY, split() was called
-        // again — overwriting the node's `children` and orphaning every
-        // descendant. Symptom: thousands of items inserted, only ~5%
-        // reachable from root via a huge_query.
         let mut t = QuadTree::new([0.0, 0.0, 100.0, 100.0]);
-        // First, fill one leaf so it splits.
         for i in 0..40u64 {
             t.insert(h(i), [1.0, 1.0, 2.0, 2.0]);
         }
-        // Now flood the root with straddlers (AABBs that cross center).
         for i in 100..200u64 {
             t.insert(h(i), [10.0, 10.0, 90.0, 90.0]);
         }
-        // After the regression-trigger inserts, every handle must still
-        // come back from a huge query.
         let huge = [-1e9, -1e9, 1e9, 1e9];
         let hits = t.query_rect(huge);
         let expected = 40 + 100;
@@ -393,13 +447,10 @@ mod tests {
     #[test]
     fn straddler_stays_at_parent() {
         let mut t = QuadTree::new([0.0, 0.0, 100.0, 100.0]);
-        // Force a split via 40 small items in NW quadrant.
         for i in 0..40u64 {
             t.insert(h(i + 100), [1.0, 1.0, 2.0, 2.0]);
         }
-        // A straddler crossing center.
         t.insert(h(1), [40.0, 40.0, 60.0, 60.0]);
-        // Querying any quadrant should still find the straddler.
         let nw_hits = t.query_rect([0.0, 50.0, 50.0, 100.0]);
         assert!(nw_hits.contains(&h(1)));
         let se_hits = t.query_rect([50.0, 0.0, 100.0, 50.0]);
@@ -413,16 +464,14 @@ mod tests {
         tree.insert(h(1), [10.0, 10.0, 20.0, 20.0]);
         tree.insert(h(2), [f64::NAN, 10.0, 20.0, 20.0]);
         tree.insert(h(3), [10.0, f64::INFINITY, 20.0, 20.0]);
-        tree.insert(h(4), [20.0, 20.0, 10.0, 10.0]); // inverted bounds: normalized
+        tree.insert(h(4), [20.0, 20.0, 10.0, 10.0]);
 
         assert_eq!(tree.len(), 4);
-        // Handles 2 & 3 have non-finite coords so they land in overflow
-        // Handle 4 has inverted coords which normalize and fit inside root
         assert_eq!(tree.overflow.len(), 2);
 
         let normal_hits = tree.query_rect([5.0, 5.0, 25.0, 25.0]);
         assert!(normal_hits.contains(&h(1)));
-        assert!(normal_hits.contains(&h(4))); // normalized [10.0, 10.0, 20.0, 20.0]
+        assert!(normal_hits.contains(&h(4)));
     }
 
     #[test]

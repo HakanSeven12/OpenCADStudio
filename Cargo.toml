@@ -120,6 +120,9 @@ unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
 pollster = "1"
 lru = { version = "0.19", default-features = false }
+rstar = "0.13"
+parry2d-f64 = "0.31"
+parry3d-f64 = "0.31"
 
 [dev-dependencies]
 fluent-syntax = "0.12"

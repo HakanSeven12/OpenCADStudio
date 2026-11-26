@@ -3541,6 +3541,7 @@ mod tests {
     fn stale_mesh() -> crate::scene::model::mesh_model::MeshLodSet {
         crate::scene::model::mesh_model::MeshLodSet {
             lods: Vec::new(),
+            triangle_bvhs: Default::default(),
             effective_layer: None,
             material: None,
             face_materials: Default::default(),

@@ -107,6 +107,8 @@ pub(crate) use entity::normalize_block_terminators;
 pub(crate) use entity::wire_thumbnail_bgra;
 pub use entity::CreateBlockOptions;
 mod group_layer;
+mod named_selections;
+pub(crate) use named_selections::NamedSelectionRecall;
 /// The one grip a whole picked group shows (GROUPDISPLAYMODE 1 and 2), at
 /// the centre of its extents: each member carries it, so dragging it moves
 /// the whole group.

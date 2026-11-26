@@ -692,47 +692,56 @@ impl OpenCADStudio {
         Ok(Task::none())
     }
 
-    /// `selection_set_save` — remember a named handle set for this session
-    /// (session-scoped by design).
+    /// `selection_set_save` — save a named set in the drawing, in one undo
+    /// step: the same sets NAMEDSEL saves and recalls.
     pub(super) fn control_selection_set_save(
         &mut self,
         req: &Value,
     ) -> Result<Task<Message>, Value> {
+        use crate::app::commands::NamedSelectionSaveError;
         let name = string(req, "name")?.to_owned();
         if name.is_empty() {
             return Err(failure("name_required", "Supply a set name"));
         }
         let handles = crate::app::control::entities::hex_handles(req, "handles")?;
-        let stored: Vec<String> = handles.iter().map(|h| format!("{:X}", h.value())).collect();
-        self.control.selection_sets.insert(name.clone(), handles);
-        let count = self
-            .control
-            .selection_sets
-            .get(&name)
-            .map(|set| set.len())
-            .unwrap_or(0);
+        let i = self.active_tab;
+        let (_, count) = self
+            .save_named_selection_step(i, &name, &handles)
+            .map_err(|error| match error {
+                NamedSelectionSaveError::InvalidName => failure(
+                    "invalid_value",
+                    format!("'{name}' is not a valid selection set name"),
+                ),
+                NamedSelectionSaveError::NothingToSave => {
+                    failure("entity_absent", "None of the handles is in the drawing")
+                }
+            })?;
+        let (name, stored) = self.tabs[i]
+            .scene
+            .named_selection(&name)
+            .unwrap_or((name, Vec::new()));
+        let stored: Vec<String> = stored.iter().map(|h| format!("{:X}", h.value())).collect();
         self.set_control_result(json!({ "name": name, "handles": stored, "count": count }));
         Ok(Task::none())
     }
 
-    /// `selection_set_load` — recall a saved set. With `"select":true`
-    /// (default) the entities become the current selection.
+    /// `selection_set_load` — recall a set saved in the drawing (the name
+    /// without case). With `"select":true` (default) its entities become the
+    /// current selection.
     pub(super) fn control_selection_set_load(
         &mut self,
         req: &Value,
     ) -> Result<Task<Message>, Value> {
         let name = string(req, "name")?.to_owned();
-        let handles = self
-            .control
-            .selection_sets
-            .get(&name)
-            .cloned()
+        let i = self.active_tab;
+        let (name, handles) = self.tabs[i]
+            .scene
+            .named_selection(&name)
             .ok_or_else(|| failure("selection_set_missing", format!("No set named '{name}'")))?;
         let stored: Vec<String> = handles.iter().map(|h| format!("{:X}", h.value())).collect();
         let select = req["select"].as_bool().unwrap_or(true);
         let mut selected = 0;
         if select {
-            let i = self.active_tab;
             let scene = &mut self.tabs[i].scene;
             scene.deselect_all();
             for handle in &handles {

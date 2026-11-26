@@ -1522,4 +1522,83 @@ mod tests {
         )
         .is_empty());
     }
+    /// A polyline from `start`: 20 along the X axis, then 10 at `degrees`.
+    fn bent(start: [f64; 2], degrees: f64) -> (Curve, [[f64; 2]; 3]) {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let corner = [start[0] + 20.0, start[1]];
+        let points = [
+            start,
+            corner,
+            [corner[0] + 10.0 * cos, corner[1] + 10.0 * sin],
+        ];
+        (polyline(&points, false), points)
+    }
+
+    #[test]
+    fn a_straight_polyline_segment_off_an_angle_is_an_absolute_error() {
+        let (path, _) = bent([2.4, -3.1], 91.7);
+        let errors = angles(&[path], &[0.0, 90.0], &[], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!((error.curve, error.segment), (0, Some(1)));
+        assert_eq!((error.other, error.other_segment), (None, None));
+        assert!(degrees(error.angle, 90.0), "{error:?}");
+        assert!(degrees(error.deviation, 1.7), "{error:?}");
+        assert!(degrees(error.turn.to_degrees(), -1.7), "{error:?}");
+    }
+
+    #[test]
+    fn segments_of_one_polyline_that_meet_off_an_angle_are_a_relative_error() {
+        let (path, points) = bent([2.4, -3.1], 91.7);
+        let errors = angles(&[path], &[], &[90.0], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, AngleErrorKind::Relative);
+        assert_eq!((error.curve, error.segment), (0, Some(0)));
+        assert_eq!((error.other, error.other_segment), (Some(0), Some(1)));
+        assert!(distance(error.location, points[1]) < 1e-9, "{error:?}");
+        assert!(degrees(error.deviation, 1.7), "{error:?}");
+    }
+
+    #[test]
+    fn a_segment_meets_the_segment_next_to_it() {
+        let (path, _) = bent([2.4, -3.1], 91.7);
+        let errors = angles(&[path], &[90.0], &[], 0.0);
+        assert_eq!(errors[0].meets, [true, false], "{errors:?}");
+    }
+
+    #[test]
+    fn the_closing_segment_of_a_closed_polyline_is_read() {
+        let square = polyline(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.3, 10.0]], true);
+        let errors = angles(&[square], &[0.0, 90.0], &[], 0.0);
+        let segments: Vec<_> = errors.iter().map(|e| e.segment).collect();
+        assert_eq!(segments, [Some(3)], "{errors:?}");
+        assert!(degrees(
+            errors[0].deviation,
+            0.3f64.atan2(10.0).to_degrees()
+        ));
+    }
+
+    #[test]
+    fn an_arc_segment_of_a_polyline_has_no_angle_error() {
+        let (sin, cos) = 91.7f64.to_radians().sin_cos();
+        let path = Curve::Polyline(Polyline {
+            vertices: vec![
+                PolylineVertex {
+                    position: [0.0, 0.0],
+                    bulge: 0.0,
+                },
+                PolylineVertex {
+                    position: [20.0, 0.0],
+                    bulge: 0.2,
+                },
+                PolylineVertex {
+                    position: [20.0 + 10.0 * cos, 10.0 * sin],
+                    bulge: 0.0,
+                },
+            ],
+            closed: false,
+        });
+        assert!(angles(&[path], &[0.0, 90.0], &[], 0.0).is_empty());
+    }
 }

@@ -1470,3 +1470,125 @@ fn a_changed_angle_row_keeps_the_fields_that_ocs_does_not_know() {
     assert_eq!(row.tolerance, 1.0);
     assert_eq!(row.extra["enabled"], true);
 }
+
+/// A LWPOLYLINE through `points`.
+fn path(app: &mut OpenCADStudio, points: &[[f64; 2]], closed: bool) -> Handle {
+    let mut polyline =
+        LwPolyline::from_points(points.iter().map(|p| Vector2::new(p[0], p[1])).collect());
+    polyline.is_closed = closed;
+    add(app, EntityType::LwPolyline(polyline))
+}
+
+fn vertices(app: &OpenCADStudio, handle: Handle) -> Vec<[f64; 2]> {
+    match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+        Some(EntityType::LwPolyline(polyline)) => polyline
+            .vertices
+            .iter()
+            .map(|v| [v.location.x, v.location.y])
+            .collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// 20 along the X axis from the origin, then 10 at 91.7°.
+fn bent_points() -> [[f64; 2]; 3] {
+    let (sin, cos) = 91.7f64.to_radians().sin_cos();
+    [[0.0, 0.0], [20.0, 0.0], [20.0 + 10.0 * cos, 10.0 * sin]]
+}
+
+#[test]
+fn rotate_at_start_turns_a_polyline_segment_about_its_first_vertex() {
+    let (mut app, i) = app();
+    let points = bent_points();
+    let handle = path(&mut app, &points, false);
+    let found = scan(&mut app, &[handle]);
+    let absolute = found
+        .iter()
+        .find(|f| f.kind == ErrorType::AbsoluteAngle)
+        .expect("listed");
+    assert_eq!(absolute.angle.unwrap().segment, Some(1), "{found:?}");
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtStart);
+    let after = vertices(&app, handle);
+    assert_eq!(after[0], points[0]);
+    assert_eq!(after[1], points[1], "the pivot stays");
+    assert!(near(after[2], [20.0, 10.0]), "{after:?}");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), 1, "one undo step");
+}
+
+#[test]
+fn rotate_at_end_moves_the_first_vertex_and_the_segment_before_keeps_its_start() {
+    let (mut app, _) = app();
+    let points = bent_points();
+    let handle = path(&mut app, &points, false);
+    scan(&mut app, &[handle]);
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtEnd);
+    let after = vertices(&app, handle);
+    assert_eq!(after[0], points[0], "the segment before keeps its start");
+    assert_eq!(after[2], points[2], "the pivot stays");
+    assert!(
+        near(after[1], [points[2][0], points[2][1] - 10.0]),
+        "{after:?}"
+    );
+}
+
+#[test]
+fn rotate_shorter_turns_the_shorter_segment_about_the_vertex_they_share() {
+    let (mut app, _) = app();
+    let points = bent_points();
+    let handle = path(&mut app, &points, false);
+    scan(&mut app, &[handle]);
+    fix(&mut app, ErrorType::RelativeAngle, Fix::RotateShorter);
+    let after = vertices(&app, handle);
+    assert_eq!(&after[..2], &points[..2]);
+    assert!(near(after[2], [20.0, 10.0]), "{after:?}");
+}
+
+#[test]
+fn two_segments_of_one_polyline_are_two_errors() {
+    let (mut app, _) = app();
+    let [a, b, c] = bent_points();
+    let (sin, cos) = 181.7f64.to_radians().sin_cos();
+    let handle = path(
+        &mut app,
+        &[a, b, c, [c[0] + 15.0 * cos, c[1] + 15.0 * sin]],
+        false,
+    );
+    let found = scan(&mut app, &[handle]);
+    let absolute: Vec<&Finding> = found
+        .iter()
+        .filter(|f| f.kind == ErrorType::AbsoluteAngle)
+        .collect();
+    let segments: Vec<_> = absolute.iter().map(|f| f.angle.unwrap().segment).collect();
+    assert_eq!(segments, [Some(1), Some(2)], "{found:?}");
+    assert!(!absolute[0].same_error(absolute[1]));
+}
+
+#[test]
+fn the_closing_segment_of_a_closed_polyline_turns_both_its_vertices() {
+    let (mut app, _) = app();
+    let points = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.3, 10.0]];
+    let handle = path(&mut app, &points, true);
+    let entity = app.tabs[app.active_tab]
+        .scene
+        .document
+        .get_entity(handle)
+        .unwrap()
+        .clone();
+    let cleanup = crate::modules::manage::geometry_cleanup::straight_part;
+    assert_eq!(cleanup(&entity, Some(3)), Some([points[3], points[0]]));
+    assert_eq!(cleanup(&entity, Some(4)), None, "a closed square has 4");
+    let turned = crate::modules::manage::geometry_cleanup::rotated_part(
+        &entity,
+        Some(3),
+        [5.0, 5.0],
+        std::f64::consts::FRAC_PI_2,
+    )
+    .unwrap();
+    let EntityType::LwPolyline(turned) = turned else {
+        panic!("a polyline")
+    };
+    let at = |n: usize| [turned.vertices[n].location.x, turned.vertices[n].location.y];
+    assert!(near(at(3), [0.0, 0.3]), "{:?}", at(3));
+    assert!(near(at(0), [10.0, 0.0]), "{:?}", at(0));
+    assert_eq!([at(1), at(2)], [points[1], points[2]]);
+}

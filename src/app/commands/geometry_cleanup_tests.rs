@@ -2270,3 +2270,258 @@ fn the_preview_of_a_repair_that_the_error_does_not_offer_shows_nothing() {
     assert!(!scene.entity_temporarily_hidden(objects[1]));
     assert!(scene.preview_wires.is_empty());
 }
+
+fn view_of(app: &OpenCADStudio) -> (f64, f64, f32) {
+    let camera = app.tabs[app.active_tab].scene.camera.borrow();
+    (camera.target.x, camera.target.y, camera.ortho_size())
+}
+
+fn same_view(a: (f64, f64, f32), b: (f64, f64, f32)) -> bool {
+    (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9 && (a.2 - b.2).abs() < 1e-6
+}
+
+#[test]
+fn geometrycleanupstate_tells_whether_the_palette_is_open() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("GEOMETRYCLEANUPSTATE");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPSTATE = 0 (read only)"));
+    let _ = app.dispatch_command("GEOMETRYCLEANUPOPEN");
+    let _ = app.dispatch_command("GEOMETRYCLEANUPSTATE");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPSTATE = 1 (read only)"));
+}
+
+#[test]
+fn geometrycleanupstate_cannot_be_set() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPSTATE 1");
+    assert!(!app.geometry_cleanup.show);
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("(read only)"));
+}
+
+#[test]
+fn geometrycleanupzoompan_is_on_at_first_and_takes_0_or_1() {
+    let (mut app, _) = app();
+    assert!(!app.geometry_cleanup.auto_zoom_off);
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    assert!(app.geometry_cleanup.auto_zoom_off);
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 2");
+    assert!(app.geometry_cleanup.auto_zoom_off, "2 is refused");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("Requires 0 or 1 only."));
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 1");
+    assert!(!app.geometry_cleanup.auto_zoom_off);
+}
+
+#[test]
+fn geometrycleanupzoompan_tells_its_value_and_takes_one_after_its_name() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("GEOMETRYCLEANUPZOOMPAN");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPZOOMPAN <1>"));
+    let _ = app.dispatch_command("GEOMETRYCLEANUPZOOMPAN 0");
+    assert!(app.geometry_cleanup.auto_zoom_off);
+    let _ = app.dispatch_command("GEOMETRYCLEANUPZOOMPAN");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPZOOMPAN <0>"));
+}
+
+#[test]
+fn with_auto_zoom_off_a_pick_of_an_error_beside_the_view_zooms_to_it() {
+    let (mut app, _) = app();
+    markers_drawing(&mut app);
+    // The view holds the x of each error, but not its y.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(-100.0, 400.0, 0.0),
+        glam::DVec3::new(120.0, 420.0, 0.0),
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let before = view_of(&app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!same_view(before, view_of(&app)));
+}
+
+#[test]
+fn the_review_display_needs_no_new_scan() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let before = app.tabs[i].scene.geometry_epoch;
+    let index = index_of(&app, ErrorType::Gap);
+    // The handler alone: the update after it would scan a stale list again.
+    let _ = app.on_geometry_cleanup(GeometryCleanupMsg::Pick(index));
+    let epoch = app.tabs[i].scene.geometry_epoch;
+    assert_ne!(epoch, before, "the review display moves the epoch");
+    let scan = app.geometry_cleanup.scan.as_ref().expect("the scan");
+    assert_eq!(scan.epoch, epoch, "the colours change, not the geometry");
+}
+
+#[test]
+fn geometrycleanupzoompan_is_kept_in_the_user_profile() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let json = serde_json::to_string(&app.current_config()).unwrap();
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(&json).unwrap();
+    assert!(!loaded.settings.geometry_cleanup_zoom_pan);
+    let (mut other, _) = self::app();
+    other.apply_config(loaded);
+    assert!(other.geometry_cleanup.auto_zoom_off);
+    let fresh: crate::app::config::AppConfig = serde_json::from_str("{}").unwrap();
+    assert!(
+        fresh.settings.geometry_cleanup_zoom_pan,
+        "on in a new profile"
+    );
+}
+
+#[test]
+fn with_auto_zoom_off_a_pick_of_an_error_in_view_keeps_the_view_and_on_it_zooms() {
+    let (mut app, _) = app();
+    markers_drawing(&mut app);
+    // The whole drawing is in view, so each error's window is too.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(-200.0, -200.0, 0.0),
+        glam::DVec3::new(200.0, 200.0, 0.0),
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let before = view_of(&app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(same_view(before, view_of(&app)));
+    assert_eq!(
+        app.geometry_cleanup.picked,
+        Some(index),
+        "the error is picked"
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 1");
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!same_view(before, view_of(&app)), "Auto Zoom on zooms");
+}
+
+#[test]
+fn with_auto_zoom_off_a_pick_of_an_error_out_of_view_zooms_to_it() {
+    let (mut app, _) = app();
+    markers_drawing(&mut app);
+    // Only the overshoot at (10, 50) is in this window.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(5.0, 45.0, 0.0),
+        glam::DVec3::new(15.0, 55.0, 0.0),
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let before = view_of(&app);
+    let index = index_of(&app, ErrorType::Undershoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!same_view(before, view_of(&app)));
+}
+
+#[test]
+fn the_review_toolbar_sets_auto_zoom() {
+    let (mut app, _) = app();
+    cleanup_msg(&mut app, GeometryCleanupMsg::ToggleAutoZoom);
+    assert!(app.geometry_cleanup.auto_zoom_off);
+    cleanup_msg(&mut app, GeometryCleanupMsg::ToggleAutoZoom);
+    assert!(!app.geometry_cleanup.auto_zoom_off);
+}
+
+#[test]
+fn a_pick_starts_review_mode_with_the_error_objects_bright() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let [_, _, _, left, right] = objects;
+    assert!(app.tabs[i].scene.count_display.is_none());
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(app.geometry_cleanup.review && app.geometry_cleanup.review_shown);
+    let display = app.tabs[i]
+        .scene
+        .count_display
+        .as_ref()
+        .expect("review display");
+    let mut bright: Vec<Handle> = display.counted.iter().copied().collect();
+    bright.sort_by_key(|h| h.value());
+    assert_eq!(bright, vec![left, right]);
+}
+
+#[test]
+fn the_review_display_follows_the_pick_after_a_repair() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::Fix(index, Fix::Trim));
+    let picked = findings(&app)[app.geometry_cleanup.picked.expect("the next error")];
+    let display = app.tabs[i]
+        .scene
+        .count_display
+        .as_ref()
+        .expect("review display");
+    assert!(display.counted.contains(&picked.handle));
+}
+
+#[test]
+fn geometryerrorreviewclose_ends_review_mode() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    let _ = app.dispatch_command("GEOMETRYERRORREVIEWCLOSE");
+    assert!(!app.geometry_cleanup.review && !app.geometry_cleanup.review_shown);
+    assert!(app.tabs[i].scene.count_display.is_none());
+    assert!(app.geometry_cleanup.show, "the palette stays open");
+}
+
+#[test]
+fn the_review_toolbar_close_ends_review_mode() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::CloseReview);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+#[test]
+fn closing_the_palette_ends_review_mode() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    let _ = app.dispatch_command("GEOMETRYCLEANUPCLOSE");
+    assert!(!app.geometry_cleanup.review);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+#[test]
+fn a_new_selection_ends_review_mode() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    scan(&mut app, &objects);
+    assert!(!app.geometry_cleanup.review);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+#[test]
+fn review_mode_leaves_the_display_of_count_mode_alone() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    app.tabs[i].count = Some(Default::default());
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!app.geometry_cleanup.review_shown);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}

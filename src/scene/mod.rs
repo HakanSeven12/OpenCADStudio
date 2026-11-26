@@ -4943,6 +4943,11 @@ impl Scene {
         }
     }
 
+    /// The MTEXT the in-place editor replaces while it is open.
+    pub(crate) fn mtext_editor_hidden(&self) -> Option<Handle> {
+        self.mtext_editor_hidden
+    }
+
     /// Hide only the source replaced by the MTEXT editor, independently from
     /// command previews and table-cell previews.
     pub(crate) fn set_mtext_editor_hidden(&mut self, handle: Option<Handle>) {

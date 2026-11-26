@@ -464,6 +464,7 @@ impl crate::app::OpenCADStudio {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.hidden_source_tab = Some(self.tabs[i].id);
                 }
+                self.refresh_selected_grips();
             }
         } else {
             self.close_mtext_editor();

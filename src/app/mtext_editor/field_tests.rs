@@ -516,3 +516,40 @@ fn a_field_just_inserted_can_be_deleted_whole() {
         .count();
     assert_eq!(fields, 1, "only the container is left");
 }
+
+/// A selected MTEXT opened in the in-place editor shows the editor's frame
+/// and ruler only: its own grips (the corner square, the width arrow) go
+/// while it is edited and come back when the editor closes.
+#[test]
+fn an_mtext_open_in_the_editor_hides_its_own_grips() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
+    app.active_tab = 1;
+    let mut text = MText::new();
+    text.value = "asdas".into();
+    text.height = 2.5;
+    text.rectangle_width = 10.0;
+    let h = app.tabs[1]
+        .scene
+        .document
+        .add_entity(EntityType::MText(Box::new(text)))
+        .unwrap();
+    app.tabs[1].scene.select_entity(h, true);
+    app.refresh_selected_grips();
+    assert!(
+        app.tabs[1].selected_grip_handles.contains(&h),
+        "a picked MTEXT shows its grips"
+    );
+    let _ = app.begin_text_edit(h);
+    assert!(app.mtext_editor.is_some());
+    assert!(
+        !app.tabs[1].selected_grip_handles.contains(&h),
+        "no MTEXT grips under the editor"
+    );
+    app.mtext_cancel();
+    assert!(
+        app.tabs[1].selected_grip_handles.contains(&h),
+        "the grips come back after the editor closes"
+    );
+}

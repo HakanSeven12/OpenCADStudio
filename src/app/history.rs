@@ -84,6 +84,7 @@ pub(super) struct PendingLayerDelta {
     selected_before: Vec<Handle>,
     dirty_before: bool,
     before: Vec<(String, Option<document::tables::Layer>)>,
+    joined: bool,
 }
 
 pub(super) struct PendingTextStyleDelta {
@@ -92,6 +93,7 @@ pub(super) struct PendingTextStyleDelta {
     selected_before: Vec<Handle>,
     dirty_before: bool,
     before: Vec<(String, Option<document::tables::TextStyle>)>,
+    joined: bool,
 }
 
 pub(super) struct PendingDimStyleDelta {
@@ -100,6 +102,7 @@ pub(super) struct PendingDimStyleDelta {
     selected_before: Vec<Handle>,
     dirty_before: bool,
     before: Vec<(String, Option<document::tables::DimStyle>)>,
+    joined: bool,
 }
 
 pub(super) struct PendingObjectDelta {
@@ -108,6 +111,7 @@ pub(super) struct PendingObjectDelta {
     selected_before: Vec<Handle>,
     dirty_before: bool,
     before: FxHashMap<Handle, document::objects::ObjectType>,
+    joined: bool,
 }
 
 impl OpenCADStudio {
@@ -149,7 +153,7 @@ impl OpenCADStudio {
         before: ObjectIsolationState,
         selected_before: Vec<Handle>,
     ) {
-        self.finish_pending_history(i);
+        self.finish_pending_history_inner(i);
         let after = self.tabs[i].scene.object_isolation.clone();
         let selected_after: Vec<Handle> = self.tabs[i].scene.selected.iter().copied().collect();
         if before == after && selected_before == selected_after {
@@ -175,6 +179,9 @@ impl OpenCADStudio {
         object_before: Vec<(Handle, document::objects::ObjectType)>,
         dirty_before: bool,
     ) {
+        if self.joins_outer_undo_scope(i) {
+            return;
+        }
         self.finish_pending_history(i);
         let entities: Vec<_> = before
             .into_iter()
@@ -264,6 +271,14 @@ impl OpenCADStudio {
     }
 
     pub(super) fn discard_last_undo_entry(&mut self, i: usize) {
+        let held = self.tabs[i]
+            .history
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.held);
+        if self.joins_outer_undo_scope(i) || held {
+            return;
+        }
         if self.tabs[i].history.pending.take().is_some() {
             self.tabs[i].scene.document.end_entity_change_recording();
             return;
@@ -274,6 +289,13 @@ impl OpenCADStudio {
     }
 
     pub(super) fn finish_pending_history(&mut self, i: usize) {
+        if self.joins_outer_undo_scope(i) {
+            return;
+        }
+        self.finish_pending_history_inner(i);
+    }
+
+    fn finish_pending_history_inner(&mut self, i: usize) {
         let Some(mut pending) = self.tabs[i].history.pending.take() else {
             return;
         };
@@ -439,6 +461,14 @@ impl OpenCADStudio {
     /// Finish the pending history step, dropping it when it changed nothing
     /// even if it was opened as a mark ([`Self::push_undo_mark`]).
     pub(super) fn drop_unchanged_pending_history(&mut self, i: usize) {
+        let held = self.tabs[i]
+            .history
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.held);
+        if self.joins_outer_undo_scope(i) || held {
+            return;
+        }
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.keep_empty = false;
         }
@@ -492,15 +522,26 @@ impl OpenCADStudio {
         }
     }
 
-    /// A plugin request is running and tab `i` has the plugin's open
-    /// `push_undo` scope: edits join it instead of closing it.
+    /// A plugin request is running — or a plugin's interactive command is
+    /// committing while a plugin undo group is held — and tab `i` has the
+    /// plugin's open scope: edits join it instead of closing it.
     fn joins_plugin_scope(&self, i: usize) -> bool {
-        self.plugin_request_active
-            && self.tabs[i]
-                .history
-                .pending
-                .as_ref()
-                .is_some_and(|pending| pending.plugin_owned)
+        self.tabs[i].history.pending.as_ref().is_some_and(|pending| {
+            pending.plugin_owned
+                && (self.plugin_request_active
+                    || (pending.held
+                        && self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .is_some_and(|cmd| cmd.is_plugin_command())))
+        })
+    }
+
+    /// An enclosing multi-operation undo scope (node graph evaluation or a
+    /// plugin-driven command inside an open plugin undo scope) is active:
+    /// inner commands join it instead of closing, replacing, or discarding it.
+    fn joins_outer_undo_scope(&self, i: usize) -> bool {
+        self.graph_undo_open || self.joins_plugin_scope(i)
     }
 
     fn reference_session_state(&self, i: usize) -> ReferenceSessionState {
@@ -511,7 +552,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn push_undo_snapshot(&mut self, i: usize, label: impl Into<HistoryLabel>) {
-        if self.graph_undo_open {
+        if self.joins_outer_undo_scope(i) {
             return;
         }
         self.finish_pending_history(i);
@@ -566,6 +607,9 @@ impl OpenCADStudio {
     /// [`Self::push_undo_snapshot`] for a command that is an undo step even
     /// when it changes nothing (UNDO and U then name it and undo nothing).
     pub(super) fn push_undo_mark(&mut self, i: usize, label: impl Into<HistoryLabel>) {
+        if self.joins_outer_undo_scope(i) {
+            return;
+        }
         self.push_undo_snapshot(i, label);
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.keep_empty = true;
@@ -625,7 +669,10 @@ impl OpenCADStudio {
         label: impl Into<HistoryLabel>,
         names: &[String],
     ) -> PendingLayerDelta {
-        self.finish_pending_history(i);
+        let joined = self.joins_outer_undo_scope(i);
+        if !joined {
+            self.finish_pending_history(i);
+        }
         PendingLayerDelta {
             label: label.into(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
@@ -640,6 +687,7 @@ impl OpenCADStudio {
                     )
                 })
                 .collect(),
+            joined,
         }
     }
 
@@ -728,6 +776,9 @@ impl OpenCADStudio {
                 }
             }
         }
+        if pending.joined {
+            return;
+        }
         let selected_after = self.tabs[i].scene.selected.iter().copied().collect();
         let delta = DeltaSnapshot {
             visibility_states: None,
@@ -758,7 +809,10 @@ impl OpenCADStudio {
         label: impl Into<HistoryLabel>,
         names: &[String],
     ) -> PendingTextStyleDelta {
-        self.finish_pending_history(i);
+        let joined = self.joins_outer_undo_scope(i);
+        if !joined {
+            self.finish_pending_history(i);
+        }
         PendingTextStyleDelta {
             label: label.into(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
@@ -773,10 +827,14 @@ impl OpenCADStudio {
                     )
                 })
                 .collect(),
+            joined,
         }
     }
 
     pub(super) fn commit_text_style_undo(&mut self, i: usize, pending: PendingTextStyleDelta) {
+        if pending.joined {
+            return;
+        }
         let entries: Vec<_> = pending
             .before
             .into_iter()
@@ -821,7 +879,10 @@ impl OpenCADStudio {
         label: impl Into<HistoryLabel>,
         names: &[String],
     ) -> PendingDimStyleDelta {
-        self.finish_pending_history(i);
+        let joined = self.joins_outer_undo_scope(i);
+        if !joined {
+            self.finish_pending_history(i);
+        }
         PendingDimStyleDelta {
             label: label.into(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
@@ -836,10 +897,14 @@ impl OpenCADStudio {
                     )
                 })
                 .collect(),
+            joined,
         }
     }
 
     pub(super) fn commit_dim_style_undo(&mut self, i: usize, pending: PendingDimStyleDelta) {
+        if pending.joined {
+            return;
+        }
         let entries: Vec<_> = pending
             .before
             .into_iter()
@@ -897,18 +962,29 @@ impl OpenCADStudio {
         i: usize,
         label: impl Into<HistoryLabel>,
     ) -> PendingObjectDelta {
-        self.finish_pending_history(i);
-        self.tabs[i].scene.begin_undo_recording();
+        let joined = self.joins_outer_undo_scope(i);
+        if !joined {
+            self.finish_pending_history(i);
+            self.tabs[i].scene.begin_undo_recording();
+        }
         PendingObjectDelta {
             label: label.into(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
             selected_before: self.tabs[i].scene.selected.iter().copied().collect(),
             dirty_before: self.tabs[i].dirty,
-            before: self.group_object_state(i),
+            before: if joined {
+                FxHashMap::default()
+            } else {
+                self.group_object_state(i)
+            },
+            joined,
         }
     }
 
     pub(super) fn commit_group_undo(&mut self, i: usize, pending: PendingObjectDelta) {
+        if pending.joined {
+            return;
+        }
         let entities: Vec<_> = self.tabs[i]
             .scene
             .take_undo_recording()
@@ -970,6 +1046,9 @@ impl OpenCADStudio {
         mut dirty_before: bool,
         merge_at: Option<usize>,
     ) {
+        if self.joins_outer_undo_scope(i) {
+            return;
+        }
         if before == after && entities.is_empty() {
             return;
         }
@@ -1707,7 +1786,7 @@ impl OpenCADStudio {
     /// the command-line notice (a dialog withdrawing its own live changes).
     pub(super) fn undo_steps_reported(&mut self, steps: usize, report: bool) {
         let i = self.active_tab;
-        self.finish_pending_history(i);
+        self.finish_pending_history_inner(i);
         let available = self.tabs[i].history.undo_stack.len();
         let steps = steps.min(available);
         if steps == 0 {
@@ -1818,7 +1897,7 @@ impl OpenCADStudio {
 
     pub(super) fn redo_steps(&mut self, steps: usize) {
         let i = self.active_tab;
-        self.finish_pending_history(i);
+        self.finish_pending_history_inner(i);
         let available = self.tabs[i].history.redo_stack.len();
         let steps = steps.min(available);
         if steps == 0 {

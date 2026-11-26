@@ -7006,6 +7006,17 @@ impl OpenCADStudio {
                         &self.tabs[i].scene.document.header,
                     ),
                 );
+                // Same relabel-only note as the status-bar unit menu: a new
+                // unit with the geometry sitting still reads as a no-op. (#3683)
+                if state.insertion_units != units_before {
+                    let label = crate::modules::draw::units::label(state.insertion_units);
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "Drawing unit is now {label}. Geometry unchanged — use DWGUNITS to convert it."
+                        )
+                        .as_ref(),
+                    );
+                }
                 Task::none()
             }
             Message::BlockDefName(name) => {

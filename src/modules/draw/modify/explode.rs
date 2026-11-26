@@ -18,6 +18,7 @@
 //     MText       → Text lines
 //     Region      → Lines, Arcs, Circles, Ellipses, Splines (from ACIS B-Rep loops or wires)
 //     Hatch       → Lines of its pattern, clipped to the boundary (not solid/gradient)
+//     Proxy / application / civil object → what it draws: polylines, SOLIDs, Text
 //
 //   Unsupported entity types are skipped silently.
 
@@ -177,8 +178,139 @@ fn explode_entity_in_context(
         }
         EntityType::MText(t) => crate::entities::mtext::explode_mtext(t, document),
         EntityType::Region(region) => explode_region(region),
+        EntityType::Unknown(_) | EntityType::Extended(_) => explode_proxy(entity, document),
         _ => vec![],
     }
+}
+
+// ── Proxy / application object explode ─────────────────────────────────────
+
+/// A proxy, application or civil object explodes into what it draws: its
+/// polylines, filled areas (as SOLIDs) and single-line texts, each on the
+/// layer, colour, linetype and lineweight its preview names; ByBlock traits
+/// take the object's own.
+fn explode_proxy(entity: &EntityType, document: &Document) -> Vec<EntityType> {
+    use crate::scene::convert::proxy_graphics::{ProxyColor, ProxyStyle, LT_BYBLOCK, LT_BYLAYER};
+    let Some(dec) = crate::scene::convert::tess::proxy_preview(document, entity) else {
+        return vec![];
+    };
+    let own = entity.common();
+    let common = |style: &ProxyStyle| {
+        let mut common = own.clone();
+        common.handle = Handle::NULL;
+        common.owner_handle = Handle::NULL;
+        common.xdictionary_handle = None;
+        common.reactors.clear();
+        common.graphic_data = None;
+        common.extended_data = Default::default();
+        if let Some(layer) = style.layer.and_then(|i| document.layers.iter().nth(i as usize)) {
+            common.layer = layer.name.clone();
+            common.layer_handle = None;
+        }
+        match style.color {
+            ProxyColor::ByBlock => {}
+            ProxyColor::ByLayer => common.color = document::types::Color::ByLayer,
+            ProxyColor::Aci(aci) => common.color = document::types::Color::Index(aci),
+            ProxyColor::Rgb(r, g, b) => common.color = document::types::Color::Rgb { r, g, b },
+        }
+        let linetype = match style.linetype {
+            LT_BYBLOCK => None,
+            LT_BYLAYER => Some("ByLayer".to_string()),
+            index => document
+                .line_types
+                .iter()
+                .filter(|lt| {
+                    !lt.name.eq_ignore_ascii_case("ByLayer")
+                        && !lt.name.eq_ignore_ascii_case("ByBlock")
+                })
+                .nth(index as usize)
+                .map(|lt| lt.name.clone()),
+        };
+        if let Some(linetype) = linetype {
+            common.linetype = linetype;
+            common.linetype_handle = None;
+        }
+        match style.lineweight {
+            w if w >= 0 => common.line_weight = document::types::LineWeight::Value(w),
+            -1 if style.layer.is_some() => common.line_weight = document::types::LineWeight::ByLayer,
+            _ => {}
+        }
+        common
+    };
+    let point = |p: &[f64; 3]| Vector3::new(p[0], p[1], p[2]);
+    let mut pieces = Vec::new();
+    for polyline in &dec.polylines {
+        let mut points: Vec<Vector3> = polyline.points.iter().map(point).collect();
+        points.dedup_by(|a, b| a.distance(b) <= 1e-12);
+        let closed = points.len() > 2 && points[0].distance(points.last().unwrap()) <= 1e-12;
+        if closed {
+            points.pop();
+        }
+        let common = common(&polyline.style);
+        match points.as_slice() {
+            [] | [_] => {}
+            [start, end] => pieces.push(EntityType::Line(LineEnt {
+                common,
+                start: *start,
+                end: *end,
+                ..LineEnt::new()
+            })),
+            _ if points.iter().all(|p| (p.z - points[0].z).abs() <= 1e-9) => {
+                let mut lw = LwPolyline::new();
+                lw.common = common;
+                lw.elevation = points[0].z;
+                lw.vertices = points
+                    .iter()
+                    .map(|p| document::entities::LwVertex::new(document::types::Vector2::new(p.x, p.y)))
+                    .collect();
+                lw.is_closed = closed;
+                pieces.push(EntityType::LwPolyline(lw));
+            }
+            _ => {
+                let mut p3 = document::entities::Polyline3D::from_points(points);
+                p3.common = common;
+                if closed {
+                    p3.close();
+                }
+                pieces.push(EntityType::Polyline3D(p3));
+            }
+        }
+    }
+    for fill in &dec.fills {
+        let common = common(&fill.style);
+        for tri in fill.tris.chunks_exact(3) {
+            let mut solid =
+                document::entities::Solid::triangle(point(&tri[0]), point(&tri[1]), point(&tri[2]));
+            solid.common = common.clone();
+            pieces.push(EntityType::Solid(solid));
+        }
+    }
+    for label in &dec.texts {
+        use document::entities::{TextHorizontalAlignment as H, TextVerticalAlignment as V};
+        let mut text = Text::new();
+        text.common = common(&label.style);
+        text.value = label.text.clone();
+        text.height = label.height;
+        text.rotation = label.rotation;
+        text.width_factor = label.width_factor;
+        text.oblique_angle = label.oblique;
+        text.insertion_point = point(&label.position);
+        text.horizontal_alignment = match label.align[0] {
+            a if a >= 0.75 => H::Right,
+            a if a >= 0.25 => H::Center,
+            _ => H::Left,
+        };
+        text.vertical_alignment = match label.align[1] {
+            a if a >= 0.75 => V::Top,
+            a if a >= 0.25 => V::Middle,
+            _ => V::Baseline,
+        };
+        if text.horizontal_alignment != H::Left || text.vertical_alignment != V::Baseline {
+            text.alignment_point = Some(text.insertion_point);
+        }
+        pieces.push(EntityType::Text(text));
+    }
+    pieces
 }
 
 /// Explode every entity; one piece list per input, input order preserved,

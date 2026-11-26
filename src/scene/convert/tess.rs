@@ -1282,27 +1282,7 @@ fn tessellate_entity_inner(
     // blob, the vector preview its author cached for exactly this case. Draw it
     // when the object enabler is missing, so the entity
     // occupies its real place instead of silently disappearing.
-    let proxy_blob: Option<std::borrow::Cow<'_, [u8]>> = match e {
-        EntityType::Unknown(_) => e
-            .common()
-            .graphic_data
-            .as_deref()
-            .map(std::borrow::Cow::Borrowed),
-        EntityType::Extended(entity) => match &entity.data {
-            document::entities::ExtendedEntityData::Proxy(proxy) => {
-                Some(std::borrow::Cow::Owned(proxy.graphics.data()))
-            }
-            // Arch objects the codec names but does not draw (walls, doors,
-            // windows…) still carry the preview their application cached.
-            document::entities::ExtendedEntityData::Arch(_) => e
-                .common()
-                .graphic_data
-                .as_deref()
-                .map(std::borrow::Cow::Borrowed),
-            _ => None,
-        },
-        _ => None,
-    };
+    let proxy_blob = proxy_blob(e);
     // ── Civil 3D objects ─────────────────────────────────────────────────────
     //
     // The display cache Civil 3D saved, when it kept one, is what the object
@@ -2537,6 +2517,54 @@ pub(crate) fn is_unindexable_entity(e: &document::EntityType) -> bool {
 /// Whether a Civil 3D display cache holds what the object draws rather than
 /// a placeholder: a drawn cache opens with its layer, a placeholder with the
 /// class name as text (record 36).
+/// The proxy-graphics preview an entity carries: an unsupported entity's
+/// cached vector preview, or that of an application object the codec names
+/// but does not draw.
+fn proxy_blob(e: &EntityType) -> Option<std::borrow::Cow<'_, [u8]>> {
+    match e {
+        EntityType::Unknown(_) => e
+            .common()
+            .graphic_data
+            .as_deref()
+            .map(std::borrow::Cow::Borrowed),
+        EntityType::Extended(entity) => match &entity.data {
+            document::entities::ExtendedEntityData::Proxy(proxy) => {
+                Some(std::borrow::Cow::Owned(proxy.graphics.data()))
+            }
+            // Arch objects the codec names but does not draw (walls, doors,
+            // windows…) still carry the preview their application cached.
+            document::entities::ExtendedEntityData::Arch(_) => e
+                .common()
+                .graphic_data
+                .as_deref()
+                .map(std::borrow::Cow::Borrowed),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// What a proxy, application or civil object draws, decoded into
+/// primitives: the civil object rebuilt from its record when its cache is
+/// only a placeholder, otherwise its proxy-graphics preview. `None` when it
+/// draws nothing this way.
+pub(crate) fn proxy_preview(
+    document: &document::Document,
+    e: &EntityType,
+) -> Option<convert::proxy_graphics::Decoded> {
+    let blob = proxy_blob(e);
+    if let EntityType::Extended(entity) = e {
+        if let document::entities::ExtendedEntityData::Arch(data) = &entity.data {
+            if data.civil_kind().is_some() && !blob.as_deref().is_some_and(civil_drawn_cache) {
+                return crate::entities::civil::decoded(data, e.common().handle.value(), document)
+                    .filter(|dec| !dec.is_empty());
+            }
+        }
+    }
+    blob.map(|blob| convert::proxy_graphics::decode(&blob))
+        .filter(|dec| !dec.is_empty())
+}
+
 pub(crate) fn civil_drawn_cache(blob: &[u8]) -> bool {
     // An 8-byte header, then records of `u32 size, u32 type, payload`.
     blob.get(12..16).is_some_and(|t| u32::from_le_bytes([t[0], t[1], t[2], t[3]]) != 36)

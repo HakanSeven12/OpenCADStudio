@@ -18,6 +18,9 @@
 //!                                             it (read)
 //! - `{"op":"civil_surface_stats",...}`      — a TIN surface's elevation
 //!                                             bounds and counts (read)
+//! - `{"op":"civil_surface_mesh",...}`       — a TIN surface's visible mesh,
+//!                                             vertices and triangle indices
+//!                                             (read)
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::line_read::{MAX_LINE_BYTES, lines_capped};
@@ -1168,6 +1171,10 @@ impl OpenCADStudio {
                 &req,
             ),
             "civil_surface_stats" => crate::app::civil_query::civil_surface_stats(
+                &self.tabs[self.active_tab].scene.document,
+                &req,
+            ),
+            "civil_surface_mesh" => crate::app::civil_query::civil_surface_mesh(
                 &self.tabs[self.active_tab].scene.document,
                 &req,
             ),

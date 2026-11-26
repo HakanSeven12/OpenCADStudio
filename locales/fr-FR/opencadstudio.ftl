@@ -9553,6 +9553,12 @@ ribbon-customize =
     .shortcuts = Raccourcis clavier…
     .close = Fermer
     .default-title = Groupe { $n }
+    .export = Exporter…
+    .import = Importer…
+    .exported = Groupes exportés vers { $path }
+    .export-failed = Échec de l'exportation : { $error }
+    .imported = Groupes importés : { $count }
+    .import-failed = Échec de l'importation, groupes inchangés : { $error }
 
 toolbar =
     .list = Barres d'outils (● affichées) :

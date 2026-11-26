@@ -3811,6 +3811,85 @@ impl OpenCADStudio {
                 }
             }
             M::Shortcuts => return Task::done(Message::ShortcutsPanelOpen),
+            M::Export => {
+                let text = crate::ui::window::ribbon_customize::panels_to_string(&panels);
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = text;
+                    return Task::none();
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                return Task::perform(
+                    async move {
+                        let handle = crate::sys::file_dialog()
+                            .set_file_name("ribbon-panels.json")
+                            .add_filter("JSON (*.json)", &["json"])
+                            .save_file()
+                            .await?;
+                        let path = crate::sys::handle_path(&handle);
+                        Some(
+                            std::fs::write(&path, text)
+                                .map(|()| path.display().to_string())
+                                .map_err(|e| e.to_string()),
+                        )
+                    },
+                    |result| Message::RibbonCustomize(M::Exported(result)),
+                );
+            }
+            M::Import => {
+                #[cfg(target_arch = "wasm32")]
+                return Task::none();
+                #[cfg(not(target_arch = "wasm32"))]
+                return Task::perform(
+                    async {
+                        let handle = crate::sys::file_dialog()
+                            .add_filter("JSON (*.json)", &["json"])
+                            .pick_file()
+                            .await?;
+                        let path = crate::sys::handle_path(&handle);
+                        Some(std::fs::read_to_string(path).map_err(|e| e.to_string()))
+                    },
+                    |result| Message::RibbonCustomize(M::Imported(result)),
+                );
+            }
+            M::Exported(result) => {
+                match result {
+                    Some(Ok(path)) => self.command_line.push_info(
+                        crate::tr!("ribbon-customize", "exported", path = path).as_ref(),
+                    ),
+                    Some(Err(error)) => self.command_line.push_error(
+                        crate::tr!("ribbon-customize", "export-failed", error = error).as_ref(),
+                    ),
+                    None => {}
+                }
+                return Task::none();
+            }
+            M::Imported(result) => {
+                let Some(result) = result else {
+                    return Task::none();
+                };
+                match result
+                    .and_then(|text| crate::ui::window::ribbon_customize::panels_from_str(&text))
+                {
+                    Ok(imported) => {
+                        state.selected = (!imported.is_empty()).then_some(0);
+                        state.draft.clear();
+                        let count = imported.len();
+                        panels = imported;
+                        self.command_line.push_info(
+                            crate::tr!("ribbon-customize", "imported", count = count).as_ref(),
+                        );
+                    }
+                    Err(error) => {
+                        // The panels stay as they were.
+                        self.command_line.push_error(
+                            crate::tr!("ribbon-customize", "import-failed", error = error)
+                                .as_ref(),
+                        );
+                        return Task::none();
+                    }
+                }
+            }
         }
         self.ribbon.set_custom_panels(panels);
         self.save_config();

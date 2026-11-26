@@ -9556,6 +9556,12 @@ ribbon-customize =
     .shortcuts = اختصارات لوحة المفاتيح…
     .close = إغلاق
     .default-title = لوحة { $n }
+    .export = تصدير…
+    .import = استيراد…
+    .exported = تم تصدير اللوحات إلى { $path }
+    .export-failed = فشل التصدير: { $error }
+    .imported = اللوحات المستوردة: { $count }
+    .import-failed = فشل الاستيراد، لم تتغير اللوحات: { $error }
 
 toolbar =
     .list = أشرطة الأدوات (● ظاهرة):

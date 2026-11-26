@@ -9553,6 +9553,12 @@ ribbon-customize =
     .shortcuts = Métodos abreviados…
     .close = Cerrar
     .default-title = Grupo { $n }
+    .export = Exportar…
+    .import = Importar…
+    .exported = Grupos exportados a { $path }
+    .export-failed = Error al exportar: { $error }
+    .imported = Grupos importados: { $count }
+    .import-failed = Error al importar, grupos sin cambios: { $error }
 
 toolbar =
     .list = Barras de herramientas (● mostradas):

@@ -9553,6 +9553,12 @@ ribbon-customize =
     .shortcuts = Συντομεύσεις πληκτρολογίου…
     .close = Κλείσιμο
     .default-title = Ομάδα { $n }
+    .export = Εξαγωγή…
+    .import = Εισαγωγή…
+    .exported = Οι ομάδες εξήχθησαν στο { $path }
+    .export-failed = Η εξαγωγή απέτυχε: { $error }
+    .imported = Ομάδες που εισήχθησαν: { $count }
+    .import-failed = Η εισαγωγή απέτυχε, οι ομάδες δεν άλλαξαν: { $error }
 
 toolbar =
     .list = Γραμμές εργαλείων (● εμφανείς):

@@ -9531,6 +9531,12 @@ ribbon-customize =
     .shortcuts = キーボード ショートカット…
     .close = 閉じる
     .default-title = パネル { $n }
+    .export = エクスポート…
+    .import = インポート…
+    .exported = パネルを { $path } にエクスポートしました
+    .export-failed = エクスポートに失敗しました: { $error }
+    .imported = インポートしたパネル: { $count }
+    .import-failed = インポートに失敗しました (パネルは変更されません): { $error }
 
 toolbar =
     .list = ツールバー (● 表示中):

@@ -9552,6 +9552,12 @@ ribbon-customize =
     .shortcuts = Keyboard Shortcuts…
     .close = Close
     .default-title = Panel { $n }
+    .export = Export…
+    .import = Import…
+    .exported = Panels exported to { $path }
+    .export-failed = Export failed: { $error }
+    .imported = Panels imported: { $count }
+    .import-failed = Import failed, panels unchanged: { $error }
 
 toolbar =
     .list = Toolbars (● shown):

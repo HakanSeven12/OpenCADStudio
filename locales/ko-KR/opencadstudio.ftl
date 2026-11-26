@@ -9542,6 +9542,12 @@ ribbon-customize =
     .shortcuts = 바로 가기 키…
     .close = 닫기
     .default-title = 패널 { $n }
+    .export = 내보내기…
+    .import = 가져오기…
+    .exported = 패널을 { $path }(으)로 내보냈습니다
+    .export-failed = 내보내기 실패: { $error }
+    .imported = 가져온 패널: { $count }
+    .import-failed = 가져오기 실패, 패널은 변경되지 않았습니다: { $error }
 
 toolbar =
     .list = 도구 막대 (● 표시됨):

@@ -40,6 +40,65 @@ pub enum Msg {
     /// Close the suggestion list without picking.
     HideSuggestions,
     Shortcuts,
+    /// Pick a file and write the user's panels to it.
+    Export,
+    /// Pick a file whose panels replace the user's.
+    Import,
+    /// The export finished: the file written, or why it failed. `None`
+    /// when the picker was dismissed.
+    Exported(Option<Result<String, String>>),
+    /// The import picker finished: the file's text, or why it failed to
+    /// read. `None` when the picker was dismissed.
+    Imported(Option<Result<String, String>>),
+}
+
+/// Marker of an exported panels file, so another JSON file is not taken
+/// for one.
+const FILE_MARK: &str = "opencad-ribbon-panels";
+const FILE_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PanelsFile {
+    format: String,
+    version: u32,
+    panels: Vec<CustomPanel>,
+}
+
+/// The text of a panels file: the user's panels, in their order.
+pub fn panels_to_string(panels: &[CustomPanel]) -> String {
+    let file = PanelsFile {
+        format: FILE_MARK.to_owned(),
+        version: FILE_VERSION,
+        panels: panels.to_vec(),
+    };
+    serde_json::to_string_pretty(&file).unwrap_or_default()
+}
+
+/// The panels in a panels file's text. A command this build does not know is
+/// kept as written (like one typed in the dialog); empty commands are
+/// dropped. Anything that is not a panels file of this or an older version
+/// is an error and nothing is returned.
+pub fn panels_from_str(text: &str) -> Result<Vec<CustomPanel>, String> {
+    let file: PanelsFile = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    if file.format != FILE_MARK {
+        return Err(format!("not a panels file: format \"{}\"", file.format));
+    }
+    if file.version == 0 || file.version > FILE_VERSION {
+        return Err(format!("unsupported panels file version {}", file.version));
+    }
+    Ok(file
+        .panels
+        .into_iter()
+        .map(|panel| CustomPanel {
+            title: panel.title,
+            commands: panel
+                .commands
+                .into_iter()
+                .map(|command| command.trim().to_owned())
+                .filter(|command| !command.is_empty())
+                .collect(),
+        })
+        .collect())
 }
 
 fn msg(m: Msg) -> Message {
@@ -48,6 +107,9 @@ fn msg(m: Msg) -> Message {
 
 /// Most suggestion rows shown under the add box.
 const SUGGESTION_ROWS: usize = 6;
+
+/// Width of the dialog: wide enough for the footer's four buttons in one row.
+pub const DIALOG_WIDTH: f32 = 760.0;
 
 /// Width of the panel list on the left.
 const PANELS_WIDTH: f32 = 210.0;
@@ -326,6 +388,16 @@ pub fn view_window<'a>(
             msg(Msg::Shortcuts),
             false
         ),
+        dialog_button(
+            crate::tr!("ribbon-customize", "export"),
+            msg(Msg::Export),
+            false
+        ),
+        dialog_button(
+            crate::tr!("ribbon-customize", "import"),
+            msg(Msg::Import),
+            false
+        ),
         Space::new().width(Length::Fill),
         dialog_button(
             crate::tr!("ribbon-customize", "close"),
@@ -352,7 +424,7 @@ pub fn view_window<'a>(
     .width(if sizing.width == Length::Fill {
         Length::Fill
     } else {
-        Length::Fixed(680.0)
+        Length::Fixed(DIALOG_WIDTH)
     })
     .into()
 }
@@ -368,4 +440,139 @@ pub fn suggestions(
     let mut found = crate::ui::command_line::ranked_matches(typed, dynamic, aliases);
     found.truncate(SUGGESTION_ROWS);
     found
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+
+    fn panel(title: &str, commands: &[&str]) -> CustomPanel {
+        CustomPanel {
+            title: title.to_owned(),
+            commands: commands.iter().map(|c| c.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_panels_file_round_trips() {
+        let panels = vec![panel("Mine", &["LINE", "NOSUCHCOMMAND"]), panel("Empty", &[])];
+        assert_eq!(panels_from_str(&panels_to_string(&panels)), Ok(panels));
+        assert_eq!(panels_from_str(&panels_to_string(&[])), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_malformed_file_is_an_error() {
+        for text in [
+            "",
+            "not json",
+            "[]",
+            r#"{"panels": []}"#,
+            r#"{"format":"other","version":1,"panels":[]}"#,
+            r#"{"format":"opencad-ribbon-panels","version":99,"panels":[]}"#,
+            r#"{"format":"opencad-ribbon-panels","version":1,"panels":[{"title":5}]}"#,
+        ] {
+            assert!(panels_from_str(text).is_err(), "{text:?} was accepted");
+        }
+    }
+
+    #[test]
+    fn empty_commands_are_dropped_and_unknown_ones_kept() {
+        let text = r#"{"format":"opencad-ribbon-panels","version":1,
+            "panels":[{"title":"A","commands":[" LINE ","","FUTURE_CMD"]}]}"#;
+        assert_eq!(
+            panels_from_str(text),
+            Ok(vec![panel("A", &["LINE", "FUTURE_CMD"])])
+        );
+    }
+
+    /// An import that fails leaves the user's panels as they were; one that
+    /// works replaces them.
+    #[test]
+    fn an_import_replaces_the_panels_and_a_bad_one_changes_nothing() {
+        use crate::app::{Message, OpenCADStudio};
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::RibbonCustomizeOpen);
+        let _ = app.update(Message::RibbonCustomize(Msg::NewPanel));
+        let before = app.ribbon.custom_panels().to_vec();
+        assert_eq!(before.len(), 1);
+
+        let _ = app.update(Message::RibbonCustomize(Msg::Imported(Some(Ok(
+            "garbage".to_owned()
+        )))));
+        assert_eq!(app.ribbon.custom_panels(), before);
+        let _ = app.update(Message::RibbonCustomize(Msg::Imported(Some(Err(
+            "unreadable".to_owned()
+        )))));
+        assert_eq!(app.ribbon.custom_panels(), before);
+
+        let wanted = vec![panel("A", &["LINE"]), panel("B", &["CIRCLE"])];
+        let _ = app.update(Message::RibbonCustomize(Msg::Imported(Some(Ok(
+            panels_to_string(&wanted),
+        )))));
+        assert_eq!(app.ribbon.custom_panels(), wanted);
+    }
+}
+
+/// The footer buttons are one line high at every window size the dialog
+/// can have (finding 173: "Apply & Exit" wrapped onto two lines).
+#[cfg(test)]
+mod footer_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    fn text_bounds(app: &OpenCADStudio, size: iced::Size, label: &str) -> iced::Rectangle {
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            size,
+            app.view_main(),
+        );
+        ui.find(label.to_string())
+            .unwrap_or_else(|_| panic!("{label} not found"))
+            .visible_bounds()
+            .unwrap_or_else(|| panic!("{label} not visible"))
+    }
+
+    /// Every label has the height of `one_line` and sits on its row.
+    fn assert_one_row(app: &OpenCADStudio, size: iced::Size, one_line: &str, labels: &[&str]) {
+        let single = text_bounds(app, size, one_line);
+        for label in labels {
+            let at = text_bounds(app, size, label);
+            assert!(
+                (at.height - single.height).abs() < 0.5,
+                "{label} wraps at {size:?}: {at:?} vs {one_line} {single:?}"
+            );
+            assert!(
+                (at.y - single.y).abs() < 0.5,
+                "{label} is not on the row of {one_line} at {size:?}: {at:?} vs {single:?}"
+            );
+        }
+    }
+
+    const SIZES: [iced::Size; 2] = [
+        iced::Size::new(1280.0, 900.0),
+        // The smallest window the app is used at.
+        iced::Size::new(900.0, 600.0),
+    ];
+
+    #[test]
+    fn the_shortcuts_footer_is_one_row_at_the_default_and_the_smallest_size() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::ShortcutsPanelOpen);
+        for size in SIZES {
+            assert_one_row(
+                &app,
+                size,
+                "Apply",
+                &["Apply & Exit", "Reset to default", "Export...", "Import..."],
+            );
+        }
+    }
+
+    #[test]
+    fn the_customize_footer_is_one_row_at_the_default_and_the_smallest_size() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::RibbonCustomizeOpen);
+        for size in SIZES {
+            assert_one_row(&app, size, "Close", &["Keyboard Shortcuts…", "Export…", "Import…"]);
+        }
+    }
 }

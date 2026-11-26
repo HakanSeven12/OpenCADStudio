@@ -9541,6 +9541,12 @@ ribbon-customize =
     .shortcuts = कीबोर्ड शॉर्टकट…
     .close = बंद करें
     .default-title = पैनल { $n }
+    .export = निर्यात…
+    .import = आयात…
+    .exported = पैनल { $path } में निर्यात किए गए
+    .export-failed = निर्यात विफल: { $error }
+    .imported = आयात किए गए पैनल: { $count }
+    .import-failed = आयात विफल, पैनल अपरिवर्तित: { $error }
 
 toolbar =
     .list = टूलबार (● दिख रहे):

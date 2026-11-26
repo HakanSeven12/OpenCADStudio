@@ -9557,6 +9557,12 @@ ribbon-customize =
     .shortcuts = Сочетания клавиш…
     .close = Закрыть
     .default-title = Панель { $n }
+    .export = Экспорт…
+    .import = Импорт…
+    .exported = Панели экспортированы в { $path }
+    .export-failed = Ошибка экспорта: { $error }
+    .imported = Импортировано панелей: { $count }
+    .import-failed = Ошибка импорта, панели не изменены: { $error }
 
 toolbar =
     .list = Панели инструментов (● показаны):

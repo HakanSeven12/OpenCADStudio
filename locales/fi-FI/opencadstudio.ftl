@@ -9550,6 +9550,12 @@ ribbon-customize =
     .shortcuts = Pikanäppäimet…
     .close = Sulje
     .default-title = Paneeli { $n }
+    .export = Vie…
+    .import = Tuo…
+    .exported = Paneelit viety tiedostoon { $path }
+    .export-failed = Vienti epäonnistui: { $error }
+    .imported = Tuodut paneelit: { $count }
+    .import-failed = Tuonti epäonnistui, paneelit ennallaan: { $error }
 
 toolbar =
     .list = Työkalurivit (● näkyvissä):

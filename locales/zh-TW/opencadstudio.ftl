@@ -9540,6 +9540,12 @@ ribbon-customize =
     .shortcuts = 鍵盤快速鍵…
     .close = 關閉
     .default-title = 面板 { $n }
+    .export = 匯出…
+    .import = 匯入…
+    .exported = 面板已匯出至 { $path }
+    .export-failed = 匯出失敗：{ $error }
+    .imported = 已匯入的面板：{ $count }
+    .import-failed = 匯入失敗，面板未變更：{ $error }
 
 toolbar =
     .list = 工具列（● 已顯示）：

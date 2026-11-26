@@ -9552,6 +9552,12 @@ ribbon-customize =
     .shortcuts = Klaviatura yorliqlari…
     .close = Yopiş
     .default-title = { $n }-panel
+    .export = Eksport…
+    .import = Import…
+    .exported = Panellar { $path } ga eksport qilindi
+    .export-failed = Eksport muvaffaqiyatsiz: { $error }
+    .imported = Import qilingan panellar: { $count }
+    .import-failed = Import muvaffaqiyatsiz, panellar o'zgarmadi: { $error }
 
 toolbar =
     .list = Asboblar panellari (● körsatilgan):

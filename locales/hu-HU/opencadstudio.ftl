@@ -9531,6 +9531,12 @@ ribbon-customize =
     .shortcuts = Billentyűparancsok…
     .close = Bezárás
     .default-title = { $n }. panel
+    .export = Exportálás…
+    .import = Importálás…
+    .exported = Panelek exportálva ide: { $path }
+    .export-failed = Az exportálás sikertelen: { $error }
+    .imported = Importált panelek: { $count }
+    .import-failed = Az importálás sikertelen, a panelek változatlanok: { $error }
 
 toolbar =
     .list = Eszköztárak (● látható):

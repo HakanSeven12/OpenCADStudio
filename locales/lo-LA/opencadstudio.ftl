@@ -9544,6 +9544,12 @@ ribbon-customize =
     .shortcuts = ປຸ່ມລັດ…
     .close = ປິດ
     .default-title = ແຜງ { $n }
+    .export = ສົ່ງອອກ…
+    .import = ນຳເຂົ້າ…
+    .exported = ສົ່ງອອກແຜງໄປທີ່ { $path } ແລ້ວ
+    .export-failed = ການສົ່ງອອກບໍ່ສຳເລັດ: { $error }
+    .imported = ແຜງທີ່ນຳເຂົ້າ: { $count }
+    .import-failed = ການນຳເຂົ້າບໍ່ສຳເລັດ, ແຜງບໍ່ປ່ຽນແປງ: { $error }
 
 toolbar =
     .list = ແຖບເຄື່ອງມື (● ສະແດງ):

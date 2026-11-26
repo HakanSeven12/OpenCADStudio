@@ -9472,6 +9472,12 @@ ribbon-customize =
     .shortcuts = Klavye Kısayolları…
     .close = Kapat
     .default-title = Panel { $n }
+    .export = Dışa Aktar…
+    .import = İçe Aktar…
+    .exported = Paneller { $path } dosyasına aktarıldı
+    .export-failed = Dışa aktarma başarısız: { $error }
+    .imported = İçe aktarılan paneller: { $count }
+    .import-failed = İçe aktarma başarısız, paneller değişmedi: { $error }
 
 toolbar =
     .list = Araç çubukları (● gösteriliyor):

@@ -9559,6 +9559,12 @@ ribbon-customize =
     .shortcuts = Klávesové zkratky…
     .close = Zavřít
     .default-title = Panel { $n }
+    .export = Exportovat…
+    .import = Importovat…
+    .exported = Panely exportovány do { $path }
+    .export-failed = Export se nezdařil: { $error }
+    .imported = Importované panely: { $count }
+    .import-failed = Import se nezdařil, panely beze změny: { $error }
 
 toolbar =
     .list = Panely nástrojů (● zobrazené):

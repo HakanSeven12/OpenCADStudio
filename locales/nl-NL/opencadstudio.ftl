@@ -9551,6 +9551,12 @@ ribbon-customize =
     .shortcuts = Sneltoetsen…
     .close = Sluiten
     .default-title = Paneel { $n }
+    .export = Exporteren…
+    .import = Importeren…
+    .exported = Panelen geëxporteerd naar { $path }
+    .export-failed = Exporteren mislukt: { $error }
+    .imported = Geïmporteerde panelen: { $count }
+    .import-failed = Importeren mislukt, panelen ongewijzigd: { $error }
 
 toolbar =
     .list = Werkbalken (● getoond):

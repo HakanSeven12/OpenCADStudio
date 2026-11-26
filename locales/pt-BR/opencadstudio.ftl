@@ -9553,6 +9553,12 @@ ribbon-customize =
     .shortcuts = Atalhos de teclado…
     .close = Fechar
     .default-title = Painel { $n }
+    .export = Exportar…
+    .import = Importar…
+    .exported = Painéis exportados para { $path }
+    .export-failed = Falha ao exportar: { $error }
+    .imported = Painéis importados: { $count }
+    .import-failed = Falha ao importar, painéis inalterados: { $error }
 
 toolbar =
     .list = Barras de ferramentas (● exibidas):

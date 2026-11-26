@@ -9550,6 +9550,12 @@ ribbon-customize =
     .shortcuts = Phím tắt…
     .close = Đóng
     .default-title = Bảng { $n }
+    .export = Xuất…
+    .import = Nhập…
+    .exported = Đã xuất các bảng ra { $path }
+    .export-failed = Xuất thất bại: { $error }
+    .imported = Số bảng đã nhập: { $count }
+    .import-failed = Nhập thất bại, các bảng không đổi: { $error }
 
 toolbar =
     .list = Thanh công cụ (● đang hiện):

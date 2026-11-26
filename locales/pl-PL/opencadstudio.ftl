@@ -9555,6 +9555,12 @@ ribbon-customize =
     .shortcuts = Skróty klawiszowe…
     .close = Zamknij
     .default-title = Panel { $n }
+    .export = Eksportuj…
+    .import = Importuj…
+    .exported = Panele wyeksportowano do { $path }
+    .export-failed = Eksport nie powiódł się: { $error }
+    .imported = Zaimportowane panele: { $count }
+    .import-failed = Import nie powiódł się, panele bez zmian: { $error }
 
 toolbar =
     .list = Paski narzędzi (● widoczne):

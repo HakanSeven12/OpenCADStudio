@@ -83,6 +83,10 @@ pub fn visible_rows(rows: &[(String, String)], query: &str, pending_add: bool) -
         .collect()
 }
 
+/// Width of the dialog: wide enough for the footer (counter, Reset, Export,
+/// Import, Apply, Apply & Exit) in one row.
+pub const SHORTCUTS_WIDTH: f32 = 900.0;
+
 pub fn view_window<'a>(
     rows: &'a [(String, String)],
     filter: &str,
@@ -344,7 +348,7 @@ pub fn view_window<'a>(
             ))
             .size(12)
             .style(danger_text_style),
-            button(text(t!("Yes, reset")).size(12))
+            button(text(t!("Yes, reset")).size(12).wrapping(iced::widget::text::Wrapping::None))
                 .on_press(Message::ShortcutEditorResetConfirm)
                 .padding([6, 18])
                 .style(button::danger),
@@ -357,6 +361,7 @@ pub fn view_window<'a>(
         row![
             text(format!("{}: {}", t!("Number of shortcuts"), rows.len()))
                 .size(12)
+                .wrapping(iced::widget::text::Wrapping::None)
                 .style(muted_style),
             dialog_button(
                 t!("Reset to default"),
@@ -394,7 +399,7 @@ pub fn view_window<'a>(
     .width(if sizing.width == Length::Fill {
         Length::Fill
     } else {
-        Length::Fixed(720.0)
+        Length::Fixed(SHORTCUTS_WIDTH)
     })
     .height(if fill { Length::Fill } else { Length::Shrink })
     .style(|theme: &Theme| container::Style {

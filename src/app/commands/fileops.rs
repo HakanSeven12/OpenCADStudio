@@ -686,14 +686,15 @@ impl OpenCADStudio {
             .chain(Task::done(Message::ScriptPump))
     }
 
-    /// An open or a save is still running.
+    /// An open, a save or a plugin command running beside the window is not
+    /// done yet.
     pub(in crate::app) fn script_busy(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         let saving =
             !self.active_save_jobs.is_empty() || self.pending_native_thumbnail_save.is_some();
         #[cfg(target_arch = "wasm32")]
         let saving = false;
-        self.opening.is_some() || !self.pending_opens.is_empty() || saving
+        self.opening.is_some() || !self.pending_opens.is_empty() || saving || self.plugin_running()
     }
 
     /// File commands ask on the command line, not in a dialog.

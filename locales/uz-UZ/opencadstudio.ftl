@@ -436,7 +436,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } bajarilmoqda …
     .pill = { $command }
-    .pill-tip = Plagin buyrug‘i bajarilmoqda. U tugagach, oyna yana javob beradi.
+    .pill-tip = Plagin buyrug‘i bajarilmoqda. Boshqa buyruqlar u tugashini kutadi.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } hali bajarilmoqda – kuting yoki holat satrida bekor qiling (Esc).
+    .cancel = Bekor qilish
+    .cancel-tip = Plagindan buyruqni to‘xtatishni so‘raydi (Esc)
+    .cancelling = { $command } ni to‘xtatish so‘raldi …
+    .cancel-asked = To‘xtatilmoqda …
 
 gpu =
     .title = Grafika ogohlantirişi

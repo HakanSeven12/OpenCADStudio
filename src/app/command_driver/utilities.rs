@@ -1273,6 +1273,10 @@ impl OpenCADStudio {
                 chain,
             );
         }
+        // A plugin command runs beside the window: nothing new until it ends.
+        if self.plugin_run_refuses(cmd) {
+            return Task::none();
+        }
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
         let tokens = quoted_words(cmd);
@@ -1294,6 +1298,11 @@ impl OpenCADStudio {
                     chain,
                 })
             {
+                return task;
+            }
+            if let Some(task) = self.begin_plugin_run(i, cmd, frame_drawn) {
+                self.tabs[i].last_cmd = Some(cmd.to_string());
+                self.command_line.record_recent(cmd);
                 return task;
             }
         }

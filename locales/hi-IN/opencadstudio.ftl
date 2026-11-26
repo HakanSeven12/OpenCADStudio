@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } चल रहा है …
     .pill = { $command }
-    .pill-tip = एक प्लगइन कमांड चल रहा है। इसके पूरा होने पर विंडो फिर से प्रतिक्रिया देगी।
+    .pill-tip = एक प्लगइन कमांड चल रहा है। अन्य कमांड इसके पूरा होने तक प्रतीक्षा करते हैं।
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } अभी भी चल रहा है – प्रतीक्षा करें या स्टेटस बार में रद्द करें (Esc)।
+    .cancel = रद्द करें
+    .cancel-tip = प्लगइन से कमांड रोकने को कहता है (Esc)
+    .cancelling = { $command } को रोकने का अनुरोध किया गया …
+    .cancel-asked = रोका जा रहा है …
 
 gpu =
     .title = ग्राफ़िक्स चेतावनी

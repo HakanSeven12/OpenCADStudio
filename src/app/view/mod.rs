@@ -3774,7 +3774,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 .scene
                                 .geo_data()
                                 .map(crate::entities::object_data::geo_system_label),
-                            plugin_busy: self.plugin_busy_label(),
+                            plugin_busy: self.plugin_busy(),
                         },
                         crate::ui::statusbar::StatusBarModes {
                             grid: self.show_grid,
@@ -4269,6 +4269,10 @@ impl OpenCADStudio {
                 iced::time::every(crate::app::plugin_frame::FRAME_TIMEOUT)
                     .map(|_| Message::PluginFrameDrawn),
             ])
+        } else if self.plugin_running() {
+            // A command beside the window wakes it whenever its plugin sends
+            // something; the interval checks its deadline when it is silent.
+            iced::time::every(crate::app::plugin_run::CHECK_EVERY).map(|_| Message::PluginRunWake)
         } else {
             Subscription::none()
         };

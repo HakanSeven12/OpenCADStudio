@@ -1,13 +1,13 @@
 //! Host-side V4 IPC reader and dispatcher helpers.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::Stream;
 
 use crate::host::PluginNotification;
-use crate::ipc::transport::{TransportError, recv};
+use crate::ipc::transport::{recv, TransportError};
 use crate::ipc::v4::protocol::PluginToHostV4;
 
 /// Default plugin→host notification rate limit (notifications per second).
@@ -70,10 +70,35 @@ pub fn default_notify_rate_limit() -> f64 {
         .unwrap_or(DEFAULT_NOTIFY_RATE_LIMIT)
 }
 
+/// Called by the reader thread while a dispatch runs without the host
+/// waiting for it (#3650): the host then serves what arrived.
+pub type DispatchWaker = Arc<dyn Fn() + Send + Sync>;
+
 /// State shared between the host main thread and the V4 reader thread.
 pub struct V4HostShared {
     pub writer: Mutex<Option<Stream>>,
     pub alive: AtomicBool,
+    /// Set while a dispatch runs without the host waiting for it: woken after
+    /// every frame from the plugin and when the connection ends.
+    pub waker: Mutex<Option<DispatchWaker>>,
+}
+
+impl V4HostShared {
+    pub fn new(writer: Stream) -> Self {
+        Self {
+            writer: Mutex::new(Some(writer)),
+            alive: AtomicBool::new(true),
+            waker: Mutex::new(None),
+        }
+    }
+
+    /// Wake the host if a dispatch runs without it waiting.
+    pub fn wake(&self) {
+        let waker = self.waker.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(waker) = waker {
+            waker();
+        }
+    }
 }
 
 /// Run the host-side V4 reader thread until the socket closes or a fatal error
@@ -97,12 +122,14 @@ pub fn run_host_reader_thread(
                     {
                         break;
                     }
+                    shared.wake();
                 }
                 Ok(PluginToHostV4::Notification(envelope)) => {
                     if rate_limiter.allow() {
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             (handler)(envelope.command_id, envelope.payload)
                         }));
+                        shared.wake();
                     } else {
                         let now = Instant::now();
                         let should_log = last_drop_log
@@ -131,6 +158,7 @@ pub fn run_host_reader_thread(
                     {
                         break;
                     }
+                    shared.wake();
                 }
                 Err(TransportError::Disconnected) => {
                     // Peer closed the connection; this is the normal shutdown
@@ -148,6 +176,7 @@ pub fn run_host_reader_thread(
         }
     }));
     shared.alive.store(false, Ordering::SeqCst);
+    shared.wake();
 }
 
 #[cfg(all(test, feature = "host"))]

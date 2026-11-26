@@ -430,7 +430,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } fut …
     .pill = { $command }
-    .pill-tip = Egy bővítményparancs fut. Az ablak a befejezése után ismét reagál.
+    .pill-tip = Egy bővítményparancs fut. A többi parancs vár, amíg befejeződik.
+    .pill-progress = { $command } { $percent } %
+    .refused = A(z) { $command } még fut – várjon, vagy szakítsa meg az állapotsoron (Esc).
+    .cancel = Mégse
+    .cancel-tip = Megkéri a bővítményt a parancs leállítására (Esc)
+    .cancelling = A(z) { $command } leállítása kérve …
+    .cancel-asked = Leállítás …
 
 gpu =
     .title = Grafikai figyelmeztetés

@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } en ejecución …
     .pill = { $command }
-    .pill-tip = Se está ejecutando un comando de complemento. La ventana volverá a responder cuando termine.
+    .pill-tip = Se está ejecutando un comando de complemento. Los demás comandos esperan hasta que termine.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } todavía se está ejecutando: espere o cancélelo en la barra de estado (Esc).
+    .cancel = Cancelar
+    .cancel-tip = Pide al complemento que detenga el comando (Esc)
+    .cancelling = Se pidió detener { $command } …
+    .cancel-asked = Deteniendo …
 
 gpu =
     .title = Aviso de gráficos

@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } on käynnissä …
     .pill = { $command }
-    .pill-tip = Laajennuksen komento on käynnissä. Ikkuna vastaa taas, kun se on valmis.
+    .pill-tip = Laajennuksen komento on käynnissä. Muut komennot odottavat, kunnes se valmistuu.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } on yhä käynnissä – odota tai peruuta tilarivillä (Esc).
+    .cancel = Peruuta
+    .cancel-tip = Pyytää laajennusta pysäyttämään komennon (Esc)
+    .cancelling = Komennon { $command } pysäytystä pyydetty …
+    .cancel-asked = Pysäytetään …
 
 gpu =
     .title = Grafiikkavaroitus

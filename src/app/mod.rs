@@ -83,6 +83,7 @@ mod geographic_location;
 #[cfg(not(target_arch = "wasm32"))]
 mod sheet_publish;
 pub(crate) mod plugin_frame;
+pub(crate) mod plugin_run;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -2265,6 +2266,11 @@ pub(super) struct OpenCADStudio {
     /// Commands run to the end where they are (`drive_headless_task`): a
     /// plugin command among them cannot wait for a frame (#3650).
     pub(super) plugin_frame_pass: bool,
+    /// A plugin command running beside the window (#3650, step 2).
+    pub(crate) plugin_run: Option<plugin_run::PluginRun>,
+    /// The running plugin command's requests are being served: commands
+    /// they run are not refused.
+    pub(super) plugin_serving: bool,
     open_job_serial: u64,
     /// Last repair or failed-open report shown in the recovery modal.
     recovery_report: Option<crate::io::recovery::RecoveryReport>,
@@ -3474,6 +3480,8 @@ impl OpenCADStudio {
             plugin_frame: None,
             plugin_frame_drawn: false,
             plugin_frame_pass: false,
+            plugin_run: None,
+            plugin_serving: false,
             open_job_serial: 0,
             recovery_report: None,
             missing_fonts: None,

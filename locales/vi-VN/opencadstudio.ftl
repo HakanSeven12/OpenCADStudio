@@ -436,7 +436,13 @@ viewport =
 plugin-busy =
     .prompt = Đang chạy { $command } …
     .pill = { $command }
-    .pill-tip = Một lệnh của plugin đang chạy. Cửa sổ sẽ phản hồi lại khi lệnh hoàn tất.
+    .pill-tip = Một lệnh plugin đang chạy. Các lệnh khác chờ đến khi nó hoàn tất.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } vẫn đang chạy – hãy chờ hoặc hủy trên thanh trạng thái (Esc).
+    .cancel = Hủy
+    .cancel-tip = Yêu cầu plugin dừng lệnh (Esc)
+    .cancelling = Đã yêu cầu dừng { $command } …
+    .cancel-asked = Đang dừng …
 
 gpu =
     .title = Cảnh báo đồ họa

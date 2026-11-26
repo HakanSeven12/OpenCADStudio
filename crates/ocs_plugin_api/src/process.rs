@@ -22,9 +22,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::traits::Listener;
@@ -35,7 +35,7 @@ use crate::host::{
 };
 use crate::ipc::protocol::{
     Document, EntityType, Handle, HostRequest, HostResponse, HostToPlugin, InteractiveEvent,
-    PLUGIN_TOKEN_ENV, PluginToHost, RunnerHandshake,
+    PluginToHost, RunnerHandshake, PLUGIN_TOKEN_ENV,
 };
 use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::{recv, send};
@@ -109,9 +109,9 @@ fn create_kill_on_close_job(child: &Child) -> windows_sys::Win32::Foundation::HA
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
 
     // SAFETY: all calls use plain OS handles and zeroed-parameter patterns
@@ -450,6 +450,10 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
     }
 }
 
+/// Called from a connection's reader thread while a dispatch runs without
+/// the host waiting for it ([`PluginProcess::begin_dispatch`]).
+pub use crate::ipc::v4::server::DispatchWaker;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
     #[error("IO error: {0}")]
@@ -528,7 +532,10 @@ impl PluginProcess {
         let listener = ListenerOptions::new().name(socket_name_ref).create_sync()?;
 
         let mut command = Command::new(&runner_path);
-        let language = HOST_LANGUAGE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let language = HOST_LANGUAGE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         command
             .env(crate::HOST_LANGUAGE_ENV, language)
             .arg("--ocs-plugin-runner")
@@ -1353,6 +1360,49 @@ impl PluginProcess {
         self.v4.is_some()
     }
 
+    /// Dispatch `cmd` without waiting for the answer (#3650): `waker` is
+    /// called from the connection's reader thread whenever the plugin sends
+    /// something, and [`Self::poll_dispatch`] serves it. `Ok(None)`: this
+    /// process cannot (no V4 connection); dispatch it the waiting way.
+    #[allow(clippy::result_large_err)]
+    pub fn begin_dispatch(
+        &self,
+        cmd: &str,
+        waker: DispatchWaker,
+    ) -> Result<Option<u64>, PluginError> {
+        vlog!("[plugin] dispatching {cmd} without waiting");
+        match &self.v4 {
+            Some(v4) => v4.begin_dispatch(cmd, waker).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Serve the dispatch started with [`Self::begin_dispatch`]: nested
+    /// requests are answered with `host`; `Ok(Some(handled))` once the plugin
+    /// answered, `Ok(None)` while it still runs.
+    #[allow(clippy::result_large_err)]
+    pub fn poll_dispatch(
+        &self,
+        host: &mut dyn HostApi,
+        on_start_interactive: &mut dyn FnMut(u64),
+    ) -> Result<Option<bool>, PluginError> {
+        let Some(v4) = &self.v4 else {
+            return Err(PluginError::Runner(
+                "no command of this plugin is running".into(),
+            ));
+        };
+        match v4.poll_dispatch(host, on_start_interactive)? {
+            None => Ok(None),
+            Some(HostResponse::Bool(handled)) => Ok(Some(handled)),
+            Some(other) => Err(PluginError::UnexpectedResponse(Box::new(other))),
+        }
+    }
+
+    /// Whether a dispatch of this process runs without the host waiting.
+    pub fn dispatch_running(&self) -> bool {
+        self.v4.as_ref().is_some_and(V4Connection::dispatch_running)
+    }
+
     /// Send a best-effort host-to-plugin notification. Requires V4; on V3
     /// processes this returns an error.
     pub fn notify_plugin(
@@ -2040,10 +2090,9 @@ mod tests {
             "NullHost ensure_plugin_state must degrade, not panic: {:?}",
             outcome.err()
         );
-        assert!(
-            null.ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
-                .is_none()
-        );
+        assert!(null
+            .ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
+            .is_none());
     }
 }
 
@@ -2061,11 +2110,11 @@ mod timeout_tests {
     use document::xdata::ExtendedDataRecord;
     use document::{Document, EntityType, Handle};
     use interprocess::local_socket::{
-        GenericNamespaced, ListenerOptions, Stream, ToNsName,
         traits::{Listener, Stream as StreamTrait},
+        GenericNamespaced, ListenerOptions, Stream, ToNsName,
     };
-    use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex as StdMutex;
     use std::thread;
     use std::time::Instant;
 

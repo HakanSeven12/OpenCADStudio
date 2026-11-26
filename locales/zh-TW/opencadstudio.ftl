@@ -436,7 +436,13 @@ viewport =
 plugin-busy =
     .prompt = 正在執行 { $command }…
     .pill = { $command }
-    .pill-tip = 外掛程式命令正在執行。完成後視窗將恢復回應。
+    .pill-tip = 正在執行外掛程式命令。其他命令會等待其完成。
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } 仍在執行 – 請等待，或在狀態列中取消 (Esc)。
+    .cancel = 取消
+    .cancel-tip = 要求外掛程式停止該命令 (Esc)
+    .cancelling = 已要求停止 { $command } …
+    .cancel-asked = 正在停止 …
 
 gpu =
     .title = 圖形警告

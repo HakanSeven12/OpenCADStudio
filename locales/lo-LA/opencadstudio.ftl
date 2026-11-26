@@ -436,7 +436,13 @@ viewport =
 plugin-busy =
     .prompt = ກຳລັງແລ່ນ { $command } …
     .pill = { $command }
-    .pill-tip = ຄຳສັ່ງຂອງປລັກອິນກຳລັງເຮັດວຽກ. ໜ້າຕ່າງຈະຕອບສະໜອງອີກຄັ້ງເມື່ອມັນສຳເລັດ.
+    .pill-tip = ຄຳສັ່ງປລັກອິນກຳລັງເຮັດວຽກ. ຄຳສັ່ງອື່ນລໍຖ້າຈົນກວ່າມັນຈະແລ້ວ.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } ຍັງເຮັດວຽກຢູ່ – ກະລຸນາລໍຖ້າ ຫຼື ຍົກເລີກໃນແຖບສະຖານະ (Esc).
+    .cancel = ຍົກເລີກ
+    .cancel-tip = ຂໍໃຫ້ປລັກອິນຢຸດຄຳສັ່ງ (Esc)
+    .cancelling = ຂໍໃຫ້ຢຸດ { $command } ແລ້ວ …
+    .cancel-asked = ກຳລັງຢຸດ …
 
 gpu =
     .title = ແຈ້ງເຕືອນກຣາຟິກ

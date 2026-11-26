@@ -1185,3 +1185,77 @@ fn the_palette_lists_the_angle_types_after_the_length_types() {
         .collect();
     assert_eq!(kinds, crate::ui::window::geometry_cleanup::TYPES);
 }
+
+#[test]
+fn the_imported_file_name_is_kept_in_the_user_profile() {
+    let (mut app, _) = app();
+    app.geometry_cleanup.settings = Some(CleanupSettings::proposed(0.4));
+    app.geometry_cleanup.settings_file = Some("drawings/cleanup.gcs".to_string());
+    let json = serde_json::to_string(&app.current_config()).unwrap();
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(&json).unwrap();
+    let (mut other, _) = self::app();
+    other.apply_config(loaded);
+    assert_eq!(
+        other.geometry_cleanup.settings_file.as_deref(),
+        Some("drawings/cleanup.gcs")
+    );
+}
+
+#[test]
+fn the_dialog_writes_back_the_fields_that_ocs_does_not_know() {
+    let (mut app, _) = app();
+    let mut settings = CleanupSettings::proposed(0.4);
+    settings
+        .extra
+        .insert("version".to_string(), serde_json::json!(2));
+    let gap = settings
+        .tolerances
+        .iter_mut()
+        .find(|row| row.name == "gap")
+        .unwrap();
+    gap.extra
+        .insert("enabled".to_string(), serde_json::json!(true));
+    app.geometry_cleanup.settings = Some(settings);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsTolerance(EndErrorKind::Gap, "0.7".to_string()),
+    );
+    let parsed = app
+        .geometry_cleanup
+        .dialog
+        .as_ref()
+        .unwrap()
+        .parsed()
+        .unwrap();
+    assert_eq!(parsed.extra["version"], 2);
+    let gap = parsed
+        .tolerances
+        .iter()
+        .find(|row| row.name == "gap")
+        .unwrap();
+    assert_eq!(gap.tolerance, 0.7);
+    assert_eq!(gap.extra["enabled"], true);
+}
+
+#[test]
+fn the_title_bar_close_of_the_settings_dialog_drops_its_changes() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsTolerance(EndErrorKind::Gap, "0.7".to_string()),
+    );
+    let _ = app.update(Message::CloseModal);
+    assert!(app.active_modal.is_none());
+    assert!(
+        app.geometry_cleanup.dialog.is_none(),
+        "the changes are dropped"
+    );
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    assert_ne!(
+        app.geometry_cleanup.dialog.as_ref().unwrap().rows[0].1,
+        "0.7",
+        "the dialog opens with the saved settings"
+    );
+}

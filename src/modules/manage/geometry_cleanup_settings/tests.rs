@@ -162,3 +162,50 @@ fn an_angle_row_that_is_not_a_number_or_a_second_time_is_kept_but_not_scanned() 
         .to_gcs()
         .contains("\"right\""));
 }
+
+#[test]
+fn a_byte_order_mark_before_the_file_is_skipped() {
+    let with_mark = format!("\u{feff}{SAMPLE_GCS}");
+    assert_eq!(
+        CleanupSettings::parse_gcs(&with_mark).unwrap(),
+        CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap()
+    );
+}
+
+/// A file with a field of its own and a field in a row that OCS does not
+/// know.
+const GCS_WITH_UNKNOWN_FIELDS: &str = r#"{
+  "version": 2,
+  "tolerances": [
+    { "name": "gap", "subName": "", "tolerance": 0.4, "enabled": true }
+  ]
+}"#;
+
+#[test]
+fn fields_that_ocs_does_not_know_are_written_back() {
+    let settings = CleanupSettings::parse_gcs(GCS_WITH_UNKNOWN_FIELDS).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&settings.to_gcs()).unwrap();
+    assert_eq!(written["version"], 2);
+    assert_eq!(written["tolerances"][0]["enabled"], true);
+    assert_eq!(written["tolerances"][0]["tolerance"], 0.4);
+}
+
+#[test]
+fn a_changed_tolerance_keeps_the_unknown_fields_of_its_row() {
+    let mut settings = CleanupSettings::parse_gcs(GCS_WITH_UNKNOWN_FIELDS).unwrap();
+    settings.set(EndErrorKind::Gap, Some(0.7));
+    let row = &settings.tolerances[0];
+    assert_eq!(row.tolerance, 0.7);
+    assert_eq!(row.extra["enabled"], true);
+}
+
+#[test]
+fn a_negative_tolerance_names_its_type_and_value() {
+    let error = CleanupSettings::parse_gcs(
+        r#"{ "tolerances": [ { "name": "overshoot", "subName": "", "tolerance": -1.5 } ] }"#,
+    )
+    .unwrap_err();
+    assert!(error.contains("overshoot"), "{error}");
+    assert!(error.contains("-1.5"), "{error}");
+    assert!(error.contains("0 or more"), "{error}");
+}

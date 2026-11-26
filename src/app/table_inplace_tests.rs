@@ -1429,6 +1429,7 @@ fn a_field_cell_without_source_text_opens_with_its_value() {
     }
     start(&mut app, handle);
     assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "9.1");
+}
 
 /// The cell editor draws the table's lines as preview wires; a middle-button
 /// pan must not take them away with the rubber band.

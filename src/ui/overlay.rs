@@ -118,7 +118,7 @@ const MATCH_ACCENT: Color = Color {
 /// While the user paints properties onto objects the brush tip sits at the pick
 /// point; the body leans up-and-right so it never covers the object picked.
 /// Bristles, ferrule and handle are all solid so it reads at cursor size.
-fn draw_match_brush(frame: &mut canvas::Frame, tip: Point, _ink: Color) {
+fn draw_match_brush(frame: &mut canvas::Frame, tip: Point) {
     let inv = std::f32::consts::FRAC_1_SQRT_2;
     // `along` runs up-and-right (handle direction); `across` is perpendicular.
     let along = (inv, -inv);
@@ -3225,7 +3225,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                         MatchCursorGlyph::SourcePick => {
                             draw_match_dropper(frame, brush_tip, ink)
                         }
-                        _ => draw_match_brush(frame, brush_tip, ink),
+                        _ => draw_match_brush(frame, brush_tip),
                     }
                     if self.crosshair.matchprop_pickbox {
                         let half = pickbox_half;

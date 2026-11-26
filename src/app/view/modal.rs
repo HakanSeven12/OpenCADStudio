@@ -543,7 +543,8 @@ impl OpenCADStudio {
                     &self.command_line.dynamic_commands,
                     &self.command_aliases,
                 );
-                sized_flow_min(ex, crate::ui::window::ribbon_customize::DIALOG_WIDTH as u16, 440, crate::ui::window::ribbon_customize::DIALOG_WIDTH as u16, |flow| {
+                let width = crate::ui::window::ribbon_customize::DIALOG_WIDTH;
+                sized_flow_min(ex, width, 440, |flow| {
                     crate::ui::window::ribbon_customize::view_window(
                         state,
                         &suggestions,
@@ -2026,7 +2027,8 @@ impl OpenCADStudio {
                 &self.command_aliases,
             )
         });
-        sized_flow_min(ex, crate::ui::window::shortcuts::SHORTCUTS_WIDTH as u16, 520, crate::ui::window::shortcuts::SHORTCUTS_WIDTH as u16, |flow| {
+        let width = crate::ui::window::shortcuts::SHORTCUTS_WIDTH;
+        sized_flow_min(ex, width, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
                 &self.shortcut_filter,
@@ -2121,21 +2123,21 @@ fn duplicate_rows(
     (duplicate_set, duplicates)
 }
 
-/// [`sized_flow`] with a content minimum: the dialog never lays out narrower
-/// than `min_width` (capped by the window), so a footer row keeps its width.
+/// [`sized_flow`] at a fixed `width` that is also its minimum: the dialog
+/// never lays out narrower (capped by the window), so a footer row keeps
+/// its width.
 fn sized_flow_min<'a>(
     extra: iced::Vector,
-    max_width: u16,
+    width: f32,
     max_height: u16,
-    min_width: u16,
     mut build: impl FnMut(crate::ui::modal::ModalSizing) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
     crate::ui::modal::intrinsic_with_min(
         build(crate::ui::modal::ModalSizing::INTRINSIC),
         build(crate::ui::modal::ModalSizing::FILL),
-        iced::Size::new(max_width as f32, max_height as f32),
+        iced::Size::new(width, max_height as f32),
         extra,
-        iced::Size::new(min_width as f32, 0.0),
+        iced::Size::new(width, 0.0),
     )
 }
 

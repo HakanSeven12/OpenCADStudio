@@ -163,6 +163,9 @@ pub struct MeshLodSet {
     pub edge_color: Option<[f32; 4]>,
     /// Precise world bounds used by the interaction index.
     pub instance_aabb: Option<[f64; 6]>,
+    /// Lazily cached exact f64 world bounds for top-level meshes so repeated
+    /// raycasts don't rescan every vertex on every click/hover.
+    pub cached_interaction_aabb: std::sync::Arc<std::sync::OnceLock<Option<[f64; 6]>>>,
     /// Display LODs 1 and 2 over `lods[0]`'s vertices ([`simplified_lods`]).
     /// Shared, so cloning a set does not copy them.
     pub display_lods: std::sync::Arc<[DisplayLod]>,
@@ -321,6 +324,7 @@ impl MeshLodSet {
             instance_color: None,
             edge_color: None,
             instance_aabb: None,
+            cached_interaction_aabb: Default::default(),
             display_lods: Default::default(),
         }
     }
@@ -364,6 +368,7 @@ impl MeshLodSet {
         self.world_aabb = xy;
         self.z_aabb = z;
         self.triangle_bvhs = new_triangle_bvh_slots(self.lods.len());
+        self.cached_interaction_aabb = Default::default();
     }
 
     pub fn prepare_instance_source(&mut self, handle: document::Handle) {

@@ -503,6 +503,18 @@ impl Scene {
                 ));
             }
         };
+        let aperture_rect = [
+            cursor[0] - aperture_px,
+            cursor[1] - aperture_px,
+            cursor[0] + aperture_px,
+            cursor[1] + aperture_px,
+        ];
+        let frustum = crate::scene::pick::interaction_index::ScreenRectFrustum::new(
+            aperture_rect,
+            view_rot,
+            eye,
+            bounds,
+        );
         for (handle, set) in self.meshes.iter() {
             let Some(lod) = set.geometry_lods().first() else {
                 continue;
@@ -510,42 +522,18 @@ impl Scene {
             if lod.indices.len() < 3 {
                 continue;
             }
-            // Screen-space cull from the mesh bounds before touching triangles.
-            // It is only sound while every corner has a real projection: a
-            // corner behind the eye mirrors across the screen, so the union of
-            // the projected corners bounds nothing (#64).
-            let (mut x0, mut y0) = (f32::INFINITY, f32::INFINITY);
-            let (mut x1, mut y1) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
-            let mut cullable = true;
-            for corner in [
-                [set.world_aabb[0], set.world_aabb[1], set.z_aabb[0]],
-                [set.world_aabb[2], set.world_aabb[1], set.z_aabb[0]],
-                [set.world_aabb[0], set.world_aabb[3], set.z_aabb[0]],
-                [set.world_aabb[2], set.world_aabb[3], set.z_aabb[0]],
-                [set.world_aabb[0], set.world_aabb[1], set.z_aabb[1]],
-                [set.world_aabb[2], set.world_aabb[1], set.z_aabb[1]],
-                [set.world_aabb[0], set.world_aabb[3], set.z_aabb[1]],
-                [set.world_aabb[2], set.world_aabb[3], set.z_aabb[1]],
-            ] {
-                let Some(s) = project(glam::DVec3::new(
-                    corner[0] as f64,
-                    corner[1] as f64,
-                    corner[2] as f64,
-                )) else {
-                    cullable = false;
-                    break;
-                };
-                x0 = x0.min(s[0]);
-                y0 = y0.min(s[1]);
-                x1 = x1.max(s[0]);
-                y1 = y1.max(s[1]);
-            }
-            if cullable
-                && (cursor[0] < x0 - aperture_px
-                    || cursor[0] > x1 + aperture_px
-                    || cursor[1] < y0 - aperture_px
-                    || cursor[1] > y1 + aperture_px)
-            {
+            if !frustum.aabb_intersects(
+                [
+                    set.world_aabb[0] as f64,
+                    set.world_aabb[1] as f64,
+                    set.z_aabb[0] as f64,
+                ],
+                [
+                    set.world_aabb[2] as f64,
+                    set.world_aabb[3] as f64,
+                    set.z_aabb[1] as f64,
+                ],
+            ) {
                 continue;
             }
             let mut evaluate_triangle = |tri: &[u32]| {
@@ -615,39 +603,13 @@ impl Scene {
             if let Some(bvh) = set.geometry_triangle_bvh(0) {
                 use parry3d_f64::partitioning::TraversalAction;
 
-                let aperture_rect = [
-                    cursor[0] - aperture_px,
-                    cursor[1] - aperture_px,
-                    cursor[0] + aperture_px,
-                    cursor[1] + aperture_px,
-                ];
-                let node_reaches_aperture = |node: &parry3d_f64::partitioning::BvhNode| -> bool {
+                bvh.traverse(|node| {
                     let mins = node.mins();
                     let maxs = node.maxs();
-                    let mut nx0 = f32::INFINITY;
-                    let mut ny0 = f32::INFINITY;
-                    let mut nx1 = f32::NEG_INFINITY;
-                    let mut ny1 = f32::NEG_INFINITY;
-                    for x in [mins.x, maxs.x] {
-                        for y in [mins.y, maxs.y] {
-                            for z in [mins.z, maxs.z] {
-                                let Some(s) = project(glam::DVec3::new(x, y, z)) else {
-                                    return true;
-                                };
-                                nx0 = nx0.min(s[0]);
-                                ny0 = ny0.min(s[1]);
-                                nx1 = nx1.max(s[0]);
-                                ny1 = ny1.max(s[1]);
-                            }
-                        }
-                    }
-                    nx1 >= aperture_rect[0]
-                        && nx0 <= aperture_rect[2]
-                        && ny1 >= aperture_rect[1]
-                        && ny0 <= aperture_rect[3]
-                };
-                bvh.traverse(|node| {
-                    if !node_reaches_aperture(node) {
+                    if !frustum.aabb_intersects(
+                        [mins.x, mins.y, mins.z],
+                        [maxs.x, maxs.y, maxs.z],
+                    ) {
                         return TraversalAction::Prune;
                     }
                     if let Some(tri_idx) = node.leaf_data() {
@@ -918,39 +880,41 @@ fn mesh_interaction_aabb(set: &model::mesh_model::MeshLodSet) -> Option<[f64; 6]
     if let Some(aabb) = set.instance_aabb {
         return Some(aabb);
     }
-    let mut aabb = [
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    let mut include = |high: [f32; 3], low: [f32; 3]| {
-        let point = [
-            high[0] as f64 + low[0] as f64,
-            high[1] as f64 + low[1] as f64,
-            high[2] as f64 + low[2] as f64,
+    *set.cached_interaction_aabb.get_or_init(|| {
+        let mut aabb = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
         ];
-        if point.iter().all(|value| value.is_finite()) {
-            for axis in 0..3 {
-                aabb[axis] = aabb[axis].min(point[axis]);
-                aabb[axis + 3] = aabb[axis + 3].max(point[axis]);
+        let mut include = |high: [f32; 3], low: [f32; 3]| {
+            let point = [
+                high[0] as f64 + low[0] as f64,
+                high[1] as f64 + low[1] as f64,
+                high[2] as f64 + low[2] as f64,
+            ];
+            if point.iter().all(|value| value.is_finite()) {
+                for axis in 0..3 {
+                    aabb[axis] = aabb[axis].min(point[axis]);
+                    aabb[axis + 3] = aabb[axis + 3].max(point[axis]);
+                }
+            }
+        };
+        for mesh in &set.lods {
+            for (index, &high) in mesh.verts.iter().enumerate() {
+                include(high, mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]));
             }
         }
-    };
-    for mesh in &set.lods {
-        for (index, &high) in mesh.verts.iter().enumerate() {
-            include(high, mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]));
+        for (index, &high) in set.edge_verts.iter().enumerate() {
+            include(
+                high,
+                set.edge_verts_low.get(index).copied().unwrap_or([0.0; 3]),
+            );
         }
-    }
-    for (index, &high) in set.edge_verts.iter().enumerate() {
-        include(
-            high,
-            set.edge_verts_low.get(index).copied().unwrap_or([0.0; 3]),
-        );
-    }
-    aabb.iter().all(|value| value.is_finite()).then_some(aabb)
+        aabb.iter().all(|value| value.is_finite()).then_some(aabb)
+    })
 }
 
 pub use model::hatch_model::HatchModel;
@@ -2575,6 +2539,7 @@ fn transform_block_mesh_lod_set(
             .iter()
             .all(|value| value.is_finite())
             .then_some(bounds),
+        cached_interaction_aabb: Default::default(),
         display_lods: Default::default(),
     }
 }

@@ -185,12 +185,15 @@ impl SpatialBvh3 {
         if self.bvh.is_empty() {
             return Vec::new();
         }
+        let frustum = ScreenRectFrustum::new(screen_rect, view_rot, eye, bounds);
         let mut entry_indices = Vec::new();
         self.bvh.traverse(|node| {
             let mins = node.mins();
             let maxs = node.maxs();
-            let aabb = [mins.x, mins.y, mins.z, maxs.x, maxs.y, maxs.z];
-            if !aabb3_projects_into(aabb, screen_rect, view_rot, eye, bounds) {
+            if !frustum.aabb_intersects(
+                [mins.x, mins.y, mins.z],
+                [maxs.x, maxs.y, maxs.z],
+            ) {
                 return TraversalAction::Prune;
             }
             if let Some(leaf_id) = node.leaf_data() {
@@ -3051,40 +3054,96 @@ fn append_triangle_entries(
     }
 }
 
-fn aabb3_projects_into(
-    aabb: [f64; 6],
-    screen_rect: [f32; 4],
-    view_rot: Mat4,
+/// Precomputed 4-plane frustum + near-w guard for testing 3D world AABBs
+/// against a 2D screen rectangle without projecting all 8 corners per node.
+#[derive(Clone, Copy)]
+pub(crate) struct ScreenRectFrustum {
     eye: DVec3,
-    bounds: Rectangle,
-) -> bool {
-    let mut projected = [
-        f32::INFINITY,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
-        f32::NEG_INFINITY,
-    ];
-    for x in [aabb[0], aabb[3]] {
-        for y in [aabb[1], aabb[4]] {
-            for z in [aabb[2], aabb[5]] {
-                let clip = view_rot * (DVec3::new(x, y, z) - eye).as_vec3().extend(1.0);
-                if !clip.is_finite() || clip.w <= 1e-6 {
-                    return true;
-                }
-                let ndc = clip.truncate() / clip.w;
-                let sx = (ndc.x + 1.0) * 0.5 * bounds.width;
-                let sy = (1.0 - ndc.y) * 0.5 * bounds.height;
-                projected[0] = projected[0].min(sx);
-                projected[1] = projected[1].min(sy);
-                projected[2] = projected[2].max(sx);
-                projected[3] = projected[3].max(sy);
-            }
+    valid: bool,
+    w_pos: glam::Vec3,
+    w_neg: glam::Vec3,
+    w_d: f32,
+    planes: [(glam::Vec3, glam::Vec3, f32); 4],
+}
+
+impl ScreenRectFrustum {
+    pub(crate) fn new(
+        screen_rect: [f32; 4],
+        view_rot: Mat4,
+        eye: DVec3,
+        bounds: Rectangle,
+    ) -> Self {
+        let valid = bounds.width.is_finite()
+            && bounds.width > 0.0
+            && bounds.height.is_finite()
+            && bounds.height > 0.0
+            && screen_rect.iter().all(|v| v.is_finite())
+            && eye.is_finite();
+        if !valid {
+            return Self {
+                eye,
+                valid: false,
+                w_pos: glam::Vec3::ZERO,
+                w_neg: glam::Vec3::ZERO,
+                w_d: 0.0,
+                planes: [(glam::Vec3::ZERO, glam::Vec3::ZERO, 0.0); 4],
+            };
+        }
+        let r0 = view_rot.row(0);
+        let r1 = view_rot.row(1);
+        let r3 = view_rot.row(3);
+        let nx0 = screen_rect[0] / bounds.width * 2.0 - 1.0;
+        let nx1 = screen_rect[2] / bounds.width * 2.0 - 1.0;
+        let ny0 = 1.0 - screen_rect[3] / bounds.height * 2.0;
+        let ny1 = 1.0 - screen_rect[1] / bounds.height * 2.0;
+
+        let make_plane = |v: glam::Vec4| -> (glam::Vec3, glam::Vec3, f32) {
+            let n = v.truncate();
+            (n.max(glam::Vec3::ZERO), n.min(glam::Vec3::ZERO), v.w)
+        };
+        let r3_n = r3.truncate();
+        Self {
+            eye,
+            valid: true,
+            w_pos: r3_n.max(glam::Vec3::ZERO),
+            w_neg: r3_n.min(glam::Vec3::ZERO),
+            w_d: r3.w,
+            planes: [
+                make_plane(r0 - r3 * nx0),
+                make_plane(r3 * nx1 - r0),
+                make_plane(r1 - r3 * ny0),
+                make_plane(r3 * ny1 - r1),
+            ],
         }
     }
-    projected[2] >= screen_rect[0]
-        && projected[0] <= screen_rect[2]
-        && projected[3] >= screen_rect[1]
-        && projected[1] <= screen_rect[3]
+
+    #[inline]
+    pub(crate) fn aabb_intersects(&self, mins: [f64; 3], maxs: [f64; 3]) -> bool {
+        if !self.valid {
+            return true;
+        }
+        let lo = glam::Vec3::new(
+            (mins[0] - self.eye.x) as f32,
+            (mins[1] - self.eye.y) as f32,
+            (mins[2] - self.eye.z) as f32,
+        );
+        let hi = glam::Vec3::new(
+            (maxs[0] - self.eye.x) as f32,
+            (maxs[1] - self.eye.y) as f32,
+            (maxs[2] - self.eye.z) as f32,
+        );
+        let min_w = self.w_pos.dot(lo) + self.w_neg.dot(hi) + self.w_d;
+        if !min_w.is_finite() || min_w <= 1e-6 {
+            return true;
+        }
+        for &(p_pos, p_neg, d) in &self.planes {
+            let max_val = p_pos.dot(hi) + p_neg.dot(lo) + d;
+            if max_val < -1e-5 * (d.abs() + 1.0) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 fn aabb_overlaps(a: [f64; 4], b: [f64; 4]) -> bool {

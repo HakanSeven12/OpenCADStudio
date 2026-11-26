@@ -194,6 +194,7 @@ pub(crate) fn square_around(centre: [f64; 2], r: f64) -> [f64; 4] {
 
 pub struct TrimAabbIndex {
     bvh: parry2d_f64::partitioning::Bvh,
+    doc_indices: Vec<usize>,
     always: Vec<usize>,
 }
 
@@ -203,22 +204,26 @@ impl TrimAabbIndex {
         use parry2d_f64::math::Vector;
         use parry2d_f64::partitioning::{Bvh, BvhBuildStrategy};
 
-        let mut leaves = Vec::new();
+        let iter = bounds.into_iter();
+        let cap = iter.size_hint().0;
+        let mut aabbs = Vec::with_capacity(cap);
+        let mut doc_indices = Vec::with_capacity(cap);
         let mut always = Vec::new();
-        for (index, bounds) in bounds.into_iter().enumerate() {
+        for (index, bounds) in iter.enumerate() {
             match bounds.filter(|box_| box_.iter().all(|value| value.is_finite())) {
-                Some([x0, y0, x1, y1]) => leaves.push((
-                    index,
-                    Aabb::new(
+                Some([x0, y0, x1, y1]) => {
+                    aabbs.push(Aabb::new(
                         Vector::new(x0.min(x1), y0.min(y1)),
                         Vector::new(x0.max(x1), y0.max(y1)),
-                    ),
-                )),
+                    ));
+                    doc_indices.push(index);
+                }
                 None => always.push(index),
             }
         }
         Self {
-            bvh: Bvh::from_iter(BvhBuildStrategy::Binned, leaves),
+            bvh: Bvh::from_leaves(BvhBuildStrategy::Binned, &aabbs),
+            doc_indices,
             always,
         }
     }
@@ -228,12 +233,16 @@ impl TrimAabbIndex {
         use parry2d_f64::math::Vector;
 
         let mut indices = self.always.clone();
-        if target.iter().all(|value| value.is_finite()) {
+        if !self.bvh.is_empty() && target.iter().all(|value| value.is_finite()) {
             let query = Aabb::new(
                 Vector::new(target[0].min(target[2]), target[1].min(target[3])),
                 Vector::new(target[0].max(target[2]), target[1].max(target[3])),
             );
-            indices.extend(self.bvh.intersect_aabb(&query).map(|id| id as usize));
+            indices.extend(
+                self.bvh
+                    .intersect_aabb(&query)
+                    .map(|id| self.doc_indices[id as usize]),
+            );
         }
         // The kernel/contact logic previously saw entities in document order.
         // Maintain that ordering for coincident cuts and endpoint priority.

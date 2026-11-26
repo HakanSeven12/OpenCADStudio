@@ -3560,6 +3560,7 @@ mod tests {
             instance_color: None,
             edge_color: None,
             instance_aabb: None,
+            cached_interaction_aabb: Default::default(),
             display_lods: Default::default(),
         }
     }

@@ -45,8 +45,9 @@ impl ModifyEntityIndex {
     }
 
     pub fn build(entities: &[EntityType]) -> Self {
-        let mut by_handle = FxHashMap::default();
-        let mut bounded = Vec::new();
+        let mut by_handle =
+            FxHashMap::with_capacity_and_hasher(entities.len(), Default::default());
+        let mut bounded = Vec::with_capacity(entities.len());
         let mut unbounded = Vec::new();
         let mut world = [
             f64::INFINITY,

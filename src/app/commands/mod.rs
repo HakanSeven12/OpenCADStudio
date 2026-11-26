@@ -670,6 +670,15 @@ impl OpenCADStudio {
         self.ribbon
             .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
 
+        // A plugin command keeps the UI thread until it returns: the window
+        // draws once first, naming it (#3650).
+        if !self.suppress_plugin_dispatch {
+            if let Some(task) = self.defer_plugin_line(cmd, || {
+                super::plugin_frame::Resume::Command(cmd.to_string())
+            }) {
+                return Some(task);
+            }
+        }
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
             // commands that it just installed. If no command is now active, the
@@ -828,6 +837,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_bricscad_visibility(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_files_palette(cmd) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_bvisibility(cmd, i) {

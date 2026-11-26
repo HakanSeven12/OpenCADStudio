@@ -77,6 +77,10 @@ pub struct StatusBarLayoutState<'a> {
     /// A georeferenced drawing's coordinate system: its name and the
     /// tooltip's details (#2686). `None` hides the pill.
     pub geo_system: Option<(String, String)>,
+    /// A plugin command that is about to run or running (#3650): the
+    /// window does not draw while it runs, so this pill stays on screen
+    /// until it has finished. `None` hides the pill.
+    pub plugin_busy: Option<&'a str>,
 }
 
 /// Drafting modes and document settings represented by status bar controls.
@@ -183,6 +187,7 @@ impl StatusBar {
             lineweight_display,
             constraint_status,
             geo_system,
+            plugin_busy,
         } = layout;
         let StatusBarModes {
             grid,
@@ -314,6 +319,18 @@ impl StatusBar {
         // when the width can't hold them all on one line.
         let vis = |p: StatusPill| config.is_visible(p);
         let mut pills: Vec<Element<'_, Message>> = Vec::new();
+        // Not a `StatusPill` and not hideable: it is there only while a
+        // plugin command runs, and leads so it is the first thing seen.
+        if let Some(command) = plugin_busy {
+            pills.push(tip(
+                busy_pill(crate::i18n::plain(crate::tr!(
+                    "plugin-busy",
+                    "pill",
+                    command = command.to_string()
+                ))),
+                crate::tr!("plugin-busy", "pill-tip").into(),
+            ));
+        }
         if vis(StatusPill::SpaceMouse) {
             if let Some(pill) = spacemouse {
                 pills.push(pill);
@@ -1260,6 +1277,27 @@ fn gpu_pill_label(status: &crate::scene::pipeline::GpuStatus) -> Option<String> 
         GpuStatus::NoRenderer => Some(crate::tr!("gpu", "pill-no-renderer")),
         GpuStatus::Unknown | GpuStatus::Hardware(_) => None,
     }
+}
+
+/// A pill in the theme's primary colours: work is in progress, nothing to
+/// click.
+fn busy_pill(label: impl Into<String>) -> Element<'static, Message> {
+    container(text(label.into()).size(12))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.primary.weak.color)),
+                text_color: Some(palette.primary.weak.text),
+                border: Border {
+                    color: palette.primary.base.color,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .padding([4, 8])
+        .into()
 }
 
 /// A pill in the theme's warning colours: the only status-bar item that

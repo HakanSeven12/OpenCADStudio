@@ -433,6 +433,11 @@ viewport =
     .move = Di chuyển khung nhìn
     .close = Đóng khung nhìn
 
+plugin-busy =
+    .prompt = Đang chạy { $command } …
+    .pill = { $command }
+    .pill-tip = Một lệnh của plugin đang chạy. Cửa sổ sẽ phản hồi lại khi lệnh hoàn tất.
+
 gpu =
     .title = Cảnh báo đồ họa
     .software-headline = Không tìm thấy trình điều khiển GPU hoạt động, vì vậy bản vẽ được hiển thị bằng phần mềm trên CPU ({ $adapter }).
@@ -11284,3 +11289,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Chọn một thư mục bằng nút thư mục để xem các bản vẽ trong đó.
+    .empty = Không có bản vẽ hay thư mục nào ở đây.

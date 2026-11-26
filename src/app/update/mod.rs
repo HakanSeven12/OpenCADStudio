@@ -157,6 +157,7 @@ mod block_ops_tests;
 #[cfg(test)]
 mod block_palette_library_tests;
 pub(super) mod blocks_palette;
+pub(super) mod files_palette;
 pub(in crate::app) mod command;
 pub(crate) mod context_menu;
 mod dialog;
@@ -1226,10 +1227,15 @@ impl OpenCADStudio {
         // its history line stays pinned (non-fading) until the step changes.
         // A pending client pick (`user_select` / `getpoint`) pins its labeled
         // request line the same way while no command owns the prompt.
-        let prompt = self.tabs[self.active_tab]
-            .active_cmd
-            .as_ref()
-            .map(|c| c.prompt())
+        // A plugin command waiting for its frame names itself (#3650).
+        let prompt = self
+            .plugin_frame_prompt()
+            .or_else(|| {
+                self.tabs[self.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.prompt())
+            })
             // A step with nothing to ask yet keeps no line.
             .filter(|prompt| !prompt.is_empty())
             .or_else(|| self.graphic_attributes.fill_close_prompt())

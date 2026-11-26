@@ -433,6 +433,11 @@ viewport =
     .move = Köriniş oynasini siljitiş
     .close = Köriniş oynasini yopiş
 
+plugin-busy =
+    .prompt = { $command } bajarilmoqda …
+    .pill = { $command }
+    .pill-tip = Plagin buyrug‘i bajarilmoqda. U tugagach, oyna yana javob beradi.
+
 gpu =
     .title = Grafika ogohlantirişi
     .software-headline = Işlaydigan GPU drayveri topilmadi, şuning uçun çizma CPU’da dasturiy tarzda çizilmoqda ({ $adapter }).
@@ -11286,3 +11291,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Chizmalarini ko‘rish uchun papka tugmasi bilan papkani tanlang.
+    .empty = Bu yerda chizma yoki papka yo‘q.

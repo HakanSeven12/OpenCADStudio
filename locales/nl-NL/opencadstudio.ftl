@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Lay-out voorbereiden…
 
+plugin-busy =
+    .prompt = { $command } wordt uitgevoerd …
+    .pill = { $command }
+    .pill-tip = Er wordt een plug-inopdracht uitgevoerd. Het venster reageert weer zodra deze klaar is.
+
 gpu =
     .title = Grafische waarschuwing
     .software-headline = Er is geen werkend GPU-stuurprogramma gevonden, dus de tekening wordt in software op de CPU gerenderd ({ $adapter }).
@@ -11285,3 +11290,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Kies een map met de mapknop om de tekeningen erin te zien.
+    .empty = Hier staan geen tekeningen of mappen.

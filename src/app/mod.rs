@@ -82,6 +82,7 @@ pub(crate) mod text_match;
 mod geographic_location;
 #[cfg(not(target_arch = "wasm32"))]
 mod sheet_publish;
+pub(crate) mod plugin_frame;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -1492,6 +1493,8 @@ pub(super) struct OpenCADStudio {
     /// The Geometry Cleanup palette (GEOMETRYCLEANUPOPEN).
     pub(crate) geometry_cleanup: crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
     pub(crate) bricscad_visibility: crate::ui::window::bricscad_visibility::VisibilityPanel,
+    /// The Files palette (FILESPALETTE).
+    pub(crate) files_palette: crate::ui::window::files_palette::FilesPalette,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
     /// The Assistant pallet (ASSISTANT): chat with an external AI agent about this drawing.
@@ -2255,6 +2258,13 @@ pub(super) struct OpenCADStudio {
     pub(super) opening: Option<OpenProgress>,
     /// Show a lightweight notice until the next layout redraw.
     pub(super) layout_settling: bool,
+    /// A plugin command waiting for the window to draw before it runs.
+    pub(super) plugin_frame: Option<plugin_frame::PluginFrame>,
+    /// The waiting command's frame was drawn: it passes the next check.
+    pub(super) plugin_frame_drawn: bool,
+    /// Commands run to the end where they are (`drive_headless_task`): a
+    /// plugin command among them cannot wait for a frame (#3650).
+    pub(super) plugin_frame_pass: bool,
     open_job_serial: u64,
     /// Last repair or failed-open report shown in the recovery modal.
     recovery_report: Option<crate::io::recovery::RecoveryReport>,
@@ -3250,6 +3260,7 @@ impl OpenCADStudio {
             count_palette: Default::default(),
             geometry_cleanup: Default::default(),
             bricscad_visibility: Default::default(),
+            files_palette: Default::default(),
             quick_calc: Default::default(),
             assistant: Default::default(),
             sheet_set: Default::default(),
@@ -3460,6 +3471,9 @@ impl OpenCADStudio {
             print_all_plot_setup_prev: None,
             opening: None,
             layout_settling: false,
+            plugin_frame: None,
+            plugin_frame_drawn: false,
+            plugin_frame_pass: false,
             open_job_serial: 0,
             recovery_report: None,
             missing_fonts: None,

@@ -433,6 +433,11 @@ viewport =
     .move = ຍ້າຍວິວພອດ
     .close = ປິດວິວພອດ
 
+plugin-busy =
+    .prompt = ກຳລັງແລ່ນ { $command } …
+    .pill = { $command }
+    .pill-tip = ຄຳສັ່ງຂອງປລັກອິນກຳລັງເຮັດວຽກ. ໜ້າຕ່າງຈະຕອບສະໜອງອີກຄັ້ງເມື່ອມັນສຳເລັດ.
+
 gpu =
     .title = ແຈ້ງເຕືອນກຣາຟິກ
     .software-headline = ບໍ່ພົບໄດຣເວີ GPU ທີ່ໃຊ້ງານໄດ້, ດັ່ງນັ້ນຮູບແຕ້ມຈຶ່ງຖືກປະມວນຜົນດ້ວຍຊອບແວເທິງ CPU ({ $adapter }).
@@ -11278,3 +11283,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = ເລືອກໂຟນເດີດ້ວຍປຸ່ມໂຟນເດີ ເພື່ອສະແດງແບບແຕ້ມໃນນັ້ນ.
+    .empty = ບໍ່ມີແບບແຕ້ມ ຫຼື ໂຟນເດີຢູ່ນີ້.

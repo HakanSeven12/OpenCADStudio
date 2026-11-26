@@ -647,6 +647,7 @@ impl OpenCADStudio {
                     PanelId::GeometryCleanup => self.geometry_cleanup.show = true,
                     PanelId::BricscadVisibility => self.set_bricscad_visibility_panel(true),
                     PanelId::SheetSetManager => self.show_sheet_set_manager(true),
+                    PanelId::Files => self.set_files_palette(true),
                     PanelId::Layers => {
                         self.sync_ribbon_layers();
                         self.show_layers = true;
@@ -748,6 +749,10 @@ impl OpenCADStudio {
             PanelId::SheetSetManager => {
                 self.sheet_set.show = false;
                 self.ribbon.set_sheet_set(false);
+            }
+            PanelId::Files => {
+                self.files_palette.show = false;
+                self.persist_settings_if_changed();
             }
             PanelId::Properties => {
                 self.show_properties = false;
@@ -899,6 +904,7 @@ impl OpenCADStudio {
             PanelId::GeometryCleanup => self.geometry_cleanup.show,
             PanelId::BricscadVisibility => self.bricscad_visibility.show,
             PanelId::SheetSetManager => self.sheet_set.show,
+            PanelId::Files => self.files_palette.show,
             PanelId::Layers => self.show_layers,
             // The walk session is the pallet's state. While the Select Objects
             // prompt owns the pointer the pallet steps out of the way, and

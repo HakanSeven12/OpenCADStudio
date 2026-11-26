@@ -3810,6 +3810,13 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// True for plugin-owned interactive commands (`PluginInteractiveAdapter`
+    /// and `PluginProcessInteractiveAdapter`) so their entity commits join an
+    /// open held plugin undo group instead of splitting it.
+    fn is_plugin_command(&self) -> bool {
+        false
+    }
+
     /// DIM asks how to handle the dimensions `new` was placed over; false
     /// when the command is at no step that asks (DIM asks at its own prompt
     /// and in its continued series, not in a baseline series).

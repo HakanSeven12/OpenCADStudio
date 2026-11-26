@@ -433,6 +433,11 @@ viewport =
     .move = Μετακίνηση θύρας προβολής
     .close = Κλείσιμο θύρας προβολής
 
+plugin-busy =
+    .prompt = Εκτελείται { $command } …
+    .pill = { $command }
+    .pill-tip = Εκτελείται εντολή πρόσθετου. Το παράθυρο θα αποκριθεί ξανά όταν ολοκληρωθεί.
+
 gpu =
     .title = Προειδοποίηση γραφικών
     .software-headline = Δεν βρέθηκε λειτουργικός οδηγός GPU, οπότε το σχέδιο αποδίδεται με λογισμικό στη CPU ({ $adapter }).
@@ -11287,3 +11292,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Επιλέξτε φάκελο με το κουμπί φακέλου για να δείτε τα σχέδιά του.
+    .empty = Δεν υπάρχουν σχέδια ή φάκελοι εδώ.

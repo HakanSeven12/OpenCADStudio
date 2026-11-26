@@ -431,6 +431,11 @@ viewport =
     .move = Görünüm Penceresini Taşı
     .close = Görünüm Penceresini Kapat
 
+plugin-busy =
+    .prompt = { $command } çalışıyor …
+    .pill = { $command }
+    .pill-tip = Bir eklenti komutu çalışıyor. Pencere, komut bittiğinde yeniden yanıt verecek.
+
 gpu =
     .title = Grafik Uyarısı
     .software-headline = Çalışan bir GPU sürücüsü bulunamadı; bu nedenle çizim, CPU üzerinde yazılımla işleniyor ({ $adapter }).
@@ -11206,3 +11211,7 @@ mesh-cmd =
     .divisions-around-the-tube = Tüp çevresinde bölüm sayısı
     .the-faces-must-be-adjacent-and-bound-one-area-wi = Yüzler komşu olmalı ve deliksiz tek bir alan sınırlamalıdır.
     .the-triangles-do-not-share-an-edge = Üçgenler ortak bir kenar paylaşmıyor.
+
+files-palette =
+    .choose-folder = Çizimlerini görmek için klasör düğmesiyle bir klasör seçin.
+    .empty = Burada çizim veya klasör yok.

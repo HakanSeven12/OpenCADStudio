@@ -142,6 +142,8 @@ pub enum PanelId {
     BricscadVisibility,
     /// The open sheet sets: subsets and sheets.
     SheetSetManager,
+    /// A folder's drawings, to open or insert (FILESPALETTE).
+    Files,
     /// The Layer Manager (LAYERS).
     Layers,
     /// The LAYWALK pallet.
@@ -158,7 +160,7 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 19] = [
+    pub const ALL: [PanelId; 20] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
@@ -173,6 +175,7 @@ impl PanelId {
         PanelId::GeometryCleanup,
         PanelId::BricscadVisibility,
         PanelId::SheetSetManager,
+        PanelId::Files,
         PanelId::Layers,
         PanelId::Laywalk,
         PanelId::QuickCalc,
@@ -197,6 +200,7 @@ impl PanelId {
             PanelId::GeometryCleanup => "Geometry Cleanup",
             PanelId::BricscadVisibility => "Visibility States",
             PanelId::SheetSetManager => "Sheet Set Manager",
+            PanelId::Files => "Files",
             PanelId::Layers => "Layer Manager",
             PanelId::Laywalk => "Layer Walk",
             PanelId::QuickCalc => "QuickCalc",
@@ -225,6 +229,7 @@ impl PanelId {
             PanelId::GeometryCleanup => crate::ui::window::geometry_cleanup::ICON,
             PanelId::BricscadVisibility => include_bytes!("../../assets/icons/ui/eye.svg"),
             PanelId::SheetSetManager => include_bytes!("../../assets/icons/sheetset.svg"),
+            PanelId::Files => crate::ui::icons::FOLDER_TREE,
             PanelId::Layers => include_bytes!("../../assets/icons/layers/panel.svg"),
             PanelId::Laywalk => include_bytes!("../../assets/icons/layers/laywalk.svg"),
             PanelId::QuickCalc => crate::ui::window::quick_calc::ICON,
@@ -251,6 +256,7 @@ impl PanelId {
             PanelId::GeometryCleanup => 280.0,
             PanelId::BricscadVisibility => 280.0,
             PanelId::SheetSetManager => 280.0,
+            PanelId::Files => 260.0,
             PanelId::Layers => 560.0,
             PanelId::Laywalk => 420.0,
             PanelId::QuickCalc => 320.0,

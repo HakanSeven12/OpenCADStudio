@@ -22,6 +22,7 @@ pub mod block_properties_table;
 pub mod block_save_as;
 pub mod block_visibility;
 pub mod bricscad_visibility;
+pub mod files_palette;
 pub mod browser;
 pub mod count_palette;
 pub mod design_center;

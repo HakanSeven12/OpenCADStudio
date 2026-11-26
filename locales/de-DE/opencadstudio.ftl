@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Layout wird vorbereitet…
 
+plugin-busy =
+    .prompt = { $command } läuft …
+    .pill = { $command }
+    .pill-tip = Ein Plugin-Befehl läuft. Das Fenster reagiert wieder, sobald er fertig ist.
+
 gpu =
     .title = Grafikwarnung
     .software-headline = Es wurde kein funktionierender GPU-Treiber gefunden, daher wird die Zeichnung per Software auf der CPU gerendert ({ $adapter }).
@@ -11285,3 +11290,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Wählen Sie über das Ordnersymbol einen Ordner, um seine Zeichnungen zu sehen.
+    .empty = Hier gibt es keine Zeichnungen und keine Ordner.

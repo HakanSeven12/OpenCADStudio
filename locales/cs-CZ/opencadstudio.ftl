@@ -436,6 +436,11 @@ viewport =
 
     .preparing-layout = Příprava rozvržení…
 
+plugin-busy =
+    .prompt = { $command } běží …
+    .pill = { $command }
+    .pill-tip = Probíhá příkaz zásuvného modulu. Okno bude znovu reagovat, až skončí.
+
 gpu =
     .title = Upozornění na grafiku
     .software-headline = Nebyl nalezen funkční ovladač GPU, výkres se proto vykresluje softwarově na CPU ({ $adapter }).
@@ -11293,3 +11298,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Vyberte složku tlačítkem složky a zobrazí se její výkresy.
+    .empty = Žádné výkresy ani složky.

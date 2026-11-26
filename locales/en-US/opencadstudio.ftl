@@ -433,6 +433,11 @@ viewport =
     .move = Move Viewport
     .close = Close Viewport
 
+plugin-busy =
+    .prompt = { $command } is running …
+    .pill = { $command }
+    .pill-tip = A plugin command is running. The window responds again when it has finished.
+
 gpu =
     .title = Graphics Warning
     .software-headline = No working GPU driver was found, so the drawing is rendered in software on the CPU ({ $adapter }).
@@ -11286,3 +11291,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Choose a folder with the folder button to list its drawings.
+    .empty = No drawings or folders here.

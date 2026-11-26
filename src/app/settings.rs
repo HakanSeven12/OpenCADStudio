@@ -1285,6 +1285,9 @@ pub struct UserSettings {
     /// opens there again unless BLOCKNAVIGATE names a folder.
     #[serde(default)]
     pub block_library_folder: String,
+    /// Files palette: the folder it showed last.
+    #[serde(default)]
+    pub files_palette_folder: String,
     /// Blocks palette insertion options.
     #[serde(default)]
     pub block_insert: BlockInsertOptions,
@@ -1697,6 +1700,7 @@ impl Default for UserSettings {
             block_palette_view: 1,
             block_palette_tab: 0,
             block_library_folder: String::new(),
+            files_palette_folder: String::new(),
             block_insert: BlockInsertOptions::default(),
             block_mru_list: 50,
             block_redefine_mode: 1,

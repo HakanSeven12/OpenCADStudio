@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Asettelua valmistellaan…
 
+plugin-busy =
+    .prompt = { $command } on käynnissä …
+    .pill = { $command }
+    .pill-tip = Laajennuksen komento on käynnissä. Ikkuna vastaa taas, kun se on valmis.
+
 gpu =
     .title = Grafiikkavaroitus
     .software-headline = Toimivaa GPU-ajuria ei löytynyt, joten piirustus piirretään ohjelmallisesti suorittimella ({ $adapter }).
@@ -11284,3 +11289,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Valitse kansio kansiopainikkeella nähdäksesi sen piirustukset.
+    .empty = Täällä ei ole piirustuksia eikä kansioita.

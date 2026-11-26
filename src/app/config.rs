@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub show_layers: bool,
     /// Whether the Blocks palette is open.
     pub show_block_palette: bool,
+    /// Whether the Files palette is open.
+    pub show_files_palette: bool,
     /// Whether the External References pallet is open.
     pub show_external_references: bool,
     /// Whether the document file tabs are shown (FILETAB).
@@ -95,6 +97,7 @@ impl Default for AppConfig {
             geometry_cleanup_file: None,
             show_layers: false,
             show_block_palette: false,
+            show_files_palette: false,
             show_external_references: false,
             show_file_tabs: true,
             file_tabs_above_docks: false,

@@ -94,6 +94,42 @@ pub fn plugin_command_names(disabled: &rustc_hash::FxHashSet<String>) -> Vec<Str
     }
 }
 
+/// Whether `line` starts a command a loaded plugin advertises (a ribbon
+/// command id or a manifest command prefix). Lisp lines never do.
+pub(crate) fn advertises(app: &OpenCADStudio, line: &str) -> bool {
+    let line = line.trim_start();
+    if line.starts_with('(') {
+        return false;
+    }
+    let Some(verb) = line.split_whitespace().next() else {
+        return false;
+    };
+    let verb = verb.trim_start_matches(['_', '.']);
+    #[cfg(test)]
+    if TEST_ADVERTISED.with(|t| t.borrow().iter().any(|v| v.eq_ignore_ascii_case(verb))) {
+        return true;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let disabled = app.disabled_plugin_ids();
+        crate::plugin::external::with_manager(|manager| {
+            manager.advertises_command(verb, |id| disabled.contains(id))
+        })
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (app, verb);
+        false
+    }
+}
+
+// Commands the tests treat as advertised by a plugin, without loading one.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_ADVERTISED: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Dispatch `cmd` to a loaded external plugin (skipping disabled ones).
 /// Returns true if one handled it.
 ///

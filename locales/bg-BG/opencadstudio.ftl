@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Подготовка на оформлението…
 
+plugin-busy =
+    .prompt = { $command } се изпълнява …
+    .pill = { $command }
+    .pill-tip = Изпълнява се команда на приставка. Прозорецът ще реагира отново, когато тя приключи.
+
 gpu =
     .title = Предупреждение за графиката
     .software-headline = Не е намерен работещ драйвер за GPU, затова чертежът се изчертава софтуерно на CPU ({ $adapter }).
@@ -11287,3 +11292,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Изберете папка с бутона за папка, за да видите чертежите в нея.
+    .empty = Тук няма чертежи и папки.

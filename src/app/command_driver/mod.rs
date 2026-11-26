@@ -2171,15 +2171,9 @@ impl OpenCADStudio {
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
-        // Each line answers the prompts the previous one left open.
-        for line in script.lines() {
-            let line = line.trim();
-            if !line.is_empty() {
-                let task = self.run_command_line_streaming(line, true);
-                let _ = self.drive_headless_task(task);
-            }
-        }
-        Task::none()
+        // Each line answers the prompts the previous one left open; a line
+        // that starts a plugin command first lets the window draw (#3650).
+        self.run_script_lines(script.lines().map(str::to_string).collect())
     }
 
     fn handle_measurement(&mut self, msg: String) {

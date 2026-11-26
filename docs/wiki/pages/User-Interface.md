@@ -88,6 +88,7 @@ Palettes are panels that stay open beside the drawing. Dock them on any side, st
 | <img src="images/icons/properties.svg" width="20" alt=""> Properties | `PROPERTIES` (Ctrl+1) |
 | <img src="images/icons/layers/panel.svg" width="20" alt=""> Layer Manager | `LAYER` |
 | <img src="images/icons/blocks/insert.svg" width="20" alt=""> Blocks | `BLOCKSPALETTE` |
+| Files | `FILESPALETTE` |
 | <img src="images/icons/tool_palettes.svg" width="20" alt=""> Tool Palettes | `TOOLPALETTES` |
 | <img src="images/icons/xclip.svg" width="20" alt=""> External References | `EXTERNALREFERENCES` |
 | <img src="images/icons/quickcalc/quickcalc.svg" width="20" alt=""> QuickCalc | `QUICKCALC` |

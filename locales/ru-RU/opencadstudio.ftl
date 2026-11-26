@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Подготовка листа…
 
+plugin-busy =
+    .prompt = { $command } выполняется …
+    .pill = { $command }
+    .pill-tip = Выполняется команда подключаемого модуля. Окно снова будет реагировать после её завершения.
+
 gpu =
     .title = Предупреждение о графике
     .software-headline = Рабочий драйвер GPU не найден, поэтому чертёж отрисовывается программно на CPU ({ $adapter }).
@@ -11291,3 +11296,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Выберите папку кнопкой папки, чтобы увидеть её чертежи.
+    .empty = Здесь нет чертежей и папок.

@@ -667,6 +667,16 @@ impl OpenCADStudio {
             self.script_paused = true;
             return Task::none();
         }
+        // Rows run back to back; before one that starts a plugin command the
+        // window draws once, and the row waits for it in the queue (#3650).
+        if let Some(line) = self.script_queue.front().cloned() {
+            if let Some(task) =
+                self.defer_plugin_row(&line, || crate::app::plugin_frame::Resume::ScriptRow)
+            {
+                self.script_running = true;
+                return task;
+            }
+        }
         let Some(line) = self.script_queue.pop_front() else {
             self.script_running = false;
             return Task::none();

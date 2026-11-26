@@ -427,6 +427,11 @@ viewport =
 
     .preparing-layout = Elrendezés előkészítése…
 
+plugin-busy =
+    .prompt = { $command } fut …
+    .pill = { $command }
+    .pill-tip = Egy bővítményparancs fut. Az ablak a befejezése után ismét reagál.
+
 gpu =
     .title = Grafikai figyelmeztetés
     .software-headline = Nem található működő GPU-illesztőprogram, ezért a rajz szoftveresen, a CPU-n jelenik meg ({ $adapter }).
@@ -11265,3 +11270,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = Válasszon mappát a mappa gombbal a rajzai megjelenítéséhez.
+    .empty = Itt nincsenek rajzok vagy mappák.

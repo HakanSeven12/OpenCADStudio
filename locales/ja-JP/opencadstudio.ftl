@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = レイアウトを準備中…
 
+plugin-busy =
+    .prompt = { $command } を実行中…
+    .pill = { $command }
+    .pill-tip = プラグインのコマンドを実行中です。完了するとウィンドウは再び応答します。
+
 gpu =
     .title = グラフィックスの警告
     .software-headline = 動作する GPU ドライバーが見つからないため、図面は CPU 上でソフトウェア描画されています ({ $adapter })。
@@ -11265,3 +11270,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = フォルダー ボタンでフォルダーを選ぶと、その図面が一覧表示されます。
+    .empty = 図面もフォルダーもありません。

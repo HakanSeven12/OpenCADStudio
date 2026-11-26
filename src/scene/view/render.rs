@@ -6103,11 +6103,12 @@ impl Scene {
         // sheets must also include their layout block: switching layouts does
         // not change the geometry epoch, and a role-only key reused the prior
         // sheet's glyph coordinates while its wires moved correctly. Tiles
-        // share the resident Model set, so they share one key; the implicit
-        // view mixes in the current layout block (BEDIT swaps sets without a
-        // geometry delta).
+        // share the resident Model set, so they share one key; tiles and the
+        // implicit view mix in the current layout block (BEDIT swaps sets
+        // without a geometry delta, and a fixed tile key kept drawing the
+        // drawing's text inside the block editor, #3685).
         let text_source_key: u64 = if inst.tile_idx.is_some() {
-            0x1000_0000_0000_0000
+            0x1000_0000_0000_0000 | self.current_layout_block_handle().value()
         } else if inst.paper_sheet {
             0x2000_0000_0000_0000
                 | u64::from(inst.sheet_over) << 59

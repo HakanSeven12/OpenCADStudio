@@ -605,6 +605,7 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
         corner: None,
         deviation: 0.1,
         angle: None,
+        stretch: true,
     };
     let moved = Finding {
         location: [1.0, 1.0],
@@ -642,6 +643,7 @@ fn two_relative_angles_of_one_line_are_two_errors() {
         corner: None,
         deviation: 1.5,
         angle: None,
+        stretch: false,
     };
     let moved = Finding {
         location: [4.1, 2.9],

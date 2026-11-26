@@ -21,10 +21,10 @@ use std::f64::consts::{PI, TAU};
 
 use super::angle::normalize_angle;
 use super::cross::intersect;
-use super::curve::{Arc, Curve, Line};
+use super::curve::{Arc, Curve, EllipseArc, Line};
 use super::polyline::BulgeArc;
 use super::vec::Vec2;
-use super::{analytic_curve_bounds, Tolerance};
+use super::{analytic_curve_bounds, Ellipse, Tolerance};
 
 /// What is wrong with an end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -64,12 +64,13 @@ pub struct EndError {
     pub deviation: f64,
 }
 
-/// A straight or circular piece: a line, an arc, or one segment of a
-/// polyline.
+/// A piece of a curve: a line, an arc, an elliptical arc, or one segment of
+/// a polyline.
 #[derive(Debug, Clone, Copy)]
 enum Shape {
     Line(Line),
     Arc(Arc),
+    Ellipse(EllipseArc),
 }
 
 impl Shape {
@@ -77,6 +78,7 @@ impl Shape {
         match self {
             Shape::Line(line) => Curve::Line(line),
             Shape::Arc(arc) => Curve::Arc(arc),
+            Shape::Ellipse(arc) => Curve::Ellipse(arc),
         }
     }
 }
@@ -88,8 +90,9 @@ struct Piece {
     shape: Shape,
 }
 
-/// How an end continues past itself: along a straight line or along its
-/// circle (counter-clockwise when `turn` is positive).
+/// How an end continues past itself: along a straight line, along its
+/// circle (counter-clockwise when `turn` is positive), or along its ellipse
+/// (to a greater parameter when `turn` is positive).
 #[derive(Debug, Clone, Copy)]
 enum Reach {
     Straight {
@@ -99,6 +102,11 @@ enum Reach {
         centre: [f64; 2],
         radius: f64,
         angle: f64,
+        turn: f64,
+    },
+    Elliptic {
+        ellipse: Ellipse,
+        parameter: f64,
         turn: f64,
     },
 }
@@ -121,7 +129,28 @@ fn shape_length(shape: Shape) -> f64 {
     match shape {
         Shape::Line(line) => line.length(),
         Shape::Arc(arc) => arc.radius * arc.sweep(),
+        Shape::Ellipse(arc) => ellipse_length(
+            &arc.ellipse,
+            arc.start_parameter,
+            arc.start_parameter + arc.sweep(),
+        ),
     }
+}
+
+/// The length of `ellipse` between the parameters `from` and `to`, in either
+/// order (Simpson's rule on the speed of the parameter).
+fn ellipse_length(ellipse: &Ellipse, from: f64, to: f64) -> f64 {
+    const STEPS: usize = 64;
+    let (a, b) = (ellipse.major_radius, ellipse.minor_radius);
+    let speed = |t: f64| (a * t.sin()).hypot(b * t.cos());
+    let step = (to - from) / STEPS as f64;
+    let inner: f64 = (1..STEPS)
+        .map(|k| {
+            let weight = if k % 2 == 1 { 4.0 } else { 2.0 };
+            weight * speed(from + step * k as f64)
+        })
+        .sum();
+    (step / 3.0 * (speed(from) + inner + speed(to))).abs()
 }
 
 /// The pieces of the curves that Geometry Cleanup reads. A curve of any
@@ -140,6 +169,14 @@ fn pieces_of(curves: &[Curve]) -> Vec<Piece> {
                 segment: None,
                 shape: Shape::Arc(*arc),
             }),
+            // An elliptical arc; a whole ellipse has no ends and is not read.
+            Curve::Ellipse(arc) if arc.sweep() < TAU - 1e-9 && !arc.ellipse.is_degenerate() => {
+                pieces.push(Piece {
+                    curve,
+                    segment: None,
+                    shape: Shape::Ellipse(*arc),
+                })
+            }
             Curve::Polyline(polyline) => {
                 let n = polyline.vertices.len();
                 let count = if polyline.closed {
@@ -199,7 +236,7 @@ fn ends_of(curves: &[Curve], pieces: &[Piece]) -> Vec<EndInfo> {
         // (a polyline arc piece is stored counter-clockwise), and the bulge
         // sign of a polyline's end segments.
         let (open, first_turn, last_turn) = match item {
-            Curve::Line(_) | Curve::Arc(_) => (true, 1.0, 1.0),
+            Curve::Line(_) | Curve::Arc(_) | Curve::Ellipse(_) => (true, 1.0, 1.0),
             Curve::Polyline(polyline) => {
                 let n = polyline.vertices.len();
                 (
@@ -258,6 +295,23 @@ fn ends_of(curves: &[Curve], pieces: &[Piece]) -> Vec<EndInfo> {
                         },
                     )
                 }
+                // The start goes on to smaller parameters, the end to
+                // greater ones.
+                Shape::Ellipse(arc) => {
+                    let (parameter, turn) = if at_start {
+                        (arc.start_parameter, -1.0)
+                    } else {
+                        (arc.start_parameter + arc.sweep(), 1.0)
+                    };
+                    (
+                        arc.ellipse.point_at(parameter),
+                        Reach::Elliptic {
+                            ellipse: arc.ellipse,
+                            parameter,
+                            turn,
+                        },
+                    )
+                }
             };
             ends.push(EndInfo {
                 end: CurveEnd { curve, at_start },
@@ -300,6 +354,25 @@ fn extension(end: &EndInfo, length: f64) -> Curve {
                 end_angle: normalize_angle(end_angle),
             })
         }
+        // The parameter moves at least the minor radius for each unit of
+        // it, so this sweep reaches `length` along the ellipse.
+        Reach::Elliptic {
+            ellipse,
+            parameter,
+            turn,
+        } => {
+            let sweep = (length / ellipse.minor_radius).min(PI);
+            let (start_parameter, end_parameter) = if turn > 0.0 {
+                (parameter, parameter + sweep)
+            } else {
+                (parameter - sweep, parameter)
+            };
+            Curve::Ellipse(EllipseArc {
+                ellipse,
+                start_parameter,
+                end_parameter,
+            })
+        }
     }
 }
 
@@ -325,6 +398,16 @@ fn along(end: &EndInfo, point: [f64; 2], ahead: bool) -> f64 {
             let to = (point[1] - centre[1]).atan2(point[0] - centre[0]);
             let sign = if ahead { turn } else { -turn };
             radius * (sign * (to - angle)).rem_euclid(TAU)
+        }
+        Reach::Elliptic {
+            ellipse,
+            parameter,
+            turn,
+        } => {
+            let to = ellipse.closest_parameter(point);
+            let sign = if ahead { turn } else { -turn };
+            let turned = (sign * (to - parameter)).rem_euclid(TAU);
+            ellipse_length(&ellipse, parameter, parameter + sign * turned)
         }
     }
 }
@@ -479,8 +562,9 @@ impl Tolerances {
 /// tolerance of its error type, and more than `weld` away (closer counts as
 /// meeting). A type with no tolerance is not looked for.
 ///
-/// Lines, arcs and polylines are read; any other curve is ignored. A closed
-/// polyline has no ends but is still geometry that ends can meet. The
+/// Lines, arcs, elliptical arcs and polylines are read; any other curve is
+/// ignored. A closed polyline has no ends but is still geometry that ends
+/// can meet. The
 /// errors come in the order of their ends.
 pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> Vec<EndError> {
     let weld = weld.linear();

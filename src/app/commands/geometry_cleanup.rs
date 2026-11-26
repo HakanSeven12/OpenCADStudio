@@ -121,6 +121,7 @@ impl OpenCADStudio {
                 corner: error.corner,
                 deviation: error.deviation,
                 angle: None,
+                stretch: !matches!(kept[error.end.curve].1, Curve::Ellipse(_)),
             });
         let x_axis = self.geometry_cleanup_x_axis(i);
         let lines = angle_errors(&curves, angles, x_axis, Tolerance::new(WELD))
@@ -141,6 +142,7 @@ impl OpenCADStudio {
                     segment: error.segment,
                     other_segment: error.other_segment,
                 }),
+                stretch: false,
             });
         ends.chain(lines).collect()
     }

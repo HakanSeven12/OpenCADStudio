@@ -15,6 +15,12 @@ automation:save
 control:new
 control:save
 
+# By design: the identity of the drawing. Geometry Cleanup's Keep gives a
+# drawing with no FINGERPRINTGUID one, which names its kept errors in the
+# user profile, as a node graph file does. It is not an edit: an undo that
+# took it back would leave the kept errors with no drawing.
+GeometryCleanup(Keep)
+
 # By design: a live edit. The entity changes while the user draws or drags,
 # and the end of the command or of the grip edit completes one undo step
 # (`finish_live_entity_history`, `push_entity_group_history`).

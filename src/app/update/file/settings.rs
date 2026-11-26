@@ -961,6 +961,7 @@ impl OpenCADStudio {
             show_command_history: self.show_command_history,
             geometry_cleanup: self.geometry_cleanup.settings.clone(),
             geometry_cleanup_file: self.geometry_cleanup.settings_file.clone(),
+            geometry_cleanup_kept: self.geometry_cleanup.kept.clone(),
             show_layers: self.show_layers,
             show_block_palette: self.show_block_palette,
             show_files_palette: self.files_palette.show,
@@ -1048,6 +1049,7 @@ impl OpenCADStudio {
         self.show_command_history = cfg.show_command_history;
         self.geometry_cleanup.settings = cfg.geometry_cleanup.clone();
         self.geometry_cleanup.settings_file = cfg.geometry_cleanup_file.clone();
+        self.geometry_cleanup.kept = cfg.geometry_cleanup_kept.clone();
         if self.show_command_history {
             self.sync_command_history_panel();
         }

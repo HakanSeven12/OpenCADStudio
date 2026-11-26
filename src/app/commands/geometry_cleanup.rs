@@ -8,7 +8,7 @@ use crate::modules::manage::geometry_cleanup_settings::{
 };
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{
-    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, Scan,
+    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, KeptError, Scan,
 };
 use crate::ui::window::geometry_cleanup_settings::SettingsDialog;
 use document::{EntityType, Handle};
@@ -189,7 +189,11 @@ impl OpenCADStudio {
             };
             (settings.tolerances(), settings.angle_tolerances())
         });
-        let findings = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
+        let found = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
+        let marks = self.geometry_cleanup_kept_marks(i);
+        let (kept, findings): (Vec<Finding>, Vec<Finding>) = found
+            .into_iter()
+            .partition(|f| marks.contains(&f.identity()));
         if report {
             self.command_line.push_output(&crate::tf!(
                 "Geometry Cleanup: {} error(s) found.",
@@ -209,8 +213,50 @@ impl OpenCADStudio {
             tolerances,
             angles,
             findings,
+            kept,
         });
         self.geometry_cleanup.picked = picked;
+    }
+
+    /// The errors kept as designed in the drawing of tab `i`. Marks of
+    /// objects that are no longer in the drawing are dropped first.
+    fn geometry_cleanup_kept_marks(&mut self, i: usize) -> Vec<KeptError> {
+        let document = &self.tabs[i].scene.document;
+        let id = &document.header.fingerprint_guid;
+        if id.is_empty() {
+            return Vec::new();
+        }
+        let Some(marks) = self.geometry_cleanup.kept.get_mut(id) else {
+            return Vec::new();
+        };
+        marks.retain(|mark| document.get_entity(Handle::new(mark.handle)).is_some());
+        if marks.is_empty() {
+            self.geometry_cleanup.kept.remove(id);
+            return Vec::new();
+        }
+        marks.clone()
+    }
+
+    /// The FINGERPRINTGUID of the drawing of tab `i`, which names its kept
+    /// errors. A drawing that has none gets one now and saves it with its
+    /// next save, as the node graph does.
+    fn geometry_cleanup_drawing_id(&mut self, i: usize) -> String {
+        let tab = &mut self.tabs[i];
+        let header = &mut tab.scene.document.header;
+        if header.fingerprint_guid.is_empty() {
+            header.fingerprint_guid =
+                format!("{{{}}}", crate::app::control::new_guid_v4().to_uppercase());
+            tab.dirty = true;
+        }
+        header.fingerprint_guid.clone()
+    }
+
+    /// Scan the objects of the palette's scan again, with its tolerances.
+    fn geometry_cleanup_rescan(&mut self, i: usize) {
+        if let Some(scan) = self.geometry_cleanup_scan_here(i) {
+            let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
+            self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
+        }
     }
 
     /// After the drawing changes, the open palette scans its objects again:
@@ -261,6 +307,47 @@ impl OpenCADStudio {
                     self.geometry_cleanup_scan(i, objects, Some(tolerances), true);
                 }
             }
+            GeometryCleanupMsg::Keep(index) => {
+                let Some(scan) = self.geometry_cleanup_scan_here(i) else {
+                    return Task::none();
+                };
+                let Some(picked) = scan.findings.get(index).copied() else {
+                    return Task::none();
+                };
+                let after = rows_after(&self.geometry_cleanup, scan, index);
+                let id = self.geometry_cleanup_drawing_id(i);
+                let marks = self.geometry_cleanup.kept.entry(id).or_default();
+                if !marks.contains(&picked.identity()) {
+                    marks.push(picked.identity());
+                }
+                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_pick_next(i, &after);
+            }
+            GeometryCleanupMsg::Restore(index) => {
+                let Some(restored) = self
+                    .geometry_cleanup_scan_here(i)
+                    .and_then(|scan| scan.kept.get(index))
+                    .map(Finding::identity)
+                else {
+                    return Task::none();
+                };
+                let id = &self.tabs[i].scene.document.header.fingerprint_guid;
+                if let Some(marks) = self.geometry_cleanup.kept.get_mut(id) {
+                    marks.retain(|mark| *mark != restored);
+                    if marks.is_empty() {
+                        self.geometry_cleanup.kept.remove(id);
+                    }
+                }
+                self.geometry_cleanup_rescan(i);
+            }
+            GeometryCleanupMsg::RestoreAll => {
+                let id = &self.tabs[i].scene.document.header.fingerprint_guid;
+                self.geometry_cleanup.kept.remove(id);
+                self.geometry_cleanup_rescan(i);
+            }
+            GeometryCleanupMsg::FoldKept => {
+                self.geometry_cleanup.kept_open = !self.geometry_cleanup.kept_open;
+            }
             GeometryCleanupMsg::Pick(index) => {
                 let Some(finding) = self.geometry_cleanup_scan_here(i).and_then(|scan| {
                     scan.findings
@@ -280,15 +367,7 @@ impl OpenCADStudio {
                 let Some(picked) = scan.findings.get(index).copied() else {
                     return Task::none();
                 };
-                // The rows below the fixed one, then those above it nearest
-                // first: where the pick goes after the repair.
-                let rows = rows(&self.geometry_cleanup, scan);
-                let at = rows.iter().position(|&row| row == index).unwrap_or(0);
-                let after: Vec<Finding> = rows[at + 1..]
-                    .iter()
-                    .chain(rows[..at].iter().rev())
-                    .map(|&row| scan.findings[row])
-                    .collect();
+                let after = rows_after(&self.geometry_cleanup, scan, index);
                 let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
                 if !self.geometry_cleanup_fix(i, picked, fix, &objects, &tolerances) {
                     return Task::none();
@@ -648,6 +727,22 @@ impl OpenCADStudio {
         self.refresh_properties();
         true
     }
+}
+
+/// The rows below row `index`, then those above it nearest first: where the
+/// pick goes after a repair or a Keep.
+fn rows_after(
+    palette: &crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
+    scan: &Scan,
+    index: usize,
+) -> Vec<Finding> {
+    let rows = rows(palette, scan);
+    let at = rows.iter().position(|&row| row == index).unwrap_or(0);
+    rows[at + 1..]
+        .iter()
+        .chain(rows[..at].iter().rev())
+        .map(|&row| scan.findings[row])
+        .collect()
 }
 
 /// The tolerances of a scan, for a rescan.

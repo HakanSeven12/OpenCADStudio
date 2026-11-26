@@ -27,7 +27,9 @@ pub fn kind_label(kind: EndErrorKind) -> &'static str {
 }
 
 /// An error type of the palette, in the order of the tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ErrorType {
     Gap,
     Overshoot,
@@ -179,17 +181,38 @@ pub struct AngleFinding {
     pub other_segment: Option<usize>,
 }
 
+/// An error that the user keeps as designed: what identifies it across
+/// scans, in one drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct KeptError {
+    pub kind: ErrorType,
+    pub handle: u64,
+    pub at_start: bool,
+    /// The segments of an angle error; `None` for a length error.
+    pub segments: Option<(Option<usize>, Option<usize>)>,
+    /// The other line of a relative angle.
+    pub other: Option<u64>,
+}
+
 impl Finding {
-    /// Whether `other` is the same error: the same type at the same end,
-    /// or of the same lines or segments.
+    /// What identifies this error across scans: its type, its object and
+    /// end, its segments, and the other line of a relative angle.
+    pub fn identity(&self) -> KeptError {
+        KeptError {
+            kind: self.kind,
+            handle: self.handle.value(),
+            at_start: self.at_start,
+            segments: self.angle.map(|a| (a.segment, a.other_segment)),
+            other: self
+                .other
+                .filter(|_| self.kind == ErrorType::RelativeAngle)
+                .map(|o| o.0.value()),
+        }
+    }
+
+    /// Whether `other` is the same error.
     pub fn same_error(&self, other: &Finding) -> bool {
-        let segments = |f: &Finding| f.angle.map(|a| (a.segment, a.other_segment));
-        self.kind == other.kind
-            && self.handle == other.handle
-            && self.at_start == other.at_start
-            && segments(self) == segments(other)
-            && (self.kind != ErrorType::RelativeAngle
-                || self.other.map(|o| o.0) == other.other.map(|o| o.0))
+        self.identity() == other.identity()
     }
 
     /// The repairs that this error offers.
@@ -236,6 +259,9 @@ pub struct Scan {
     pub tolerances: Tolerances,
     pub angles: AngleTolerances,
     pub findings: Vec<Finding>,
+    /// The errors found that the user keeps as designed: not listed with
+    /// the others, and not repaired.
+    pub kept: Vec<Finding>,
 }
 
 #[derive(Debug, Default)]
@@ -252,6 +278,11 @@ pub struct GeometryCleanupPalette {
     pub settings_file: Option<String>,
     /// The open Settings dialog.
     pub dialog: Option<crate::ui::window::geometry_cleanup_settings::SettingsDialog>,
+    /// The errors kept as designed, by the FINGERPRINTGUID of their drawing:
+    /// a handle is unique only in its drawing.
+    pub kept: std::collections::BTreeMap<String, Vec<KeptError>>,
+    /// Whether the list of the kept errors is open.
+    pub kept_open: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -261,7 +292,15 @@ pub enum GeometryCleanupMsg {
     /// Pick an error: zoom to it and show its repairs.
     Pick(usize),
     Fix(usize, Fix),
+    /// Keep an error as designed: it is not listed again.
+    Keep(usize),
+    /// List a kept error again, by its index in the scan's kept errors.
+    Restore(usize),
+    /// List all the kept errors of the drawing again.
+    RestoreAll,
     Fold(ErrorType),
+    /// Open or close the list of the kept errors.
+    FoldKept,
     /// The Settings dialog.
     OpenSettings,
     SettingsTolerance(EndErrorKind, String),
@@ -395,18 +434,51 @@ pub fn view<'a>(
         }
         for index in indices {
             let finding = &scan.findings[index];
-            let place = match finding.angle {
-                Some(angle) => format!("{} ({}°)", coordinates(finding.location), angle.angle),
-                None => coordinates(finding.location),
-            };
             list = list.push(
-                kit::tree_row(place)
+                kit::tree_row(place(finding))
                     .depth(1)
                     .selected(palette.picked == Some(index))
                     .trailing(fix_buttons(index, finding))
                     .on_press(msg(GeometryCleanupMsg::Pick(index)))
                     .view(),
             );
+        }
+    }
+
+    if !scan.kept.is_empty() {
+        list = list.push(kit::category_bar(
+            crate::tf!("Kept as Designed: {}", scan.kept.len()).into_owned(),
+            !palette.kept_open,
+            msg(GeometryCleanupMsg::FoldKept),
+        ));
+        if palette.kept_open {
+            list = list.push(
+                row![
+                    Space::new().width(Fill),
+                    kit::text_button(
+                        crate::t!("Restore All").into_owned(),
+                        Some(msg(GeometryCleanupMsg::RestoreAll)),
+                        false,
+                    ),
+                ]
+                .align_y(iced::Center),
+            );
+            for (index, finding) in scan.kept.iter().enumerate() {
+                list = list.push(
+                    kit::tree_row(format!(
+                        "{}: {}",
+                        crate::t!(finding.kind.label()),
+                        place(finding)
+                    ))
+                    .depth(1)
+                    .trailing(row_button(
+                        crate::t!("Restore").into_owned(),
+                        crate::t!("List this error again.").into_owned(),
+                        msg(GeometryCleanupMsg::Restore(index)),
+                    ))
+                    .view(),
+                );
+            }
         }
     }
 
@@ -417,22 +489,38 @@ pub fn view<'a>(
     kit::palette(title_bar, body, width)
 }
 
-/// The repairs of one error, at the end of its row.
-fn fix_buttons<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
-    let mut fixes = row![].spacing(km::TOOL_GAP / 2.0).align_y(iced::Center);
-    for fix in finding.fixes() {
-        let press = button(
-            text(crate::t!(fix.label()).into_owned()).size(crate::ui::style::text::UI_SMALL),
-        )
+/// Where an error is, for its row.
+fn place(finding: &Finding) -> String {
+    match finding.angle {
+        Some(angle) => format!("{} ({}°)", coordinates(finding.location), angle.angle),
+        None => coordinates(finding.location),
+    }
+}
+
+/// A small button at the end of a row, with its tooltip.
+fn row_button<'a>(label: String, tip: String, press: Message) -> Element<'a, Message> {
+    let button = button(text(label).size(crate::ui::style::text::UI_SMALL))
         .padding(Padding::from([0, 4]))
         .height(km::ROW_H - 2.0)
         .style(kit::text_button_style(false))
-        .on_press(msg(GeometryCleanupMsg::Fix(index, fix)));
-        fixes = fixes.push(kit::tooltip(
-            press,
+        .on_press(press);
+    kit::tooltip(button, tip, kit::TipPosition::Bottom)
+}
+
+/// The repairs of one error, and Keep, at the end of its row.
+fn fix_buttons<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
+    let mut fixes = row![].spacing(km::TOOL_GAP / 2.0).align_y(iced::Center);
+    for fix in finding.fixes() {
+        fixes = fixes.push(row_button(
+            crate::t!(fix.label()).into_owned(),
             crate::t!(fix.tip()).into_owned(),
-            kit::TipPosition::Bottom,
+            msg(GeometryCleanupMsg::Fix(index, fix)),
         ));
     }
+    fixes = fixes.push(row_button(
+        crate::t!("Keep").into_owned(),
+        crate::t!("Keep as designed: the drawing does not change, and later scans do not list this error.").into_owned(),
+        msg(GeometryCleanupMsg::Keep(index)),
+    ));
     fixes.into()
 }

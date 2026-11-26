@@ -1655,11 +1655,19 @@ fn append_pdf_page(
             // A band's segments arrive pen-up separated; where the next one
             // starts on the last one's end it stays in the same path, so the
             // corner gets the mitre join instead of two overlapping ends.
+            // Thin lines do the same where round caps and joins draw a
+            // corner of two strokes exactly as one path draws it: a frame
+            // of four edges is one path then (or one `re`) instead of four
+            // strokes, a third of the bytes.
             let band = wire.world_width > 0.0;
+            let chain = !band
+                && dot_radius.is_none()
+                && cap == LineCapStyle::Round
+                && join == LineJoinStyle::Round;
             let mut pen_up = false;
             for (pi, &[x, y, _z]) in wire.points.iter().enumerate() {
                 if x.is_nan() || y.is_nan() {
-                    if band {
+                    if band || chain {
                         pen_up = true;
                     } else {
                         flush_line(&mut ops, &segment, dot_radius, line_step);
@@ -1676,13 +1684,13 @@ fn append_pdf_page(
                         if joined {
                             continue;
                         }
-                        flush_line(&mut ops, &segment, dot_radius, line_step);
+                        flush_stroke(&mut ops, &segment, dot_radius, line_step, chain);
                         segment.clear();
                     }
                     segment.push(LinePoint { p, bezier: false });
                 }
             }
-            flush_line(&mut ops, &segment, dot_radius, line_step);
+            flush_stroke(&mut ops, &segment, dot_radius, line_step, chain);
         }
         if item_state_open {
             ops.push(Op::RestoreGraphicsState);
@@ -1944,6 +1952,20 @@ fn vector_step(options: PdfPlotOptions, scale: f32) -> Option<f32> {
 }
 
 fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>, step: Option<f32>) {
+    flush_stroke(ops, pts, dot_radius, step, false);
+}
+
+/// [`flush_line`], and with `as_rectangle` a closed, axis-aligned four-edge
+/// path goes out as one `re` (a text frame, a table cell): a fifth of the
+/// bytes of its corners as a path. Only where round caps and joins make the
+/// closed subpath look like the open one.
+fn flush_stroke(
+    ops: &mut Vec<Op>,
+    pts: &[LinePoint],
+    dot_radius: Option<Pt>,
+    step: Option<f32>,
+    as_rectangle: bool,
+) {
     // Snapped to the vector resolution, points that land together merge.
     let snapped: Vec<LinePoint>;
     let pts = match step {
@@ -1982,12 +2004,59 @@ fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>, step
             return;
         }
     }
+    if as_rectangle {
+        if let Some(rectangle) = axis_rectangle(pts) {
+            ops.push(Op::DrawRectangle { rectangle });
+            return;
+        }
+    }
     ops.push(Op::DrawLine {
         line: Line {
             points: pts.to_vec(),
             is_closed: false,
         },
     });
+}
+
+/// The stroked rectangle a path of four axis-aligned edges back to its start
+/// traces, if it is one.
+fn axis_rectangle(pts: &[LinePoint]) -> Option<printpdf::Rect> {
+    const EPS: f32 = 1e-3;
+    if pts.len() != 5 || pts.iter().any(|p| p.bezier) {
+        return None;
+    }
+    let same = |a: f32, b: f32| (a - b).abs() <= EPS;
+    if !same(pts[0].p.x.0, pts[4].p.x.0) || !same(pts[0].p.y.0, pts[4].p.y.0) {
+        return None;
+    }
+    // Edges alternate horizontal and vertical, whichever comes first.
+    let horizontal = |i: usize| same(pts[i].p.y.0, pts[i + 1].p.y.0);
+    let vertical = |i: usize| same(pts[i].p.x.0, pts[i + 1].p.x.0);
+    let edge = |i: usize, across: bool| {
+        if i.is_multiple_of(2) == across {
+            horizontal(i)
+        } else {
+            vertical(i)
+        }
+    };
+    if !(0..4).all(|i| edge(i, true)) && !(0..4).all(|i| edge(i, false)) {
+        return None;
+    }
+    let xs = pts[..4].iter().map(|p| p.p.x.0);
+    let ys = pts[..4].iter().map(|p| p.p.y.0);
+    let (x0, x1) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    let (y0, y1) = ys.fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    if x1 - x0 <= EPS || y1 - y0 <= EPS {
+        return None;
+    }
+    Some(printpdf::Rect {
+        x: Pt(x0),
+        y: Pt(y0),
+        width: Pt(x1 - x0),
+        height: Pt(y1 - y0),
+        mode: Some(PaintMode::Stroke),
+        winding_order: None,
+    })
 }
 
 fn emit_round_dot(ops: &mut Vec<Op>, center: Point, radius: Pt) {
@@ -3977,6 +4046,86 @@ mod tests {
             missing.is_empty(),
             "short runs must reach their endpoints: {missing:?}"
         );
+    }
+
+    /// One wire of separate edges (pen-up between them), as a text frame or
+    /// a table's cells arrive.
+    fn edges_page(edges: &[[[f32; 2]; 2]], plot_style_end: Option<u8>) -> String {
+        let mut points = Vec::new();
+        for (i, [a, b]) in edges.iter().enumerate() {
+            if i > 0 {
+                points.push([f32::NAN, f32::NAN, 0.0]);
+            }
+            points.push([a[0], a[1], 0.0]);
+            points.push([b[0], b[1], 0.0]);
+        }
+        let mut wire = WireModel::solid("edges".into(), points, [1.0, 0.0, 0.0, 1.0], false);
+        wire.aci = 1;
+        let page = test_page(vec![PlotWire {
+            wire,
+            draw_depth: 0.0,
+        }]);
+        let style = plot_style_end.map(|end| {
+            let mut table = PlotStyleTable::builtin("monochrome.ctb").unwrap();
+            table.aci_entries[1].end_style = end;
+            table
+        });
+        pdf_stream_text(&render_pdf_bytes(&[page], style.as_ref()).unwrap())
+    }
+
+    fn count(text: &str, operator: &str) -> usize {
+        text.split_whitespace().filter(|t| *t == operator).count()
+    }
+
+    /// A frame of four separate edges is one `re`, and edges meeting end to
+    /// start are one path: with round caps and joins it draws the same.
+    #[test]
+    fn edges_meeting_end_to_start_are_one_path_and_a_frame_one_rectangle() {
+        let frame = [
+            [[10.0, 20.0], [30.0, 20.0]],
+            [[30.0, 20.0], [30.0, 40.0]],
+            [[30.0, 40.0], [10.0, 40.0]],
+            [[10.0, 40.0], [10.0, 20.0]],
+        ];
+        let text = edges_page(&frame, None);
+        assert_eq!(count(&text, "re"), 2, "the paper and the frame: {text}");
+        assert_eq!((count(&text, "m"), count(&text, "S")), (0, 1), "{text}");
+        let tokens: Vec<_> = text.split_whitespace().collect();
+        let at = tokens.iter().rposition(|t| *t == "re").unwrap();
+        let rect: Vec<f32> = tokens[at - 4..at]
+            .iter()
+            .map(|t| t.parse().unwrap())
+            .collect();
+        for (got, want) in rect.iter().zip([10.0, 20.0, 20.0, 20.0]) {
+            assert!((got - want * MM_TO_PT).abs() <= 0.02, "{rect:?}");
+        }
+
+        let corner = [[[10.0, 20.0], [30.0, 20.0]], [[30.0, 20.0], [30.0, 40.0]]];
+        let text = edges_page(&corner, None);
+        assert_eq!(count(&text, "re"), 1, "the paper only: {text}");
+        assert_eq!(
+            (count(&text, "m"), count(&text, "l"), count(&text, "S")),
+            (1, 2, 1),
+            "one path of two edges: {text}"
+        );
+
+        let apart = [[[10.0, 20.0], [30.0, 20.0]], [[40.0, 20.0], [60.0, 20.0]]];
+        assert_eq!(count(&edges_page(&apart, None), "S"), 2);
+    }
+
+    /// Square or flat ends from the plot style keep each edge its own
+    /// stroke: joining them would fill the corner the ends leave open.
+    #[test]
+    fn edges_stay_strokes_of_their_own_with_flat_ends() {
+        let frame = [
+            [[10.0, 20.0], [30.0, 20.0]],
+            [[30.0, 20.0], [30.0, 40.0]],
+            [[30.0, 40.0], [10.0, 40.0]],
+            [[10.0, 40.0], [10.0, 20.0]],
+        ];
+        let text = edges_page(&frame, Some(0));
+        assert_eq!(count(&text, "S"), 4, "{text}");
+        assert_eq!(count(&text, "re"), 1, "the paper only: {text}");
     }
 
     #[test]

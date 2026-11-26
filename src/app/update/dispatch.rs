@@ -1968,6 +1968,7 @@ impl OpenCADStudio {
             Message::Count(message) => self.on_count(message),
             Message::GeometryCleanup(message) => self.on_geometry_cleanup(message),
             Message::BricscadVisibility(message) => self.on_bricscad_visibility(message),
+            Message::FilesPalette(message) => self.on_files_palette(message),
             Message::Laywalk(message) => self.on_layer_walk(message),
             Message::QuickCalc(message) => self.on_quick_calc(message),
             Message::Assistant(message) => self.on_assistant(message),

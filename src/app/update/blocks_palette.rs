@@ -1135,7 +1135,7 @@ pub(crate) fn changed_block_names(
 
 /// Read the thumbnails of `paths` off the UI thread, a few at a time so they
 /// show as they come (the web build has no threads and reads them at once).
-fn read_thumbnails(
+pub(super) fn read_thumbnails(
     paths: Vec<PathBuf>,
 ) -> impl iced::futures::Stream<Item = Vec<(PathBuf, Option<iced::widget::image::Handle>)>> {
     const BATCH: usize = 8;

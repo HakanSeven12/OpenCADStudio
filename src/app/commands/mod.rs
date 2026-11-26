@@ -839,6 +839,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_bricscad_visibility(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_files_palette(cmd) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_bvisibility(cmd, i) {
             return Some(t);
         }

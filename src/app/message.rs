@@ -2725,6 +2725,8 @@ pub enum Message {
     GeometryCleanup(crate::ui::window::geometry_cleanup::GeometryCleanupMsg),
     /// The Visibility States palette of a BricsCAD parametric block.
     BricscadVisibility(crate::ui::window::bricscad_visibility::VisMsg),
+    /// The Files palette.
+    FilesPalette(crate::ui::window::files_palette::FilesMsg),
     /// The LayerWalk pallet (LAYWALK).
     Laywalk(crate::ui::window::layer_walk::LayerWalkMsg),
     /// The QuickCalc pallet.

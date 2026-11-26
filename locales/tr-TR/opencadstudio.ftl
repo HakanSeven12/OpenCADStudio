@@ -11213,3 +11213,7 @@ mesh-cmd =
     .divisions-around-the-tube = Tüp çevresinde bölüm sayısı
     .the-faces-must-be-adjacent-and-bound-one-area-wi = Yüzler komşu olmalı ve deliksiz tek bir alan sınırlamalıdır.
     .the-triangles-do-not-share-an-edge = Üçgenler ortak bir kenar paylaşmıyor.
+
+files-palette =
+    .choose-folder = Çizimlerini görmek için klasör düğmesiyle bir klasör seçin.
+    .empty = Burada çizim veya klasör yok.

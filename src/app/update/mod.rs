@@ -157,6 +157,7 @@ mod block_ops_tests;
 #[cfg(test)]
 mod block_palette_library_tests;
 pub(super) mod blocks_palette;
+pub(super) mod files_palette;
 pub(in crate::app) mod command;
 pub(crate) mod context_menu;
 mod dialog;

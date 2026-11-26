@@ -418,7 +418,7 @@ impl Scene {
     /// pre-baked 3D hints ride is clipped; this direct mesh read is not).
     /// Worst case in those views is a snap with no geometry behind it —
     /// never a corrupt point.
-    pub(crate) fn solid_face_snaps(
+    pub fn solid_face_snaps(
         &self,
         cursor_screen: iced::Point,
         view_rot: glam::Mat4,

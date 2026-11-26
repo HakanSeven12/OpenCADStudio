@@ -504,6 +504,10 @@ harness = false
 name = "polygon_overlay_and_clip"
 harness = false
 
+[[bench]]
+name = "spatial_index_and_hit_test"
+harness = false
+
 [[test]]
 name = "active_space_roundtrip"
 path = "tests/active_space_roundtrip.rs"

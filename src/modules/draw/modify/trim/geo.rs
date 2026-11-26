@@ -192,14 +192,14 @@ pub(crate) fn square_around(centre: [f64; 2], r: f64) -> [f64; 4] {
 /// Entries without a safe finite box (splines, rays, infinite lines) are
 /// unconditionally retained to preserve exact kernel semantics.
 
-pub(crate) struct TrimAabbIndex {
+pub struct TrimAabbIndex {
     entries: Vec<(usize, [f64; 4])>,
     prefix_max_x: Vec<f64>,
     always: Vec<usize>,
 }
 
 impl TrimAabbIndex {
-    pub(crate) fn new(bounds: impl IntoIterator<Item = Option<[f64; 4]>>) -> Self {
+    pub fn new(bounds: impl IntoIterator<Item = Option<[f64; 4]>>) -> Self {
         let mut entries = Vec::new();
         let mut always = Vec::new();
         for (index, bounds) in bounds.into_iter().enumerate() {
@@ -222,7 +222,7 @@ impl TrimAabbIndex {
         }
     }
 
-    pub(crate) fn overlapping(&self, target: [f64; 4]) -> Vec<usize> {
+    pub fn overlapping(&self, target: [f64; 4]) -> Vec<usize> {
         let end = self
             .entries
             .partition_point(|(_, aabb)| aabb[0] <= target[2]);

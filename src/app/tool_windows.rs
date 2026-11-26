@@ -1128,7 +1128,7 @@ impl OpenCADStudio {
             }
             self.os_windows
                 .push(OsWindow::new(id, Detached::Tool(kind), placement, opener));
-            tasks.push(open);
+            tasks.push(open.chain(own_window(id, self.main_window)));
         }
         let panels: Vec<(crate::ui::dock::PanelId, WindowPlacement)> = self
             .dock
@@ -1157,7 +1157,7 @@ impl OpenCADStudio {
             let (id, open) = open_window(placement, panel.title().to_string(), false, false);
             self.os_windows
                 .push(OsWindow::new(id, Detached::Panel(panel), placement, None));
-            tasks.push(open);
+            tasks.push(open.chain(own_window(id, self.main_window)));
         }
         Task::batch(tasks)
     }
@@ -1323,6 +1323,12 @@ pub(crate) fn float_os_windows(
     app_focused: bool,
     focused: Option<iced::window::Id>,
 ) -> Task<Message> {
+    // Owned by the main window there (`own_window`): Windows keeps them
+    // above it, and a level change would raise them over other apps and
+    // over a file dialog they opened (#3443).
+    if cfg!(target_os = "windows") {
+        return Task::none();
+    }
     let level = if app_focused {
         iced::window::Level::AlwaysOnTop
     } else {
@@ -1369,6 +1375,44 @@ fn centred_over_main(
     }
 }
 
+/// Make window `id` an owned window of `owner` (Windows): it stays above
+/// its owner, goes behind other apps with it and leaves the taskbar to it.
+#[cfg(target_os = "windows")]
+fn own_window(id: iced::window::Id, owner: Option<iced::window::Id>) -> Task<Message> {
+    use iced::window::raw_window_handle::RawWindowHandle;
+
+    fn hwnd(window: &dyn iced::window::Window) -> Option<isize> {
+        match window.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+            _ => None,
+        }
+    }
+    let Some(owner) = owner else {
+        return Task::none();
+    };
+    iced::window::run(owner, hwnd)
+        .then(move |owner| {
+            iced::window::run(id, move |window| {
+                if let (Some(owner), Some(own)) = (owner, hwnd(window)) {
+                    // SAFETY: both handles are live windows of this process.
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(
+                            own as _,
+                            windows_sys::Win32::UI::WindowsAndMessaging::GWLP_HWNDPARENT,
+                            owner,
+                        );
+                    }
+                }
+            })
+        })
+        .discard()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+fn own_window(_id: iced::window::Id, _owner: Option<iced::window::Id>) -> Task<Message> {
+    Task::none()
+}
+
 /// Open a window of its own at `placement` (centred when it has no place).
 #[cfg(not(target_arch = "wasm32"))]
 fn open_window(
@@ -1400,7 +1444,12 @@ fn open_window(
         resizable: true,
         exit_on_close_request: false,
         // Opened from the app, which has the focus: above the main window.
-        level: iced::window::Level::AlwaysOnTop,
+        // Windows: an owned window instead (`own_window`).
+        level: if cfg!(target_os = "windows") {
+            iced::window::Level::Normal
+        } else {
+            iced::window::Level::AlwaysOnTop
+        },
         icon: super::helpers::build_window_icon()
             .and_then(|rgba| iced::window::icon::from_rgba(rgba, 32, 32).ok()),
         // The same app id as the main window: the dock groups them and shows

@@ -9,6 +9,11 @@
 //! deflection and distance. A mode stays on for the next points (each from
 //! the last one) until Enter at its first prompt ('NE: Esc) hands the
 //! location prompt back.
+//!
+//! A run starts from the last point the command wrote (in any mode): a
+//! bearing or azimuth asks its direction straight away, an angle or
+//! deflection its end point; with two points written the angle is turned at
+//! the last one from the one before it and asked straight away.
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use glam::DVec3;
@@ -64,10 +69,13 @@ pub struct CreatePointManualCommand {
     description: Option<String>,
     /// Northing and easting the 'NE prompts offer.
     ne: (f64, f64),
-    /// Where the next direction run starts: the last point written.
+    /// Where the direction run starts.
     from: Option<DVec3>,
     /// The other end of the angle or deflection's reference line.
     to: Option<DVec3>,
+    /// The last point the command wrote and the one before it.
+    last: Option<DVec3>,
+    before: Option<DVec3>,
     counter_clockwise: bool,
     /// A line picked at the line prompt (its two ends).
     picked: Option<(DVec3, DVec3)>,
@@ -104,33 +112,25 @@ impl CreatePointManualCommand {
 
     /// The command started by a menu entry in a direction mode.
     pub fn with_mode(mode: Mode) -> Self {
-        let mut c = Self { step: Step::Location, mode: Mode::Manual, description: None, ne: (0.0, 0.0), from: None, to: None, counter_clockwise: false, picked: None };
+        let mut c = Self { step: Step::Location, mode: Mode::Manual, description: None, ne: (0.0, 0.0), from: None, to: None, last: None, before: None, counter_clockwise: false, picked: None };
         c.enter_mode(mode);
         c
     }
 
+    /// The mode's first prompt, chained from the points already written.
     fn enter_mode(&mut self, mode: Mode) {
         self.mode = mode;
-        self.step = match mode {
-            Mode::Manual => Step::Location,
-            Mode::NorthingEasting => Step::Northing,
-            Mode::Bearing | Mode::Azimuth => Step::Start,
-            Mode::Angle | Mode::Deflection => Step::Line,
-        };
-    }
-
-    /// The first prompt of the mode's next point, chained from the last one.
-    fn next_location(&mut self) {
-        self.step = match self.mode {
-            Mode::Manual => Step::Location,
-            Mode::NorthingEasting => Step::Northing,
-            Mode::Bearing if self.from.is_some() => Step::Quadrant,
-            Mode::Azimuth if self.from.is_some() => Step::Azimuth,
-            Mode::Angle | Mode::Deflection if self.from.is_some() => Step::End,
-            _ => {
-                self.enter_mode(self.mode);
-                return;
-            }
+        self.from = self.last;
+        self.to = self.before;
+        self.step = match (mode, self.last, self.before) {
+            (Mode::Manual, ..) => Step::Location,
+            (Mode::NorthingEasting, ..) => Step::Northing,
+            (Mode::Bearing, Some(_), _) => Step::Quadrant,
+            (Mode::Azimuth, Some(_), _) => Step::Azimuth,
+            (Mode::Bearing | Mode::Azimuth, None, _) => Step::Start,
+            (Mode::Angle | Mode::Deflection, Some(_), Some(_)) => Step::Angle,
+            (Mode::Angle | Mode::Deflection, Some(_), None) => Step::End,
+            (Mode::Angle | Mode::Deflection, None, _) => Step::Line,
         };
     }
 
@@ -190,6 +190,10 @@ impl CreatePointManualCommand {
 
     fn invalid() -> Option<CmdResult> {
         Some(CmdResult::ReportError(t("Invalid input")))
+    }
+
+    fn point_required() -> Option<CmdResult> {
+        Some(CmdResult::ReportError(t("Point or option keyword required.")))
     }
 
     fn numeric() -> Option<CmdResult> {
@@ -391,11 +395,8 @@ impl CadCommand for CreatePointManualCommand {
                 }
             }
             Step::End => {
-                if typed.is_empty() {
-                    return Some(self.resume());
-                }
                 self.step = Step::End;
-                return Self::invalid();
+                return Self::point_required();
             }
             Step::Angle => {
                 if typed.is_empty() {
@@ -414,19 +415,22 @@ impl CadCommand for CreatePointManualCommand {
                     }
                 }
             }
-            Step::Distance(direction) => match number(typed).and_then(|d| self.travel(direction, d)) {
-                Some(at) => {
-                    self.from = Some(at);
-                    return Some(self.located(at));
+            Step::Distance(direction) => {
+                if typed.is_empty() {
+                    return Some(self.resume());
                 }
-                None => {
-                    self.step = Step::Distance(direction);
-                    return Self::numeric();
+                match number(typed).and_then(|d| self.travel(direction, d)) {
+                    Some(at) => return Some(self.located(at)),
+                    None => {
+                        self.step = Step::Distance(direction);
+                        return Some(CmdResult::ReportError(format!("{}
+{}", t("Invalid input"), t("Requires numeric distance. Please try again."))));
+                    }
                 }
-            },
+            }
             Step::Start => {
                 self.step = Step::Start;
-                return Self::invalid();
+                return Self::point_required();
             }
             Step::Description(at) => {
                 let d = self.description_of(text);
@@ -445,10 +449,8 @@ impl CadCommand for CreatePointManualCommand {
                     },
                 };
                 // The mode's next point starts where this one is.
-                if self.mode != Mode::Manual {
-                    self.from = Some(at);
-                }
-                self.next_location();
+                self.before = self.last.replace(at);
+                self.enter_mode(self.mode);
                 let then = match self.unit_line() {
                     CmdResult::ReportMessage(m) => Some(m),
                     _ => None,
@@ -462,7 +464,7 @@ impl CadCommand for CreatePointManualCommand {
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
             Step::Location => CmdResult::Done,
-            Step::Start | Step::Line => self.resume(),
+            Step::Line => self.resume(),
             _ => self.on_text_input("").unwrap_or(CmdResult::NeedPoint),
         }
     }
@@ -521,6 +523,10 @@ mod tests {
         let r = run(&mut c, &["30", "20", "", ""]);
         let p = added(&r[3]);
         assert!((p.x - 33.5822).abs() < 1e-4 && (p.y - 1.6429).abs() < 1e-4);
+        // Third point: turned at the last point from the one before, no end asked.
+        let r = run(&mut c, &["35", "20", "", ""]);
+        let p = added(&r[3]);
+        assert!((p.x - 13.5833).abs() < 1e-4 && (p.y - 1.4329).abs() < 1e-4);
         // 'DD on (0,0)-(10,0): 90°, 20 → (0, 20).
         let mut c = CreatePointManualCommand::with_mode(Mode::Deflection);
         c.on_text_input("P");
@@ -529,5 +535,15 @@ mod tests {
         let r = run(&mut c, &["90", "20", "", ""]);
         let p = added(&r[3]);
         assert!(p.x.abs() < 1e-9 && (p.y - 20.0).abs() < 1e-9);
+        // 'DD after two plain points (100,100), (200,100): 90°, 20 → (200, 80).
+        let mut c = CreatePointManualCommand::new();
+        for at in [DVec3::new(100.0, 100.0, 0.0), DVec3::new(200.0, 100.0, 0.0)] {
+            c.on_point(at);
+            run(&mut c, &["", ""]);
+        }
+        run(&mut c, &["'DD"]);
+        let r = run(&mut c, &["90", "20", "", ""]);
+        let p = added(&r[3]);
+        assert!((p.x - 200.0).abs() < 1e-9 && (p.y - 80.0).abs() < 1e-9);
     }
 }

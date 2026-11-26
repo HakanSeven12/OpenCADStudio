@@ -2260,8 +2260,17 @@ impl OpenCADStudio {
             }
 
             Message::PluginDialogTextChange(id, val) => {
+                // Each edit reaches the plugin as a "change", as a panel's
+                // text field and a dialog's file field already report it,
+                // so it can follow the input (filter a list, check a name).
+                // A Number field reports its text as typed, partial or not.
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.text_values.insert(id, val);
+                    state.text_values.insert(id.clone(), val.clone());
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "change".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Text(val)),
+                    );
                 }
                 Task::none()
             }

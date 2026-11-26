@@ -1315,6 +1315,10 @@ pub struct UserSettings {
     /// COUNTSERVICE (default on).
     #[serde(default = "default_true")]
     pub count_service: bool,
+    /// GEOMETRYCLEANUPZOOMPAN (default on): a pick in the Geometry Cleanup
+    /// palette zooms to the error.
+    #[serde(default = "default_true")]
+    pub geometry_cleanup_zoom_pan: bool,
     /// Count - Invalid Area: 0 ask, 1 undo, 2 count all of model space.
     #[serde(default)]
     pub count_invalid_area: u8,
@@ -1710,6 +1714,7 @@ impl Default for UserSettings {
             count_color: 3,
             count_error_color: 1,
             count_service: true,
+            geometry_cleanup_zoom_pan: true,
             count_invalid_area: 0,
             sheet_set: Default::default(),
             quick_calc: Default::default(),

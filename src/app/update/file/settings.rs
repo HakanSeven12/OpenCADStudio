@@ -316,6 +316,7 @@ impl OpenCADStudio {
             count_color: self.count_palette.color,
             count_error_color: self.count_palette.error_color,
             count_service: self.count_palette.service,
+            geometry_cleanup_zoom_pan: !self.geometry_cleanup.auto_zoom_off,
             count_invalid_area: self.count_palette.invalid_choice,
             sheet_set: self.sheet_set.settings,
             quick_calc: self.quick_calc.settings(),
@@ -603,6 +604,7 @@ impl OpenCADStudio {
         self.count_palette.color = s.count_color;
         self.count_palette.error_color = s.count_error_color;
         self.count_palette.service = s.count_service;
+        self.geometry_cleanup.auto_zoom_off = !s.geometry_cleanup_zoom_pan;
         self.count_palette.invalid_choice = s.count_invalid_area.min(2);
         self.sheet_set.settings = s.sheet_set;
         self.quick_calc.apply_settings(&s.quick_calc);

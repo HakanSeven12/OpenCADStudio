@@ -21,6 +21,12 @@ use ocs_geom::geom2d::{Curve, Tolerance};
 /// Ends nearer than this meet: they are not an error.
 const WELD: f64 = 1e-6;
 
+/// The variables of Geometry Cleanup.
+const SYSVARS: &[&str] = &["GEOMETRYCLEANUPSTATE", "GEOMETRYCLEANUPZOOMPAN"];
+
+/// The colour index of the picked error's objects in review mode (red).
+const REVIEW_COLOR: i16 = 1;
+
 impl OpenCADStudio {
     pub(super) fn dispatch_geometry_cleanup(
         &mut self,
@@ -29,7 +35,26 @@ impl OpenCADStudio {
     ) -> Option<Task<Message>> {
         let cmd = cmd.trim();
         let (verb, rest) = cmd.split_once(char::is_whitespace).unwrap_or((cmd, ""));
-        match verb.to_ascii_uppercase().as_str() {
+        let verb = verb.to_ascii_uppercase();
+        let rest = rest.trim();
+        if verb == "SETVAR" {
+            let (name, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            let name = name.to_ascii_uppercase();
+            if !SYSVARS.contains(&name.as_str()) {
+                return None;
+            }
+            self.geometry_cleanup_sysvar(&name, Some(value.trim()).filter(|v| !v.is_empty()));
+            return Some(Task::none());
+        }
+        if SYSVARS.contains(&verb.as_str()) {
+            self.geometry_cleanup_sysvar(&verb, Some(rest).filter(|v| !v.is_empty()));
+            return Some(Task::none());
+        }
+        match verb.as_str() {
+            "GEOMETRYERRORREVIEWCLOSE" => {
+                self.geometry_cleanup_end_review(i);
+                Some(Task::none())
+            }
             "GEOMETRYCLEANUPOPEN" => {
                 self.set_geometry_cleanup(true);
                 // Objects selected before the command are scanned at once.
@@ -58,17 +83,90 @@ impl OpenCADStudio {
         }
     }
 
+    /// GEOMETRYCLEANUPSTATE is read-only; GEOMETRYCLEANUPZOOMPAN takes 0
+    /// or 1 (asked for when none is given).
+    fn geometry_cleanup_sysvar(&mut self, name: &str, value: Option<&str>) {
+        if name == "GEOMETRYCLEANUPSTATE" {
+            let v = usize::from(self.geometry_cleanup.show);
+            self.command_line
+                .push_output(&crate::tf!("{name} = {v} (read only)"));
+            return;
+        }
+        let current = i32::from(!self.geometry_cleanup.auto_zoom_off);
+        let ask = |app: &mut Self| {
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some(name.to_string());
+        };
+        match value.map(str::parse::<i32>) {
+            None => ask(self),
+            Some(Ok(n @ (0 | 1))) => {
+                self.geometry_cleanup.auto_zoom_off = n == 0;
+                self.persist_settings_if_changed();
+            }
+            Some(_) => {
+                self.command_line
+                    .push_rejection(&crate::t!("Requires 0 or 1 only."));
+                ask(self);
+            }
+        }
+    }
+
+    /// End review mode: the drawing is drawn as it is again.
+    pub(in crate::app) fn geometry_cleanup_end_review(&mut self, i: usize) {
+        self.geometry_cleanup.review = false;
+        self.geometry_cleanup_review_display(i);
+    }
+
+    /// Show or end the review display of tab `i`: in review mode, the
+    /// picked error's objects in the review colour and the rest faded (the
+    /// display of count mode). Not on a tab in count mode, which owns it.
+    pub(in crate::app) fn geometry_cleanup_review_display(&mut self, i: usize) {
+        let picked = self
+            .geometry_cleanup_scan_here(i)
+            .zip(self.geometry_cleanup.picked)
+            .and_then(|(scan, index)| scan.findings.get(index).copied())
+            .filter(|_| self.geometry_cleanup.review && self.geometry_cleanup.show);
+        if self.tabs[i].count.is_some() {
+            self.geometry_cleanup.review_shown = false;
+            return;
+        }
+        let display = picked.map(|finding| crate::scene::CountDisplay {
+            counted: std::iter::once(finding.handle)
+                .chain(finding.other.map(|o| o.0))
+                .collect(),
+            errors: Default::default(),
+            color: crate::ui::window::count_palette::aci_rgba(REVIEW_COLOR),
+            error_color: crate::ui::window::count_palette::aci_rgba(REVIEW_COLOR),
+        });
+        if display.is_none() && !self.geometry_cleanup.review_shown {
+            return;
+        }
+        self.geometry_cleanup.review_shown = display.is_some();
+        // The colours change, not the geometry: the scan is still true.
+        let fresh = self
+            .geometry_cleanup_scan_here(i)
+            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        self.tabs[i].scene.set_count_display(display);
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if let Some(scan) = self.geometry_cleanup.scan.as_mut().filter(|_| fresh) {
+            scan.epoch = epoch;
+        }
+    }
+
     /// Open or close the Geometry Cleanup palette (docked, expanded).
     pub(in crate::app) fn set_geometry_cleanup(&mut self, open: bool) {
         let id = PanelId::GeometryCleanup;
         if !open {
             self.geometry_cleanup_close_menu(self.active_tab);
+            self.geometry_cleanup.review = false;
         }
         self.geometry_cleanup.show = open;
         if open {
             self.dock_open_at_default(id);
         } else {
             self.dock_unpeek(id);
+            self.geometry_cleanup_review_display(self.active_tab);
         }
     }
 
@@ -211,6 +309,10 @@ impl OpenCADStudio {
             .and_then(|(scan, index)| scan.findings.get(index).copied())
             .filter(|_| rescan)
             .and_then(|old| findings.iter().position(|f| f.same_error(&old)));
+        if !rescan {
+            // A new selection ends review mode.
+            self.geometry_cleanup.review = false;
+        }
         self.geometry_cleanup.scan = Some(Scan {
             tab: self.tabs[i].id,
             epoch: self.tabs[i].scene.geometry_epoch,
@@ -221,6 +323,7 @@ impl OpenCADStudio {
             kept,
         });
         self.geometry_cleanup.picked = picked;
+        self.geometry_cleanup_review_display(i);
     }
 
     /// The errors kept as designed in the drawing of tab `i`. Marks of
@@ -489,6 +592,11 @@ impl OpenCADStudio {
             }
             GeometryCleanupMsg::Preview(target) => self.geometry_cleanup_preview(i, target),
             GeometryCleanupMsg::MenuHover(on) => self.geometry_cleanup.menu_hovered = on,
+            GeometryCleanupMsg::CloseReview => self.geometry_cleanup_end_review(i),
+            GeometryCleanupMsg::ToggleAutoZoom => {
+                self.geometry_cleanup.auto_zoom_off = !self.geometry_cleanup.auto_zoom_off;
+                self.persist_settings_if_changed();
+            }
             GeometryCleanupMsg::Pick(index) => {
                 let Some(finding) = self.geometry_cleanup_scan_here(i).and_then(|scan| {
                     scan.findings
@@ -499,7 +607,9 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 self.geometry_cleanup.picked = Some(index);
+                self.geometry_cleanup.review = true;
                 self.geometry_cleanup_show(i, finding.0, finding.1);
+                self.geometry_cleanup_review_display(i);
             }
             GeometryCleanupMsg::Fix(index, fix) => {
                 let Some(scan) = self.geometry_cleanup_scan_here(i) else {
@@ -711,6 +821,7 @@ impl OpenCADStudio {
         if let Some((_, finding)) = next {
             self.geometry_cleanup_show(i, finding, tolerances);
         }
+        self.geometry_cleanup_review_display(i);
     }
 
     /// Zoom to an error and select its objects: round a length error by
@@ -747,16 +858,41 @@ impl OpenCADStudio {
                 )
             }
         };
-        self.handle_zoom_to_window(
+        let (low, high) = (
             glam::DVec3::new(low[0], low[1], 0.0),
             glam::DVec3::new(high[0], high[1], 0.0),
         );
+        // GEOMETRYCLEANUPZOOMPAN 0: only an error that is not in view.
+        if !self.geometry_cleanup.auto_zoom_off || !self.geometry_cleanup_in_view(i, low, high) {
+            self.handle_zoom_to_window(low, high);
+        }
         let scene = &mut self.tabs[i].scene;
         scene.select_entity(finding.handle, true);
         if let Some((other, _)) = finding.other {
             scene.select_entity(other, false);
         }
         self.refresh_selected_grips();
+    }
+
+    /// Whether the window from `low` to `high` is all in the view of tab
+    /// `i`.
+    fn geometry_cleanup_in_view(&self, i: usize, low: glam::DVec3, high: glam::DVec3) -> bool {
+        let scene = &self.tabs[i].scene;
+        let (vw, vh) = scene.selection.borrow().view.vp_size;
+        let tile = scene.active_model_tile_bounds(vw, vh);
+        let project = scene.camera.borrow().projector(tile);
+        [
+            low,
+            high,
+            glam::DVec3::new(low.x, high.y, 0.0),
+            glam::DVec3::new(high.x, low.y, 0.0),
+        ]
+        .into_iter()
+        .all(|corner| {
+            project(corner).is_some_and(|at| {
+                (0.0..=tile.width).contains(&at.x) && (0.0..=tile.height).contains(&at.y)
+            })
+        })
     }
 
     /// Repair one error as one undo step; `false` when nothing changed. The

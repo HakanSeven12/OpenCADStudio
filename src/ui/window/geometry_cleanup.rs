@@ -293,6 +293,17 @@ pub struct GeometryCleanupPalette {
     pub menu_hovered: bool,
     /// The repair whose result the drawing previews.
     pub preview: Option<(usize, Fix)>,
+    /// Review mode: the picked error's objects are drawn bright and the
+    /// rest faded, with the review toolbar over the drawing. A pick starts
+    /// it; GEOMETRYERRORREVIEWCLOSE, the toolbar's Close, a new selection
+    /// and closing the palette end it.
+    pub review: bool,
+    /// Whether the drawing shows the review display now, so that ending it
+    /// does not clear the display of count mode.
+    pub review_shown: bool,
+    /// GEOMETRYCLEANUPZOOMPAN 0: a pick zooms only when the error is not in
+    /// view. Kept in the user profile.
+    pub auto_zoom_off: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -315,6 +326,10 @@ pub enum GeometryCleanupMsg {
     Preview(Option<(usize, Fix)>),
     /// The pointer came onto the marker menu or left it.
     MenuHover(bool),
+    /// The review toolbar's Close: end review mode.
+    CloseReview,
+    /// The review toolbar's Auto Zoom: GEOMETRYCLEANUPZOOMPAN 1 or 0.
+    ToggleAutoZoom,
     /// The Settings dialog.
     OpenSettings,
     SettingsTolerance(EndErrorKind, String),
@@ -527,6 +542,64 @@ fn previews<'a>(content: Element<'a, Message>, index: usize, fix: Fix) -> Elemen
     mouse_area(content)
         .on_enter(msg(GeometryCleanupMsg::Preview(Some((index, fix)))))
         .on_exit(msg(GeometryCleanupMsg::Preview(None)))
+        .into()
+}
+
+/// The toolbar over the drawing in review mode: Auto Zoom
+/// (GEOMETRYCLEANUPZOOMPAN) and Close (GEOMETRYERRORREVIEWCLOSE).
+pub fn review_toolbar<'a>(palette: &GeometryCleanupPalette) -> Element<'a, Message> {
+    let bar_button = |icon: Element<'a, Message>, tip: String, press: Message| {
+        kit::tooltip(
+            button(icon)
+                .style(button::text)
+                .padding([3, 5])
+                .on_press(press),
+            tip,
+            kit::TipPosition::Bottom,
+        )
+    };
+    let zoom_tip = if palette.auto_zoom_off {
+        crate::t!("Auto Zoom is off: a picked error is zoomed to only when it is not in view.")
+    } else {
+        crate::t!("Auto Zoom is on: the view zooms to each picked error.")
+    };
+    let zoom_icon = if palette.auto_zoom_off {
+        crate::ui::icons::themed_disabled(crate::ui::icons::zoom_icon(), 16.0)
+    } else {
+        crate::ui::icons::themed_success(crate::ui::icons::zoom_icon(), 16.0)
+    };
+    let bar = row![
+        text(crate::t!("Geometry Cleanup: Review").into_owned()).size(13),
+        bar_button(
+            zoom_icon,
+            zoom_tip.into_owned(),
+            msg(GeometryCleanupMsg::ToggleAutoZoom)
+        ),
+        bar_button(
+            crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0),
+            crate::t!("Close").into_owned(),
+            msg(GeometryCleanupMsg::CloseReview)
+        ),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    let bar = container(bar)
+        .padding([4, 10])
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(crate::ui::style::chrome::panel(
+                theme,
+            ))),
+            border: iced::Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: km::line(),
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+    container(iced::widget::opaque(bar))
+        .width(Fill)
+        .align_x(iced::Center)
+        .padding([10, 0])
         .into()
 }
 

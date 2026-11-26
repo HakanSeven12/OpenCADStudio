@@ -3121,6 +3121,13 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // Geometry Cleanup review mode: its toolbar over the drawing.
+            if self.geometry_cleanup.review_shown && !tab.is_start {
+                viewport_stack = viewport_stack.push(
+                    crate::ui::window::geometry_cleanup::review_toolbar(&self.geometry_cleanup),
+                );
+            }
+
             // Count mode: a blue frame round the drawing and the count toolbar.
             if let (Some(mode), false) = (tab.count.as_ref(), tab.is_start) {
                 viewport_stack = viewport_stack.push(crate::ui::window::count_palette::border());

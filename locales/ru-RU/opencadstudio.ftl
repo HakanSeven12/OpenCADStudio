@@ -1538,6 +1538,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Поворот черчения сброшен на 0° в мировой системе координат.
     .length-format-is-now = Формат длины теперь __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Единица чертежа теперь __ocs_fmt_0__. Геометрия не изменена; для пересчёта используйте DWGUNITS.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = В этой области нет объектов.
     .this-operator-requires-a-numeric-property = Этому оператору нужно числовое свойство.
     .enter-a-valid-number = Введите допустимое число.

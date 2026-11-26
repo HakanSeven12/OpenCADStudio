@@ -1533,6 +1533,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Tekenrotatie teruggezet naar 0° in het wereldstelsel.
     .length-format-is-now = Lengtenotatie is nu __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Tekeneenheid is nu __ocs_fmt_0__. Geometrie ongewijzigd; gebruik DWGUNITS om om te rekenen.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Geen objecten beschikbaar binnen dit bereik.
     .this-operator-requires-a-numeric-property = Deze operator vereist een numerieke eigenschap.
     .enter-a-valid-number = Voer een geldig getal in.

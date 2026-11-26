@@ -1522,6 +1522,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = 绘图旋转已重置为世界坐标系的 0°。
     .length-format-is-now = 长度格式现为 __ocs_fmt_0__。
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = 图形单位现为 __ocs_fmt_0__。几何未更改；请使用 DWGUNITS 进行转换。
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = 此范围内没有对象。
     .this-operator-requires-a-numeric-property = 此运算符需要数值属性。
     .enter-a-valid-number = 请输入有效数值。

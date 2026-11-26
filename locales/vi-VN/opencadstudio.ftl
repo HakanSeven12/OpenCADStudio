@@ -1535,6 +1535,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Góc xoay bản vẽ được đặt lại về World ở 0°.
     .length-format-is-now = Định dạng độ dài bây giờ là __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Đơn vị vẽ bây giờ là __ocs_fmt_0__. Hình học không thay đổi - sử dụng DWGUNITS để chuyển đổi nó.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Không có đối tượng nào có sẵn trong phạm vi này.
     .this-operator-requires-a-numeric-property = Toán tử này yêu cầu thuộc tính số.
     .enter-a-valid-number = Nhập một số hợp lệ.

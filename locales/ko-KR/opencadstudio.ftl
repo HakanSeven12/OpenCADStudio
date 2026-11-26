@@ -1534,6 +1534,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = 제도 회전을 세계 좌표의 0°로 초기화했습니다.
     .length-format-is-now = 길이 형식이 __ocs_fmt_0__(으)로 변경되었습니다.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = 도면 단위가 __ocs_fmt_0__(으)로 변경되었습니다. 형상은 변경되지 않았습니다. 변환하려면 DWGUNITS를 사용하세요.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = 이 범위에 객체가 없습니다.
     .this-operator-requires-a-numeric-property = 이 연산자는 숫자 속성이 필요합니다.
     .enter-a-valid-number = 유효한 숫자를 입력하세요.

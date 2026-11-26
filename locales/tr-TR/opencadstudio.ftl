@@ -1509,6 +1509,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Çizim dönüşü, Dünya koordinatlarında 0° olarak sıfırlandı.
     .length-format-is-now = Uzunluk biçimi artık __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Çizim birimi artık __ocs_fmt_0__. Geometri değişmedi; dönüştürmek için DWGUNITS kullanın.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Uzunluklar hâlâ fit ve inç olarak gösteriliyor: UNITS içinde Uzunluk türünü Ondalık yapın.
     .no-objects-are-available-in-this-scope = Bu kapsamda nesne yok.
     .this-operator-requires-a-numeric-property = Bu işleç sayısal bir özellik gerektirir.
     .enter-a-valid-number = Geçerli bir sayı girin.

@@ -1534,6 +1534,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Piirtokierto palautettu maailmakoordinaatiston 0°:een.
     .length-format-is-now = Pituuden muoto on nyt __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Piirustuksen yksikkö on nyt __ocs_fmt_0__. Geometria ei muuttunut; muunna se komennolla DWGUNITS.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Tällä alueella ei ole objekteja.
     .this-operator-requires-a-numeric-property = Tämä operaattori edellyttää numeerista ominaisuutta.
     .enter-a-valid-number = Anna kelvollinen luku.

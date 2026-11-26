@@ -1535,6 +1535,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Rotation du dessin réinitialisée à 0° dans le repère général.
     .length-format-is-now = Le format de longueur est désormais __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = L’unité du dessin est désormais __ocs_fmt_0__. Géométrie inchangée ; utilisez DWGUNITS pour la convertir.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Aucun objet disponible dans cette portée.
     .this-operator-requires-a-numeric-property = Cet opérateur nécessite une propriété numérique.
     .enter-a-valid-number = Saisissez un nombre valide.

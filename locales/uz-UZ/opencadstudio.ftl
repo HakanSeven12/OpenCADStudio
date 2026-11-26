@@ -1522,6 +1522,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Çizmaçilik burilişi 0° da Jahon (World) ga tiklandi.
     .length-format-is-now = Uzunlik formati endi __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Çizma birligi endi __ocs_fmt_0__. Geometriya özgartirilmadi — uni konvertatsiya qiliş uçun DWGUNITS dan foydalaning.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Uşbu doirada obyektlar mavjud emas.
     .this-operator-requires-a-numeric-property = Bu operator raqamli xususiyatni talab qiladi.
     .enter-a-valid-number = Töğri raqam kiriting.

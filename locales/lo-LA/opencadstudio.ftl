@@ -1540,6 +1540,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = ຕັ້ງຄ່າການໝຸນການຂຽນແບບຄືນເປັນ World ທີ່ 0° ແລ້ວ.
     .length-format-is-now = ຮູບແບບຄວາມຍາວຕອນນີ້ແມ່ນ __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = ຫົວໜ່ວຍຮູບແຕ້ມຕອນນີ້ແມ່ນ __ocs_fmt_0__. ເລຂາຄະນິດບໍ່ປ່ຽນແປງ — ໃຊ້ DWGUNITS ເພື່ອແປງມັນ.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = ບໍ່ມີວັດຖຸໃນຂອບເຂດນີ້.
     .this-operator-requires-a-numeric-property = ຕົວດຳເນີນການນີ້ຕ້ອງການຄຸນສົມບັດທີ່ເປັນຕົວເລກ.
     .enter-a-valid-number = ປ້ອນຕົວເລກທີ່ຖືກຕ້ອງ.

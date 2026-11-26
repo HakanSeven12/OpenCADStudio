@@ -1536,6 +1536,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Η περιστροφή σχεδίασης επανήλθε στις 0° του παγκόσμιου συστήματος.
     .length-format-is-now = Η μορφή μήκους είναι πλέον __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Η μονάδα σχεδίου είναι πλέον __ocs_fmt_0__. Η γεωμετρία δεν άλλαξε· χρησιμοποιήστε DWGUNITS για μετατροπή.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Δεν υπάρχουν αντικείμενα σε αυτό το πεδίο.
     .this-operator-requires-a-numeric-property = Αυτός ο τελεστής απαιτεί αριθμητική ιδιότητα.
     .enter-a-valid-number = Εισαγάγετε έγκυρο αριθμό.

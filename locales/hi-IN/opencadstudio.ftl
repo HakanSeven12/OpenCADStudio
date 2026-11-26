@@ -1523,6 +1523,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = आरेखन घुमाव वैश्विक निर्देशांकों में 0° पर रीसेट किया गया।
     .length-format-is-now = लंबाई प्रारूप अब __ocs_fmt_0__ है।
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = चित्र की इकाई अब __ocs_fmt_0__ है। ज्यामिति अपरिवर्तित है; रूपांतरण के लिए DWGUNITS उपयोग करें।
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = इस दायरे में कोई ऑब्जेक्ट नहीं है।
     .this-operator-requires-a-numeric-property = इस ऑपरेटर को संख्यात्मक गुण चाहिए।
     .enter-a-valid-number = मान्य संख्या दर्ज करें।

@@ -6264,6 +6264,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Drafting rotation reset to World at 0°." => Some(("common", "drafting-rotation-reset-to-world-at-0")),
         "Length format is now {label}." => Some(("common", "length-format-is-now")),
         "Drawing unit is now {label}. Geometry unchanged — use DWGUNITS to convert it." => Some(("common", "drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it")),
+        "Lengths still show in feet and inches: set Length type to Decimal in UNITS." => Some(("common", "lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units")),
         "No objects are available in this scope." => Some(("common", "no-objects-are-available-in-this-scope")),
         "This operator requires a numeric property." => Some(("common", "this-operator-requires-a-numeric-property")),
         "Enter a valid number." => Some(("common", "enter-a-valid-number")),

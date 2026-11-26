@@ -1532,6 +1532,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Rajzolási elforgatás visszaállítva: Világ, 0°.
     .length-format-is-now = A hosszformátum most __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = A rajz egysége most __ocs_fmt_0__. A geometria változatlan; átváltáshoz használja a DWGUNITS parancsot.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = Ebben a hatókörben nincsenek objektumok.
     .this-operator-requires-a-numeric-property = Ez az operátor numerikus tulajdonságot igényel.
     .enter-a-valid-number = Adjon meg érvényes számot.

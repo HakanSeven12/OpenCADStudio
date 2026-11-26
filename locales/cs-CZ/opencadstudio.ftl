@@ -1539,6 +1539,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = Natočení kreslení obnoveno na 0° v globálních souřadnicích.
     .length-format-is-now = Formát délky je nyní __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = Jednotka výkresu je nyní __ocs_fmt_0__. Geometrie nezměněna; pro převod použijte DWGUNITS.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = V tomto rozsahu nejsou žádné objekty.
     .this-operator-requires-a-numeric-property = Tento operátor vyžaduje číselnou vlastnost.
     .enter-a-valid-number = Zadejte platné číslo.

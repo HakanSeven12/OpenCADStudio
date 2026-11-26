@@ -7536,6 +7536,19 @@ impl OpenCADStudio {
                     )
                     .as_ref(),
                 );
+                // Engineering / Architectural lengths read as feet and inches
+                // whatever the unit, so a metric unit alone still shows inches
+                // while drawing (#3683).
+                let metric = matches!(code, 4..=7 | 12..=17);
+                let lunits = self.tabs[i].scene.document.header.linear_unit_format;
+                if metric && matches!(lunits, 3 | 4) {
+                    self.command_line.push_output(
+                        crate::t!(
+                            "Lengths still show in feet and inches: set Length type to Decimal in UNITS."
+                        )
+                        .as_ref(),
+                    );
+                }
                 Task::none()
             }
             Message::ToggleIsolatePopup => {

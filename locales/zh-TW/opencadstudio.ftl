@@ -1534,6 +1534,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = 製圖旋轉已重設為世界座標系的 0°。
     .length-format-is-now = 長度格式現在為 __ocs_fmt_0__。
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = 圖面單位現在為 __ocs_fmt_0__。幾何未變更；請使用 DWGUNITS 進行轉換。
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = 此範圍內沒有可用的物件。
     .this-operator-requires-a-numeric-property = 此運算子需要數值屬性。
     .enter-a-valid-number = 請輸入有效的數值。

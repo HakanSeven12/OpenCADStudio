@@ -1547,6 +1547,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = أُعيد دوران الرسم إلى 0° في نظام الإحداثيات العالمي.
     .length-format-is-now = تنسيق الطول الآن __ocs_fmt_0__.
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = وحدة الرسم الآن __ocs_fmt_0__. لم تتغير الهندسة؛ استخدم DWGUNITS لتحويلها.
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = لا توجد عناصر ضمن هذا النطاق.
     .this-operator-requires-a-numeric-property = يتطلب هذا العامل خاصية رقمية.
     .enter-a-valid-number = أدخل عددًا صالحًا.

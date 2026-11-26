@@ -1525,6 +1525,7 @@ common =
     .drafting-rotation-reset-to-world-at-0 = 作図の回転をワールド座標の0°にリセットしました。
     .length-format-is-now = 長さの形式を __ocs_fmt_0__ にしました。
     .drawing-unit-is-now-geometry-unchanged-use-dwgunits-to-convert-it = 図面単位を __ocs_fmt_0__ にしました。ジオメトリは変更していません。変換にはDWGUNITSを使用してください。
+    .lengths-still-show-in-feet-and-inches-set-length-type-to-decimal-in-units = Lengths still show in feet and inches: set Length type to Decimal in UNITS.
     .no-objects-are-available-in-this-scope = この範囲にオブジェクトはありません。
     .this-operator-requires-a-numeric-property = この演算子には数値プロパティが必要です。
     .enter-a-valid-number = 有効な数値を入力してください。

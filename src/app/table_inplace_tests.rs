@@ -1429,4 +1429,28 @@ fn a_field_cell_without_source_text_opens_with_its_value() {
     }
     start(&mut app, handle);
     assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "9.1");
+
+/// The cell editor draws the table's lines as preview wires; a middle-button
+/// pan must not take them away with the rubber band.
+#[test]
+fn the_table_lines_stay_drawn_while_the_view_is_panned_in_a_cell_edit() {
+    let (mut app, handle) = fixture("x");
+    start(&mut app, handle);
+    let i = app.active_tab;
+    let lines = |app: &OpenCADStudio| {
+        app.tabs[app.active_tab]
+            .scene
+            .shown_rubber_band()
+            .1
+            .len()
+    };
+    let shown = lines(&app);
+    assert!(shown > 0, "the edited table's lines are drawn");
+    // A pan starts where the pointer last moved.
+    app.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(iced::Point::new(400.0, 300.0));
+    let _ = app.update(Message::ViewportMiddlePress);
+    assert!(!app.tabs[i].scene.drawing_feedback_shown());
+    assert_eq!(lines(&app), shown, "a pan keeps the table's lines");
+    let _ = app.update(Message::ViewportMiddleRelease);
+    assert_eq!(lines(&app), shown);
 }

@@ -167,6 +167,10 @@ impl CadCommand for CorridorRangePickCommand {
         self.station.is_none()
     }
 
+    fn inject_before_entity_pick(&self) -> bool {
+        self.station.is_none()
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let typed = text.trim();
         // A typed coordinate is a pick, handled as a point.

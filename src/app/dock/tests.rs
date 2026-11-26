@@ -3234,3 +3234,42 @@ fn the_fold_is_kept_with_the_layout() {
     let older: DockState = serde_json::from_value(older).unwrap();
     assert!(!older.folded(DockSide::Left));
 }
+
+/// A click whose press and release arrive together (a scripted click does)
+/// folds the edge too and leaves no drag behind: the press starts the drag's
+/// capture layer only with the next frame, so the icon hears its own
+/// release.
+#[test]
+fn a_click_on_the_shown_icon_folds_the_edge_in_the_real_view() {
+    with_stack(|| {
+        use crate::app::config::DockSide;
+        let mut app = dock_app();
+        let title = find_in_view(&app, "PROPERTIES");
+        let at = iced::Point::new(crate::ui::dock::DOCK_STRIP_W / 2.0, title.y);
+        let click = |app: &mut OpenCADStudio| {
+            let mut simulator = iced_test::Simulator::with_size(
+                iced::Settings::default(),
+                VIEW_SIZE,
+                app.view_main(),
+            );
+            simulator.point_at(at);
+            simulator.simulate([
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at }),
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )),
+            ]);
+            let messages = simulator.into_messages().collect::<Vec<_>>();
+            for message in messages {
+                let _ = app.update(message);
+            }
+        };
+        click(&mut app);
+        assert!(app.dock_drag.is_none(), "no drag left behind");
+        assert!(app.dock.folded(DockSide::Left));
+        click(&mut app);
+        assert!(app.dock_drag.is_none());
+        assert!(!app.dock.folded(DockSide::Left));
+    });
+}

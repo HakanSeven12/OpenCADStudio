@@ -431,6 +431,11 @@ viewport =
     .move = Görünüm Penceresini Taşı
     .close = Görünüm Penceresini Kapat
 
+plugin-busy =
+    .prompt = { $command } çalışıyor …
+    .pill = ⏳ { $command }
+    .pill-tip = Bir eklenti komutu çalışıyor. Pencere, komut bittiğinde yeniden yanıt verecek.
+
 gpu =
     .title = Grafik Uyarısı
     .software-headline = Çalışan bir GPU sürücüsü bulunamadı; bu nedenle çizim, CPU üzerinde yazılımla işleniyor ({ $adapter }).

@@ -433,6 +433,11 @@ viewport =
 
     .preparing-layout = 正在准备布局…
 
+plugin-busy =
+    .prompt = 正在运行 { $command }…
+    .pill = ⏳ { $command }
+    .pill-tip = 插件命令正在运行。完成后窗口将恢复响应。
+
 gpu =
     .title = 图形警告
     .software-headline = 未找到可用的 GPU 驱动程序，因此图形正在 CPU 上以软件方式渲染 ({ $adapter })。

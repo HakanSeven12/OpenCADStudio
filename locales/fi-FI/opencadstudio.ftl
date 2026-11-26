@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Asettelua valmistellaan…
 
+plugin-busy =
+    .prompt = { $command } on käynnissä …
+    .pill = ⏳ { $command }
+    .pill-tip = Laajennuksen komento on käynnissä. Ikkuna vastaa taas, kun se on valmis.
+
 gpu =
     .title = Grafiikkavaroitus
     .software-headline = Toimivaa GPU-ajuria ei löytynyt, joten piirustus piirretään ohjelmallisesti suorittimella ({ $adapter }).

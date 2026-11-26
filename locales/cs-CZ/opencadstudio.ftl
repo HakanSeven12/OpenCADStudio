@@ -436,6 +436,11 @@ viewport =
 
     .preparing-layout = Příprava rozvržení…
 
+plugin-busy =
+    .prompt = { $command } běží …
+    .pill = ⏳ { $command }
+    .pill-tip = Probíhá příkaz zásuvného modulu. Okno bude znovu reagovat, až skončí.
+
 gpu =
     .title = Upozornění na grafiku
     .software-headline = Nebyl nalezen funkční ovladač GPU, výkres se proto vykresluje softwarově na CPU ({ $adapter }).

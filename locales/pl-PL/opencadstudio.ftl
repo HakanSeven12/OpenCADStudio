@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Przygotowywanie układu…
 
+plugin-busy =
+    .prompt = { $command } działa …
+    .pill = ⏳ { $command }
+    .pill-tip = Trwa wykonywanie polecenia wtyczki. Okno znów zareaguje po jego zakończeniu.
+
 gpu =
     .title = Ostrzeżenie graficzne
     .software-headline = Nie znaleziono działającego sterownika GPU, więc rysunek jest renderowany programowo na CPU ({ $adapter }).

@@ -1232,6 +1232,11 @@ pub enum Message {
     GripDwellTick,
     /// The notice redraw allows the next frame to build the scene.
     LayoutSettled,
+    /// The window drew while a plugin command waited for it (or the wait
+    /// timed out): the command may run (#3650).
+    PluginFrameDrawn,
+    /// Run the plugin command that waited for a frame.
+    PluginFrameResume,
     /// Timer pulse while a rollover hit-test is queued; fires when the
     /// cursor has been still long enough to safely run the pick.
     HoverDwellTick,

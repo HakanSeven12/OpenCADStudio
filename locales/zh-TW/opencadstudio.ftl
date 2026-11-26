@@ -433,6 +433,11 @@ viewport =
 
     .preparing-layout = 正在準備配置…
 
+plugin-busy =
+    .prompt = 正在執行 { $command }…
+    .pill = ⏳ { $command }
+    .pill-tip = 外掛程式命令正在執行。完成後視窗將恢復回應。
+
 gpu =
     .title = 圖形警告
     .software-headline = 找不到可用的 GPU 驅動程式，因此圖面正在 CPU上以軟體方式算繪（{ $adapter }）。

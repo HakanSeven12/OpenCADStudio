@@ -301,26 +301,28 @@ pub(crate) fn civil_surface_mesh(document: &document::Document, req: &Value) -> 
         if !triangle.is_visible() {
             continue;
         }
+        // A triangle naming a vertex past the list is skipped whole, so no
+        // vertex is emitted that no triangle uses.
+        if triangle.vertices.iter().any(|&i| i as usize >= surface.vertices.len()) {
+            continue;
+        }
         let mut tri = [0u32; 3];
-        let mut valid = true;
         for (k, &index) in triangle.vertices.iter().enumerate() {
             let i = index as usize;
-            let Some(v) = surface.vertices.get(i) else {
-                valid = false;
-                break;
-            };
             if remap[i] == u32::MAX {
+                let v = &surface.vertices[i].position;
                 remap[i] = pts.len() as u32;
-                pts.push([v.position.x, v.position.y, v.position.z]);
+                pts.push([v.x, v.y, v.z]);
             }
             tri[k] = remap[i];
         }
-        if valid {
-            tris.push(tri);
-        }
+        tris.push(tri);
     }
     if tris.is_empty() {
-        return err(format!("civil_surface_mesh: handle {:X} draws no triangles", handle.value()));
+        return err(format!(
+            "civil_surface_mesh: handle {:X} draws no triangles",
+            handle.value()
+        ));
     }
     json!({
         "ok": true,

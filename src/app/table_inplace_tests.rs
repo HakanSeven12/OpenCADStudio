@@ -163,6 +163,25 @@ fn empty_cell_commit_and_escape_have_different_effects() {
 }
 
 #[test]
+fn alt_enter_breaks_the_line_in_the_cell_and_enter_still_moves_down() {
+    let (mut app, handle) = fixture("a");
+    start(&mut app, handle);
+    app.mtext_select_all();
+    let _ = app.update(Message::CommandAppendChar("a".into()));
+    let _ = app.update(Message::ShortcutPressed("ALT+ENTER".into()));
+    let cell = app.table_cell_editor.as_ref().expect("Alt+Enter keeps the cell editor open");
+    assert_eq!((cell.row, cell.column), (0, 0), "Alt+Enter must not leave the cell");
+    let _ = app.update(Message::CommandAppendChar("b".into()));
+    let _ = app.update(Message::ShortcutPressed("SHIFT+ENTER".into()));
+    let _ = app.update(Message::CommandAppendChar("c".into()));
+    assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), r"a\Pb\Pc");
+    let _ = app.update(Message::ShortcutPressed("ENTER".into()));
+    assert_eq!(source(&app, handle), r"a\Pb\Pc");
+    let cell = app.table_cell_editor.as_ref().unwrap();
+    assert_eq!((cell.row, cell.column), (1, 0), "plain Enter still moves down");
+}
+
+#[test]
 fn tab_enter_and_arrows_move_the_editor_and_highlight() {
     let (mut app, handle) = fixture("first");
     start(&mut app, handle);

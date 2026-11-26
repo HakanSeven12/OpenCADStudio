@@ -191,6 +191,20 @@ impl OpenCADStudio {
         scene.set_preview_wires(preview);
     }
 
+    /// Alt+Enter (or Shift+Enter) in a cell editor starts a new line in the
+    /// cell; plain Enter keeps writing the cell and moving down. `true` when
+    /// the key was taken.
+    pub(in crate::app) fn table_cell_line_break(&mut self, key: &str) -> bool {
+        if !matches!(key, "ALT+ENTER" | "SHIFT+ENTER")
+            || self.table_cell_editor.is_none()
+            || self.mtext_editor.is_none()
+        {
+            return false;
+        }
+        self.mtext_type("\n");
+        true
+    }
+
     pub(in crate::app) fn close_table_cell_editor(&mut self) {
         let Some(cell) = self.table_cell_editor.take() else {
             return;

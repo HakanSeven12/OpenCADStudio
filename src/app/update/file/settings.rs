@@ -316,6 +316,7 @@ impl OpenCADStudio {
             count_color: self.count_palette.color,
             count_error_color: self.count_palette.error_color,
             count_service: self.count_palette.service,
+            geometry_cleanup_zoom_pan: !self.geometry_cleanup.auto_zoom_off,
             count_invalid_area: self.count_palette.invalid_choice,
             sheet_set: self.sheet_set.settings,
             quick_calc: self.quick_calc.settings(),
@@ -603,6 +604,7 @@ impl OpenCADStudio {
         self.count_palette.color = s.count_color;
         self.count_palette.error_color = s.count_error_color;
         self.count_palette.service = s.count_service;
+        self.geometry_cleanup.auto_zoom_off = !s.geometry_cleanup_zoom_pan;
         self.count_palette.invalid_choice = s.count_invalid_area.min(2);
         self.sheet_set.settings = s.sheet_set;
         self.quick_calc.apply_settings(&s.quick_calc);
@@ -961,6 +963,7 @@ impl OpenCADStudio {
             show_command_history: self.show_command_history,
             geometry_cleanup: self.geometry_cleanup.settings.clone(),
             geometry_cleanup_file: self.geometry_cleanup.settings_file.clone(),
+            geometry_cleanup_kept: self.geometry_cleanup.kept.clone(),
             show_layers: self.show_layers,
             show_block_palette: self.show_block_palette,
             show_files_palette: self.files_palette.show,
@@ -1048,6 +1051,7 @@ impl OpenCADStudio {
         self.show_command_history = cfg.show_command_history;
         self.geometry_cleanup.settings = cfg.geometry_cleanup.clone();
         self.geometry_cleanup.settings_file = cfg.geometry_cleanup_file.clone();
+        self.geometry_cleanup.kept = cfg.geometry_cleanup_kept.clone();
         if self.show_command_history {
             self.sync_command_history_panel();
         }

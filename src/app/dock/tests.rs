@@ -3109,3 +3109,167 @@ fn a_group_grip_lights_only_after_its_latest_hover_rests() {
     let _ = app.on_dock(DockMsg::GroupGrab(grip.0, grip.1));
     assert_eq!((app.dock_grip_hover, app.dock_grip_lit), (None, None));
 }
+
+/// Click on a strip icon: press and release without moving.
+fn click_icon(app: &mut OpenCADStudio, id: crate::ui::dock::PanelId) {
+    let _ = app.on_dock(crate::ui::dock::DockMsg::IconPress(id));
+    let _ = app.on_dock(crate::ui::dock::DockMsg::DragRelease);
+}
+
+/// A click on the icon of the group an edge shows folds the edge to its
+/// icon strip and gives the drawing the room; a click on any of its icons
+/// brings the edge back, with that icon's group.
+#[test]
+fn a_click_on_the_shown_icon_folds_the_edge() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockGroup, PanelId};
+    let mut app = dock_app();
+    app.show_browser = true;
+    app.dock.left = vec![
+        DockGroup::single(PanelId::Properties),
+        DockGroup::single(PanelId::Browser),
+    ];
+    let wide = app.dock_column_width(DockSide::Left);
+    assert!(wide > 0.0);
+
+    click_icon(&mut app, PanelId::Properties);
+    assert!(app.dock.folded(DockSide::Left));
+    assert!(!app.dock_edge_expanded(DockSide::Left));
+    assert_eq!(app.dock_column_width(DockSide::Left), 0.0);
+    assert!(app.dock_panel_visible(PanelId::Properties), "still open");
+    assert!(!app.dock_panel_on_screen(PanelId::Properties));
+    assert!(
+        app.dock_edge_expanded(DockSide::Right),
+        "the other edge stays"
+    );
+
+    click_icon(&mut app, PanelId::Properties);
+    assert!(!app.dock.folded(DockSide::Left));
+    assert_eq!(app.dock_shown_group(DockSide::Left), Some(0));
+    assert_eq!(app.dock_column_width(DockSide::Left), wide);
+
+    // Folded, another group's icon brings the edge back with that group.
+    click_icon(&mut app, PanelId::Properties);
+    click_icon(&mut app, PanelId::Browser);
+    assert!(app.dock_edge_expanded(DockSide::Left));
+    assert_eq!(app.dock_shown_group(DockSide::Left), Some(1));
+
+    // The icon of a group not shown switches to it, as before.
+    click_icon(&mut app, PanelId::Properties);
+    assert!(app.dock_edge_expanded(DockSide::Left));
+    assert_eq!(app.dock_shown_group(DockSide::Left), Some(0));
+}
+
+/// Dragging the shown group's icon moves the pallet and folds nothing.
+#[test]
+fn dragging_the_shown_icon_does_not_fold() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockMsg, PanelId};
+    let mut app = dock_app();
+    let _ = app.on_dock(DockMsg::IconPress(PanelId::Properties));
+    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(20.0, 100.0)));
+    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(1580.0, 120.0)));
+    let _ = app.on_dock(DockMsg::DragRelease);
+    assert_eq!(
+        app.dock.location(PanelId::Properties).map(|(s, _)| s),
+        Some(DockSide::Right)
+    );
+    assert!(!app.dock.folded(DockSide::Left));
+    assert!(!app.dock.folded(DockSide::Right));
+    assert!(app.dock_panel_on_screen(PanelId::Properties));
+}
+
+/// Opening a pallet of a folded edge (its command, the ribbon, a plugin)
+/// brings the edge back, and so does docking a pallet there.
+#[test]
+fn opening_or_docking_a_pallet_unfolds_its_edge() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::PanelId;
+    let mut app = dock_app();
+    click_icon(&mut app, PanelId::Properties);
+    assert!(app.dock.folded(DockSide::Left));
+    let _ = app.dock_set_open(PanelId::Properties, true);
+    assert!(!app.dock.folded(DockSide::Left));
+    assert!(app.dock_panel_on_screen(PanelId::Properties));
+
+    click_icon(&mut app, PanelId::Properties);
+    assert!(app.dock.dock(PanelId::BlockPalette, DockSide::Left, 1));
+    assert!(!app.dock.folded(DockSide::Left));
+    assert!(app.dock_panel_on_screen(PanelId::BlockPalette));
+}
+
+/// An auto-hiding edge never folds; switching auto-hide clears a fold.
+#[test]
+fn an_auto_hiding_edge_does_not_fold() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockMsg, PanelId};
+    let mut app = dock_app();
+    app.dock.auto_hide.0 = true;
+    click_icon(&mut app, PanelId::Properties);
+    assert!(!app.dock.folded(DockSide::Left));
+
+    app.dock.auto_hide.0 = false;
+    click_icon(&mut app, PanelId::Properties);
+    assert!(app.dock.folded(DockSide::Left));
+    let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+    let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+    assert!(!app.dock.folded(DockSide::Left));
+    assert!(app.dock_edge_expanded(DockSide::Left));
+}
+
+/// The fold is part of the saved layout; a layout saved before it reads as
+/// unfolded.
+#[test]
+fn the_fold_is_kept_with_the_layout() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockState, PanelId};
+    let mut app = dock_app();
+    click_icon(&mut app, PanelId::Properties);
+    let saved = serde_json::to_value(&app.dock).unwrap();
+    let back: DockState = serde_json::from_value(saved.clone()).unwrap();
+    assert!(back.folded(DockSide::Left));
+    assert!(!back.folded(DockSide::Right));
+    let mut older = saved;
+    older.as_object_mut().unwrap().remove("folded");
+    let older: DockState = serde_json::from_value(older).unwrap();
+    assert!(!older.folded(DockSide::Left));
+}
+
+/// A click whose press and release arrive together (a scripted click does)
+/// folds the edge too and leaves no drag behind: the press starts the drag's
+/// capture layer only with the next frame, so the icon hears its own
+/// release.
+#[test]
+fn a_click_on_the_shown_icon_folds_the_edge_in_the_real_view() {
+    with_stack(|| {
+        use crate::app::config::DockSide;
+        let mut app = dock_app();
+        let title = find_in_view(&app, "PROPERTIES");
+        let at = iced::Point::new(crate::ui::dock::DOCK_STRIP_W / 2.0, title.y);
+        let click = |app: &mut OpenCADStudio| {
+            let mut simulator = iced_test::Simulator::with_size(
+                iced::Settings::default(),
+                VIEW_SIZE,
+                app.view_main(),
+            );
+            simulator.point_at(at);
+            simulator.simulate([
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at }),
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )),
+            ]);
+            let messages = simulator.into_messages().collect::<Vec<_>>();
+            for message in messages {
+                let _ = app.update(message);
+            }
+        };
+        click(&mut app);
+        assert!(app.dock_drag.is_none(), "no drag left behind");
+        assert!(app.dock.folded(DockSide::Left));
+        click(&mut app);
+        assert!(app.dock_drag.is_none());
+        assert!(!app.dock.folded(DockSide::Left));
+    });
+}

@@ -1524,6 +1524,9 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
     /// Last pointer position during a dock drag.
     pub(crate) dock_drag_last: Option<iced::Point>,
+    /// The edge a press on the icon of its shown group folds, if the press
+    /// ends as a plain click.
+    pub(crate) dock_fold_on_release: Option<crate::app::config::DockSide>,
     /// The window `dock_drag_last` is in (`None`: the main window).
     pub(crate) dock_drag_window: Option<iced::window::Id>,
     /// Docked panel whose title bar the pointer is over (shows pin / close).
@@ -3293,6 +3296,7 @@ impl OpenCADStudio {
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
             dock_drag_last: None,
+            dock_fold_on_release: None,
             dock_drag_window: None,
             dock_title_hover: None,
             dock_edge_menu: None,

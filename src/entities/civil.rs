@@ -144,6 +144,36 @@ const SURFACE_BOUNDARY: usize = 2;
 const SURFACE_MAJOR_CONTOUR: usize = 3;
 const SURFACE_MINOR_CONTOUR: usize = 4;
 
+/// `(minor, major)` contour intervals of the surface style among `handles`.
+fn contour_intervals(document: &document::Document, handles: &[u64]) -> Option<(f64, f64)> {
+    handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .find(|o| o.dxf_name == "AECC_SURFACE_STYLE")
+        .and_then(|style| style.surface_contour_intervals())
+}
+
+fn is_major_contour(z: f64, major: f64) -> bool {
+    ((z / major).round() * major - z).abs() < 1e-6 * major.max(1.0)
+}
+
+/// The contour runs a TIN surface draws: those of its style's major and
+/// minor contour components that are shown.
+pub(crate) fn surface_contours(data: &ArchEntityData, document: &document::Document) -> Vec<Vec<[f64; 3]>> {
+    let handles = data.decode().handles;
+    let Some((minor, major)) = contour_intervals(document, &handles) else { return Vec::new() };
+    let Some(surface) = data.tin_surface() else { return Vec::new() };
+    let components = style_components(document, &handles, "AECC_SURFACE_STYLE");
+    let shown = |index| component(document, components.as_deref(), index).is_some();
+    let (major_shown, minor_shown) = (shown(SURFACE_MAJOR_CONTOUR), shown(SURFACE_MINOR_CONTOUR));
+    surface
+        .contours(minor)
+        .into_iter()
+        .filter(|(z, _)| if is_major_contour(*z, major) { major_shown } else { minor_shown })
+        .map(|(_, run)| run.into_iter().map(|p| [p.x, p.y, p.z]).collect())
+        .collect()
+}
+
 fn tin_surface(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) {
     let handles = data.decode().handles;
     let components = style_components(document, &handles, "AECC_SURFACE_STYLE");
@@ -162,13 +192,8 @@ fn tin_surface(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .map(|run| run.into_iter().map(|p| [p.x, p.y, p.z]).collect()),
         )
     });
-    let intervals = handles
-        .iter()
-        .filter_map(|h| object_arch(document, *h))
-        .find(|o| o.dxf_name == "AECC_SURFACE_STYLE")
-        .and_then(|style| style.surface_contour_intervals());
-    if let Some((minor, major)) = intervals {
-        let is_major = move |z: f64| ((z / major).round() * major - z).abs() < 1e-6 * major.max(1.0);
+    if let Some((minor, major)) = contour_intervals(document, &handles) {
+        let is_major = move |z: f64| is_major_contour(z, major);
         let contours = move |surface: &TinSurface, want_major: bool| {
             chains(
                 surface

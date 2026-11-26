@@ -372,6 +372,11 @@ impl Scene {
     pub fn shown_rubber_band(&self) -> (Option<&WireModel>, &[WireModel]) {
         if self.drawing_feedback_shown() {
             (self.interim_wire.as_ref(), &self.preview_wires[..])
+        } else if self.table_cell_editing.is_some() {
+            // The table being edited is drawn from these wires (its own
+            // lines stand in for the hidden table), not a rubber band: they
+            // stay while the view is dragged.
+            (None, &self.preview_wires[..])
         } else {
             (None, &[])
         }

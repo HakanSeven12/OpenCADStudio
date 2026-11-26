@@ -56,7 +56,6 @@ impl std::fmt::Display for ChoiceOption {
     }
 }
 
-/// Shared helper to apply `DialogValue` updates to dialog or panel control state maps.
 /// What the Browse button of a dialog or panel path field picks.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PickTarget {
@@ -126,6 +125,7 @@ pub async fn pick_path(
     }
 }
 
+/// Shared helper to apply `DialogValue` updates to dialog or panel control state maps.
 pub fn apply_control_value_updates(
     values: HashMap<String, DialogValue>,
     text_values: &mut HashMap<String, String>,

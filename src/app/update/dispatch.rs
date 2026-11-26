@@ -10754,7 +10754,7 @@ impl OpenCADStudio {
                 let selected = (!self.ribbon.custom_panels().is_empty()).then_some(0);
                 self.ribbon_customize = Some(crate::ui::window::ribbon_customize::State {
                     selected,
-                    draft: String::new(),
+                    ..Default::default()
                 });
                 self.active_modal = Some(crate::app::ModalKind::RibbonCustomize);
                 Task::none()

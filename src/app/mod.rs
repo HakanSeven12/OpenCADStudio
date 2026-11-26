@@ -631,7 +631,7 @@ pub(super) struct OpenCADStudio {
     /// Bumped on every tab hover change, so a stale rest is ignored.
     doc_tab_hover_gen: u64,
     tab_counter: usize,
-    ribbon: Ribbon,
+    pub(crate) ribbon: Ribbon,
     /// Recently opened files, newest first — backs the Start page panel.
     recent_files: Vec<std::path::PathBuf>,
     /// Decoded DWG preview thumbnails for the Start page, keyed by path.

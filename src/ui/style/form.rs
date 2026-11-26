@@ -37,7 +37,7 @@ pub fn dialog_button_styled_opt<'a>(
     on_press: Option<Message>,
     style: fn(&Theme, button::Status) -> button::Style,
 ) -> button::Button<'a, Message> {
-    button(text(label).size(12))
+    button(text(label).size(12).wrapping(text::Wrapping::None))
         .on_press_maybe(on_press)
         .padding([6, 18])
         .style(style)

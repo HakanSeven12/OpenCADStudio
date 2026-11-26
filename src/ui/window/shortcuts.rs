@@ -3,9 +3,11 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::editor_table::{EDITOR_TABLE_GUTTER, danger_input_style, danger_text_style};
-use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
-use iced::{Background, Element, Length, Theme};
+use crate::ui::style::editor_table::{danger_input_style, danger_text_style};
+use crate::ui::style::form::{dialog_button, hdivider};
+use crate::ui::style::{chrome, kit_metrics as km};
+use iced::widget::{Space, button, column, container, row, text, text_input};
+use iced::{Background, Border, Element, Length, Theme};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ShortcutField {
@@ -15,6 +17,30 @@ pub enum ShortcutField {
 
 /// Narrowest suggestion list; a longer command name widens it.
 const SUGGESTION_LIST_MIN_WIDTH: f32 = 220.0;
+
+/// Width of the Key column; the header and every row share it.
+const KEY_WIDTH: f32 = 180.0;
+
+/// Width of the actions column (trash, or check and cancel on a draft row).
+const ACTIONS_WIDTH: f32 = 60.0;
+
+/// Natural height of the framed list. The dialog is measured at this height
+/// and keeps it: filtering never moves the buttons under the list. Resizing
+/// the window grows the list.
+const LIST_HEIGHT: f32 = 340.0;
+
+/// A muted line centred in an empty list.
+fn empty_note<'a>(note: String) -> Element<'a, Message> {
+    container(
+        text(note)
+            .size(12)
+            .style(muted_style)
+            .align_x(iced::alignment::Horizontal::Center),
+    )
+    .padding(16)
+    .center(Length::Fill)
+    .into()
+}
 
 /// Widget id of row `idx`'s Command box, so picking a suggestion can put the
 /// caret after the picked name instead of where the typed prefix ended.
@@ -57,6 +83,10 @@ pub fn visible_rows(rows: &[(String, String)], query: &str, pending_add: bool) -
         .collect()
 }
 
+/// Width of the dialog: wide enough for the footer (counter, Reset, Export,
+/// Import, Apply, Apply & Exit) in one row.
+pub const SHORTCUTS_WIDTH: f32 = 900.0;
+
 pub fn view_window<'a>(
     rows: &'a [(String, String)],
     filter: &str,
@@ -77,25 +107,27 @@ pub fn view_window<'a>(
     ))
     .size(11)
     .style(muted_style);
-    let gutter = iced::Padding {
-        top: 0.0,
-        right: EDITOR_TABLE_GUTTER,
-        bottom: 0.0,
-        left: 0.0,
-    };
-
+    // The header lines up with the rows below: same side insets as the
+    // scroll area, plus the room its scroll bar takes.
     let head = container(
         row![
-            container(text(t!("Key")).size(11).style(muted_style)).width(Length::Fixed(180.0)),
-            container(text(t!("Command")).size(11).style(muted_style)).width(sizing.width),
-            Space::new().width(Length::Fixed(30.0)),
+            container(text(t!("Key")).size(12).style(muted_style)).width(Length::Fixed(KEY_WIDTH)),
+            container(text(t!("Command")).size(12).style(muted_style)).width(Length::Fill),
+            Space::new().width(Length::Fixed(ACTIONS_WIDTH)),
         ]
         .spacing(8),
     )
-    .padding(gutter);
+    .padding(iced::Padding {
+        top: 6.0,
+        right: km::GRID_INSET_R + km::SCROLLBAR_W,
+        bottom: 6.0,
+        left: km::GRID_INSET_L,
+    });
 
+    let shown = visible_rows(rows, filter, pending_add);
+    let shown_empty = shown.is_empty();
     let mut list = column![].spacing(3);
-    for idx in visible_rows(rows, filter, pending_add) {
+    for idx in shown {
         let (key, command) = &rows[idx];
         // Key cell: click to arm capture, then press the combination. The
         // armed cell shows what is expected and highlights until a key
@@ -115,20 +147,20 @@ pub fn view_window<'a>(
             button(text(key_label).size(13))
                 .on_press(Message::ShortcutCaptureClear)
                 .padding([3, 6])
-                .width(Length::Fixed(180.0))
+                .width(Length::Fixed(KEY_WIDTH))
                 .style(button::primary)
         } else if duplicate {
             // The whole field turns red, not just the text.
             button(text(key_label).size(13))
                 .on_press(Message::ShortcutCaptureStart(idx))
                 .padding([3, 6])
-                .width(Length::Fixed(180.0))
+                .width(Length::Fixed(KEY_WIDTH))
                 .style(button::danger)
         } else {
             button(text(key_label).size(13).style(muted_style))
                 .on_press(Message::ShortcutCaptureStart(idx))
                 .padding([3, 6])
-                .width(Length::Fixed(180.0))
+                .width(Length::Fixed(KEY_WIDTH))
                 .style(button::secondary)
         };
         let unknown_command = !command.is_empty() && unknown_commands.contains(command.trim());
@@ -141,7 +173,7 @@ pub fn view_window<'a>(
             })
             .size(13)
             .padding([3, 6])
-            .width(sizing.width);
+            .width(Length::Fill);
         // An unrunnable command turns the whole field red, mirroring the
         // duplicate key cell.
         let command_box = if unknown_command {
@@ -227,7 +259,11 @@ pub fn view_window<'a>(
             .align_y(iced::Center)
         };
         list = list.push(
-            row![key_box, command_box, remove]
+            row![
+                key_box,
+                command_box,
+                container(remove).width(Length::Fixed(ACTIONS_WIDTH))
+            ]
                 .spacing(8)
                 .align_y(iced::Center),
         );
@@ -238,86 +274,51 @@ pub fn view_window<'a>(
     let add = if pending_add {
         button(text(t!("Cancel add (Esc)")).size(12))
             .on_press(Message::ShortcutCaptureCancel)
-            .padding([4, 10])
+            .padding([6, 18])
             .style(button::danger)
     } else {
-        button(text(format!("+ {}", t!("Add"))).size(12))
-            .on_press(Message::ShortcutEditorAdd)
-            .padding([4, 10])
-            .style(button::secondary)
+        dialog_button(format!("+ {}", t!("Add")), Message::ShortcutEditorAdd, false)
     };
-    // The reset confirmation replaces the shortcut count so the warning
-    // gets the whole left side of the bar.
-    let stats = if reset_confirm {
-        row![Space::new().width(Length::Fixed(0.0))]
+    let toolbar = row![
+        crate::ui::kit::search_field(
+            t!("Search…").as_ref(),
+            filter,
+            Message::ShortcutEditorFilter
+        ),
+        add,
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+
+    // The framed list keeps its height whatever the filter leaves in it, so
+    // typing in the search box never moves the buttons below.
+    let body: Element<'a, Message> = if shown_empty {
+        empty_note(crate::tf!("No shortcut matches \"{}\"", filter).into_owned())
     } else {
-        row![
-            text(format!("{}: {}", t!("Number of shortcuts"), rows.len()))
-                .size(12)
-                .style(muted_style)
-        ]
+        crate::ui::kit::scroll_area(list)
     };
-    // Reset asks for confirmation in place: the add/reset buttons are
-    // replaced by the question with Yes / No.
-    let (reset_area, add_area) = if reset_confirm {
-        (
-            row![
-                text(t!(
-                    "Are you sure you want to reset? You will lose all your current shortcuts!"
-                ))
-                .size(12)
-                .style(danger_text_style),
-                button(text(t!("Yes, reset")).size(12))
-                    .on_press(Message::ShortcutEditorResetConfirm)
-                    .padding([4, 10])
-                    .style(button::danger),
-                button(text(t!("No")).size(12))
-                    .on_press(Message::ShortcutEditorResetDeny)
-                    .padding([4, 10])
-                    .style(button::secondary),
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
-            row![Space::new().width(Length::Fixed(0.0))],
-        )
-    } else {
-        (
-            row![
-                button(text(t!("Reset to default")).size(12))
-                    .on_press(Message::ShortcutEditorResetAsk)
-                    .padding([4, 10])
-                    .style(button::secondary),
-                button(text(t!("Export...")).size(12))
-                    .on_press(Message::KeyListExport(false))
-                    .padding([4, 10])
-                    .style(button::secondary),
-                button(text(t!("Import...")).size(12))
-                    .on_press_maybe((!pending_add).then_some(Message::ShortcutEditorImport))
-                    .padding([4, 10])
-                    .style(button::secondary),
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
-            row![add],
-        )
-    };
-    let apply = button(text(t!("Apply")).size(12))
-        .on_press(Message::ShortcutEditorApply)
-        .padding([4, 16])
-        .style(button::primary);
-    let apply_exit = button(text(t!("Apply & Exit")).size(12))
-        .on_press(Message::ShortcutEditorApplyExit)
-        .padding([4, 16])
-        .style(button::primary);
-    // The reset confirmation takes over the whole action bar.
-    let apply_area = if reset_confirm {
-        row![Space::new().width(Length::Fixed(0.0))]
-    } else {
-        row![apply, apply_exit].spacing(8).align_y(iced::Center)
-    };
+    let fill = sizing.height == Length::Fill;
+    let well = container(column![head, hdivider(Length::Fill), body])
+        .width(Length::Fill)
+        .height(if fill {
+            Length::Fill
+        } else {
+            Length::Fixed(LIST_HEIGHT)
+        })
+        .padding(1)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::surface(theme))),
+            border: Border {
+                color: chrome::border(theme),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
 
     // Persistent duplicate warning: shown until every conflicting key is
-    // resolved (re-captured, changed, or a row removed).
+    // resolved (re-captured, changed, or a row removed). It sits right under
+    // the list.
     let mut conflict_banner = column![].spacing(2);
     for (key, command) in duplicate_conflicts {
         conflict_banner = conflict_banner.push(
@@ -338,38 +339,69 @@ pub fn view_window<'a>(
         );
     }
 
+    // Reset asks for confirmation in place: the left group becomes the
+    // question with Yes / No, and the Apply buttons step aside.
+    let footer: Element<'a, Message> = if reset_confirm {
+        row![
+            text(t!(
+                "Are you sure you want to reset? You will lose all your current shortcuts!"
+            ))
+            .size(12)
+            .style(danger_text_style),
+            button(text(t!("Yes, reset")).size(12).wrapping(iced::widget::text::Wrapping::None))
+                .on_press(Message::ShortcutEditorResetConfirm)
+                .padding([6, 18])
+                .style(button::danger),
+            dialog_button(t!("No"), Message::ShortcutEditorResetDeny, false),
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+    } else {
+        row![
+            text(format!("{}: {}", t!("Number of shortcuts"), rows.len()))
+                .size(12)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .style(muted_style),
+            dialog_button(
+                t!("Reset to default"),
+                Message::ShortcutEditorResetAsk,
+                false
+            ),
+            dialog_button(t!("Export..."), Message::KeyListExport(false), false),
+            // Import is greyed out while a draft row is pending.
+            dialog_button(t!("Import..."), Message::ShortcutEditorImport, false)
+                .on_press_maybe((!pending_add).then_some(Message::ShortcutEditorImport)),
+            Space::new().width(Length::Fill),
+            dialog_button(t!("Apply"), Message::ShortcutEditorApply, false),
+            dialog_button(t!("Apply & Exit"), Message::ShortcutEditorApplyExit, true),
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+    };
+
     let content = container(
         column![
             title,
             hint,
-            crate::ui::kit::search_field(
-                t!("Search…").as_ref(),
-                filter,
-                Message::ShortcutEditorFilter
-            ),
-            Space::new().height(6),
-            head,
-            scrollable(container(list).padding(gutter)).height(sizing.height),
-            Space::new().height(6),
+            toolbar,
+            well,
             conflict_banner,
-            Space::new().height(4),
-            row![
-                stats,
-                add_area,
-                reset_area,
-                Space::new().width(sizing.width),
-                apply_area
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            hdivider(Length::Fill),
+            footer,
         ]
-        .spacing(6)
-        .width(sizing.width)
-        .height(sizing.height),
+        .spacing(12)
+        .width(Length::Fill)
+        .height(if fill { Length::Fill } else { Length::Shrink }),
     )
-    .padding(12)
-    .width(sizing.width)
-    .height(sizing.height)
+    .padding(16)
+    .width(if sizing.width == Length::Fill {
+        Length::Fill
+    } else {
+        Length::Fixed(SHORTCUTS_WIDTH)
+    })
+    .height(if fill { Length::Fill } else { Length::Shrink })
     .style(|theme: &Theme| container::Style {
         background: Some(Background::Color(theme.palette().background.base.color)),
         ..Default::default()

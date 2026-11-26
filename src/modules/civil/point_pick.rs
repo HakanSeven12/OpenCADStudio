@@ -169,7 +169,9 @@ impl CadCommand for CorridorRangePickCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let typed = text.trim();
-        if typed.is_empty() {
+        // A typed coordinate is a pick, handled as a point.
+        let coordinate = matches!(typed.split(',').count(), 2 | 3) && typed.split(',').all(|v| v.trim().parse::<f64>().is_ok());
+        if typed.is_empty() || coordinate {
             return None;
         }
         Some(match self.station {

@@ -6750,6 +6750,7 @@ manage =
     .geometry-cleanup-import-settings = Import settings
     .geometry-cleanup-import-title = Import Geometry Cleanup Settings
     .geometry-cleanup-keep = Keep
+    .geometry-cleanup-keep-as-designed = Keep as Designed
     .geometry-cleanup-kept = Kept as Designed: __ocs_fmt_0__
     .geometry-cleanup-no-errors = No errors found.
     .geometry-cleanup-overshoot = Overshoot

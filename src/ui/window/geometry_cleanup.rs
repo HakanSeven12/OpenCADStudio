@@ -9,11 +9,15 @@ use crate::ui::dock::PanelId;
 use crate::ui::kit;
 use crate::ui::style::kit_metrics as km;
 use document::Handle;
-use iced::widget::{button, column, container, row, text, Space};
+use iced::widget::{button, column, container, mouse_area, row, text, Space};
 use iced::{Element, Fill, Padding};
 use ocs_geom::geom2d::cleanup::{AngleErrorKind, AngleTolerances, EndErrorKind, Tolerances};
 
 pub const ICON: &[u8] = include_bytes!("../../../assets/icons/geometry_cleanup.svg");
+
+/// The pointer is on an error's marker in the drawing within this many
+/// pixels of its centre.
+pub const MARKER_REACH: f32 = 8.0;
 
 /// The length types, in the order of the tree and of the settings rows.
 pub const KINDS: [EndErrorKind; 3] = [
@@ -283,6 +287,12 @@ pub struct GeometryCleanupPalette {
     pub kept: std::collections::BTreeMap<String, Vec<KeptError>>,
     /// Whether the list of the kept errors is open.
     pub kept_open: bool,
+    /// The error whose marker menu is open in the drawing.
+    pub menu: Option<usize>,
+    /// Whether the pointer is on the marker menu, which keeps it open.
+    pub menu_hovered: bool,
+    /// The repair whose result the drawing previews.
+    pub preview: Option<(usize, Fix)>,
 }
 
 #[derive(Debug, Clone)]
@@ -301,6 +311,10 @@ pub enum GeometryCleanupMsg {
     Fold(ErrorType),
     /// Open or close the list of the kept errors.
     FoldKept,
+    /// The pointer is on a repair (preview its result) or left it.
+    Preview(Option<(usize, Fix)>),
+    /// The pointer came onto the marker menu or left it.
+    MenuHover(bool),
     /// The Settings dialog.
     OpenSettings,
     SettingsTolerance(EndErrorKind, String),
@@ -507,14 +521,61 @@ fn row_button<'a>(label: String, tip: String, press: Message) -> Element<'a, Mes
     kit::tooltip(button, tip, kit::TipPosition::Bottom)
 }
 
+/// `content`, which previews repair `fix` of error `index` while the
+/// pointer is on it.
+fn previews<'a>(content: Element<'a, Message>, index: usize, fix: Fix) -> Element<'a, Message> {
+    mouse_area(content)
+        .on_enter(msg(GeometryCleanupMsg::Preview(Some((index, fix)))))
+        .on_exit(msg(GeometryCleanupMsg::Preview(None)))
+        .into()
+}
+
+/// The menu on the marker of error `index` in the drawing: its repairs,
+/// each previewed while the pointer is on it, and Keep as Designed.
+pub fn marker_menu<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
+    let item = |label: String, press: Message| -> Element<'a, Message> {
+        button(text(label).size(crate::ui::style::text::UI_SMALL))
+            .padding(Padding::from([2, 8]))
+            .width(Fill)
+            .style(kit::text_button_style(false))
+            .on_press(press)
+            .into()
+    };
+    let mut items = column![].spacing(2);
+    for fix in finding.fixes() {
+        let press = msg(GeometryCleanupMsg::Fix(index, fix));
+        items = items.push(kit::tooltip(
+            previews(item(crate::t!(fix.label()).into_owned(), press), index, fix),
+            crate::t!(fix.tip()).into_owned(),
+            kit::TipPosition::Right,
+        ));
+    }
+    items = items.push(item(
+        crate::t!("Keep as Designed").into_owned(),
+        msg(GeometryCleanupMsg::Keep(index)),
+    ));
+    let panel = container(items)
+        .padding(4)
+        .width(iced::Length::Fixed(160.0))
+        .style(container::bordered_box);
+    mouse_area(panel)
+        .on_enter(msg(GeometryCleanupMsg::MenuHover(true)))
+        .on_exit(msg(GeometryCleanupMsg::MenuHover(false)))
+        .into()
+}
+
 /// The repairs of one error, and Keep, at the end of its row.
 fn fix_buttons<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
     let mut fixes = row![].spacing(km::TOOL_GAP / 2.0).align_y(iced::Center);
     for fix in finding.fixes() {
-        fixes = fixes.push(row_button(
-            crate::t!(fix.label()).into_owned(),
-            crate::t!(fix.tip()).into_owned(),
-            msg(GeometryCleanupMsg::Fix(index, fix)),
+        fixes = fixes.push(previews(
+            row_button(
+                crate::t!(fix.label()).into_owned(),
+                crate::t!(fix.tip()).into_owned(),
+                msg(GeometryCleanupMsg::Fix(index, fix)),
+            ),
+            index,
+            fix,
         ));
     }
     fixes = fixes.push(row_button(

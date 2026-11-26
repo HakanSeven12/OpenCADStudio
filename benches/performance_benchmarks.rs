@@ -1608,6 +1608,7 @@ fn build_selection_overlay_element(
         }],
         vec![(Point::new(0.0, 0.0), Point::new(100.0, 100.0))],
         None,
+        vec![],
         true,
         vec![],
         None,

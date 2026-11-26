@@ -654,6 +654,44 @@ pub fn resolve_selection_base_color(
     }
 }
 
+// ── Geometry Cleanup markers ──────────────────────────────────────────────
+
+/// A Geometry Cleanup error in the drawing, marked with an X.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CleanupMarker {
+    /// Screen-space position (viewport-relative pixels).
+    pub pos: Point,
+    /// Its menu is open, or its error is picked: drawn larger.
+    pub active: bool,
+}
+
+/// Half the size of a Geometry Cleanup marker, in pixels.
+pub const CLEANUP_MARKER_HALF: f32 = 5.0;
+
+fn draw_cleanup_marker(frame: &mut canvas::Frame, marker: CleanupMarker) {
+    let r = if marker.active {
+        CLEANUP_MARKER_HALF + 2.0
+    } else {
+        CLEANUP_MARKER_HALF
+    };
+    let Point { x, y } = marker.pos;
+    let cross = canvas::Path::new(|b| {
+        b.move_to(Point::new(x - r, y - r));
+        b.line_to(Point::new(x + r, y + r));
+        b.move_to(Point::new(x - r, y + r));
+        b.line_to(Point::new(x + r, y - r));
+    });
+    // A dark edge under the red cross keeps it seen on any background.
+    let edge = canvas::Stroke::default()
+        .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.6))
+        .with_width(4.0);
+    let red = canvas::Stroke::default()
+        .with_color(Color::from_rgb(0.95, 0.25, 0.2))
+        .with_width(2.0);
+    frame.stroke(&cross, edge);
+    frame.stroke(&cross, red);
+}
+
 // ── Grip marker data ──────────────────────────────────────────────────────
 
 /// Describes one grip to be drawn in the viewport overlay.
@@ -1344,6 +1382,7 @@ pub fn selection_overlay<'a>(
     ost_points: Vec<OstTrackPoint>,
     otrack_lines: Vec<(Point, Point)>,
     parallel_ref_marker: Option<Point>,
+    cleanup_markers: Vec<CleanupMarker>,
     show_viewcube: bool,
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
@@ -1385,6 +1424,7 @@ pub fn selection_overlay<'a>(
         ost_points,
         otrack_lines,
         parallel_ref_marker,
+        cleanup_markers,
         show_viewcube,
         dividers,
         pane_move_rect,
@@ -1465,6 +1505,8 @@ struct SelectionCanvas {
     /// The acquired Parallel-snap reference point (screen), marked with a small
     /// ∥ glyph so the user sees which line is the parallel reference. (#277)
     parallel_ref_marker: Option<Point>,
+    /// The Geometry Cleanup errors in view, each marked with an X.
+    cleanup_markers: Vec<CleanupMarker>,
     show_viewcube: bool,
     /// Divider bars (pixel rects, canvas-relative) between Model panes — drawn
     /// as filled lines and used to suppress the crosshair over a divider.
@@ -3373,6 +3415,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                         frame.stroke(&canvas::Path::line(a, b), dash);
                     }
                 }
+            }
+            for marker in &self.cleanup_markers {
+                draw_cleanup_marker(frame, *marker);
             }
             // The acquired Parallel-snap reference — a small ∥ glyph on its line so
             // the user sees which line the parallel is measured from. (#277)

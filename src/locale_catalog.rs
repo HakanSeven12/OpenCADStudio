@@ -4075,6 +4075,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Turn the line about its start so that it is on the angle." => Some(("manage", "geometry-cleanup-tip-rotate-at-start")),
         "Turn the longer line about the point where the lines meet." => Some(("manage", "geometry-cleanup-tip-rotate-longer")),
         "Turn the shorter line about the point where the lines meet." => Some(("manage", "geometry-cleanup-tip-rotate-shorter")),
+        "Keep as Designed" => Some(("manage", "geometry-cleanup-keep-as-designed")),
         "Kept as Designed: {}" => Some(("manage", "geometry-cleanup-kept")),
         "Restore All" => Some(("manage", "geometry-cleanup-restore-all")),
         "List this error again." => Some(("manage", "geometry-cleanup-tip-restore")),

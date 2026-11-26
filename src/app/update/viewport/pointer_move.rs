@@ -18,6 +18,8 @@ impl OpenCADStudio {
         let move_started = Instant::now();
         self.tabs[i].measurement.live_visible = true;
         self.tabs[i].scene.selection.borrow_mut().input.pointer_away = false;
+        // Geometry Cleanup: a marker under the pointer opens its menu.
+        self.geometry_cleanup_pointer(i, p);
         self.nav_pointer_moved(i, p);
         if let Some(task) = self.start_drag_move(i, p) {
             return Task::batch([task, self.on_viewport_move(p)]);

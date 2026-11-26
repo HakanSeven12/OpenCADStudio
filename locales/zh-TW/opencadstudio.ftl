@@ -6747,6 +6747,7 @@ manage =
     .geometry-cleanup-import-settings = 匯入設定
     .geometry-cleanup-import-title = 匯入幾何清理設定
     .geometry-cleanup-keep = Keep
+    .geometry-cleanup-keep-as-designed = Keep as Designed
     .geometry-cleanup-kept = Kept as Designed: __ocs_fmt_0__
     .geometry-cleanup-no-errors = 未找到錯誤。
     .geometry-cleanup-overshoot = 超過延伸

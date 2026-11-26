@@ -2137,6 +2137,14 @@ bg={bg_ms:.1}ms n={view_count}"
                 ost_points,
                 otrack_lines,
                 parallel_ref_marker,
+                self.geometry_cleanup_markers(i)
+                    .into_iter()
+                    .map(|(index, pos)| crate::ui::overlay::CleanupMarker {
+                        pos,
+                        active: self.geometry_cleanup.menu == Some(index)
+                            || self.geometry_cleanup.picked == Some(index),
+                    })
+                    .collect(),
                 // ViewCube hover region matches the drawn cube — gone when hidden.
                 !is_paper && viewcube_visible,
                 dividers,
@@ -3125,6 +3133,17 @@ bg={bg_ms:.1}ms n={view_count}"
             // Reserve the overlaid command line when placing cursor-anchored panels.
             mark("chrome");
             let command_line_inset = command_line_inset(self);
+            if let Some((at, menu)) = self.geometry_cleanup_marker_menu(self.active_tab) {
+                // The menu starts on the marker's corner, so the pointer goes
+                // from the marker onto it with no gap between them.
+                let reach = crate::ui::window::geometry_cleanup::MARKER_REACH * 0.5;
+                viewport_stack = viewport_stack.push(overlay::position_canvas_overlay_clamped(
+                    at,
+                    command_line_inset,
+                    iced::Vector::new(reach, reach),
+                    menu,
+                ));
+            }
             if let Some((cursor, tip)) = self.hovered_dynamic_grip_tip() {
                 viewport_stack =
                     viewport_stack.push(overlay::grip_tip_overlay(cursor, command_line_inset, tip));

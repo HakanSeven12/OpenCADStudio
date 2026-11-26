@@ -8,7 +8,7 @@ use crate::modules::manage::geometry_cleanup_settings::{
 };
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{
-    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, KeptError, Scan,
+    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, KeptError, Scan, MARKER_REACH,
 };
 use crate::ui::window::geometry_cleanup_settings::SettingsDialog;
 use document::{EntityType, Handle};
@@ -61,6 +61,9 @@ impl OpenCADStudio {
     /// Open or close the Geometry Cleanup palette (docked, expanded).
     pub(in crate::app) fn set_geometry_cleanup(&mut self, open: bool) {
         let id = PanelId::GeometryCleanup;
+        if !open {
+            self.geometry_cleanup_close_menu(self.active_tab);
+        }
         self.geometry_cleanup.show = open;
         if open {
             self.dock_open_at_default(id);
@@ -182,6 +185,8 @@ impl OpenCADStudio {
         report: bool,
     ) {
         let rescan = tolerances.is_some();
+        // The rows change: a menu or a preview of the old list is wrong.
+        self.geometry_cleanup_close_menu(i);
         let (tolerances, angles) = tolerances.unwrap_or_else(|| {
             let settings = match &self.geometry_cleanup.settings {
                 Some(settings) => settings.clone(),
@@ -251,6 +256,133 @@ impl OpenCADStudio {
         header.fingerprint_guid.clone()
     }
 
+    /// The markers of the errors in the drawing of tab `i`: each error's
+    /// index in the scan and its place on the canvas, for the errors in
+    /// view. None while the palette is closed, in a layout, or while a
+    /// command runs.
+    pub(in crate::app) fn geometry_cleanup_markers(&self, i: usize) -> Vec<(usize, iced::Point)> {
+        let tab = &self.tabs[i];
+        if !self.geometry_cleanup.show
+            || tab.is_start
+            || tab.active_cmd.is_some()
+            || tab.scene.current_layout != "Model"
+        {
+            return Vec::new();
+        }
+        let Some(scan) = self.geometry_cleanup_scan_here(i) else {
+            return Vec::new();
+        };
+        let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
+        let tile = tab.scene.active_model_tile_bounds(vw, vh);
+        let project = tab.scene.camera.borrow().projector(tile);
+        scan.findings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, finding)| {
+                let [x, y] = finding.location;
+                let at = project(glam::DVec3::new(x, y, 0.0))?;
+                let at = iced::Point::new(tile.x + at.x, tile.y + at.y);
+                let inside = at.x >= tile.x
+                    && at.y >= tile.y
+                    && at.x <= tile.x + tile.width
+                    && at.y <= tile.y + tile.height;
+                inside.then_some((index, at))
+            })
+            .collect()
+    }
+
+    /// The open marker menu and the place of its marker on the canvas.
+    pub(in crate::app) fn geometry_cleanup_marker_menu(
+        &self,
+        i: usize,
+    ) -> Option<(iced::Point, iced::Element<'_, Message>)> {
+        let index = self.geometry_cleanup.menu?;
+        let (_, at) = self
+            .geometry_cleanup_markers(i)
+            .into_iter()
+            .find(|(marker, _)| *marker == index)?;
+        let finding = self.geometry_cleanup_scan_here(i)?.findings.get(index)?;
+        Some((
+            at,
+            crate::ui::window::geometry_cleanup::marker_menu(index, finding),
+        ))
+    }
+
+    /// The pointer moved on the canvas to `p`: on a marker, open its menu;
+    /// away from the marker and its menu, close the menu.
+    pub(in crate::app) fn geometry_cleanup_pointer(&mut self, i: usize, p: iced::Point) {
+        let markers = self.geometry_cleanup_markers(i);
+        let on = markers
+            .iter()
+            .filter(|(_, at)| (at.x - p.x).hypot(at.y - p.y) <= MARKER_REACH)
+            .min_by(|a, b| {
+                let d = |at: iced::Point| (at.x - p.x).hypot(at.y - p.y);
+                d(a.1).total_cmp(&d(b.1))
+            })
+            .map(|(index, _)| *index);
+        match on {
+            Some(index) if self.geometry_cleanup.menu != Some(index) => {
+                self.geometry_cleanup_close_menu(i);
+                self.geometry_cleanup.menu = Some(index);
+            }
+            Some(_) => {}
+            None if self.geometry_cleanup.menu.is_some() && !self.geometry_cleanup.menu_hovered => {
+                self.geometry_cleanup_close_menu(i);
+            }
+            None => {}
+        }
+    }
+
+    /// Close the marker menu and end the preview of a repair.
+    fn geometry_cleanup_close_menu(&mut self, i: usize) {
+        self.geometry_cleanup.menu = None;
+        self.geometry_cleanup.menu_hovered = false;
+        self.geometry_cleanup_preview(i, None);
+    }
+
+    /// Preview repair `target` in the drawing of tab `i`: the objects that
+    /// it changes are hidden, and drawn as the repair leaves them. `None`
+    /// ends the preview.
+    fn geometry_cleanup_preview(&mut self, i: usize, target: Option<(usize, Fix)>) {
+        if self.geometry_cleanup.preview == target {
+            return;
+        }
+        let had = self.geometry_cleanup.preview.is_some();
+        self.geometry_cleanup.preview = target;
+        // A command owns the preview while it runs.
+        if self.tabs[i].active_cmd.is_some() {
+            return;
+        }
+        let edits = target.and_then(|(index, fix)| {
+            let finding = *self.geometry_cleanup_scan_here(i)?.findings.get(index)?;
+            finding
+                .fixes()
+                .contains(&fix)
+                .then(|| self.geometry_cleanup_edits(i, &finding, fix))?
+        });
+        let fresh = self
+            .geometry_cleanup_scan_here(i)
+            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        let scene = &mut self.tabs[i].scene;
+        match edits.filter(|edits| !edits.is_empty()) {
+            Some(edits) => {
+                let (handles, entities): (Vec<Handle>, Vec<EntityType>) = edits.into_iter().unzip();
+                let wires = scene.wires_for_entities(&entities);
+                scene.set_command_preview_hidden(&handles);
+                scene.set_preview_wires(wires);
+            }
+            None if had => scene.clear_preview_wire(),
+            None => {}
+        }
+        // Hiding the objects moves the geometry epoch, but changes no
+        // geometry: the scan is still true, and a rescan would end the
+        // preview.
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if let Some(scan) = self.geometry_cleanup.scan.as_mut().filter(|_| fresh) {
+            scan.epoch = epoch;
+        }
+    }
+
     /// Scan the objects of the palette's scan again, with its tolerances.
     fn geometry_cleanup_rescan(&mut self, i: usize) {
         if let Some(scan) = self.geometry_cleanup_scan_here(i) {
@@ -289,6 +421,13 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn on_geometry_cleanup(&mut self, m: GeometryCleanupMsg) -> Task<Message> {
         let i = self.active_tab;
+        if matches!(
+            m,
+            GeometryCleanupMsg::Pick(_) | GeometryCleanupMsg::Fix(..) | GeometryCleanupMsg::Keep(_)
+        ) {
+            // The drawing shows the objects as they are before a change.
+            self.geometry_cleanup_close_menu(i);
+        }
         match m {
             GeometryCleanupMsg::SelectObjects => {
                 self.tabs[i].scene.deselect_all();
@@ -348,6 +487,8 @@ impl OpenCADStudio {
             GeometryCleanupMsg::FoldKept => {
                 self.geometry_cleanup.kept_open = !self.geometry_cleanup.kept_open;
             }
+            GeometryCleanupMsg::Preview(target) => self.geometry_cleanup_preview(i, target),
+            GeometryCleanupMsg::MenuHover(on) => self.geometry_cleanup.menu_hovered = on,
             GeometryCleanupMsg::Pick(index) => {
                 let Some(finding) = self.geometry_cleanup_scan_here(i).and_then(|scan| {
                     scan.findings
@@ -639,6 +780,36 @@ impl OpenCADStudio {
                 .push_error(&crate::t!("The error is no longer in the drawing."));
             return false;
         };
+        let edits = self.geometry_cleanup_edits(i, &finding, fix);
+        let Some(edits) = edits.filter(|_| finding.fixes().contains(&fix)) else {
+            self.command_line
+                .push_error(&crate::t!("This error cannot be fixed that way."));
+            return false;
+        };
+        self.push_undo_snapshot(i, "GEOMETRYCLEANUP");
+        let mut changes = Vec::new();
+        for (handle, replacement) in edits {
+            if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                *target = replacement;
+                changes.push((handle, crate::scene::ChangeKind::Modified));
+            }
+        }
+        self.tabs[i].scene.bump_entities(&changes);
+        self.tabs[i].dirty = true;
+        self.refresh_selected_grips();
+        self.refresh_properties();
+        true
+    }
+
+    /// The objects that repair `fix` of `finding` changes, each with what
+    /// it becomes; `None` when the repair cannot be made. The repair and
+    /// its preview both use it.
+    fn geometry_cleanup_edits(
+        &self,
+        i: usize,
+        finding: &Finding,
+        fix: Fix,
+    ) -> Option<Vec<(Handle, EntityType)>> {
         let document = &self.tabs[i].scene.document;
         let entity = |handle: Handle| document.get_entity(handle);
         let mut edits: Vec<(Handle, EntityType)> = Vec::new();
@@ -708,24 +879,7 @@ impl OpenCADStudio {
             }
             Some(())
         })();
-        if done.is_none() || !finding.fixes().contains(&fix) {
-            self.command_line
-                .push_error(&crate::t!("This error cannot be fixed that way."));
-            return false;
-        }
-        self.push_undo_snapshot(i, "GEOMETRYCLEANUP");
-        let mut changes = Vec::new();
-        for (handle, replacement) in edits {
-            if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                *target = replacement;
-                changes.push((handle, crate::scene::ChangeKind::Modified));
-            }
-        }
-        self.tabs[i].scene.bump_entities(&changes);
-        self.tabs[i].dirty = true;
-        self.refresh_selected_grips();
-        self.refresh_properties();
-        true
+        done.map(|()| edits)
     }
 }
 

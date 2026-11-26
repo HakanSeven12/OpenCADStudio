@@ -3774,6 +3774,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 .scene
                                 .geo_data()
                                 .map(crate::entities::object_data::geo_system_label),
+                            plugin_busy: self.plugin_busy_label(),
                         },
                         crate::ui::statusbar::StatusBarModes {
                             grid: self.show_grid,
@@ -4260,6 +4261,17 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // A plugin command waits for one frame that names it (#3650); a
+        // window that draws none must not hold it.
+        let plugin_frame = if self.plugin_frame.is_some() {
+            Subscription::batch([
+                crate::app::tool_windows::main_window_frames().map(|_| Message::PluginFrameDrawn),
+                iced::time::every(crate::app::plugin_frame::FRAME_TIMEOUT)
+                    .map(|_| Message::PluginFrameDrawn),
+            ])
+        } else {
+            Subscription::none()
+        };
         // A deferred Properties rebuild (huge selection commit) runs on the
         // next frame instead of blocking the click that committed it.
         let properties_refresh = if self.properties_refresh_pending.is_some() {
@@ -4514,6 +4526,7 @@ impl OpenCADStudio {
             snap_dwell,
             move_coalesce,
             box_preview,
+            plugin_frame,
             properties_refresh,
             nav_settle,
             gpu_probe,

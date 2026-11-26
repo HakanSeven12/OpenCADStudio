@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = लेआउट तैयार हो रहा है…
 
+plugin-busy =
+    .prompt = { $command } चल रहा है …
+    .pill = ⏳ { $command }
+    .pill-tip = एक प्लगइन कमांड चल रहा है। इसके पूरा होने पर विंडो फिर से प्रतिक्रिया देगी।
+
 gpu =
     .title = ग्राफ़िक्स चेतावनी
     .software-headline = कोई कार्यशील GPU ड्राइवर नहीं मिला, इसलिए आरेखण CPU पर सॉफ़्टवेयर से रेंडर किया जा रहा है ({ $adapter })।

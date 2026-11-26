@@ -641,6 +641,34 @@ impl PluginManager {
         out
     }
 
+    /// Whether an alive, non-disabled plugin advertises `verb`: a ribbon
+    /// tool's command id, or a word that starts with one of its manifest's
+    /// `command_prefixes` (case-insensitive). The host asks this before a
+    /// command runs, so that it can draw a frame first: a plugin command keeps
+    /// the UI thread until it returns. A plugin may handle commands it does not
+    /// advertise; those run without that frame.
+    pub fn advertises_command<F: Fn(&str) -> bool>(&self, verb: &str, is_disabled: F) -> bool {
+        let verb = verb.to_ascii_uppercase();
+        if verb.is_empty() {
+            return false;
+        }
+        self.plugins.iter().any(|p| {
+            if is_disabled(p.process.id()) || !p.process.is_alive() {
+                return false;
+            }
+            p.process
+                .manifest()
+                .command_prefixes
+                .iter()
+                .any(|prefix| !prefix.is_empty() && verb.starts_with(&prefix.to_ascii_uppercase()))
+                || p.process
+                    .ribbon()
+                    .iter()
+                    .flat_map(|group| group.command_ids())
+                    .any(|id| id.eq_ignore_ascii_case(&verb))
+        })
+    }
+
     /// Entity-class declarations of every alive, non-disabled plugin that
     /// made one (API v10), in load order, as `(plugin id, declaration)`.
     ///

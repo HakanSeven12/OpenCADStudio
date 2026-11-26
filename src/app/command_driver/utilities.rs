@@ -1255,7 +1255,12 @@ impl OpenCADStudio {
     /// `chain`: words a command that took none leaves behind start the next
     /// command, as a script line (`REGEN CIRCLE 0,0 5`) expects. Off, they stay
     /// unconsumed.
-    fn run_command_line_impl(&mut self, cmd: &str, finish: bool, chain: bool) -> Task<Message> {
+    pub(in crate::app) fn run_command_line_impl(
+        &mut self,
+        cmd: &str,
+        finish: bool,
+        chain: bool,
+    ) -> Task<Message> {
         let trimmed = cmd.trim_start();
         if trimmed
             .split_whitespace()
@@ -1279,6 +1284,19 @@ impl OpenCADStudio {
         // dispatch first. A built-in interactive tool matches only its bare name
         // (`LINE`), so the full line is not a plugin command and falls through to
         // the first-word + fed-tokens path below. (#162)
+        // The window draws once before a plugin command starts (#3650).
+        let frame_drawn = self.plugin_frame_drawn;
+        if !self.suppress_plugin_dispatch {
+            if let Some(task) =
+                self.defer_plugin_line(cmd, || crate::app::plugin_frame::Resume::Line {
+                    line: cmd.to_string(),
+                    finish,
+                    chain,
+                })
+            {
+                return task;
+            }
+        }
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             self.tabs[i].last_cmd = Some(cmd.to_string());
             self.command_line.record_recent(cmd);
@@ -1296,6 +1314,8 @@ impl OpenCADStudio {
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
             return self.finish_active_command(&toks, finish);
         }
+        // A line no plugin took goes the built-in way as it came.
+        self.plugin_frame_drawn = frame_drawn;
         // Bare XREF opens the External References palette, so probing the
         // verb alone would open it (and refresh every entry) before the
         // argument form `XREF Reload A` runs.

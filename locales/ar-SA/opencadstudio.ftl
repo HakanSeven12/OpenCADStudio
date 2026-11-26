@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = جارٍ إعداد التخطيط…
 
+plugin-busy =
+    .prompt = { $command } قيد التشغيل …
+    .pill = ⏳ { $command }
+    .pill-tip = يجري تشغيل أمر إضافة. ستستجيب النافذة مجددًا عند انتهائه.
+
 gpu =
     .title = تحذير الرسومات
     .software-headline = لم يُعثر على برنامج تشغيل GPU يعمل، لذا يتم رسم المخطط برمجيًا على المعالج CPU ({ $adapter }).

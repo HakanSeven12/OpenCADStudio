@@ -433,6 +433,11 @@ viewport =
     .move = Move Viewport
     .close = Close Viewport
 
+plugin-busy =
+    .prompt = { $command } is running …
+    .pill = ⏳ { $command }
+    .pill-tip = A plugin command is running. The window responds again when it has finished.
+
 gpu =
     .title = Graphics Warning
     .software-headline = No working GPU driver was found, so the drawing is rendered in software on the CPU ({ $adapter }).

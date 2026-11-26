@@ -2111,11 +2111,12 @@ impl OpenCADStudio {
                     // the command line would upper-case the whole string and
                     // mangle case-sensitive paths on Linux/macOS.
                     let line = format!("{} {}", command, path.to_string_lossy());
-                    let i = self.active_tab;
-                    if !crate::plugin::try_dispatch(self, i, &line) {
-                        self.command_line
-                            .push_error(crate::tf!("No plugin handled: {command}").as_ref());
+                    if let Some(task) = self.defer_plugin_line(&line, || {
+                        crate::app::plugin_frame::Resume::Direct(line.clone())
+                    }) {
+                        return task;
                     }
+                    self.dispatch_plugin_answer(&line);
                 }
                 Task::none()
             }
@@ -5702,6 +5703,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PluginFrameDrawn => {
+                self.on_plugin_frame_drawn();
+                Task::none()
+            }
+            Message::PluginFrameResume => self.resume_plugin_frame(),
             Message::LayoutSettled => {
                 // Restore the scene after the notice redraw.
                 self.layout_settling = false;

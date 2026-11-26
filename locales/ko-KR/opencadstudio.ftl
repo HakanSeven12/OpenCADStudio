@@ -11283,3 +11283,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = 폴더 버튼으로 폴더를 선택하면 도면이 표시됩니다.
+    .empty = 도면이나 폴더가 없습니다.

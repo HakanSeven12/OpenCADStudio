@@ -300,6 +300,12 @@ impl OpenCADStudio {
                 .or(self.block_palette.library_resume.as_ref())
                 .map(|dir| dir.display().to_string())
                 .unwrap_or_default(),
+            files_palette_folder: self
+                .files_palette
+                .folder
+                .as_ref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_default(),
             block_insert: self.block_palette.options.clone(),
             block_mru_list: self.block_mru_list,
             block_redefine_mode: self.block_redefine_mode,
@@ -611,6 +617,9 @@ impl OpenCADStudio {
             crate::ui::window::block_palette::Tab::from_u8(s.block_palette_tab);
         self.block_palette.library_resume = Some(std::path::PathBuf::from(&s.block_library_folder))
             .filter(|dir| !s.block_library_folder.is_empty() && dir.is_dir());
+        self.files_palette.folder = Some(std::path::PathBuf::from(&s.files_palette_folder))
+            .filter(|dir| !s.files_palette_folder.is_empty() && dir.is_dir());
+        self.files_palette_restore();
         self.block_palette.set_options(s.block_insert.clone());
         self.trim_recent_blocks();
         // Push restored display defaults onto every drawing tab that exists now.
@@ -954,6 +963,7 @@ impl OpenCADStudio {
             geometry_cleanup_file: self.geometry_cleanup.settings_file.clone(),
             show_layers: self.show_layers,
             show_block_palette: self.show_block_palette,
+            show_files_palette: self.files_palette.show,
             show_external_references: self.show_external_references,
             show_file_tabs: self.show_file_tabs,
             file_tabs_above_docks: self.file_tabs_above_docks,
@@ -1045,6 +1055,9 @@ impl OpenCADStudio {
         self.show_layers = cfg.show_layers && self.dock.is_placed(crate::ui::dock::PanelId::Layers);
         self.show_block_palette =
             cfg.show_block_palette && self.dock.is_placed(crate::ui::dock::PanelId::BlockPalette);
+        self.files_palette.show =
+            cfg.show_files_palette && self.dock.is_placed(crate::ui::dock::PanelId::Files);
+        self.files_palette_restore();
         self.show_external_references = cfg.show_external_references
             && self.dock.is_placed(crate::ui::dock::PanelId::ExternalReferences);
         self.show_file_tabs = cfg.show_file_tabs;

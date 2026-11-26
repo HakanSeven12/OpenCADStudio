@@ -747,6 +747,9 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::SheetSetManager => {
                 crate::ui::window::sheet_set::view(&self.sheet_set, width, chrome)
             }
+            crate::ui::dock::PanelId::Files => {
+                crate::ui::window::files_palette::view(&self.files_palette, width, chrome)
+            }
             crate::ui::dock::PanelId::Layers => {
                 let active_vp = tab
                     .scene

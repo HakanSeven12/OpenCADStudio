@@ -1493,6 +1493,8 @@ pub(super) struct OpenCADStudio {
     /// The Geometry Cleanup palette (GEOMETRYCLEANUPOPEN).
     pub(crate) geometry_cleanup: crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
     pub(crate) bricscad_visibility: crate::ui::window::bricscad_visibility::VisibilityPanel,
+    /// The Files palette (FILESPALETTE).
+    pub(crate) files_palette: crate::ui::window::files_palette::FilesPalette,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
     /// The Assistant pallet (ASSISTANT): chat with an external AI agent about this drawing.
@@ -3258,6 +3260,7 @@ impl OpenCADStudio {
             count_palette: Default::default(),
             geometry_cleanup: Default::default(),
             bricscad_visibility: Default::default(),
+            files_palette: Default::default(),
             quick_calc: Default::default(),
             assistant: Default::default(),
             sheet_set: Default::default(),

@@ -11267,3 +11267,7 @@ mesh-cmd =
     .divisions-around-the-tube = Divisions around the tube
     .the-faces-must-be-adjacent-and-bound-one-area-wi = The faces must be adjacent and bound one area without holes.
     .the-triangles-do-not-share-an-edge = The triangles do not share an edge.
+
+files-palette =
+    .choose-folder = 使用文件夹按钮选择文件夹以列出其中的图形。
+    .empty = 此处没有图形或文件夹。

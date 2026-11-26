@@ -11279,3 +11279,7 @@ mesh-cmd =
     .divisions-around-the-tube = 繞管路的區分
     .the-faces-must-be-adjacent-and-bound-one-area-wi = 這些面必須相鄰，且圍成一個不含孔洞的區域。
     .the-triangles-do-not-share-an-edge = 這些三角形未共用邊。
+
+files-palette =
+    .choose-folder = 使用資料夾按鈕選擇資料夾以列出其中的圖面。
+    .empty = 這裡沒有圖面或資料夾。

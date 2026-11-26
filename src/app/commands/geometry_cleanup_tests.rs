@@ -1770,3 +1770,244 @@ fn a_fit_2d_polyline_is_not_read() {
         document, handle
     ));
 }
+
+fn cleanup_msg(app: &mut OpenCADStudio, m: GeometryCleanupMsg) {
+    let _ = app.update(Message::GeometryCleanup(m));
+}
+
+fn kept(app: &OpenCADStudio) -> Vec<Finding> {
+    app.geometry_cleanup
+        .scan
+        .as_ref()
+        .map(|scan| scan.kept.clone())
+        .unwrap_or_default()
+}
+
+fn index_of(app: &OpenCADStudio, kind: ErrorType) -> usize {
+    findings(app)
+        .iter()
+        .position(|finding| finding.kind == kind)
+        .expect("the error is listed")
+}
+
+#[test]
+fn keep_takes_an_error_off_the_list_and_leaves_the_drawing_as_it_is() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    let over = objects[1];
+    let before = ends(&app, over);
+    let listed = scan(&mut app, &objects).len();
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let after: Vec<ErrorType> = findings(&app).iter().map(|f| f.kind).collect();
+    assert_eq!(after.len(), listed - 1);
+    assert!(!after.contains(&ErrorType::Overshoot), "{after:?}");
+    let kept = kept(&app);
+    assert_eq!(kept.len(), 1);
+    assert_eq!((kept[0].kind, kept[0].handle), (ErrorType::Overshoot, over));
+    assert_eq!(ends(&app, over), before, "the drawing does not change");
+}
+
+#[test]
+fn a_kept_error_stays_off_the_list_in_a_new_scan() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Undershoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let again = scan(&mut app, &objects);
+    assert!(again.iter().all(|f| f.kind != ErrorType::Undershoot));
+    assert_eq!(kept(&app).len(), 1);
+}
+
+#[test]
+fn keep_picks_the_next_error() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    // The first two rows of the palette, top to bottom.
+    let rows = crate::ui::window::geometry_cleanup::rows(
+        &app.geometry_cleanup,
+        app.geometry_cleanup.scan.as_ref().unwrap(),
+    );
+    let (index, next) = (rows[0], findings(&app)[rows[1]]);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let picked = app.geometry_cleanup.picked.expect("an error is picked");
+    assert!(findings(&app)[picked].same_error(&next));
+}
+
+#[test]
+fn keep_gives_a_drawing_with_no_fingerprint_one() {
+    let (mut app, i) = app();
+    app.tabs[i].scene.document.header.fingerprint_guid.clear();
+    app.tabs[i].dirty = false;
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let id = app.tabs[i].scene.document.header.fingerprint_guid.clone();
+    assert!(!id.is_empty());
+    assert!(
+        app.tabs[i].dirty,
+        "the new fingerprint is saved with the drawing"
+    );
+    assert_eq!(app.geometry_cleanup.kept[&id].len(), 1);
+}
+
+#[test]
+fn a_kept_error_is_kept_only_in_its_own_drawing() {
+    let (mut app, first) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    // A second drawing with the same objects, so with the same handles.
+    let _ = app.update(Message::TabNew);
+    let second = app.active_tab;
+    assert_ne!(first, second);
+    app.tabs[second].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+    let others = errors_drawing(&mut app);
+    assert_eq!(others, objects, "the same handles");
+    assert_ne!(
+        app.tabs[first].scene.document.header.fingerprint_guid,
+        app.tabs[second].scene.document.header.fingerprint_guid
+    );
+    let found = scan(&mut app, &others);
+    assert!(found.iter().any(|f| f.kind == ErrorType::Overshoot));
+    assert!(kept(&app).is_empty());
+}
+
+#[test]
+fn restore_lists_a_kept_error_again() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    let listed = scan(&mut app, &objects).len();
+    let gap = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(gap));
+    let over = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(over));
+    assert_eq!(kept(&app).len(), 2);
+    let at = kept(&app)
+        .iter()
+        .position(|f| f.kind == ErrorType::Gap)
+        .unwrap();
+    cleanup_msg(&mut app, GeometryCleanupMsg::Restore(at));
+    assert_eq!(findings(&app).len(), listed - 1);
+    assert!(findings(&app).iter().any(|f| f.kind == ErrorType::Gap));
+    assert_eq!(kept(&app).len(), 1);
+    assert_eq!(kept(&app)[0].kind, ErrorType::Overshoot);
+}
+
+#[test]
+fn restore_all_lists_every_kept_error_of_the_drawing_again() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    let listed = scan(&mut app, &objects).len();
+    for kind in [ErrorType::Gap, ErrorType::Undershoot] {
+        let index = index_of(&app, kind);
+        cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    }
+    app.geometry_cleanup
+        .kept
+        .insert("{OTHER DRAWING}".into(), vec![kept(&app)[0].identity()]);
+    cleanup_msg(&mut app, GeometryCleanupMsg::RestoreAll);
+    assert_eq!(findings(&app).len(), listed);
+    assert!(kept(&app).is_empty());
+    let id = &app.tabs[i].scene.document.header.fingerprint_guid;
+    assert!(!app.geometry_cleanup.kept.contains_key(id));
+    assert!(
+        app.geometry_cleanup.kept.contains_key("{OTHER DRAWING}"),
+        "the marks of other drawings stay"
+    );
+}
+
+#[test]
+fn the_kept_category_opens_and_folds() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let folded = app.geometry_cleanup.kept_open;
+    cleanup_msg(&mut app, GeometryCleanupMsg::FoldKept);
+    assert_eq!(app.geometry_cleanup.kept_open, !folded);
+    cleanup_msg(&mut app, GeometryCleanupMsg::FoldKept);
+    assert_eq!(app.geometry_cleanup.kept_open, folded);
+}
+
+#[test]
+fn the_mark_of_an_erased_object_is_dropped_at_the_next_scan() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let over = objects[1];
+    app.tabs[i].scene.erase_entities(&[over]);
+    scan(&mut app, &objects);
+    let id = &app.tabs[i].scene.document.header.fingerprint_guid;
+    assert!(!app.geometry_cleanup.kept.contains_key(id));
+}
+
+#[test]
+fn the_kept_errors_are_in_the_user_profile() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let json = serde_json::to_string(&app.current_config()).unwrap();
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(&json).unwrap();
+    let id = app.tabs[i].scene.document.header.fingerprint_guid.clone();
+    assert_eq!(loaded.geometry_cleanup_kept[&id].len(), 1);
+    let (mut other, j) = self::app();
+    other.apply_config(loaded);
+    other.tabs[j].scene.document.header.fingerprint_guid = id;
+    let others = errors_drawing(&mut other);
+    let found = scan(&mut other, &others);
+    assert!(found.iter().all(|f| f.kind != ErrorType::Overshoot));
+    assert_eq!(kept(&other).len(), 1);
+}
+
+#[test]
+fn a_profile_with_kept_errors_that_cannot_be_read_keeps_the_rest() {
+    let json = r#"{"show_command_history": true,
+        "geometry_cleanup_kept": {"{A}": [{"kind": "NoSuchType"}]}}"#;
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(json).unwrap();
+    assert!(
+        loaded.show_command_history,
+        "the rest of the profile is kept"
+    );
+    assert!(loaded.geometry_cleanup_kept.is_empty());
+}
+
+#[test]
+fn a_relative_angle_is_kept_for_its_own_pair_of_lines() {
+    let (mut app, _) = app();
+    // One line meets two others, each 3° off a right angle.
+    let base = line(&mut app, [0.0, 0.0], [100.0, 0.0]);
+    let tilt = 3f64.to_radians();
+    let a = line(
+        &mut app,
+        [20.0, 0.0],
+        [20.0 + 50.0 * tilt.sin(), 50.0 * tilt.cos()],
+    );
+    let b = line(
+        &mut app,
+        [80.0, 0.0],
+        [80.0 - 50.0 * tilt.sin(), 50.0 * tilt.cos()],
+    );
+    let objects = [base, a, b];
+    let relative = |app: &OpenCADStudio| {
+        findings(app)
+            .into_iter()
+            .filter(|f| f.kind == ErrorType::RelativeAngle)
+            .collect::<Vec<_>>()
+    };
+    scan(&mut app, &objects);
+    assert_eq!(relative(&app).len(), 2, "{:?}", findings(&app));
+    let index = index_of(&app, ErrorType::RelativeAngle);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    assert_eq!(relative(&app).len(), 1, "the other pair is still listed");
+}

@@ -184,6 +184,14 @@ pub(crate) fn cell_picture(
             }
         })
         .unwrap_or_default();
+    // A cell read from a file may keep no source text of its own: a field or
+    // a typed value shows through its evaluated or formatted value. The
+    // editor opens with that, as Properties shows it, not with nothing.
+    if text.value.is_empty() {
+        if let Some(content) = cell.contents.first() {
+            text.value = content_display_value(doc, table, content);
+        }
+    }
     Some(CellPicture {
         text,
         members,

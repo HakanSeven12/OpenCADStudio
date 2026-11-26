@@ -319,6 +319,15 @@ impl CadCommand for CreatePointManualCommand {
         true
     }
 
+    /// A direct distance at the ending point runs from the run's start (the
+    /// last point written in a chain); elsewhere from the last point given.
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        match self.step {
+            Step::End => self.from,
+            _ => None,
+        }
+    }
+
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         self.point_at(pt)
     }
@@ -396,7 +405,8 @@ impl CadCommand for CreatePointManualCommand {
             }
             Step::End => {
                 self.step = Step::End;
-                return Self::point_required();
+                // A number is a direct distance toward the cursor (measured).
+                return if number(typed).is_some() { None } else { Self::point_required() };
             }
             Step::Angle => {
                 if typed.is_empty() {
@@ -430,7 +440,7 @@ impl CadCommand for CreatePointManualCommand {
             }
             Step::Start => {
                 self.step = Step::Start;
-                return Self::point_required();
+                return if number(typed).is_some() { None } else { Self::point_required() };
             }
             Step::Description(at) => {
                 let d = self.description_of(text);

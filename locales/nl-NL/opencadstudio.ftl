@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Lay-out voorbereiden…
 
+plugin-busy =
+    .prompt = { $command } wordt uitgevoerd …
+    .pill = { $command }
+    .pill-tip = Er wordt een plug-inopdracht uitgevoerd. Het venster reageert weer zodra deze klaar is.
+
 gpu =
     .title = Grafische waarschuwing
     .software-headline = Er is geen werkend GPU-stuurprogramma gevonden, dus de tekening wordt in software op de CPU gerenderd ({ $adapter }).

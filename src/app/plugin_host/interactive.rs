@@ -26,6 +26,9 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
     fn name(&self) -> &'static str {
         "PLUGIN"
     }
+    fn is_plugin_command(&self) -> bool {
+        true
+    }
     fn preserve_commit_style(&self) -> bool {
         true
     }
@@ -243,6 +246,9 @@ impl Drop for PluginProcessInteractiveAdapter {
 impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
     fn name(&self) -> &'static str {
         "PLUGIN"
+    }
+    fn is_plugin_command(&self) -> bool {
+        true
     }
     fn preserve_commit_style(&self) -> bool {
         true

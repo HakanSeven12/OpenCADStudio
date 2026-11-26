@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = 배치 준비 중…
 
+plugin-busy =
+    .prompt = { $command } 실행 중…
+    .pill = { $command }
+    .pill-tip = 플러그인 명령이 실행 중입니다. 완료되면 창이 다시 응답합니다.
+
 gpu =
     .title = 그래픽 경고
     .software-headline = 작동하는 GPU 드라이버를 찾을 수 없어 도면을 CPU에서 소프트웨어로 렌더링하고 있습니다 ({ $adapter }).

@@ -433,6 +433,11 @@ viewport =
     .move = Di chuyển khung nhìn
     .close = Đóng khung nhìn
 
+plugin-busy =
+    .prompt = Đang chạy { $command } …
+    .pill = { $command }
+    .pill-tip = Một lệnh của plugin đang chạy. Cửa sổ sẽ phản hồi lại khi lệnh hoàn tất.
+
 gpu =
     .title = Cảnh báo đồ họa
     .software-headline = Không tìm thấy trình điều khiển GPU hoạt động, vì vậy bản vẽ được hiển thị bằng phần mềm trên CPU ({ $adapter }).

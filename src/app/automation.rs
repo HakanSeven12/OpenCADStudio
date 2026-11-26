@@ -1792,6 +1792,20 @@ impl OpenCADStudio {
         &mut self,
         task: iced::Task<super::Message>,
     ) -> Result<(), String> {
+        // Driven here to the end, a plugin command cannot wait for the
+        // window to draw: nothing in it defers, and one the line that made
+        // `task` already deferred goes on at once (#3650).
+        let pass = std::mem::replace(&mut self.plugin_frame_pass, true);
+        self.on_plugin_frame_drawn();
+        let driven = self.drive_headless_task_to_end(task);
+        self.plugin_frame_pass = pass;
+        driven
+    }
+
+    fn drive_headless_task_to_end(
+        &mut self,
+        task: iced::Task<super::Message>,
+    ) -> Result<(), String> {
         use iced::futures::StreamExt;
         let mut streams = Vec::new();
         if let Some(stream) = iced_runtime::task::into_stream(task) {

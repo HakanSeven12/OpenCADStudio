@@ -3653,10 +3653,14 @@ impl OpenCADStudio {
             // "insert_row", "delete_row", "select_row=<k>",
             // "row=<k>:<set operator>:<0|1 open>:<property 0-4>:<operator>:
             // <value>:<0|1 close>", "reset", "override=<k>:0|1",
-            // "override_text=<k>:<text>", "apply", "ok", "cancel".
+            // "override_text=<k>:<text>", "list_filter=<text>",
+            // "list_sort=<column title>", "list_switch=grid|full|name|raw|
+            // columns", "list_pick=<number>", "list_show[=<number>]",
+            // "apply", "ok", "cancel".
             // Create COGO Points (corridor): "range=entire|user",
             // "baseline=<name>", "start=", "end=", "group_name=",
-            // "code=<k>:0|1", "ok". Create Blocks from COGO Points:
+            // "code=<k>:0|1", "pick_baseline", "pick_station=start|end",
+            // "ok". Create Blocks from COGO Points:
             // "spatial=none|display|window", "pick_window", "group=<k>:0|1",
             // "existing=<block>", "new=<name>", "layer=<name>", "ok". The
             // duplicate block question: "skip", "overwrite", "cancel".
@@ -3707,6 +3711,21 @@ impl OpenCADStudio {
                         "reset" => G::Reset,
                         "override" => pair().map(|(k, v)| G::Override(k, on(&v))).ok_or_else(bad)?,
                         "override_text" => pair().map(|(k, v)| G::OverrideText(k, v)).ok_or_else(bad)?,
+                        "list_filter" => G::ListFilter(value.into()),
+                        "list_sort" => G::ListSort(crate::ui::window::point_group::ListCol::of(value).ok_or_else(bad)?),
+                        "list_switch" => {
+                            use crate::ui::window::point_group::ListSwitch as S;
+                            G::ListSwitch(match value {
+                                "grid" => S::Grid,
+                                "full" => S::Full,
+                                "name" => S::Name,
+                                "raw" => S::Raw,
+                                "columns" => S::Columns,
+                                _ => return Err(bad()),
+                            })
+                        }
+                        "list_pick" => G::ListPick(value.parse().map_err(|_| bad())?),
+                        "list_show" => G::ListShow(value.parse().ok()),
                         "apply" => G::Apply,
                         "ok" => G::Ok,
                         _ => return Err(bad()),
@@ -3734,6 +3753,8 @@ impl OpenCADStudio {
                             (K::CorridorPoints, "end") => P::End(value.into()),
                             (K::CorridorPoints, "group_name") => P::GroupName(value.into()),
                             (K::CorridorPoints, "code") => pair().map(|(k, v)| P::Code(k, v)).ok_or_else(bad)?,
+                            (K::CorridorPoints, "pick_baseline") => P::PickBaseline,
+                            (K::CorridorPoints, "pick_station") => P::PickStation(value == "end"),
                             (K::CorridorPoints, "ok") => P::CorridorOk,
                             (K::PointBlocks, "spatial") => P::Spatial(match value {
                                 "display" => Spatial::CurrentDisplay,

@@ -721,7 +721,7 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::CorridorPoints => {
                 let state = self.point_tools.corridor.as_ref()?;
-                sized_flow(ex, 460, 600, |flow| crate::ui::window::point_tools::view_corridor(state, flow))
+                sized_flow(ex, 660, 620, |flow| crate::ui::window::point_tools::view_corridor(state, flow))
             }
             super::super::ModalKind::PointBlocks => {
                 let state = self.point_tools.blocks.as_ref()?;

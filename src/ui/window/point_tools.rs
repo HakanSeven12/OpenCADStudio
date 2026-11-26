@@ -16,8 +16,10 @@ use crate::ui::window::pdf_dialogs::{card, chip};
 #[derive(Debug, Clone)]
 pub struct CorridorPointsWindow {
     pub corridor: document::Handle,
-    /// Baseline names and their station ranges.
-    pub baselines: Vec<(String, f64, f64)>,
+    /// Baseline names, their station ranges and alignments.
+    pub baselines: Vec<(String, f64, f64, u64)>,
+    /// The stations each baseline gives each code a point at.
+    pub stations: Vec<Vec<Vec<f64>>>,
     pub baseline: usize,
     /// The user specified range is on (otherwise the entire corridor).
     pub user_range: bool,
@@ -100,6 +102,10 @@ pub enum PointToolMsg {
     End(String),
     GroupName(String),
     Code(usize, bool),
+    /// Pick the baseline's alignment in the drawing.
+    PickBaseline,
+    /// Pick the start (false) or end (true) station in the drawing.
+    PickStation(bool),
     CorridorOk,
     // Create Blocks from COGO Points
     Spatial(Spatial),
@@ -178,47 +184,198 @@ fn footer<'a>(help: &'static str, ok: Message) -> Element<'a, Message> {
     .into()
 }
 
+static PICK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
+
+/// A station as typed: `0+60.00` or `60`.
+pub fn parse_station(s: &str) -> Option<f64> {
+    s.trim().replace('+', "").parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+impl CorridorPointsWindow {
+    /// The station range the points are taken from: the typed one, or
+    /// none when the whole corridor is taken (or a station does not read).
+    pub fn range(&self) -> Option<(f64, f64)> {
+        if !self.user_range {
+            return None;
+        }
+        let (a, b) = (parse_station(&self.start)?, parse_station(&self.end)?);
+        Some((a.min(b), a.max(b)))
+    }
+
+    /// The points code `c` gives: the user range's baseline within the
+    /// range, otherwise every baseline.
+    pub fn count(&self, c: usize) -> usize {
+        let range = self.range();
+        self.stations
+            .iter()
+            .enumerate()
+            .filter(|(b, _)| !self.user_range || *b == self.baseline)
+            .filter_map(|(_, codes)| codes.get(c))
+            .map(|s| s.iter().filter(|s| range.is_none_or(|(a, b)| (a - 1e-9..=b + 1e-9).contains(*s))).count())
+            .sum()
+    }
+}
+
+fn pick_button<'a>(m: Option<Message>) -> Element<'a, Message> {
+    button(container(crate::ui::icons::semantic(PICK_ICON, 15.0)).center(Length::Fixed(22.0)))
+        .on_press_maybe(m)
+        .style(button_style(false))
+        .padding(2)
+        .into()
+}
+
+/// A card with a numbered step badge and an optional count next to its title.
+fn step<'a>(n: u8, title: String, count: Option<String>, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    use crate::ui::window::pdf_dialogs::{accent_text, card_style};
+    let badge = container(text(n.to_string()).size(11).style(|t: &iced::Theme| iced::widget::text::Style { color: Some(t.palette().primary.base.text) }))
+        .center(Length::Fixed(20.0))
+        .style(|t: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(t.palette().primary.base.color)),
+            border: iced::Border { radius: 10.0.into(), ..Default::default() },
+            ..Default::default()
+        });
+    let mut head = row![badge, text(title.to_uppercase()).size(10).style(accent_text)].spacing(8).align_y(iced::Center);
+    if let Some(c) = count {
+        head = head.push(small(c).style(muted_style));
+    }
+    container(column![head, content.into()].spacing(10)).padding([10, 12]).width(Fill).style(card_style).into()
+}
+
+/// The baseline's station range as a bar, the stations taken filled.
+fn range_bar<'a>(lo: f64, hi: f64, taken: (f64, f64)) -> Element<'a, Message> {
+    let span = (hi - lo).max(1e-9);
+    let part = |v: f64| ((v.clamp(lo, hi) - lo) / span * 1000.0).round() as u16;
+    let (a, b) = (part(taken.0), part(taken.1));
+    let track = |fill: bool, w: u16| -> Element<'a, Message> {
+        container(Space::new().height(Length::Fixed(6.0)))
+            .width(Length::FillPortion(w.max(1)))
+            .style(move |t: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(if fill { t.palette().primary.base.color } else { t.palette().background.base.color })),
+                border: iced::Border { radius: 3.0.into(), ..Default::default() },
+                ..Default::default()
+            })
+            .into()
+    };
+    let mut bar = row![].align_y(iced::Center);
+    if a > 0 {
+        bar = bar.push(track(false, a));
+    }
+    bar = bar.push(track(true, b.saturating_sub(a)));
+    if b < 1000 {
+        bar = bar.push(track(false, 1000 - b));
+    }
+    let stations = row![
+        small(crate::modules::civil::point_alignment::format_station(lo)).style(muted_style),
+        Space::new().width(Fill),
+        small(crate::modules::civil::point_alignment::format_station(hi)).style(muted_style),
+    ];
+    column![bar, stations].spacing(4).into()
+}
+
 pub fn view_corridor<'a>(state: &'a CorridorPointsWindow, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    use crate::ui::kit::{column as list_column, column_header, list_row, number_cell, text_cell};
     let names: Vec<String> = state.baselines.iter().map(|b| b.0.clone()).collect();
     let on = state.user_range;
-    let range = card(
-        t!("Station range").into_owned(),
+    let seg = |label: String, value: bool| {
+        button(text(label).size(11).width(Fill).align_x(iced::Center))
+            .on_press(msg(PointToolMsg::UserRange(value)))
+            .style(button_style(on == value))
+            .padding([5, 10])
+            .width(Fill)
+    };
+    let segmented = container(row![seg(t!("Entire corridor").into_owned(), false), seg(t!("Specified range").into_owned(), true)].spacing(2))
+        .padding(2)
+        .width(Length::Fixed(250.0))
+        .style(crate::ui::window::pdf_dialogs::well_style);
+    let baseline = pick_list(state.baselines.get(state.baseline).map(|b| b.0.clone()), names, |s: &String| s.clone())
+        .on_select(|s| msg(PointToolMsg::Baseline(s)))
+        .text_size(11)
+        .padding([4, 8])
+        .width(Length::Fixed(140.0));
+    let (lo, hi) = state.baselines.get(state.baseline).map_or((0.0, 0.0), |b| (b.1, b.2));
+    let taken = state.range().unwrap_or((lo, hi));
+    let picks = |m: PointToolMsg| on.then(|| msg(m));
+    let range = step(
+        1,
+        t!("Range").into_owned(),
+        None,
         column![
             row![
-                chip(t!("For entire corridor range").into_owned(), !on, msg(PointToolMsg::UserRange(false))),
-                chip(t!("For user specified range").into_owned(), on, msg(PointToolMsg::UserRange(true))),
+                segmented,
+                Space::new().width(Fill),
+                small(t!("Baseline")).style(muted_style),
+                baseline,
+                pick_button(picks(PointToolMsg::PickBaseline)),
             ]
-            .spacing(6),
-            labelled(
-                t!("Select baseline:").into_owned(),
-                pick_list(state.baselines.get(state.baseline).map(|b| b.0.clone()), names, |s: &String| s.clone())
-                    .on_select(|s| msg(PointToolMsg::Baseline(s)))
-                    .text_size(11)
-                    .padding([4, 8])
-                    .width(Fill),
-            ),
-            labelled(t!("Baseline start:").into_owned(), field(&state.start, on, |s| msg(PointToolMsg::Start(s)))),
-            labelled(t!("Baseline end:").into_owned(), field(&state.end, on, |s| msg(PointToolMsg::End(s)))),
+            .spacing(8)
+            .align_y(iced::Center),
+            range_bar(lo, hi, taken),
+            row![
+                small(t!("Start station")).style(muted_style),
+                container(field(&state.start, on, |s| msg(PointToolMsg::Start(s)))).width(Length::Fixed(130.0)),
+                pick_button(picks(PointToolMsg::PickStation(false))),
+                Space::new().width(Fill),
+                small(t!("End station")).style(muted_style),
+                container(field(&state.end, on, |s| msg(PointToolMsg::End(s)))).width(Length::Fixed(130.0)),
+                pick_button(picks(PointToolMsg::PickStation(true))),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
         ]
-        .spacing(8),
+        .spacing(10),
     );
-    let mut codes = column![].spacing(4);
-    for (k, (code, picked)) in state.codes.iter().enumerate() {
-        codes = codes.push(checkbox(*picked).label(code.clone()).size(14).text_size(11).on_toggle(move |v| msg(PointToolMsg::Code(k, v))));
+    let picked = state.codes.iter().filter(|c| c.1).count();
+    let header = column_header(vec![
+        list_column(t!("Code").into_owned(), Length::Fill),
+        list_column(t!("Points").into_owned(), Length::Fixed(90.0)).end(),
+        list_column(String::new(), Length::Fixed(40.0)),
+    ]);
+    let mut rows = column![];
+    for (k, (code, on)) in state.codes.iter().enumerate() {
+        let tick = container(checkbox(*on).size(14).on_toggle(move |v| msg(PointToolMsg::Code(k, v)))).center_x(Fill);
+        rows = rows.push(
+            list_row(vec![
+                (text_cell(code.clone(), false), Length::Fill),
+                (number_cell(state.count(k).to_string()), Length::Fixed(90.0)),
+                (tick.into(), Length::Fixed(40.0)),
+            ])
+            .on_press(msg(PointToolMsg::Code(k, !on)))
+            .view(),
+        );
     }
-    let mut col = column![
-        range,
-        card(t!("New point group name:").into_owned(), field(&state.group_name, true, |s| msg(PointToolMsg::GroupName(s)))),
-        card(t!("Select point codes to create:").into_owned(), scrollable(codes).height(Length::Fixed(170.0))),
-    ]
-    .spacing(10);
+    let codes = step(
+        2,
+        t!("Point codes").into_owned(),
+        Some(t!("%{n} picked", n = picked).into_owned()),
+        container(column![header, scrollable(rows).height(Length::Fixed(130.0))]).width(Fill).style(crate::ui::window::pdf_dialogs::well_style),
+    );
+    let total: usize = (0..state.codes.len()).filter(|k| state.codes[*k].1).map(|k| state.count(k)).sum();
+    let group = step(
+        3,
+        t!("Point group").into_owned(),
+        None,
+        row![field(&state.group_name, true, |s| msg(PointToolMsg::GroupName(s))), small(t!("%{n} points will be added", n = total)).style(muted_style)]
+            .spacing(10)
+            .align_y(iced::Center),
+    );
+    let mut col = column![range, codes, group].spacing(10);
     if let Some(band) = error_band(&state.error) {
         col = col.push(band);
     }
-    col.push(footer("Creates a COGO point at each corridor station for the point codes picked, described by its code, and a point group holding them.", msg(PointToolMsg::CorridorOk)))
-        .padding([10, 12])
-        .width(sizing.width)
-        .into()
+    let footer = row![
+        button(text("?").size(12))
+            .on_press(msg(PointToolMsg::Help(
+                "Creates a COGO point at each corridor station for the point codes picked, described by its code, and a point group holding them."
+            )))
+            .style(button_style(false))
+            .padding([5, 11]),
+        Space::new().width(Fill),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Create"), msg(PointToolMsg::CorridorOk), true),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    col.push(footer).padding([10, 12]).width(sizing.width).into()
 }
 
 pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {

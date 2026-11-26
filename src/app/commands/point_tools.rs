@@ -124,6 +124,7 @@ impl OpenCADStudio {
             override_style: false,
             override_label: false,
             points,
+            list: Default::default(),
             error: None,
             written: None,
         });
@@ -286,6 +287,49 @@ impl OpenCADStudio {
                 } else {
                     state.override_elevation.1 = s;
                 }
+            }
+            PointGroupMsg::ListFilter(s) => state.list.filter = s,
+            PointGroupMsg::ListSort(col) => {
+                let list = &mut state.list;
+                list.descending = list.sort == col && !list.descending;
+                list.sort = col;
+            }
+            PointGroupMsg::ListSwitch(s) => {
+                use crate::ui::window::point_group::ListSwitch;
+                let list = &mut state.list;
+                let flag = match s {
+                    ListSwitch::Grid => &mut list.grid,
+                    ListSwitch::Full => &mut list.full,
+                    ListSwitch::Name => &mut list.name,
+                    ListSwitch::Raw => &mut list.raw,
+                    ListSwitch::Columns => &mut list.columns_open,
+                };
+                *flag = !*flag;
+            }
+            PointGroupMsg::ListPick(n) => state.list.picked = Some(n),
+            PointGroupMsg::ListShow(n) => {
+                // The row double-clicked, else the row picked, else every
+                // point listed.
+                let numbers: Vec<u32> = match n.or(state.list.picked) {
+                    Some(n) => vec![n],
+                    None => {
+                        let members = state.query().ok().and_then(|q| q.members(&state.points).ok()).unwrap_or_default();
+                        state.list.rows(&state.points, &members).iter().map(|p| p.number).collect()
+                    }
+                };
+                let i = self.active_tab;
+                let handles: Vec<Handle> = numbers.iter().filter_map(|n| cogo_point_entity(&self.tabs[i].scene.document, *n)).collect();
+                let scene = &mut self.tabs[i].scene;
+                scene.deselect_all();
+                for h in &handles {
+                    scene.select_entity(*h, false);
+                }
+                // A lone point has no extent to fit; the view stays where it is.
+                if handles.len() > 1 {
+                    scene.zoom_to_entities(&handles);
+                }
+                self.refresh_properties();
+                self.refresh_selected_grips();
             }
             PointGroupMsg::DismissError => {}
             PointGroupMsg::Help => self.command_line.push_info(
@@ -586,23 +630,82 @@ impl OpenCADStudio {
                     .and_then(arch_entity)
                     .and_then(|a| a.alignment_name())
                     .unwrap_or_else(|| format!("Baseline ({})", k + 1));
-                (name, if lo.is_finite() { lo } else { 0.0 }, if hi.is_finite() { hi } else { 0.0 })
+                (name, if lo.is_finite() { lo } else { 0.0 }, if hi.is_finite() { hi } else { 0.0 }, alignment.unwrap_or(0))
             })
             .collect::<Vec<_>>();
+        // The stations each baseline gives each code a point at; two runs
+        // meeting at a station share its point (as OK takes them).
+        let stations = lines
+            .iter()
+            .map(|groups| {
+                (0..codes.len())
+                    .map(|c| {
+                        let mut v: Vec<f64> = Vec::new();
+                        for (s, _) in groups.get(c).into_iter().flatten().flatten() {
+                            if v.last().is_none_or(|l| (l - s).abs() > 1e-9) {
+                                v.push(*s);
+                            }
+                        }
+                        v
+                    })
+                    .collect()
+            })
+            .collect();
         let groups = point_groups(doc).len();
         let group_name = self.next_group_name(i, groups);
         let (start, end) = baselines.first().map_or((0.0, 0.0), |b| (b.1, b.2));
+        use crate::modules::civil::point_alignment::format_station;
         self.point_tools.corridor = Some(CorridorPointsWindow {
             corridor,
             baselines,
+            stations,
             baseline: 0,
             user_range: false,
-            start: format!("{start:.2}"),
-            end: format!("{end:.2}"),
+            start: format_station(start),
+            end: format_station(end),
             group_name,
             codes,
             error: None,
         });
+        self.active_modal = Some(crate::app::ModalKind::CorridorPoints);
+    }
+
+    /// The pick a range button stepped aside for: the baseline whose
+    /// alignment was picked, or the station of the point picked on the
+    /// baseline; then the window comes back.
+    pub(in crate::app) fn corridor_range_picked(&mut self, args: &str) {
+        let i = self.active_tab;
+        self.tabs[i].active_cmd = None;
+        let doc = &self.tabs[i].scene.document;
+        let Some(w) = self.point_tools.corridor.as_mut() else { return };
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        match parts[..] {
+            [hex] => {
+                let picked = u64::from_str_radix(hex, 16).ok();
+                match w.baselines.iter().position(|b| Some(b.3) == picked) {
+                    Some(k) => {
+                        w.baseline = k;
+                        w.start = crate::modules::civil::point_alignment::format_station(w.baselines[k].1);
+                        w.end = crate::modules::civil::point_alignment::format_station(w.baselines[k].2);
+                    }
+                    None => w.error = Some(crate::t!("The alignment picked is not a baseline of this corridor.").into_owned()),
+                }
+            }
+            [which, x, y] => {
+                let alignment = doc.get_entity(Handle::new(w.baselines.get(w.baseline).map_or(0, |b| b.3)));
+                if let (Some(e), Ok(x), Ok(y)) = (alignment, x.parse::<f64>(), y.parse::<f64>()) {
+                    if let Some(s) = crate::modules::civil::point_alignment::station_on(e, [x, y]) {
+                        let text = crate::modules::civil::point_alignment::format_station(s);
+                        if which.eq_ignore_ascii_case("end") {
+                            w.end = text;
+                        } else {
+                            w.start = text;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
         self.active_modal = Some(crate::app::ModalKind::CorridorPoints);
     }
 
@@ -617,13 +720,10 @@ impl OpenCADStudio {
                 w.error = Some(e);
             }
         };
-        let (start, end) = if state.user_range {
-            match (state.start.trim().parse::<f64>(), state.end.trim().parse::<f64>()) {
-                (Ok(a), Ok(b)) => (a.min(b), a.max(b)),
-                _ => return fail(self, crate::t!("Type mismatch.").into_owned()),
-            }
-        } else {
-            (f64::NEG_INFINITY, f64::INFINITY)
+        let (start, end) = match state.range() {
+            Some(r) => r,
+            None if state.user_range => return fail(self, crate::t!("Type mismatch.").into_owned()),
+            None => (f64::NEG_INFINITY, f64::INFINITY),
         };
         let name = pq::clean_name(state.group_name.trim());
         let doc = &self.tabs[i].scene.document;
@@ -1016,8 +1116,8 @@ impl OpenCADStudio {
                 if let Some(w) = corridor {
                     if let Some(k) = w.baselines.iter().position(|b| b.0 == name) {
                         w.baseline = k;
-                        w.start = format!("{:.2}", w.baselines[k].1);
-                        w.end = format!("{:.2}", w.baselines[k].2);
+                        w.start = crate::modules::civil::point_alignment::format_station(w.baselines[k].1);
+                        w.end = crate::modules::civil::point_alignment::format_station(w.baselines[k].2);
                     }
                 }
             }
@@ -1042,6 +1142,17 @@ impl OpenCADStudio {
                 }
             }
             PointToolMsg::CorridorOk => self.corridor_points_ok(),
+            PointToolMsg::PickBaseline | PointToolMsg::PickStation(_) => {
+                use crate::command::CadCommand;
+                let station = match message {
+                    PointToolMsg::PickStation(end) => Some(end),
+                    _ => None,
+                };
+                self.active_modal = None;
+                let c = crate::modules::civil::point_pick::CorridorRangePickCommand::new(station);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
             PointToolMsg::Spatial(s) => {
                 if let Some(w) = self.point_tools.blocks.as_mut() {
                     w.spatial = s;

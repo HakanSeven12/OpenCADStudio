@@ -2678,6 +2678,9 @@ impl OpenCADStudio {
                     self.open_corridor_points(document::Handle::new(h));
                 }
             }
+            cmd if cmd.starts_with(crate::modules::civil::point_pick::CORRIDOR_RANGE_PICKED) => {
+                self.corridor_range_picked(&cmd[crate::modules::civil::point_pick::CORRIDOR_RANGE_PICKED.len()..]);
+            }
             "CREATEBLOCKSFROMPOINTS" => self.open_point_blocks(),
             cmd if cmd.starts_with(crate::modules::civil::point_pick::WINDOW_PICKED) => {
                 self.point_blocks_window(&cmd[crate::modules::civil::point_pick::WINDOW_PICKED.len()..]);

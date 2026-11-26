@@ -96,3 +96,70 @@ impl CadCommand for WindowPickCommand {
         CmdResult::Dispatch(WINDOW_PICKED.into())
     }
 }
+
+/// Hands the picked alignment (hex), or the picked station point
+/// (`start|end x y`), back to the corridor points window; alone, the window
+/// comes back unchanged.
+pub const CORRIDOR_RANGE_PICKED: &str = "_CORRIDORPOINTS_RANGE";
+
+/// The baseline or a station of Create COGO Points from Corridor, picked in
+/// the drawing.
+pub struct CorridorRangePickCommand {
+    /// None: the baseline's alignment; Some(false/true): the start/end station.
+    pub station: Option<bool>,
+    picked: Option<bool>,
+}
+
+impl CorridorRangePickCommand {
+    pub fn new(station: Option<bool>) -> Self {
+        CorridorRangePickCommand { station, picked: None }
+    }
+}
+
+impl CadCommand for CorridorRangePickCommand {
+    fn name(&self) -> &'static str {
+        "CREATEPOINTSFROMCORRIDOR"
+    }
+
+    fn prompt(&self) -> String {
+        match self.station {
+            None => crate::t!("Select a baseline alignment:"),
+            Some(_) => crate::t!("Specify a station:"),
+        }
+        .into_owned()
+    }
+
+    fn input_kind(&self) -> InputKind {
+        InputKind::Point
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        self.station.is_none()
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked = Some(matches!(&entity, EntityType::Extended(x) if matches!(&x.data, document::entities::ExtendedEntityData::Arch(a) if a.dxf_name == "AECC_ALIGNMENT")));
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
+        match self.picked.take() {
+            Some(true) => CmdResult::Dispatch(format!("{CORRIDOR_RANGE_PICKED} {:X}", handle.value())),
+            _ => CmdResult::ReportError(crate::t!("Select an alignment.").into_owned()),
+        }
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        match self.station {
+            Some(end) => CmdResult::Dispatch(format!("{CORRIDOR_RANGE_PICKED} {} {} {}", if end { "end" } else { "start" }, pt.x, pt.y)),
+            None => CmdResult::NeedPoint,
+        }
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Dispatch(CORRIDOR_RANGE_PICKED.into())
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Dispatch(CORRIDOR_RANGE_PICKED.into())
+    }
+}

@@ -96,6 +96,7 @@ pub struct PointGroupWindow {
     pub override_style: bool,
     pub override_label: bool,
     pub points: Vec<Point>,
+    pub list: PointListView,
     pub error: Option<String>,
     /// The group Apply wrote; OK and a later Apply rewrite it.
     pub written: Option<document::Handle>,
@@ -152,6 +153,12 @@ pub enum PointGroupMsg {
     Reset,
     Override(usize, bool),
     OverrideText(usize, String),
+    ListFilter(String),
+    ListSort(ListCol),
+    ListSwitch(ListSwitch),
+    ListPick(u32),
+    /// Select the point (or, with none, the listed points) in the drawing.
+    ListShow(Option<u32>),
     DismissError,
     Apply,
     Ok,
@@ -339,25 +346,232 @@ fn overrides<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
     .into()
 }
 
-fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
-    let widths = [70.0, 100.0, 100.0, 100.0, 90.0, 110.0];
-    let head = [t!("Point Number"), t!("Easting"), t!("Northing"), t!("Point Elevation"), t!("Name"), t!("Raw Description")];
-    let mut header = row![].spacing(6);
-    for (h, w) in head.into_iter().zip(widths) {
-        header = header.push(small(h.into_owned()).style(muted_style).width(Length::Fixed(w)));
-    }
-    let numbers = state.query().ok().and_then(|q| q.members(&state.points).ok()).unwrap_or_default();
-    let mut list = column![].spacing(2);
-    for p in state.points.iter().filter(|p| numbers.contains(&p.number)) {
-        let z = if p.has_elevation() { format!("{:.3}", p.position[2]) } else { String::new() };
-        let cells = [p.number.to_string(), format!("{:.4}", p.position[0]), format!("{:.4}", p.position[1]), z, p.name.clone().unwrap_or_default(), p.raw.clone().unwrap_or_default()];
-        let mut line = row![].spacing(6);
-        for (c, w) in cells.into_iter().zip(widths) {
-            line = line.push(small(c).width(Length::Fixed(w)));
+/// A column of the Point List.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListCol {
+    Number,
+    Easting,
+    Northing,
+    Elevation,
+    Name,
+    Raw,
+    Full,
+    GridEasting,
+    GridNorthing,
+}
+
+impl ListCol {
+    fn title(self) -> &'static str {
+        match self {
+            ListCol::Number => "Point Number",
+            ListCol::Easting => "Easting",
+            ListCol::Northing => "Northing",
+            ListCol::Elevation => "Point Elevation",
+            ListCol::Name => "Name",
+            ListCol::Raw => "Raw Description",
+            ListCol::Full => "Full Description",
+            ListCol::GridEasting => "Grid Easting",
+            ListCol::GridNorthing => "Grid Northing",
         }
-        list = list.push(line);
     }
-    card(t!("Point List").into_owned(), column![header, scrollable(list).height(Length::Fixed(280.0))].spacing(6)).into()
+
+    /// The column a script names: its title in lower case, spaces as `_`.
+    pub fn of(name: &str) -> Option<ListCol> {
+        use ListCol::*;
+        [Number, Easting, Northing, Elevation, Name, Raw, Full, GridEasting, GridNorthing]
+            .into_iter()
+            .find(|c| c.title().to_lowercase().replace(' ', "_") == name)
+    }
+
+    fn width(self) -> f32 {
+        match self {
+            ListCol::Number => 100.0,
+            ListCol::Name => 70.0,
+            ListCol::Raw | ListCol::Full => 100.0,
+            _ => 90.0,
+        }
+    }
+
+    fn numeric(self) -> bool {
+        !matches!(self, ListCol::Name | ListCol::Raw | ListCol::Full)
+    }
+
+    /// The cell of point `p`. Without description keys the full
+    /// description is the raw one; without a coordinate system grid
+    /// coordinates are the drawing's.
+    pub fn cell(self, p: &Point) -> String {
+        match self {
+            ListCol::Number => p.number.to_string(),
+            ListCol::Easting | ListCol::GridEasting => format!("{:.4}", p.position[0]),
+            ListCol::Northing | ListCol::GridNorthing => format!("{:.4}", p.position[1]),
+            ListCol::Elevation => {
+                if p.has_elevation() {
+                    format!("{:.3}", p.position[2])
+                } else {
+                    String::new()
+                }
+            }
+            ListCol::Name => p.name.clone().unwrap_or_default(),
+            ListCol::Raw | ListCol::Full => p.raw.clone().unwrap_or_default(),
+        }
+    }
+
+    fn key(self, p: &Point) -> f64 {
+        match self {
+            ListCol::Number => p.number as f64,
+            ListCol::Easting | ListCol::GridEasting => p.position[0],
+            ListCol::Northing | ListCol::GridNorthing => p.position[1],
+            _ => p.position[2],
+        }
+    }
+}
+
+/// How the Point List shows the group's points.
+#[derive(Debug, Clone)]
+pub struct PointListView {
+    pub filter: String,
+    pub sort: ListCol,
+    pub descending: bool,
+    pub grid: bool,
+    pub full: bool,
+    pub name: bool,
+    pub raw: bool,
+    /// The column switches are open under the toolbar.
+    pub columns_open: bool,
+    pub picked: Option<u32>,
+}
+
+impl Default for PointListView {
+    fn default() -> Self {
+        PointListView {
+            filter: String::new(),
+            sort: ListCol::Number,
+            descending: false,
+            grid: false,
+            full: true,
+            name: true,
+            raw: true,
+            columns_open: false,
+            picked: None,
+        }
+    }
+}
+
+impl PointListView {
+    pub fn columns(&self) -> Vec<ListCol> {
+        let mut c = vec![ListCol::Number, ListCol::Easting, ListCol::Northing, ListCol::Elevation];
+        let optional = [
+            (self.name, ListCol::Name),
+            (self.raw, ListCol::Raw),
+            (self.full, ListCol::Full),
+            (self.grid, ListCol::GridEasting),
+            (self.grid, ListCol::GridNorthing),
+        ];
+        c.extend(optional.into_iter().filter(|o| o.0).map(|o| o.1));
+        c
+    }
+
+    /// The listed points: the group's, filtered by number, name or raw
+    /// description and sorted by the sort column.
+    pub fn rows<'p>(&self, points: &'p [Point], members: &[u32]) -> Vec<&'p Point> {
+        let needle = self.filter.trim().to_lowercase();
+        let mut rows: Vec<&Point> = points
+            .iter()
+            .filter(|p| members.contains(&p.number))
+            .filter(|p| {
+                needle.is_empty() || [ListCol::Number, ListCol::Name, ListCol::Raw].iter().any(|c| c.cell(p).to_lowercase().contains(&needle))
+            })
+            .collect();
+        let col = self.sort;
+        if col.numeric() {
+            rows.sort_by(|a, b| col.key(a).total_cmp(&col.key(b)));
+        } else {
+            rows.sort_by_key(|p| col.cell(p).to_lowercase());
+        }
+        if self.descending {
+            rows.reverse();
+        }
+        rows
+    }
+}
+
+/// A switch of the Point List toolbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListSwitch {
+    Grid,
+    Full,
+    Name,
+    Raw,
+    Columns,
+}
+
+fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
+    use crate::ui::kit::{column as list_column, column_header, list_row, number_cell, search_field, text_cell};
+    use crate::ui::window::pdf_dialogs::chip;
+    let view = &state.list;
+    let members = state.query().ok().and_then(|q| q.members(&state.points).ok()).unwrap_or_default();
+    let rows = view.rows(&state.points, &members);
+    let cols = view.columns();
+    let switch = |s: ListSwitch| msg(PointGroupMsg::ListSwitch(s));
+    let tools = row![
+        container(search_field(t!("Search number, name or description").as_ref(), &view.filter, |s| msg(PointGroupMsg::ListFilter(s))))
+            .width(Length::Fixed(230.0)),
+        small(t!("%{n} points", n = rows.len())).style(muted_style),
+        Space::new().width(Fill),
+        chip(t!("Grid coordinates").into_owned(), view.grid, switch(ListSwitch::Grid)),
+        chip(t!("Full Description").into_owned(), view.full, switch(ListSwitch::Full)),
+        chip(t!("Columns").into_owned(), view.columns_open, switch(ListSwitch::Columns)),
+        button(text(t!("Show in drawing")).size(11)).on_press(msg(PointGroupMsg::ListShow(None))).style(button_style(false)).padding([4, 10]),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    let mut body = column![tools].spacing(6);
+    if view.columns_open {
+        body = body.push(
+            row![
+                small(t!("Columns:")).style(muted_style),
+                chip(t!("Name").into_owned(), view.name, switch(ListSwitch::Name)),
+                chip(t!("Raw Description").into_owned(), view.raw, switch(ListSwitch::Raw)),
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+        );
+    }
+    let header = column_header(
+        cols.iter()
+            .map(|c| {
+                let mut h = list_column(t!(c.title()).into_owned(), Length::Fixed(c.width())).on_press(msg(PointGroupMsg::ListSort(*c)));
+                if c.numeric() {
+                    h = h.end();
+                }
+                if *c == view.sort {
+                    h = h.sorted(view.descending);
+                }
+                h
+            })
+            .collect(),
+    );
+    let mut list = column![];
+    for p in &rows {
+        let cells = cols
+            .iter()
+            .map(|c| {
+                let v = c.cell(p);
+                let cell = if c.numeric() { number_cell(v) } else { text_cell(v, false) };
+                (cell, Length::Fixed(c.width()))
+            })
+            .collect();
+        list = list.push(
+            list_row(cells)
+                .selected(view.picked == Some(p.number))
+                .on_press(msg(PointGroupMsg::ListPick(p.number)))
+                .on_double_click(msg(PointGroupMsg::ListShow(Some(p.number))))
+                .view(),
+        );
+    }
+    let table = container(column![header, scrollable(list).height(Fill)]).height(Fill).width(Fill).style(well_style);
+    let note = small(t!("Click a title to sort; double-click a row to select its point in the drawing.")).style(muted_style);
+    card(t!("Point List").into_owned(), body.push(table).push(note)).into()
 }
 
 fn summary<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {

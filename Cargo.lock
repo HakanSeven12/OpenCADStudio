@@ -67,6 +67,7 @@ dependencies = [
  "pretty_assertions",
  "printpdf",
  "proj4rs",
+ "proj4rs-geodesic",
  "proj4wkt",
  "rayon",
  "resvg",

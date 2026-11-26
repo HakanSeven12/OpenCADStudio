@@ -2728,11 +2728,15 @@ impl OpenCADStudio {
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
-            // The drawing has no coordinate transformation settings, which
-            // the command needs (the reference refuses the same way).
-            "CREATEPTGEODETICDIR" => {
-                self.command_line.push_error(&crate::t!("Coordinate transformations must be enabled for this command."));
-            }
+            // Needs the drawing's coordinate system (refused without one).
+            "CREATEPTGEODETICDIR" => match crate::io::crs::document_crs(&self.tabs[i].scene.document) {
+                Ok(Some(crs)) if !crs.is_geographic() => {
+                    let c = crate::modules::civil::point_geodetic::GeodeticDirectCommand::new(crs);
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                }
+                _ => self.command_line.push_error(&crate::t!("Coordinate transformations must be enabled for this command.")),
+            },
             cmd if crate::modules::civil::point_object::Kind::of(cmd).is_some() => {
                 let kind = crate::modules::civil::point_object::Kind::of(cmd).unwrap();
                 let c = crate::modules::civil::point_object::ObjectPointCommand::new(kind);

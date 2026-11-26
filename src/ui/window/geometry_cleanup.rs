@@ -158,6 +158,9 @@ pub struct Finding {
     pub deviation: f64,
     /// What an angle error needs for its repair.
     pub angle: Option<AngleFinding>,
+    /// Whether Stretch can put the end on `target`: not on an elliptical
+    /// arc, whose end only goes round its ellipse.
+    pub stretch: bool,
 }
 
 /// An angle error's standard angle and turn.
@@ -170,15 +173,21 @@ pub struct AngleFinding {
     pub turn: f64,
     /// Whether the start and the end of the line meet other geometry.
     pub meets: [bool; 2],
+    /// The segment of a polyline that is off the angle, and the segment of
+    /// the other polyline (Relative); `None` for a line.
+    pub segment: Option<usize>,
+    pub other_segment: Option<usize>,
 }
 
 impl Finding {
     /// Whether `other` is the same error: the same type at the same end,
-    /// or of the same two lines.
+    /// or of the same lines or segments.
     pub fn same_error(&self, other: &Finding) -> bool {
+        let segments = |f: &Finding| f.angle.map(|a| (a.segment, a.other_segment));
         self.kind == other.kind
             && self.handle == other.handle
             && self.at_start == other.at_start
+            && segments(self) == segments(other)
             && (self.kind != ErrorType::RelativeAngle
                 || self.other.map(|o| o.0) == other.other.map(|o| o.0))
     }
@@ -200,7 +209,9 @@ impl Finding {
                 if self.corner.is_some() {
                     fixes.push(Fix::ExtendBoth);
                 }
-                fixes.push(Fix::Stretch);
+                if self.stretch {
+                    fixes.push(Fix::Stretch);
+                }
                 // Moving a polyline so that one end meets its other end
                 // cannot close it.
                 if self.other.is_some_and(|(other, _)| other != self.handle) {
@@ -258,6 +269,11 @@ pub enum GeometryCleanupMsg {
     SettingsUseProposed(EndErrorKind),
     SettingsRemove(EndErrorKind),
     SettingsAdd(EndErrorKind),
+    /// The angle rows, by their index in the dialog.
+    SettingsAngle(usize, String),
+    SettingsAngleTolerance(usize, String),
+    SettingsRemoveAngle(usize),
+    SettingsAddAngle(AngleErrorKind),
     SettingsImport,
     SettingsImported(std::path::PathBuf),
     SettingsExport,

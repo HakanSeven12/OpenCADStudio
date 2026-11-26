@@ -10,7 +10,9 @@
 //! (`absolute-angle`, `relative-angle`) have a row for each standard angle,
 //! with the angle in degrees in `subName`.
 
-use ocs_geom::geom2d::cleanup::{AngleTolerance, AngleTolerances, EndErrorKind, Tolerances};
+use ocs_geom::geom2d::cleanup::{
+    AngleErrorKind, AngleTolerance, AngleTolerances, EndErrorKind, Tolerances,
+};
 use serde::{Deserialize, Serialize};
 
 /// The smallest tolerance. A smaller value becomes this one.
@@ -28,7 +30,7 @@ const DEFAULT_ANGLES: [(&str, &str); 4] = [
     (RELATIVE_ANGLE, "0"),
     (RELATIVE_ANGLE, "90"),
 ];
-const DEFAULT_ANGLE_TOLERANCE: f64 = 5.0;
+pub const DEFAULT_ANGLE_TOLERANCE: f64 = 5.0;
 
 /// The length types, in the order of their rows.
 const LENGTH_KINDS: [EndErrorKind; 3] = [
@@ -40,6 +42,10 @@ const LENGTH_KINDS: [EndErrorKind; 3] = [
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CleanupSettings {
     pub tolerances: Vec<ToleranceRow>,
+    /// The fields that OCS does not know, kept so that an export writes
+    /// them back.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// One error type of a `.gcs` file.
@@ -50,6 +56,9 @@ pub struct ToleranceRow {
     #[serde(rename = "subName", default)]
     pub sub_name: String,
     pub tolerance: f64,
+    /// The fields of the row that OCS does not know, kept as they are.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The name of a length type in a `.gcs` file.
@@ -59,6 +68,21 @@ pub fn kind_name(kind: EndErrorKind) -> &'static str {
         EndErrorKind::Overshoot => "overshoot",
         EndErrorKind::Undershoot => "undershoot",
     }
+}
+
+/// The name of an angle type in a `.gcs` file.
+pub fn angle_kind_name(kind: AngleErrorKind) -> &'static str {
+    match kind {
+        AngleErrorKind::Absolute => ABSOLUTE_ANGLE,
+        AngleErrorKind::Relative => RELATIVE_ANGLE,
+    }
+}
+
+/// The angle type of a `.gcs` name; `None` for the other types.
+pub fn angle_kind_of(name: &str) -> Option<AngleErrorKind> {
+    [AngleErrorKind::Absolute, AngleErrorKind::Relative]
+        .into_iter()
+        .find(|&kind| angle_kind_name(kind) == name)
 }
 
 /// The length type of a `.gcs` name; `None` for the other types.
@@ -91,8 +115,10 @@ impl CleanupSettings {
                     name: name.to_string(),
                     sub_name: angle.to_string(),
                     tolerance: DEFAULT_ANGLE_TOLERANCE,
+                    extra: Default::default(),
                 })
                 .collect(),
+            extra: Default::default(),
         };
         for kind in LENGTH_KINDS {
             settings.set(kind, Some(tolerance));
@@ -100,17 +126,26 @@ impl CleanupSettings {
         settings
     }
 
-    /// Read a `.gcs` file. Text that is not such a file, or a tolerance
-    /// that is negative or not a number, is an error.
+    /// Read a `.gcs` file; a byte order mark before it is skipped. Text
+    /// that is not such a file, or a tolerance that is negative or not a
+    /// number, is an error.
     pub fn parse_gcs(text: &str) -> Result<Self, String> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut settings: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
         for row in &mut settings.tolerances {
+            let bad = || {
+                crate::tf!(
+                    "The tolerance of {} is {}: it must be a number of 0 or more.",
+                    row.name,
+                    row.tolerance
+                )
+                .into_owned()
+            };
             if !row.tolerance.is_finite() || row.tolerance < 0.0 {
-                return Err(format!("{}: {}", row.name, row.tolerance));
+                return Err(bad());
             }
             if kind_of(&row.name).is_some() {
-                row.tolerance = clean_tolerance(row.tolerance)
-                    .ok_or_else(|| format!("{}: {}", row.name, row.tolerance))?;
+                row.tolerance = clean_tolerance(row.tolerance).ok_or_else(bad)?;
             }
         }
         Ok(settings)
@@ -138,6 +173,13 @@ impl CleanupSettings {
             Some(None) => return,
             cleaned => cleaned.flatten(),
         };
+        // A changed row keeps the fields that OCS does not know.
+        let extra = self
+            .tolerances
+            .iter()
+            .find(|row| row.name == kind_name(kind))
+            .map(|row| row.extra.clone())
+            .unwrap_or_default();
         self.tolerances.retain(|row| row.name != kind_name(kind));
         let Some(tolerance) = tolerance else {
             return;
@@ -153,6 +195,7 @@ impl CleanupSettings {
                 name: kind_name(kind).to_string(),
                 sub_name: String::new(),
                 tolerance,
+                extra,
             },
         );
     }

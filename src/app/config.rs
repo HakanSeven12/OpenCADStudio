@@ -43,6 +43,9 @@ pub struct AppConfig {
     #[serde(deserialize_with = "lenient")]
     pub geometry_cleanup:
         Option<crate::modules::manage::geometry_cleanup_settings::CleanupSettings>,
+    /// The `.gcs` file that the Geometry Cleanup settings were last imported
+    /// from, shown in their Settings dialog.
+    pub geometry_cleanup_file: Option<String>,
     /// Whether the Layer Manager pallet is open.
     pub show_layers: bool,
     /// Whether the Blocks palette is open.
@@ -89,6 +92,7 @@ impl Default for AppConfig {
             show_tool_palettes: false,
             show_command_history: false,
             geometry_cleanup: None,
+            geometry_cleanup_file: None,
             show_layers: false,
             show_block_palette: false,
             show_external_references: false,

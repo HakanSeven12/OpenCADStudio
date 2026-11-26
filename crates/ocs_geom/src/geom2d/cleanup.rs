@@ -21,10 +21,10 @@ use std::f64::consts::{PI, TAU};
 
 use super::angle::normalize_angle;
 use super::cross::intersect;
-use super::curve::{Arc, Curve, Line};
+use super::curve::{Arc, Curve, EllipseArc, Line};
 use super::polyline::BulgeArc;
 use super::vec::Vec2;
-use super::{analytic_curve_bounds, Tolerance};
+use super::{analytic_curve_bounds, Ellipse, Tolerance};
 
 /// What is wrong with an end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -64,12 +64,13 @@ pub struct EndError {
     pub deviation: f64,
 }
 
-/// A straight or circular piece: a line, an arc, or one segment of a
-/// polyline.
+/// A piece of a curve: a line, an arc, an elliptical arc, or one segment of
+/// a polyline.
 #[derive(Debug, Clone, Copy)]
 enum Shape {
     Line(Line),
     Arc(Arc),
+    Ellipse(EllipseArc),
 }
 
 impl Shape {
@@ -77,17 +78,21 @@ impl Shape {
         match self {
             Shape::Line(line) => Curve::Line(line),
             Shape::Arc(arc) => Curve::Arc(arc),
+            Shape::Ellipse(arc) => Curve::Ellipse(arc),
         }
     }
 }
 
 struct Piece {
     curve: usize,
+    /// The index of the segment, for a piece of a polyline.
+    segment: Option<usize>,
     shape: Shape,
 }
 
-/// How an end continues past itself: along a straight line or along its
-/// circle (counter-clockwise when `turn` is positive).
+/// How an end continues past itself: along a straight line, along its
+/// circle (counter-clockwise when `turn` is positive), or along its ellipse
+/// (to a greater parameter when `turn` is positive).
 #[derive(Debug, Clone, Copy)]
 enum Reach {
     Straight {
@@ -97,6 +102,11 @@ enum Reach {
         centre: [f64; 2],
         radius: f64,
         angle: f64,
+        turn: f64,
+    },
+    Elliptic {
+        ellipse: Ellipse,
+        parameter: f64,
         turn: f64,
     },
 }
@@ -119,7 +129,28 @@ fn shape_length(shape: Shape) -> f64 {
     match shape {
         Shape::Line(line) => line.length(),
         Shape::Arc(arc) => arc.radius * arc.sweep(),
+        Shape::Ellipse(arc) => ellipse_length(
+            &arc.ellipse,
+            arc.start_parameter,
+            arc.start_parameter + arc.sweep(),
+        ),
     }
+}
+
+/// The length of `ellipse` between the parameters `from` and `to`, in either
+/// order (Simpson's rule on the speed of the parameter).
+fn ellipse_length(ellipse: &Ellipse, from: f64, to: f64) -> f64 {
+    const STEPS: usize = 64;
+    let (a, b) = (ellipse.major_radius, ellipse.minor_radius);
+    let speed = |t: f64| (a * t.sin()).hypot(b * t.cos());
+    let step = (to - from) / STEPS as f64;
+    let inner: f64 = (1..STEPS)
+        .map(|k| {
+            let weight = if k % 2 == 1 { 4.0 } else { 2.0 };
+            weight * speed(from + step * k as f64)
+        })
+        .sum();
+    (step / 3.0 * (speed(from) + inner + speed(to))).abs()
 }
 
 /// The pieces of the curves that Geometry Cleanup reads. A curve of any
@@ -130,12 +161,22 @@ fn pieces_of(curves: &[Curve]) -> Vec<Piece> {
         match item {
             Curve::Line(line) => pieces.push(Piece {
                 curve,
+                segment: None,
                 shape: Shape::Line(*line),
             }),
             Curve::Arc(arc) => pieces.push(Piece {
                 curve,
+                segment: None,
                 shape: Shape::Arc(*arc),
             }),
+            // An elliptical arc; a whole ellipse has no ends and is not read.
+            Curve::Ellipse(arc) if arc.sweep() < TAU - 1e-9 && !arc.ellipse.is_degenerate() => {
+                pieces.push(Piece {
+                    curve,
+                    segment: None,
+                    shape: Shape::Ellipse(*arc),
+                })
+            }
             Curve::Polyline(polyline) => {
                 let n = polyline.vertices.len();
                 let count = if polyline.closed {
@@ -165,7 +206,11 @@ fn pieces_of(curves: &[Curve]) -> Vec<Piece> {
                             end: to.position,
                         }),
                     };
-                    pieces.push(Piece { curve, shape });
+                    pieces.push(Piece {
+                        curve,
+                        segment: Some(index),
+                        shape,
+                    });
                 }
             }
             _ => {}
@@ -191,7 +236,7 @@ fn ends_of(curves: &[Curve], pieces: &[Piece]) -> Vec<EndInfo> {
         // (a polyline arc piece is stored counter-clockwise), and the bulge
         // sign of a polyline's end segments.
         let (open, first_turn, last_turn) = match item {
-            Curve::Line(_) | Curve::Arc(_) => (true, 1.0, 1.0),
+            Curve::Line(_) | Curve::Arc(_) | Curve::Ellipse(_) => (true, 1.0, 1.0),
             Curve::Polyline(polyline) => {
                 let n = polyline.vertices.len();
                 (
@@ -250,6 +295,23 @@ fn ends_of(curves: &[Curve], pieces: &[Piece]) -> Vec<EndInfo> {
                         },
                     )
                 }
+                // The start goes on to smaller parameters, the end to
+                // greater ones.
+                Shape::Ellipse(arc) => {
+                    let (parameter, turn) = if at_start {
+                        (arc.start_parameter, -1.0)
+                    } else {
+                        (arc.start_parameter + arc.sweep(), 1.0)
+                    };
+                    (
+                        arc.ellipse.point_at(parameter),
+                        Reach::Elliptic {
+                            ellipse: arc.ellipse,
+                            parameter,
+                            turn,
+                        },
+                    )
+                }
             };
             ends.push(EndInfo {
                 end: CurveEnd { curve, at_start },
@@ -292,6 +354,25 @@ fn extension(end: &EndInfo, length: f64) -> Curve {
                 end_angle: normalize_angle(end_angle),
             })
         }
+        // The parameter moves at least the minor radius for each unit of
+        // it, so this sweep reaches `length` along the ellipse.
+        Reach::Elliptic {
+            ellipse,
+            parameter,
+            turn,
+        } => {
+            let sweep = (length / ellipse.minor_radius).min(PI);
+            let (start_parameter, end_parameter) = if turn > 0.0 {
+                (parameter, parameter + sweep)
+            } else {
+                (parameter - sweep, parameter)
+            };
+            Curve::Ellipse(EllipseArc {
+                ellipse,
+                start_parameter,
+                end_parameter,
+            })
+        }
     }
 }
 
@@ -317,6 +398,16 @@ fn along(end: &EndInfo, point: [f64; 2], ahead: bool) -> f64 {
             let to = (point[1] - centre[1]).atan2(point[0] - centre[0]);
             let sign = if ahead { turn } else { -turn };
             radius * (sign * (to - angle)).rem_euclid(TAU)
+        }
+        Reach::Elliptic {
+            ellipse,
+            parameter,
+            turn,
+        } => {
+            let to = ellipse.closest_parameter(point);
+            let sign = if ahead { turn } else { -turn };
+            let turned = (sign * (to - parameter)).rem_euclid(TAU);
+            ellipse_length(&ellipse, parameter, parameter + sign * turned)
         }
     }
 }
@@ -471,8 +562,9 @@ impl Tolerances {
 /// tolerance of its error type, and more than `weld` away (closer counts as
 /// meeting). A type with no tolerance is not looked for.
 ///
-/// Lines, arcs and polylines are read; any other curve is ignored. A closed
-/// polyline has no ends but is still geometry that ends can meet. The
+/// Lines, arcs, elliptical arcs and polylines are read; any other curve is
+/// ignored. A closed polyline has no ends but is still geometry that ends
+/// can meet. The
 /// errors come in the order of their ends.
 pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> Vec<EndError> {
     let weld = weld.linear();
@@ -653,14 +745,19 @@ pub struct AngleTolerances {
     pub relative: Vec<AngleTolerance>,
 }
 
-/// A line a little off an angle.
+/// A line, or a straight segment of a polyline, a little off an angle.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AngleError {
     pub kind: AngleErrorKind,
-    /// The index of the line.
+    /// The index of the line or polyline.
     pub curve: usize,
-    /// The line that it meets (Relative).
+    /// The index of the segment, when `curve` is a polyline: segment `n`
+    /// runs from vertex `n` to the next one.
+    pub segment: Option<usize>,
+    /// The line or polyline that it meets (Relative).
     pub other: Option<usize>,
+    /// The segment of `other`, when it is a polyline.
+    pub other_segment: Option<usize>,
     /// The middle of the line, or the point where the two lines meet.
     pub location: [f64; 2],
     /// The standard angle, in degrees.
@@ -699,8 +796,9 @@ fn nearest(
 /// `weld`; they make two angles, θ and 180° − θ, and a standard angle
 /// matches the nearer one.
 ///
-/// Only lines are read. Absolute errors come first, by line; then the
-/// Relative ones, by pair.
+/// Lines and the straight segments of polylines are read; two segments of
+/// one polyline can make a Relative error. Absolute errors come first, by
+/// line or segment; then the Relative ones, by pair.
 pub fn angle_errors(
     curves: &[Curve],
     tolerances: &AngleTolerances,
@@ -708,11 +806,12 @@ pub fn angle_errors(
     weld: Tolerance,
 ) -> Vec<AngleError> {
     let weld = weld.linear();
-    let lines: Vec<(usize, Line)> = curves
+    let pieces = pieces_of(curves);
+    // Each line or straight segment: its curve, its segment and the line.
+    let lines: Vec<(usize, Option<usize>, Line)> = pieces
         .iter()
-        .enumerate()
-        .filter_map(|(index, curve)| match curve {
-            Curve::Line(line) if line.length() > weld => Some((index, *line)),
+        .filter_map(|piece| match piece.shape {
+            Shape::Line(line) if line.length() > weld => Some((piece.curve, piece.segment, line)),
             _ => None,
         })
         .collect();
@@ -725,7 +824,6 @@ pub fn angle_errors(
             .to_degrees()
             - x_axis.to_degrees()
     };
-    let pieces = pieces_of(curves);
     let mean = pieces.iter().map(|p| shape_length(p.shape)).sum::<f64>() / pieces.len() as f64;
     let size = if mean.is_finite() && mean > 0.0 {
         mean
@@ -733,15 +831,17 @@ pub fn angle_errors(
         1.0
     };
     let grid = Grid::new(&pieces, size, weld);
-    let meets = |curve: usize, point: [f64; 2]| {
+    // Whether `point` meets geometry other than the line or segment: the
+    // next segment of the same polyline counts.
+    let meets = |curve: usize, segment: Option<usize>, point: [f64; 2]| {
         grid.near(point).any(|k| {
-            pieces[k].curve != curve
+            (pieces[k].curve, pieces[k].segment) != (curve, segment)
                 && super::containment::distance_to(&pieces[k].shape.curve(), point) <= weld
         })
     };
 
     let mut errors = Vec::new();
-    for (curve, line) in &lines {
+    for (curve, segment, line) in &lines {
         let angle = direction(line);
         let candidates = tolerances
             .absolute
@@ -751,7 +851,9 @@ pub fn angle_errors(
             errors.push(AngleError {
                 kind: AngleErrorKind::Absolute,
                 curve: *curve,
+                segment: *segment,
                 other: None,
+                other_segment: None,
                 location: [
                     (line.start[0] + line.end[0]) / 2.0,
                     (line.start[1] + line.end[1]) / 2.0,
@@ -759,7 +861,10 @@ pub fn angle_errors(
                 angle: standard.angle,
                 deviation: turn.abs(),
                 turn: turn.to_radians(),
-                meets: [meets(*curve, line.start), meets(*curve, line.end)],
+                meets: [
+                    meets(*curve, *segment, line.start),
+                    meets(*curve, *segment, line.end),
+                ],
             });
         }
     }
@@ -771,8 +876,9 @@ pub fn angle_errors(
     let line_grid = Grid::new(
         &lines
             .iter()
-            .map(|(curve, line)| Piece {
+            .map(|(curve, segment, line)| Piece {
                 curve: *curve,
+                segment: *segment,
                 shape: Shape::Line(*line),
             })
             .collect::<Vec<_>>(),
@@ -795,7 +901,7 @@ pub fn angle_errors(
     let mut pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|(a, b)| a != b).collect();
     pairs.sort_unstable();
     for (a, b) in pairs {
-        let ((first, one), (second, two)) = (lines[a], lines[b]);
+        let ((first, first_segment, one), (second, second_segment, two)) = (lines[a], lines[b]);
         let crossings = intersect(&Curve::Line(one), &Curve::Line(two), Tolerance::new(weld));
         let Some(meet) = crossings.first().map(|crossing| crossing.point) else {
             continue;
@@ -816,12 +922,17 @@ pub fn angle_errors(
         errors.push(AngleError {
             kind: AngleErrorKind::Relative,
             curve: first,
+            segment: first_segment,
             other: Some(second),
+            other_segment: second_segment,
             location: meet,
             angle: standard.angle,
             deviation: turn.abs(),
             turn: turn.to_radians(),
-            meets: [meets(first, one.start), meets(first, one.end)],
+            meets: [
+                meets(first, first_segment, one.start),
+                meets(first, first_segment, one.end),
+            ],
         });
     }
     errors
@@ -1469,14 +1580,9 @@ mod tests {
     }
 
     #[test]
-    fn arcs_and_polylines_have_no_angle_errors() {
-        let (sin, cos) = 91.7f64.to_radians().sin_cos();
-        let path = polyline(
-            &[[1.2, 3.4], [1.2 + 5.0 * cos, 3.4 + 5.0 * sin], [8.9, 7.1]],
-            false,
-        );
+    fn arcs_have_no_angle_errors() {
         let bow = arc([4.1, -3.3], 2.6, 0.1, 1.6);
-        assert!(angles(&[path, bow], &[90.0], &[90.0], 0.0).is_empty());
+        assert!(angles(&[bow], &[90.0], &[90.0], 0.0).is_empty());
     }
 
     #[test]
@@ -1499,5 +1605,258 @@ mod tests {
             Tolerance::new(1e-9)
         )
         .is_empty());
+    }
+    /// A polyline from `start`: 20 along the X axis, then 10 at `degrees`.
+    fn bent(start: [f64; 2], degrees: f64) -> (Curve, [[f64; 2]; 3]) {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let corner = [start[0] + 20.0, start[1]];
+        let points = [
+            start,
+            corner,
+            [corner[0] + 10.0 * cos, corner[1] + 10.0 * sin],
+        ];
+        (polyline(&points, false), points)
+    }
+
+    #[test]
+    fn a_straight_polyline_segment_off_an_angle_is_an_absolute_error() {
+        let (path, _) = bent([2.4, -3.1], 91.7);
+        let errors = angles(&[path], &[0.0, 90.0], &[], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!((error.curve, error.segment), (0, Some(1)));
+        assert_eq!((error.other, error.other_segment), (None, None));
+        assert!(degrees(error.angle, 90.0), "{error:?}");
+        assert!(degrees(error.deviation, 1.7), "{error:?}");
+        assert!(degrees(error.turn.to_degrees(), -1.7), "{error:?}");
+    }
+
+    #[test]
+    fn segments_of_one_polyline_that_meet_off_an_angle_are_a_relative_error() {
+        let (path, points) = bent([2.4, -3.1], 91.7);
+        let errors = angles(&[path], &[], &[90.0], 0.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, AngleErrorKind::Relative);
+        assert_eq!((error.curve, error.segment), (0, Some(0)));
+        assert_eq!((error.other, error.other_segment), (Some(0), Some(1)));
+        assert!(distance(error.location, points[1]) < 1e-9, "{error:?}");
+        assert!(degrees(error.deviation, 1.7), "{error:?}");
+    }
+
+    #[test]
+    fn a_segment_meets_the_segment_next_to_it() {
+        let (path, _) = bent([2.4, -3.1], 91.7);
+        let errors = angles(&[path], &[90.0], &[], 0.0);
+        assert_eq!(errors[0].meets, [true, false], "{errors:?}");
+    }
+
+    #[test]
+    fn the_closing_segment_of_a_closed_polyline_is_read() {
+        let square = polyline(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.3, 10.0]], true);
+        let errors = angles(&[square], &[0.0, 90.0], &[], 0.0);
+        let segments: Vec<_> = errors.iter().map(|e| e.segment).collect();
+        assert_eq!(segments, [Some(3)], "{errors:?}");
+        assert!(degrees(
+            errors[0].deviation,
+            0.3f64.atan2(10.0).to_degrees()
+        ));
+    }
+
+    #[test]
+    fn an_arc_segment_of_a_polyline_has_no_angle_error() {
+        let (sin, cos) = 91.7f64.to_radians().sin_cos();
+        let path = Curve::Polyline(Polyline {
+            vertices: vec![
+                PolylineVertex {
+                    position: [0.0, 0.0],
+                    bulge: 0.0,
+                },
+                PolylineVertex {
+                    position: [20.0, 0.0],
+                    bulge: 0.2,
+                },
+                PolylineVertex {
+                    position: [20.0 + 10.0 * cos, 10.0 * sin],
+                    bulge: 0.0,
+                },
+            ],
+            closed: false,
+        });
+        assert!(angles(&[path], &[0.0, 90.0], &[], 0.0).is_empty());
+    }
+    /// An elliptical arc on the ellipse with radii 10 (along X) and 5 at the
+    /// origin, between two of its parameters.
+    fn elliptical(start_parameter: f64, end_parameter: f64) -> Curve {
+        Curve::Ellipse(EllipseArc {
+            ellipse: Ellipse {
+                centre: [0.0, 0.0],
+                major_radius: 10.0,
+                minor_radius: 5.0,
+                major_axis: [1.0, 0.0],
+            },
+            start_parameter,
+            end_parameter,
+        })
+    }
+
+    /// The length of that ellipse between two parameters, summed over many
+    /// short chords: a check of the scan's own integration.
+    fn chord_length(from: f64, to: f64) -> f64 {
+        let point = |t: f64| [10.0 * t.cos(), 5.0 * t.sin()];
+        let steps = 100_000;
+        (0..steps)
+            .map(|k| {
+                let a = from + (to - from) * k as f64 / steps as f64;
+                let b = from + (to - from) * (k + 1) as f64 / steps as f64;
+                distance(point(a), point(b))
+            })
+            .sum()
+    }
+
+    #[test]
+    fn the_length_of_an_elliptical_arc_is_measured_along_it() {
+        use std::f64::consts::FRAC_PI_2;
+        let Curve::Ellipse(quarter) = elliptical(0.0, FRAC_PI_2) else {
+            unreachable!()
+        };
+        let length = shape_length(Shape::Ellipse(quarter));
+        assert!(
+            (length - chord_length(0.0, FRAC_PI_2)).abs() < 1e-6,
+            "{length}"
+        );
+        // An arc that is not symmetric about an axis of the ellipse.
+        let Curve::Ellipse(part) = elliptical(0.3, FRAC_PI_2) else {
+            unreachable!()
+        };
+        let length = shape_length(Shape::Ellipse(part));
+        assert!(
+            (length - chord_length(0.3, FRAC_PI_2)).abs() < 1e-6,
+            "{length}"
+        );
+    }
+
+    #[test]
+    fn a_thin_elliptical_arc_reaches_a_line_round_its_flattest_end() {
+        // At the end of its major axis a thin ellipse turns most for each
+        // unit of length: the continuation of the end at (2, 0) must turn
+        // more than the tolerance in radians to reach the line.
+        let arc = Curve::Ellipse(EllipseArc {
+            ellipse: Ellipse {
+                centre: [0.0, 0.0],
+                major_radius: 2.0,
+                minor_radius: 0.5,
+                major_axis: [1.0, 0.0],
+            },
+            start_parameter: 1.5 * PI,
+            end_parameter: TAU,
+        });
+        let reached = 0.44f64;
+        let target = [2.0 * reached.cos(), 0.5 * reached.sin()];
+        let curves = [arc, line([0.0, 0.0], [2.0 * target[0], 2.0 * target[1]])];
+        let errors = end_errors(&curves, Tolerances::all(0.4), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, EndErrorKind::Undershoot);
+        assert_eq!(
+            error.end,
+            CurveEnd {
+                curve: 0,
+                at_start: false
+            }
+        );
+        assert!(distance(error.target, target) < 1e-6, "{error:?}");
+        assert!(error.deviation < 0.4, "{error:?}");
+    }
+
+    #[test]
+    fn an_elliptical_arc_that_stops_short_is_an_undershoot_along_its_ellipse() {
+        use std::f64::consts::FRAC_PI_2;
+        // The arc ends at (0, 5); a wall at x = -0.3 is just round the ellipse.
+        let curves = [
+            elliptical(0.0, FRAC_PI_2),
+            line([-0.3, -10.0], [-0.3, 10.0]),
+        ];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, EndErrorKind::Undershoot);
+        assert_eq!(
+            error.end,
+            CurveEnd {
+                curve: 0,
+                at_start: false
+            }
+        );
+        let reached = (-0.03f64).acos();
+        assert!(
+            distance(error.target, [-0.3, 5.0 * reached.sin()]) < 1e-6,
+            "{error:?}"
+        );
+        assert!(
+            (error.deviation - chord_length(FRAC_PI_2, reached)).abs() < 1e-6,
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_elliptical_arc_that_runs_past_a_line_is_an_overshoot() {
+        use std::f64::consts::FRAC_PI_2;
+        let curves = [
+            elliptical(0.0, FRAC_PI_2 + 0.03),
+            line([0.0, -10.0], [0.0, 10.0]),
+        ];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Overshoot);
+        assert!(distance(errors[0].target, [0.0, 5.0]) < 1e-6, "{errors:?}");
+        assert!(
+            (errors[0].deviation - chord_length(FRAC_PI_2, FRAC_PI_2 + 0.03)).abs() < 1e-6,
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_elliptical_arc_end_near_another_end_is_a_gap() {
+        let curves = [elliptical(0.0, 1.0), line([10.2, 0.0], [20.0, 0.0])];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, EndErrorKind::Gap);
+        assert_eq!(
+            error.end,
+            CurveEnd {
+                curve: 0,
+                at_start: true
+            }
+        );
+        assert!((error.deviation - 0.2).abs() < 1e-9, "{error:?}");
+        assert_eq!(error.corner, None, "an elliptical end has no corner");
+    }
+
+    #[test]
+    fn a_whole_ellipse_is_not_read() {
+        let curves = [elliptical(0.0, TAU), line([10.2, 0.0], [20.0, 0.0])];
+        assert!(end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9)).is_empty());
+    }
+
+    #[test]
+    fn an_elliptical_arc_that_wraps_ends_at_its_end_parameter() {
+        use std::f64::consts::FRAC_PI_2;
+        // From 3π/2 round through 0 to π/2: it ends at (0, 5).
+        let curves = [
+            elliptical(3.0 * FRAC_PI_2, FRAC_PI_2),
+            line([-0.3, -10.0], [-0.3, 10.0]),
+        ];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        for error in &errors {
+            assert_eq!(error.kind, EndErrorKind::Undershoot);
+            let expected = if error.end.at_start { -5.0 } else { 5.0 };
+            assert!(
+                distance(error.location, [0.0, expected]) < 1e-9,
+                "{error:?}"
+            );
+        }
     }
 }

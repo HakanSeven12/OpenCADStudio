@@ -6718,6 +6718,7 @@ manage =
     .geometry-cleanup = Geometry Cleanup
     .geometry-cleanup-absolute-angle = Absolute Angle
     .geometry-cleanup-add-error-type = Add error type
+    .geometry-cleanup-bad-tolerance = The tolerance of __ocs_fmt_0__ is __ocs_fmt_1__: it must be a number of 0 or more.
     .geometry-cleanup-browse = Browse
     .geometry-cleanup-cannot-fix = This error cannot be fixed that way.
     .geometry-cleanup-empty = Select objects to find gaps, overshoots, undershoots and lines off an angle.

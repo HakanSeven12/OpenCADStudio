@@ -121,6 +121,7 @@ impl OpenCADStudio {
                 corner: error.corner,
                 deviation: error.deviation,
                 angle: None,
+                stretch: !matches!(kept[error.end.curve].1, Curve::Ellipse(_)),
             });
         let x_axis = self.geometry_cleanup_x_axis(i);
         let lines = angle_errors(&curves, angles, x_axis, Tolerance::new(WELD))
@@ -138,7 +139,10 @@ impl OpenCADStudio {
                     angle: error.angle,
                     turn: error.turn,
                     meets: error.meets,
+                    segment: error.segment,
+                    other_segment: error.other_segment,
                 }),
+                stretch: false,
             });
         ends.chain(lines).collect()
     }
@@ -343,10 +347,30 @@ impl OpenCADStudio {
                     dialog.add(kind);
                 }
             }
+            GeometryCleanupMsg::SettingsAngle(index, value) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.set_angle(index, value);
+                }
+            }
+            GeometryCleanupMsg::SettingsAngleTolerance(index, value) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.set_angle_tolerance(index, value);
+                }
+            }
+            GeometryCleanupMsg::SettingsRemoveAngle(index) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.remove_angle(index);
+                }
+            }
+            GeometryCleanupMsg::SettingsAddAngle(kind) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.add_angle(kind);
+                }
+            }
             GeometryCleanupMsg::SettingsImport => {
                 return Task::perform(
                     async {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title(crate::t!("Import Geometry Cleanup Settings").as_ref())
                             .add_filter(
                                 crate::t!("Geometry Cleanup Settings").as_ref(),
@@ -386,9 +410,12 @@ impl OpenCADStudio {
             GeometryCleanupMsg::SettingsExport => {
                 return Task::perform(
                     async {
-                        rfd::AsyncFileDialog::new()
+                        crate::sys::file_dialog()
                             .set_title(crate::t!("Export Geometry Cleanup Settings").as_ref())
-                            .add_filter(crate::t!("Geometry Cleanup Settings").as_ref(), &["gcs"])
+                            .add_filter(
+                                crate::t!("Geometry Cleanup Settings").as_ref(),
+                                &["gcs", "GCS"],
+                            )
                             .set_file_name("GeometryCleanup.gcs")
                             .save_file()
                             .await
@@ -480,9 +507,14 @@ impl OpenCADStudio {
                 let document = &self.tabs[i].scene.document;
                 let mut low = finding.location;
                 let mut high = finding.location;
-                let handles = std::iter::once(finding.handle).chain(finding.other.map(|o| o.0));
-                for p in handles
-                    .filter_map(|h| line_ends(document.get_entity(h)?))
+                let segments = finding.angle.map(|a| (a.segment, a.other_segment));
+                let (segment, other_segment) = segments.unwrap_or_default();
+                let parts = std::iter::once((finding.handle, segment))
+                    .chain(finding.other.map(|o| (o.0, other_segment)));
+                for p in parts
+                    .filter_map(|(h, segment)| {
+                        cleanup::straight_part(document.get_entity(h)?, segment)
+                    })
                     .flatten()
                 {
                     low = [low[0].min(p[0]), low[1].min(p[1])];
@@ -566,28 +598,32 @@ impl OpenCADStudio {
                     ));
                 }
                 Fix::RotateAtStart | Fix::RotateAtEnd => {
-                    let ends = line_ends(own)?;
+                    let angle = finding.angle?;
+                    let ends = cleanup::straight_part(own, angle.segment)?;
                     let pivot = ends[usize::from(fix == Fix::RotateAtEnd)];
-                    let turn = finding.angle?.turn;
-                    edits.push((finding.handle, cleanup::rotated(own, pivot, turn)));
+                    edits.push((
+                        finding.handle,
+                        cleanup::rotated_part(own, angle.segment, pivot, angle.turn)?,
+                    ));
                 }
                 Fix::RotateShorter | Fix::RotateLonger => {
                     let (other, _) = finding.other?;
-                    let length = |handle| {
-                        let [a, b] = line_ends(entity(handle)?)?;
+                    let angle = finding.angle?;
+                    let length = |handle, segment| {
+                        let [a, b] = cleanup::straight_part(entity(handle)?, segment)?;
                         Some((b[0] - a[0]).hypot(b[1] - a[1]))
                     };
                     // At equal lengths, the first line is the shorter.
-                    let first_shorter = length(finding.handle)? <= length(other)?;
-                    let turn = finding.angle?.turn;
-                    let (handle, turn) = if first_shorter == (fix == Fix::RotateShorter) {
-                        (finding.handle, turn)
+                    let first_shorter = length(finding.handle, angle.segment)?
+                        <= length(other, angle.other_segment)?;
+                    let (handle, segment, turn) = if first_shorter == (fix == Fix::RotateShorter) {
+                        (finding.handle, angle.segment, angle.turn)
                     } else {
-                        (other, -turn)
+                        (other, angle.other_segment, -angle.turn)
                     };
                     edits.push((
                         handle,
-                        cleanup::rotated(entity(handle)?, finding.location, turn),
+                        cleanup::rotated_part(entity(handle)?, segment, finding.location, turn)?,
                     ));
                 }
             }
@@ -617,12 +653,4 @@ impl OpenCADStudio {
 /// The tolerances of a scan, for a rescan.
 fn scan_tolerances(scan: &Scan) -> (Tolerances, AngleTolerances) {
     (scan.tolerances, scan.angles.clone())
-}
-
-/// The start and the end of a LINE.
-fn line_ends(entity: &EntityType) -> Option<[[f64; 2]; 2]> {
-    match entity {
-        EntityType::Line(line) => Some([[line.start.x, line.start.y], [line.end.x, line.end.y]]),
-        _ => None,
-    }
 }

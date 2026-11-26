@@ -1685,4 +1685,178 @@ mod tests {
         });
         assert!(angles(&[path], &[0.0, 90.0], &[], 0.0).is_empty());
     }
+    /// An elliptical arc on the ellipse with radii 10 (along X) and 5 at the
+    /// origin, between two of its parameters.
+    fn elliptical(start_parameter: f64, end_parameter: f64) -> Curve {
+        Curve::Ellipse(EllipseArc {
+            ellipse: Ellipse {
+                centre: [0.0, 0.0],
+                major_radius: 10.0,
+                minor_radius: 5.0,
+                major_axis: [1.0, 0.0],
+            },
+            start_parameter,
+            end_parameter,
+        })
+    }
+
+    /// The length of that ellipse between two parameters, summed over many
+    /// short chords: a check of the scan's own integration.
+    fn chord_length(from: f64, to: f64) -> f64 {
+        let point = |t: f64| [10.0 * t.cos(), 5.0 * t.sin()];
+        let steps = 100_000;
+        (0..steps)
+            .map(|k| {
+                let a = from + (to - from) * k as f64 / steps as f64;
+                let b = from + (to - from) * (k + 1) as f64 / steps as f64;
+                distance(point(a), point(b))
+            })
+            .sum()
+    }
+
+    #[test]
+    fn the_length_of_an_elliptical_arc_is_measured_along_it() {
+        use std::f64::consts::FRAC_PI_2;
+        let Curve::Ellipse(quarter) = elliptical(0.0, FRAC_PI_2) else {
+            unreachable!()
+        };
+        let length = shape_length(Shape::Ellipse(quarter));
+        assert!(
+            (length - chord_length(0.0, FRAC_PI_2)).abs() < 1e-6,
+            "{length}"
+        );
+        // An arc that is not symmetric about an axis of the ellipse.
+        let Curve::Ellipse(part) = elliptical(0.3, FRAC_PI_2) else {
+            unreachable!()
+        };
+        let length = shape_length(Shape::Ellipse(part));
+        assert!(
+            (length - chord_length(0.3, FRAC_PI_2)).abs() < 1e-6,
+            "{length}"
+        );
+    }
+
+    #[test]
+    fn a_thin_elliptical_arc_reaches_a_line_round_its_flattest_end() {
+        // At the end of its major axis a thin ellipse turns most for each
+        // unit of length: the continuation of the end at (2, 0) must turn
+        // more than the tolerance in radians to reach the line.
+        let arc = Curve::Ellipse(EllipseArc {
+            ellipse: Ellipse {
+                centre: [0.0, 0.0],
+                major_radius: 2.0,
+                minor_radius: 0.5,
+                major_axis: [1.0, 0.0],
+            },
+            start_parameter: 1.5 * PI,
+            end_parameter: TAU,
+        });
+        let reached = 0.44f64;
+        let target = [2.0 * reached.cos(), 0.5 * reached.sin()];
+        let curves = [arc, line([0.0, 0.0], [2.0 * target[0], 2.0 * target[1]])];
+        let errors = end_errors(&curves, Tolerances::all(0.4), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, EndErrorKind::Undershoot);
+        assert_eq!(
+            error.end,
+            CurveEnd {
+                curve: 0,
+                at_start: false
+            }
+        );
+        assert!(distance(error.target, target) < 1e-6, "{error:?}");
+        assert!(error.deviation < 0.4, "{error:?}");
+    }
+
+    #[test]
+    fn an_elliptical_arc_that_stops_short_is_an_undershoot_along_its_ellipse() {
+        use std::f64::consts::FRAC_PI_2;
+        // The arc ends at (0, 5); a wall at x = -0.3 is just round the ellipse.
+        let curves = [
+            elliptical(0.0, FRAC_PI_2),
+            line([-0.3, -10.0], [-0.3, 10.0]),
+        ];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, EndErrorKind::Undershoot);
+        assert_eq!(
+            error.end,
+            CurveEnd {
+                curve: 0,
+                at_start: false
+            }
+        );
+        let reached = (-0.03f64).acos();
+        assert!(
+            distance(error.target, [-0.3, 5.0 * reached.sin()]) < 1e-6,
+            "{error:?}"
+        );
+        assert!(
+            (error.deviation - chord_length(FRAC_PI_2, reached)).abs() < 1e-6,
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_elliptical_arc_that_runs_past_a_line_is_an_overshoot() {
+        use std::f64::consts::FRAC_PI_2;
+        let curves = [
+            elliptical(0.0, FRAC_PI_2 + 0.03),
+            line([0.0, -10.0], [0.0, 10.0]),
+        ];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Overshoot);
+        assert!(distance(errors[0].target, [0.0, 5.0]) < 1e-6, "{errors:?}");
+        assert!(
+            (errors[0].deviation - chord_length(FRAC_PI_2, FRAC_PI_2 + 0.03)).abs() < 1e-6,
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_elliptical_arc_end_near_another_end_is_a_gap() {
+        let curves = [elliptical(0.0, 1.0), line([10.2, 0.0], [20.0, 0.0])];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = errors[0];
+        assert_eq!(error.kind, EndErrorKind::Gap);
+        assert_eq!(
+            error.end,
+            CurveEnd {
+                curve: 0,
+                at_start: true
+            }
+        );
+        assert!((error.deviation - 0.2).abs() < 1e-9, "{error:?}");
+        assert_eq!(error.corner, None, "an elliptical end has no corner");
+    }
+
+    #[test]
+    fn a_whole_ellipse_is_not_read() {
+        let curves = [elliptical(0.0, TAU), line([10.2, 0.0], [20.0, 0.0])];
+        assert!(end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9)).is_empty());
+    }
+
+    #[test]
+    fn an_elliptical_arc_that_wraps_ends_at_its_end_parameter() {
+        use std::f64::consts::FRAC_PI_2;
+        // From 3π/2 round through 0 to π/2: it ends at (0, 5).
+        let curves = [
+            elliptical(3.0 * FRAC_PI_2, FRAC_PI_2),
+            line([-0.3, -10.0], [-0.3, 10.0]),
+        ];
+        let errors = end_errors(&curves, Tolerances::all(0.5), Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        for error in &errors {
+            assert_eq!(error.kind, EndErrorKind::Undershoot);
+            let expected = if error.end.at_start { -5.0 } else { 5.0 };
+            assert!(
+                distance(error.location, [0.0, expected]) < 1e-9,
+                "{error:?}"
+            );
+        }
+    }
 }

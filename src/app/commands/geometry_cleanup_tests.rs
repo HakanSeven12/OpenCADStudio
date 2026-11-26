@@ -1594,3 +1594,179 @@ fn the_closing_segment_of_a_closed_polyline_turns_both_its_vertices() {
     assert!(near(at(0), [10.0, 0.0]), "{:?}", at(0));
     assert_eq!([at(1), at(2)], [points[1], points[2]]);
 }
+
+/// An elliptical arc on the ellipse with radii 10 (along X) and 5 at the
+/// origin.
+fn elliptical(app: &mut OpenCADStudio, start: f64, end: f64) -> Handle {
+    let mut ellipse = document::entities::Ellipse::from_center_axes(
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(10.0, 0.0, 0.0),
+        0.5,
+    );
+    ellipse.start_parameter = start;
+    ellipse.end_parameter = end;
+    add(app, EntityType::Ellipse(ellipse))
+}
+
+fn parameters(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
+    match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+        Some(EntityType::Ellipse(ellipse)) => (ellipse.start_parameter, ellipse.end_parameter),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn extend_runs_an_elliptical_arc_round_its_ellipse_to_the_wall() {
+    let (mut app, i) = app();
+    let arc = elliptical(&mut app, 0.0, std::f64::consts::FRAC_PI_2);
+    // Within the drawing's proposed tolerance (0.2, 1% of the wall).
+    let wall = line(&mut app, [-0.1, -10.0], [-0.1, 10.0]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &[arc, wall])
+        .iter()
+        .map(|f| f.kind)
+        .collect();
+    assert_eq!(kinds, [ErrorType::Undershoot]);
+    fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
+    let (start, end) = parameters(&app, arc);
+    assert_eq!(start, 0.0, "the other end stays");
+    assert!((10.0 * end.cos() + 0.1).abs() < 1e-6, "on the wall: {end}");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), 1, "one undo step");
+}
+
+#[test]
+fn trim_cuts_the_start_of_an_elliptical_arc_back_to_the_line_it_crosses() {
+    let (mut app, _) = app();
+    // From just below the X axis: the start crosses the line y = 0.
+    let arc = elliptical(&mut app, -0.03, 1.0);
+    let wall = line(&mut app, [0.0, 0.0], [20.0, 0.0]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &[arc, wall])
+        .iter()
+        .map(|f| f.kind)
+        .collect();
+    assert_eq!(kinds, [ErrorType::Overshoot]);
+    fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
+    let (start, end) = parameters(&app, arc);
+    assert!(
+        start.abs() < 1e-6 || (start - std::f64::consts::TAU).abs() < 1e-6,
+        "{start}"
+    );
+    assert_eq!(end, 1.0, "the other end stays");
+}
+
+#[test]
+fn a_gap_at_an_elliptical_arc_offers_no_stretch() {
+    let (mut app, _) = app();
+    let arc = elliptical(&mut app, 0.0, 1.0);
+    // Within the drawing's proposed tolerance (0.1, 1% of the line).
+    let other = line(&mut app, [10.05, 0.0], [20.0, 0.0]);
+    let found = scan(&mut app, &[arc, other]);
+    let gap = found
+        .iter()
+        .find(|f| f.kind == ErrorType::Gap)
+        .expect("listed");
+    assert_eq!(gap.handle, arc, "{found:?}");
+    assert_eq!(gap.fixes(), [Fix::Move]);
+    let before = parameters(&app, arc);
+    fix(&mut app, EndErrorKind::Gap, Fix::Stretch);
+    assert_eq!(parameters(&app, arc), before, "Stretch changes nothing");
+}
+
+#[test]
+fn an_elliptical_arc_off_the_xy_plane_is_not_read() {
+    let (mut app, i) = app();
+    let raised = elliptical(&mut app, 0.0, 1.0);
+    let tilted = elliptical(&mut app, 0.0, 1.0);
+    for (handle, change) in [
+        (raised, Vector3::new(0.0, 0.0, 2.0)),
+        (tilted, Vector3::new(0.0, 1.0, 0.0)),
+    ] {
+        let Some(EntityType::Ellipse(ellipse)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("an ellipse")
+        };
+        if handle == raised {
+            ellipse.center = change;
+        } else {
+            ellipse.normal = change;
+        }
+    }
+    let document = &app.tabs[i].scene.document;
+    for handle in [raised, tilted] {
+        assert!(!crate::modules::manage::geometry_cleanup::is_candidate(
+            document, handle
+        ));
+    }
+}
+
+#[test]
+fn a_whole_ellipse_is_not_read() {
+    let (mut app, i) = app();
+    let whole = elliptical(&mut app, 0.0, std::f64::consts::TAU);
+    let document = &app.tabs[i].scene.document;
+    assert!(!crate::modules::manage::geometry_cleanup::is_candidate(
+        document, whole
+    ));
+}
+
+/// A 2D POLYLINE through `points`.
+fn heavy(app: &mut OpenCADStudio, points: &[[f64; 2]], fit: bool) -> Handle {
+    let mut polyline = document::entities::Polyline2D::new();
+    for p in points {
+        polyline.add_vertex(document::entities::Vertex2D::new(Vector3::new(
+            p[0], p[1], 0.0,
+        )));
+    }
+    if fit {
+        polyline.flags = document::entities::PolylineFlags::CURVE_FIT;
+    }
+    add(app, EntityType::Polyline2D(polyline))
+}
+
+fn heavy_vertices(app: &OpenCADStudio, handle: Handle) -> Vec<[f64; 2]> {
+    match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+        Some(EntityType::Polyline2D(polyline)) => polyline
+            .vertices
+            .iter()
+            .map(|v| [v.location.x, v.location.y])
+            .collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_2d_polyline_is_extended_at_its_end() {
+    let (mut app, _) = app();
+    let wall = line(&mut app, [10.0, -100.0], [10.0, 100.0]);
+    let handle = heavy(&mut app, &[[0.0, 5.0], [0.0, 0.0], [9.7, 0.0]], false);
+    let kinds: Vec<ErrorType> = scan(&mut app, &[wall, handle])
+        .iter()
+        .map(|f| f.kind)
+        .collect();
+    assert_eq!(kinds, [ErrorType::Undershoot]);
+    fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
+    let after = heavy_vertices(&app, handle);
+    assert!(near(after[2], [10.0, 0.0]), "{after:?}");
+    assert_eq!(&after[..2], &[[0.0, 5.0], [0.0, 0.0]]);
+}
+
+#[test]
+fn a_2d_polyline_segment_off_an_angle_turns_about_its_vertex() {
+    let (mut app, _) = app();
+    let points = bent_points();
+    let handle = heavy(&mut app, &points, false);
+    scan(&mut app, &[handle]);
+    fix(&mut app, ErrorType::AbsoluteAngle, Fix::RotateAtStart);
+    let after = heavy_vertices(&app, handle);
+    assert_eq!(&after[..2], &points[..2]);
+    assert!(near(after[2], [20.0, 10.0]), "{after:?}");
+}
+
+#[test]
+fn a_fit_2d_polyline_is_not_read() {
+    let (mut app, i) = app();
+    let handle = heavy(&mut app, &bent_points(), true);
+    let document = &app.tabs[i].scene.document;
+    assert!(!crate::modules::manage::geometry_cleanup::is_candidate(
+        document, handle
+    ));
+}

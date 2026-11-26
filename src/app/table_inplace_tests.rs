@@ -1359,3 +1359,55 @@ fn exploded_array_tables_keep_their_own_formulas() {
     assert_eq!(sum(&app, tables[0]), "12", "first item follows its own A1");
     assert_eq!(sum(&app, tables[1]), "22", "second item follows its own A1");
 }
+
+/// A cell as a template file keeps it: a decimal value with a format and no
+/// source text of its own.
+#[test]
+fn a_decimal_cell_without_source_text_opens_with_its_value() {
+    use document::entities::table::{CellValueType, ValueUnitType};
+    let (mut app, handle) = fixture("x");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        let value = &mut table.cell_mut(0, 0).unwrap().contents[0].value;
+        value.value_type = CellValueType::Double;
+        value.unit_type = ValueUnitType::NoUnits;
+        value.numeric_value = 9.1;
+        value.format = "%zs8".into();
+        value.formatted_value = "9.1".into();
+        value.text.clear();
+    }
+    start(&mut app, handle);
+    assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "9.1");
+}
+
+/// The same cell holding a field: Properties shows the field's value, and
+/// the editor must open with it, with no regeneration of the table first.
+#[test]
+fn a_field_cell_without_source_text_opens_with_its_value() {
+    let (mut app, handle) = fixture("x");
+    {
+        let i = app.active_tab;
+        let document = &mut app.tabs[i].scene.document;
+        document
+            .set_table_cell_field(
+                handle,
+                0,
+                0,
+                r"%<\_FldIdx 0>%",
+                vec![document::fields::NewField::new(r"\AcVar userr1", "9.1")],
+            )
+            .expect("field");
+        let Some(EntityType::Table(table)) = document.get_entity_mut(handle) else {
+            panic!("table")
+        };
+        let value = &mut table.cell_mut(0, 0).unwrap().contents[0].value;
+        value.text.clear();
+        value.formatted_value.clear();
+    }
+    start(&mut app, handle);
+    assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "9.1");
+}

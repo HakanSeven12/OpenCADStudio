@@ -906,9 +906,9 @@ pub fn table_insert_view<'a>(
         iced::widget::canvas(InsertTablePreview {
             layout: insert_table_preview_layout(state),
         })
-            .width(Fill)
-            .height(Fill)
-            .into()
+        .width(Fill)
+        .height(Fill)
+        .into()
     } else {
         Space::new().height(Fill).into()
     };

@@ -105,6 +105,21 @@ pub fn row_heights(
     )
 }
 
+/// Rows of `table` that are one merged cell across every column.
+fn spanning_rows(table: &document::entities::Table) -> Vec<usize> {
+    let columns = table.columns.len();
+    if columns < 2 {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    for range in &table.merged_ranges {
+        if range.left_col == 0 && range.right_col + 1 >= columns {
+            rows.extend(range.top_row..=range.bottom_row);
+        }
+    }
+    rows
+}
+
 /// Row heights of a table whose first, second and other rows take the
 /// named cell styles (`Title`, `Header`, `Data` or a user cell style): each
 /// row is `lines` lines of its cell style's text plus its top and bottom
@@ -768,14 +783,30 @@ impl TableCommand {
     }
 
     fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
-        let (point, widths, heights) = self.layout(first, second);
-        let point = self.plane.to_world(point);
-        self.grid_wire(point, &widths, &heights, self.title_header().0)
+        // The ghost is the table the click would place, so it cannot differ
+        // from the result in columns, rows or merged rows.
+        let EntityType::Table(table) = self.build_table(first, second) else {
+            return WireModel::default();
+        };
+        let point = DVec3::new(
+            table.insertion_point.x,
+            table.insertion_point.y,
+            table.insertion_point.z,
+        );
+        let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
+        let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
+        self.grid_wire(point, &widths, &heights, &spanning_rows(&table))
     }
 
-    /// The outline grid of a table at `point` (world); with `title` the
-    /// first row is one cell across the table, as the placed title is.
-    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64], title: bool) -> WireModel {
+    /// The outline grid of a table at `point` (world); the `merged` rows are
+    /// one cell across the table, so no column line crosses them.
+    fn grid_wire(
+        &self,
+        point: DVec3,
+        widths: &[f64],
+        heights: &[f64],
+        merged: &[usize],
+    ) -> WireModel {
         let point = self.plane.to_local(point);
         let width: f64 = widths.iter().sum();
         let height: f64 = heights.iter().sum();
@@ -786,11 +817,6 @@ impl TableCommand {
                 .to_array()
         };
         let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 3);
-        let title_height = if title {
-            heights.first().copied().unwrap_or(0.0)
-        } else {
-            0.0
-        };
         let mut x = 0.0;
         for (index, column) in std::iter::once(0.0)
             .chain(widths.iter().copied())
@@ -798,9 +824,32 @@ impl TableCommand {
         {
             x += column;
             let inner = index > 0 && index < widths.len();
-            points.push(world(x, if inner { -title_height } else { 0.0 }));
-            points.push(world(x, -height));
-            points.push([f32::NAN; 3]); // each line on its own
+            if !inner {
+                points.push(world(x, 0.0));
+                points.push(world(x, -height));
+                points.push([f32::NAN; 3]); // each line on its own
+                continue;
+            }
+            // An inner line runs through the rows that are not merged.
+            let mut y = 0.0;
+            let mut start: Option<f64> = None;
+            for (row, row_height) in heights.iter().enumerate() {
+                if merged.contains(&row) {
+                    if let Some(from) = start.take() {
+                        points.push(world(x, from));
+                        points.push(world(x, y));
+                        points.push([f32::NAN; 3]);
+                    }
+                } else if start.is_none() {
+                    start = Some(y);
+                }
+                y -= row_height;
+            }
+            if let Some(from) = start {
+                points.push(world(x, from));
+                points.push(world(x, y));
+                points.push([f32::NAN; 3]);
+            }
         }
         let mut y = 0.0;
         for row in std::iter::once(0.0).chain(heights.iter().copied()) {
@@ -1227,14 +1276,7 @@ impl CadCommand for TableCommand {
                 };
                 let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
                 let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
-                let title = widths.len() > 1
-                    && table.merged_ranges.iter().any(|r| {
-                        r.top_row == 0
-                            && r.bottom_row == 0
-                            && r.left_col == 0
-                            && r.right_col + 1 >= widths.len()
-                    });
-                Some(self.grid_wire(point, &widths, &heights, title))
+                Some(self.grid_wire(point, &widths, &heights, &spanning_rows(&table)))
             }
             Step::Insertion => Some(self.preview_grid(point, None)),
             Step::SecondCorner(first) => Some(self.preview_grid(first, Some(point))),
@@ -1631,6 +1673,8 @@ mod tabledit_tests {
     use document::entities::Table;
     use document::types::Vector3;
     use glam::DVec3;
+    use crate::scene::model::wire_model::WireModel;
+    use document::EntityType;
 
     fn table_2x2() -> Table {
         Table::new(Vector3::new(0.0, 0.0, 0.0), 2, 2)
@@ -1744,6 +1788,47 @@ mod tabledit_tests {
                 );
             }
         }
+    }
+
+    fn ghost_extents(wire: &WireModel) -> (f32, f32, usize) {
+        let pts: Vec<_> = wire.points.iter().filter(|p| p[0].is_finite()).collect();
+        let w = pts.iter().map(|p| p[0]).fold(f32::MIN, f32::max)
+            - pts.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+        let h = pts.iter().map(|p| p[1]).fold(f32::MIN, f32::max)
+            - pts.iter().map(|p| p[1]).fold(f32::MAX, f32::min);
+        let mut xs: Vec<f32> = wire
+            .points
+            .chunks(3)
+            .filter(|l| l[0][0] == l[1][0])
+            .map(|l| l[0][0])
+            .collect();
+        xs.sort_by(|a, b| a.total_cmp(b));
+        xs.dedup();
+        let columns = xs.len() - 1;
+        (w, h, columns)
+    }
+
+    #[test]
+    fn ghost_matches_the_placed_table() {
+        let names = ["Data", "Data", "Data"];
+        let mut cmd = TableCommand::configured(None, Some(5), Some(1), 2.5, 1, false, true, names);
+        let wire = cmd.preview_grid(DVec3::ZERO, None);
+        let (w, h, columns) = ghost_extents(&wire);
+        let CmdResult::CommitAndExit(EntityType::Table(t)) = cmd.on_point(DVec3::ZERO) else {
+            panic!("expected a table");
+        };
+        let tw: f64 = t.columns.iter().map(|c| c.width).sum();
+        let th: f64 = t.rows.iter().map(|r| r.height).sum();
+        assert_eq!(columns, 5);
+        assert_eq!(t.column_count(), 5);
+        assert!((w as f64 - tw).abs() < 1e-4 && (h as f64 - th).abs() < 1e-4);
+        // One horizontal line per row boundary.
+        let horizontals = wire
+            .points
+            .chunks(3)
+            .filter(|l| l[0][1] == l[1][1])
+            .count();
+        assert_eq!(horizontals, t.rows.len() + 1);
     }
 
     #[test]

@@ -47,7 +47,7 @@ fn msg(m: Msg) -> Message {
 }
 
 /// Most suggestion rows shown under the add box.
-const SUGGESTION_ROWS: usize = 8;
+const SUGGESTION_ROWS: usize = 6;
 
 /// Width of the panel list on the left.
 const PANELS_WIDTH: f32 = 210.0;

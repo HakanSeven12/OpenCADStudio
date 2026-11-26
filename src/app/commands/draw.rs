@@ -3773,6 +3773,11 @@ impl OpenCADStudio {
             }
             M::Draft(text) => {
                 state.draft = text;
+                state.suggestions_hidden = false;
+                return Task::none();
+            }
+            M::HideSuggestions => {
+                state.suggestions_hidden = true;
                 return Task::none();
             }
             M::AddCommand => {
@@ -3872,7 +3877,7 @@ mod ribbon_customize_suggestion_tests {
             }]);
         app.ribbon_customize = Some(State {
             selected: Some(0),
-            draft: String::new(),
+            ..State::default()
         });
         app
     }

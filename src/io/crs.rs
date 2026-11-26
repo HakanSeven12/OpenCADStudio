@@ -250,6 +250,11 @@ impl CrsDefinition {
         self.proj.units()
     }
 
+    /// The ellipsoid's semi-major and semi-minor axes, in meters.
+    pub fn ellipsoid(&self) -> (f64, f64) {
+        self.proj.ellipse_parameters()
+    }
+
     pub fn to_meter(&self) -> f64 {
         self.proj.to_meter()
     }

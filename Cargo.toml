@@ -77,6 +77,7 @@ kurbo = "0.13"
 # Pure-Rust CRS resolution and projection for document GEODATA. The embedded
 # EPSG data runs on native and wasm; the WKT parser is native-only (below).
 proj4rs = { version = "0.3", default-features = false, features = ["crs-definitions", "wasm-strict"] }
+proj4rs-geodesic = "0.2"
 crs-definitions = "0.6"
 # DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
 zip = { version = "9", default-features = false, features = ["deflate"] }

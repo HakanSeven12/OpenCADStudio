@@ -7,6 +7,7 @@ use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, 
 
 pub mod point_interp;
 pub mod point_manual;
+pub mod point_geodetic;
 pub mod point_intersect;
 pub mod point_object;
 pub mod point_alignment;

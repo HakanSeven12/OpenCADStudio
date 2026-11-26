@@ -3557,7 +3557,50 @@ impl OpenCADStudio {
                     };
                 }
             }
+            M::PatternPicker => {
+                let current = match &settings.fill {
+                    crate::modules::draw::draw::hatch::HatchFill::Pattern(name) => name.clone(),
+                    _ => String::new(),
+                };
+                let picker = &mut self.hatch_drafts.pattern_picker;
+                if picker.take().is_some() {
+                    return Task::none();
+                }
+                let focus = crate::ui::properties::filtered_hatch_patterns("")
+                    .iter()
+                    .position(|entry| entry.name.eq_ignore_ascii_case(&current))
+                    .unwrap_or(0);
+                *picker = Some((String::new(), focus, current));
+                return iced::widget::operation::focus(iced::widget::Id::new(
+                    "hatch-panel-pattern-search",
+                ));
+            }
+            M::PatternSearch(search) => {
+                if let Some(picker) = self.hatch_drafts.pattern_picker.as_mut() {
+                    picker.0 = search;
+                    picker.1 = 0;
+                }
+                return Task::none();
+            }
+            M::PatternFocus(index) => {
+                if let Some(picker) = self.hatch_drafts.pattern_picker.as_mut() {
+                    picker.1 = index;
+                }
+                return Task::none();
+            }
+            M::PatternConfirm => {
+                let name = self.hatch_drafts.pattern_picker.as_ref().and_then(|picker| {
+                    crate::ui::properties::filtered_hatch_patterns(&picker.0)
+                        .get(picker.1)
+                        .map(|entry| entry.name.clone())
+                });
+                return match name {
+                    Some(name) => self.on_hatch_panel(M::Pattern(name)),
+                    None => Task::none(),
+                };
+            }
             M::Pattern(name) => {
+                self.hatch_drafts.pattern_picker = None;
                 settings.fill = if name.eq_ignore_ascii_case("SOLID") {
                     crate::modules::draw::draw::hatch::HatchFill::Solid
                 } else {

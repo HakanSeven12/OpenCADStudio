@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } wordt uitgevoerd …
     .pill = { $command }
-    .pill-tip = Er wordt een plug-inopdracht uitgevoerd. Het venster reageert weer zodra deze klaar is.
+    .pill-tip = Er loopt een plug-inopdracht. Andere opdrachten wachten tot deze klaar is.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } loopt nog – wacht of annuleer in de statusbalk (Esc).
+    .cancel = Annuleren
+    .cancel-tip = Vraagt de plug-in de opdracht te stoppen (Esc)
+    .cancelling = Stoppen van { $command } gevraagd …
+    .cancel-asked = Wordt gestopt …
 
 gpu =
     .title = Grafische waarschuwing

@@ -1,12 +1,12 @@
 //! Private V4 connection owned by [`PluginProcess`](crate::process::PluginProcess).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, TryLockError, mpsc};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
-use interprocess::TryClone;
 use interprocess::local_socket::Stream;
+use interprocess::TryClone;
 
 use crate::host::{CommandSource, ExecutionResult, HostApi, HostNotification, PluginNotification};
 use crate::ipc::protocol::{HostRequest, HostResponse, PluginRequest, PluginResponse};
@@ -14,9 +14,10 @@ use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::send;
 use crate::ipc::v4::protocol::{HostToPluginV4, NotificationEnvelope};
 use crate::ipc::v4::server::{
-    HostIncoming, RateLimiter, V4HostShared, default_notify_rate_limit, run_host_reader_thread,
+    default_notify_rate_limit, run_host_reader_thread, DispatchWaker, HostIncoming, RateLimiter,
+    V4HostShared,
 };
-use crate::process::{PluginError, request_kind, request_timeout};
+use crate::process::{request_kind, request_timeout, PluginError};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 
@@ -66,6 +67,26 @@ fn call_hard_budget(timeout: Duration) -> Option<Instant> {
     Instant::now().checked_add(budget)
 }
 
+/// After serving a request of a dispatch the host does not wait for, how
+/// long to wait for the next one: a plugin's requests come in bursts, and
+/// each would otherwise wait for the window's next turn.
+const DETACHED_LINGER: Duration = Duration::from_millis(3);
+
+/// The most one serving turn of such a dispatch takes, so the window keeps
+/// drawing.
+const DETACHED_TURN: Duration = Duration::from_millis(12);
+
+/// A dispatch the host does not wait for (#3650): its request id and the
+/// deadlines a waiting [`V4Connection::call`] would have.
+#[derive(Clone, Copy)]
+struct Detached {
+    id: u64,
+    kind: &'static str,
+    timeout: Duration,
+    deadline: Instant,
+    hard_deadline: Option<Instant>,
+}
+
 pub(crate) struct V4Connection {
     shared: Arc<V4HostShared>,
     incoming: Mutex<mpsc::Receiver<HostIncoming>>,
@@ -87,6 +108,10 @@ pub(crate) struct V4Connection {
     /// The runner child cell: killed (tree) whenever this connection is marked
     /// dead, so a hung runner cannot linger half-alive holding handles.
     terminator: Option<crate::process::SharedRunnerChild>,
+    /// The dispatch running without the host waiting for it, if any. While
+    /// it runs, [`Self::poll_dispatch`] is the only consumer of incoming
+    /// frames: [`Self::call`] refuses and [`Self::drain_requests`] waits.
+    detached: Mutex<Option<Detached>>,
 }
 
 impl V4Connection {
@@ -107,10 +132,7 @@ impl V4Connection {
             )))
         })?;
 
-        let shared = Arc::new(V4HostShared {
-            writer: Mutex::new(Some(stream)),
-            alive: AtomicBool::new(true),
-        });
+        let shared = Arc::new(V4HostShared::new(stream));
 
         let (incoming_tx, incoming_rx) = mpsc::sync_channel(MAX_INCOMING_FRAMES);
 
@@ -138,6 +160,7 @@ impl V4Connection {
             grip_moves_in_flight: std::sync::Mutex::new(std::collections::HashSet::new()),
             deferred_responses: Mutex::new(VecDeque::new()),
             terminator,
+            detached: Mutex::new(None),
         })
     }
 
@@ -193,6 +216,13 @@ impl V4Connection {
         req: HostRequest,
         on_start_interactive: &mut dyn FnMut(u64),
     ) -> Result<HostResponse, PluginError> {
+        if self.dispatch_running() {
+            // Its frames belong to `poll_dispatch`; waiting here would take
+            // them (and the serving thread may be this one).
+            return Err(PluginError::Runner(
+                "a command of this plugin is still running; try again when it ends".into(),
+            ));
+        }
         let _call_guard = self.call_lock.lock().unwrap_or_else(|e| e.into_inner());
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let kind = request_kind(&req);
@@ -354,6 +384,234 @@ impl V4Connection {
         }
     }
 
+    /// Whether a dispatch runs without the host waiting for it.
+    pub fn dispatch_running(&self) -> bool {
+        self.detached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+    }
+
+    /// Send a `Dispatch` without waiting for its answer (#3650): the host
+    /// keeps drawing, `waker` is called whenever the plugin sends something
+    /// (a request, the answer, a notification) or the connection ends, and
+    /// [`Self::poll_dispatch`] then serves the requests and collects the
+    /// answer. The deadlines are those of a waiting dispatch. Returns the
+    /// request id. One such dispatch per connection at a time.
+    #[allow(clippy::result_large_err)]
+    pub fn begin_dispatch(&self, cmd: &str, waker: DispatchWaker) -> Result<u64, PluginError> {
+        if !self.is_alive() {
+            return Err(PluginError::Runner("V4 connection is dead".into()));
+        }
+        let _call_guard = self.call_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut detached = self.detached.lock().unwrap_or_else(|e| e.into_inner());
+        if detached.is_some() {
+            return Err(PluginError::Runner(
+                "a command of this plugin is still running".into(),
+            ));
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let req = HostRequest::Dispatch {
+            cmd: cmd.to_string(),
+        };
+        let kind = request_kind(&req);
+        let timeout = request_timeout(kind);
+        // Woken from the first frame on, even one that races this send.
+        *self.shared.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(waker);
+        let sent = {
+            let mut writer = self.shared.writer.lock().unwrap_or_else(|e| e.into_inner());
+            match writer.as_mut() {
+                Some(stream) => send(stream, &HostToPluginV4::Request { id, payload: req })
+                    .map_err(PluginError::from),
+                None => Err(PluginError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "V4 connection is shut down",
+                ))),
+            }
+        };
+        if let Err(e) = sent {
+            *self.shared.waker.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            return Err(e);
+        }
+        *detached = Some(Detached {
+            id,
+            kind,
+            timeout,
+            deadline: Instant::now() + timeout,
+            hard_deadline: call_hard_budget(timeout),
+        });
+        Ok(id)
+    }
+
+    /// End the dispatch running without the host waiting: no more wakes.
+    fn end_detached(&self) {
+        *self.detached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.shared.waker.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Serve what the plugin sent for the dispatch started with
+    /// [`Self::begin_dispatch`], without waiting for more: nested requests
+    /// are answered with `host` (the same way a waiting dispatch answers
+    /// them), and its answer, once there, is returned and ends it. `Ok(None)`:
+    /// still running. A plugin silent past the dispatch deadline is handled
+    /// as a waiting dispatch would handle it (connection dead, runner
+    /// killed), so the host calls this now and then even without a wake.
+    #[allow(clippy::result_large_err)]
+    pub fn poll_dispatch(
+        &self,
+        host: &mut dyn HostApi,
+        on_start_interactive: &mut dyn FnMut(u64),
+    ) -> Result<Option<HostResponse>, PluginError> {
+        let _call_guard = self.call_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut state) = *self.detached.lock().unwrap_or_else(|e| e.into_inner()) else {
+            return Err(PluginError::Runner(
+                "no command of this plugin is running".into(),
+            ));
+        };
+        // Its answer may have been parked by a grip poll.
+        {
+            let mut deferred_responses = self
+                .deferred_responses
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some(position) = deferred_responses
+                .iter()
+                .position(|(rid, _)| *rid == state.id)
+            {
+                let (_, payload) = deferred_responses.remove(position).unwrap();
+                drop(deferred_responses);
+                self.end_detached();
+                return Ok(Some(payload));
+            }
+        }
+        let incoming = self.incoming.lock().unwrap_or_else(|e| e.into_inner());
+        let mut served = 0usize;
+        let turn = Instant::now();
+        loop {
+            if served >= MAX_REQUESTS_PER_DRAIN || (served > 0 && turn.elapsed() >= DETACHED_TURN) {
+                // The rest at the next message: this one draws a frame first.
+                self.shared.wake();
+                break;
+            }
+            // What is there, and after a served request what follows within
+            // the linger.
+            let next = if served == 0 {
+                incoming.try_recv().map_err(|e| match e {
+                    mpsc::TryRecvError::Empty => mpsc::RecvTimeoutError::Timeout,
+                    mpsc::TryRecvError::Disconnected => mpsc::RecvTimeoutError::Disconnected,
+                })
+            } else {
+                incoming
+                    .recv_timeout(DETACHED_LINGER.min(DETACHED_TURN.saturating_sub(turn.elapsed())))
+            };
+            match next {
+                Ok(HostIncoming::Response { id, payload }) if id == state.id => {
+                    drop(incoming);
+                    self.end_detached();
+                    return Ok(Some(payload));
+                }
+                Ok(HostIncoming::Response { id, payload }) => {
+                    // Not ours (a grip move answered meanwhile): park it.
+                    park_bounded(
+                        &self.deferred_responses,
+                        MAX_DEFERRED_RESPONSES,
+                        "response",
+                        (id, payload),
+                    );
+                }
+                Ok(HostIncoming::Request {
+                    id: rid,
+                    tab_id,
+                    payload,
+                }) => {
+                    served += 1;
+                    state.deadline = Instant::now() + state.timeout;
+                    let current_tab_id = host.tab_id();
+                    if matches!(*payload, PluginRequest::GetTabId)
+                        || tab_id.is_none_or(|request_tab| {
+                            request_tab == current_tab_id || current_tab_id == 0
+                        })
+                    {
+                        if let Err(e) =
+                            self.respond_to_plugin_request(host, rid, payload, on_start_interactive)
+                        {
+                            drop(incoming);
+                            self.end_detached();
+                            return Err(e);
+                        }
+                    } else {
+                        // As a waiting dispatch does: refuse it, the runner
+                        // goes on.
+                        let requested_tab =
+                            tab_id.expect("an unserviceable foreign-tab request has a tab id");
+                        let response = PluginResponse::Error(format!(
+                            "nested plugin request for tab {requested_tab} cannot be served \
+                             while the host dispatches to tab {current_tab_id}; send it again \
+                             after that dispatch returns"
+                        ));
+                        let mut writer =
+                            self.shared.writer.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(stream) = writer.as_mut() {
+                            let _ = send(
+                                stream,
+                                &HostToPluginV4::Response {
+                                    id: rid,
+                                    payload: response,
+                                },
+                            );
+                        }
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    eprintln!(
+                        "[plugin] V4 reader thread disconnected: request={} \
+                         (marking the connection dead)",
+                        state.kind
+                    );
+                    self.shared.alive.store(false, Ordering::SeqCst);
+                    drop(incoming);
+                    self.end_detached();
+                    return Err(PluginError::Runner("V4 reader thread disconnected".into()));
+                }
+            }
+        }
+        drop(incoming);
+        let now = Instant::now();
+        let hard = state.hard_deadline.is_some_and(|end| now >= end);
+        if hard || now >= state.deadline || !self.is_alive() {
+            // Always logged: the process may still run after the connection
+            // is marked dead, and this is the only record.
+            eprintln!(
+                "[plugin] V4 {} without an answer past its deadline: request={} timeout={:?} \
+                 (marking the connection dead and terminating the runner)",
+                if hard {
+                    "dispatch budget exhausted"
+                } else {
+                    "dispatch"
+                },
+                state.kind,
+                state.timeout
+            );
+            self.shared.alive.store(false, Ordering::SeqCst);
+            self.terminate_runner();
+            self.end_detached();
+            return Err(PluginError::CallTimeout {
+                request: state.kind,
+                duration: state.timeout,
+            });
+        }
+        if let Some(running) = self
+            .detached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+        {
+            running.deadline = state.deadline;
+        }
+        Ok(None)
+    }
+
     /// Drain any plugin→host requests that have arrived since the last call and
     /// apply them using `host`. This lets long-lived plugin sessions (e.g. a
     /// Python REPL) mutate the host document while the host is not otherwise in
@@ -364,6 +622,10 @@ impl V4Connection {
         host: &mut dyn HostApi,
         on_start_interactive: &mut dyn FnMut(u64),
     ) -> Result<(), PluginError> {
+        if self.dispatch_running() {
+            // `poll_dispatch` serves the requests until the command ends.
+            return Ok(());
+        }
         let _call_guard = match self.call_lock.try_lock() {
             Ok(guard) => guard,
             Err(TryLockError::Poisoned(error)) => error.into_inner(),
@@ -774,8 +1036,8 @@ mod tests {
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
     use document::{Document, Handle};
     use interprocess::local_socket::{
-        GenericNamespaced, ListenerOptions, ToNsName,
         traits::{Listener, Stream as StreamTrait},
+        GenericNamespaced, ListenerOptions, ToNsName,
     };
 
     fn unique_socket_name() -> String {
@@ -1081,6 +1343,134 @@ mod tests {
             vec!["nested".to_string()],
             "push_info should be delivered to host"
         );
+        runner.join().unwrap();
+        restore_test_env();
+    }
+
+    /// Wait until `poll` gives an answer, as the host does on each wake.
+    fn poll_until(
+        conn: &V4Connection,
+        host: &mut DummyHost,
+        wakes: &mpsc::Receiver<()>,
+    ) -> Result<HostResponse, PluginError> {
+        loop {
+            if let Some(answer) = conn.poll_dispatch(host, &mut |_| {})? {
+                return Ok(answer);
+            }
+            let _ = wakes.recv_timeout(Duration::from_millis(200));
+        }
+    }
+
+    fn waker() -> (DispatchWaker, mpsc::Receiver<()>) {
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let waker: DispatchWaker = Arc::new(move || {
+            let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(());
+        });
+        (waker, rx)
+    }
+
+    #[test]
+    fn a_dispatch_runs_without_waiting_and_its_requests_are_served_on_poll() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_test_env();
+        let (host_stream, mut runner_stream) = connect_pair();
+        let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
+            Arc::new(|_, _| {});
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+
+        let runner = thread::spawn(move || {
+            let (id, cmd) = match recv::<HostToPluginV4>(&mut runner_stream).unwrap() {
+                HostToPluginV4::Request {
+                    id,
+                    payload: HostRequest::Dispatch { cmd },
+                } => (id, cmd),
+                other => panic!("unexpected: {other:?}"),
+            };
+            assert_eq!(cmd, "LONG");
+            // The host is not waiting: hold the answer until the test says so.
+            go_rx.recv().unwrap();
+            send(
+                &mut runner_stream,
+                &PluginToHostV4::Request {
+                    id: 7,
+                    tab_id: None,
+                    payload: PluginRequest::PushInfo("working".to_string()),
+                },
+            )
+            .unwrap();
+            match recv::<HostToPluginV4>(&mut runner_stream).unwrap() {
+                HostToPluginV4::Response {
+                    id: 7,
+                    payload: PluginResponse::Ok,
+                } => {}
+                other => panic!("unexpected nested response: {other:?}"),
+            }
+            send(
+                &mut runner_stream,
+                &PluginToHostV4::Response {
+                    id,
+                    payload: HostResponse::Bool(true),
+                },
+            )
+            .unwrap();
+        });
+
+        let (waker, wakes) = waker();
+        conn.begin_dispatch("LONG", waker).unwrap();
+        assert!(conn.dispatch_running());
+        let mut host = DummyHost::new();
+        // Nothing arrived yet: the poll returns at once.
+        assert!(conn
+            .poll_dispatch(&mut host, &mut |_| {})
+            .unwrap()
+            .is_none());
+        // Another call is refused while it runs instead of taking its frames.
+        assert!(conn
+            .call(
+                &mut host,
+                HostRequest::Dispatch { cmd: "X".into() },
+                &mut |_| {}
+            )
+            .is_err());
+        go_tx.send(()).unwrap();
+        let answer = poll_until(&conn, &mut host, &wakes).unwrap();
+        assert!(matches!(answer, HostResponse::Bool(true)));
+        assert_eq!(host.take_push_info(), vec!["working".to_string()]);
+        assert!(!conn.dispatch_running(), "the answer ends it");
+        assert!(conn.poll_dispatch(&mut host, &mut |_| {}).is_err());
+        runner.join().unwrap();
+        restore_test_env();
+    }
+
+    #[test]
+    fn a_silent_dispatch_past_its_deadline_ends_like_a_waiting_one() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_test_env();
+        std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", "1");
+        let (host_stream, mut runner_stream) = connect_pair();
+        let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
+            Arc::new(|_, _| {});
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
+        let runner = thread::spawn(move || {
+            // Read the dispatch and never answer.
+            let _ = recv::<HostToPluginV4>(&mut runner_stream);
+            thread::sleep(Duration::from_millis(1600));
+        });
+        let (waker, _wakes) = waker();
+        conn.begin_dispatch("HANG", waker).unwrap();
+        let mut host = DummyHost::new();
+        assert!(conn
+            .poll_dispatch(&mut host, &mut |_| {})
+            .unwrap()
+            .is_none());
+        thread::sleep(Duration::from_millis(1200));
+        assert!(matches!(
+            conn.poll_dispatch(&mut host, &mut |_| {}),
+            Err(PluginError::CallTimeout { .. })
+        ));
+        assert!(!conn.is_alive() && !conn.dispatch_running());
         runner.join().unwrap();
         restore_test_env();
     }

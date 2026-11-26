@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } قيد التشغيل …
     .pill = { $command }
-    .pill-tip = يجري تشغيل أمر إضافة. ستستجيب النافذة مجددًا عند انتهائه.
+    .pill-tip = يتم تشغيل أمر مكوّن إضافي. تنتظر الأوامر الأخرى حتى ينتهي.
+    .pill-progress = { $command } { $percent } %
+    .refused = لا يزال { $command } قيد التشغيل – انتظر أو ألغه من شريط الحالة (Esc).
+    .cancel = إلغاء
+    .cancel-tip = يطلب من المكوّن الإضافي إيقاف الأمر (Esc)
+    .cancelling = تم طلب إيقاف { $command } …
+    .cancel-asked = جارٍ الإيقاف …
 
 gpu =
     .title = تحذير الرسومات

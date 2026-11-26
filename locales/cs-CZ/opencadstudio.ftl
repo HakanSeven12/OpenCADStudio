@@ -439,7 +439,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } běží …
     .pill = { $command }
-    .pill-tip = Probíhá příkaz zásuvného modulu. Okno bude znovu reagovat, až skončí.
+    .pill-tip = Běží příkaz zásuvného modulu. Ostatní příkazy čekají, dokud neskončí.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } stále běží – počkejte nebo jej zrušte ve stavovém řádku (Esc).
+    .cancel = Zrušit
+    .cancel-tip = Požádá modul o zastavení příkazu (Esc)
+    .cancelling = Požádáno o zastavení { $command } …
+    .cancel-asked = Zastavuje se …
 
 gpu =
     .title = Upozornění na grafiku

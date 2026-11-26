@@ -1237,6 +1237,11 @@ pub enum Message {
     PluginFrameDrawn,
     /// Run the plugin command that waited for a frame.
     PluginFrameResume,
+    /// The plugin of the command running beside the window sent something,
+    /// or the check interval passed: serve it (#3650).
+    PluginRunWake,
+    /// Ask the plugin command running beside the window to stop.
+    PluginRunCancel,
     /// Timer pulse while a rollover hit-test is queued; fires when the
     /// cursor has been still long enough to safely run the pick.
     HoverDwellTick,

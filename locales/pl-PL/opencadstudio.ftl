@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } działa …
     .pill = { $command }
-    .pill-tip = Trwa wykonywanie polecenia wtyczki. Okno znów zareaguje po jego zakończeniu.
+    .pill-tip = Trwa polecenie wtyczki. Inne polecenia czekają, aż się zakończy.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } nadal trwa – poczekaj lub anuluj na pasku stanu (Esc).
+    .cancel = Anuluj
+    .cancel-tip = Prosi wtyczkę o przerwanie polecenia (Esc)
+    .cancelling = Zażądano przerwania { $command } …
+    .cancel-asked = Przerywanie …
 
 gpu =
     .title = Ostrzeżenie graficzne

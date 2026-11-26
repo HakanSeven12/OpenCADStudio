@@ -1,5 +1,6 @@
 //! Host-side V4 snapshot and notification support for the Python REPL plugin.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ocs_plugin_api::host::{HostNotification, PluginNotification};
@@ -384,6 +385,22 @@ pub fn notification_handler() -> NotificationHandler {
                     .unwrap_or_else(|e| e.into_inner())
                     .push(plugin_id.to_string());
             }
+            // What a running plugin command reports for the status bar
+            // (#3650); the main thread reads it with `take_command_status`.
+            PluginNotification::Progress { percent } => {
+                command_status(plugin_id, |status| status.percent = Some(percent.min(100)));
+            }
+            PluginNotification::Output { text } | PluginNotification::Error { text } => {
+                let line = text
+                    .lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("");
+                if !line.is_empty() {
+                    let line = line.trim().to_string();
+                    command_status(plugin_id, |status| status.line = Some(line));
+                }
+            }
             _ => {}
         }
     })
@@ -395,6 +412,40 @@ fn broadcast(notification: HostNotification) {
     crate::plugin::external::with_manager(|mgr| {
         mgr.broadcast_notification(None, notification);
     });
+}
+
+// ── Running command status (#3650) ──────────────────────────────────────────
+//
+// The latest progress and output line each plugin reported, written by the
+// reader-thread handler and read by the main thread while that plugin's
+// command runs. Only the latest values matter, so this is a map, not a queue.
+
+/// What a running plugin command reported last.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandStatus {
+    pub percent: Option<u8>,
+    pub line: Option<String>,
+}
+
+static COMMAND_STATUS: std::sync::Mutex<Option<HashMap<String, CommandStatus>>> =
+    std::sync::Mutex::new(None);
+
+fn command_status(plugin_id: &str, update: impl FnOnce(&mut CommandStatus)) {
+    let mut map = COMMAND_STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    update(
+        map.get_or_insert_with(HashMap::new)
+            .entry(plugin_id.to_string())
+            .or_default(),
+    );
+}
+
+/// The status `plugin_id` reported since the last call, cleared.
+pub fn take_command_status(plugin_id: &str) -> Option<CommandStatus> {
+    COMMAND_STATUS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .and_then(|map| map.remove(plugin_id))
 }
 
 // ── ChannelReady ack queue (API v13) ────────────────────────────────────────

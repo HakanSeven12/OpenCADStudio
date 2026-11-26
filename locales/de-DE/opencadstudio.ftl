@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } läuft …
     .pill = { $command }
-    .pill-tip = Ein Plugin-Befehl läuft. Das Fenster reagiert wieder, sobald er fertig ist.
+    .pill-tip = Ein Plugin-Befehl läuft. Andere Befehle warten, bis er fertig ist.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } läuft noch – bitte warten oder in der Statusleiste abbrechen (Esc).
+    .cancel = Abbrechen
+    .cancel-tip = Bittet das Plugin, den Befehl abzubrechen (Esc)
+    .cancelling = { $command }: Abbrechen angefordert …
+    .cancel-asked = Wird abgebrochen …
 
 gpu =
     .title = Grafikwarnung

@@ -2117,7 +2117,7 @@ impl OpenCADStudio {
                     }) {
                         return task;
                     }
-                    self.dispatch_plugin_answer(&line);
+                    return self.dispatch_plugin_answer(&line, false);
                 }
                 Task::none()
             }
@@ -5709,6 +5709,11 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginFrameResume => self.resume_plugin_frame(),
+            Message::PluginRunWake => self.on_plugin_run_wake(),
+            Message::PluginRunCancel => {
+                self.cancel_plugin_run();
+                Task::none()
+            }
             Message::LayoutSettled => {
                 // Restore the scene after the notice redraw.
                 self.layout_settling = false;

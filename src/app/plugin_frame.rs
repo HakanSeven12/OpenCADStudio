@@ -149,10 +149,7 @@ impl OpenCADStudio {
                     None => Task::done(Message::ScriptPump),
                 },
                 Resume::Lines(lines) => self.run_script_lines(lines),
-                Resume::Direct(line) => {
-                    self.dispatch_plugin_answer(&line);
-                    Task::none()
-                }
+                Resume::Direct(line) => self.dispatch_plugin_answer(&line, true),
             });
             // A path that did not reach a plugin command leaves nothing behind.
             self.plugin_frame_drawn = false;
@@ -161,20 +158,43 @@ impl OpenCADStudio {
     }
 
     /// The command line's pinned prompt while a plugin command waits for its
-    /// frame and then runs.
+    /// frame and then runs (beside the window, or holding it).
     pub(super) fn plugin_frame_prompt(&self) -> Option<String> {
-        self.plugin_frame.as_ref().map(|frame| {
-            crate::i18n::plain(crate::tr!(
-                "plugin-busy",
-                "prompt",
-                command = frame.label.clone()
-            ))
-        })
+        let label = self.plugin_busy_label()?;
+        Some(crate::i18n::plain(crate::tr!(
+            "plugin-busy",
+            "prompt",
+            command = label.to_string()
+        )))
+    }
+
+    /// The plugin command the status bar shows as running, with what it
+    /// reported.
+    pub(super) fn plugin_busy(&self) -> Option<crate::ui::statusbar::PluginBusy<'_>> {
+        if let Some(frame) = self.plugin_frame.as_ref() {
+            return Some(crate::ui::statusbar::PluginBusy {
+                command: &frame.label,
+                percent: None,
+                line: None,
+                cancel: None,
+            });
+        }
+        self.plugin_run
+            .as_ref()
+            .map(|run| crate::ui::statusbar::PluginBusy {
+                command: &run.label,
+                percent: run.percent,
+                line: run.status_line.as_deref(),
+                cancel: Some(run.cancel_requested),
+            })
     }
 
     /// The plugin command the status bar shows as running.
     pub(super) fn plugin_busy_label(&self) -> Option<&str> {
-        self.plugin_frame.as_ref().map(|frame| frame.label.as_str())
+        self.plugin_frame
+            .as_ref()
+            .map(|frame| frame.label.as_str())
+            .or_else(|| self.plugin_run.as_ref().map(|run| run.label.as_str()))
     }
 
     /// The lines of a plugin's script, each answering what the one before
@@ -191,9 +211,18 @@ impl OpenCADStudio {
                 return task;
             }
             lines.pop_front();
-            // The line runs to the end here: what it starts does not wait.
-            let pass = std::mem::replace(&mut self.plugin_frame_pass, true);
+            // A plugin line that got its frame may run beside the window; the
+            // rest of the script then waits for it to end. Any other line
+            // runs to the end here, and what it starts does not wait.
+            let beside = self.plugin_frame_drawn && !self.plugin_frame_pass;
+            let pass = std::mem::replace(&mut self.plugin_frame_pass, !beside);
             let task = self.run_command_line_streaming(&line, true);
+            if beside && self.plugin_running() {
+                self.plugin_frame_pass = pass;
+                self.plugin_frame_drawn = false;
+                self.plugin_run_then(lines);
+                return task;
+            }
             let _ = self.drive_headless_task(task);
             self.plugin_frame_pass = pass;
         }
@@ -203,14 +232,26 @@ impl OpenCADStudio {
     }
 
     /// A plugin file or folder dialog's answer: `"<command> <path>"`, with
-    /// the path's case intact.
-    pub(super) fn dispatch_plugin_answer(&mut self, line: &str) {
+    /// the path's case intact. `frame_drawn`: it waited for its frame and may
+    /// run beside the window.
+    pub(super) fn dispatch_plugin_answer(
+        &mut self,
+        line: &str,
+        frame_drawn: bool,
+    ) -> Task<Message> {
+        if self.plugin_run_refuses(line) {
+            return Task::none();
+        }
         let i = self.active_tab;
+        if let Some(task) = self.begin_plugin_run(i, line, frame_drawn) {
+            return task;
+        }
         if !crate::plugin::try_dispatch(self, i, line) {
             let command = line.split_whitespace().next().unwrap_or_default();
             self.command_line
                 .push_error(crate::tf!("No plugin handled: {command}").as_ref());
         }
+        Task::none()
     }
 }
 

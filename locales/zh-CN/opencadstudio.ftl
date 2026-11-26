@@ -436,7 +436,13 @@ viewport =
 plugin-busy =
     .prompt = 正在运行 { $command }…
     .pill = { $command }
-    .pill-tip = 插件命令正在运行。完成后窗口将恢复响应。
+    .pill-tip = 正在运行插件命令。其他命令将等待其完成。
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } 仍在运行 – 请等待，或在状态栏中取消 (Esc)。
+    .cancel = 取消
+    .cancel-tip = 请求插件停止该命令 (Esc)
+    .cancelling = 已请求停止 { $command } …
+    .cancel-asked = 正在停止 …
 
 gpu =
     .title = 图形警告

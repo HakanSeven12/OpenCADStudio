@@ -366,6 +366,10 @@ impl OpenCADStudio {
         cmd: &str,
         allow_suggest: bool,
     ) -> Option<Task<Message>> {
+        // A plugin command runs beside the window: nothing new until it ends.
+        if self.plugin_run_refuses(cmd) {
+            return Some(Task::none());
+        }
         if self.table_cell_editor.is_some()
             && self.field_dialog.is_none()
             && !self.commit_table_cell_editor()
@@ -670,12 +674,18 @@ impl OpenCADStudio {
         self.ribbon
             .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
 
-        // A plugin command keeps the UI thread until it returns: the window
-        // draws once first, naming it (#3650).
+        // A plugin command draws one frame first, naming it, then runs beside
+        // the window where it can (#3650).
+        let frame_drawn = self.plugin_frame_drawn;
         if !self.suppress_plugin_dispatch {
             if let Some(task) = self.defer_plugin_line(cmd, || {
                 super::plugin_frame::Resume::Command(cmd.to_string())
             }) {
+                return Some(task);
+            }
+            if let Some(task) = self.begin_plugin_run(i, cmd, frame_drawn) {
+                self.tabs[i].last_cmd = Some(cmd.to_string());
+                self.command_line.record_recent(cmd);
                 return Some(task);
             }
         }

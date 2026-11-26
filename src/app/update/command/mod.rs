@@ -555,6 +555,11 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_command_escape(&mut self) -> Task<Message> {
+        // Escape asks a plugin command running beside the window to stop.
+        if self.plugin_running() {
+            self.cancel_plugin_run();
+            return Task::none();
+        }
         self.table_edit_command_line = false;
         self.tabs[self.active_tab].multiple_cmd = None;
         self.tabs[self.active_tab].measurement.clear();

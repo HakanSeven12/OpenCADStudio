@@ -434,7 +434,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } çalışıyor …
     .pill = { $command }
-    .pill-tip = Bir eklenti komutu çalışıyor. Pencere, komut bittiğinde yeniden yanıt verecek.
+    .pill-tip = Bir eklenti komutu çalışıyor. Diğer komutlar bitmesini bekler.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command } hâlâ çalışıyor – bekleyin veya durum çubuğundan iptal edin (Esc).
+    .cancel = İptal
+    .cancel-tip = Eklentiden komutu durdurmasını ister (Esc)
+    .cancelling = { $command } için durdurma istendi …
+    .cancel-asked = Durduruluyor …
 
 gpu =
     .title = Grafik Uyarısı

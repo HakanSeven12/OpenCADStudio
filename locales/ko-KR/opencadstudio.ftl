@@ -437,7 +437,13 @@ viewport =
 plugin-busy =
     .prompt = { $command } 실행 중…
     .pill = { $command }
-    .pill-tip = 플러그인 명령이 실행 중입니다. 완료되면 창이 다시 응답합니다.
+    .pill-tip = 플러그인 명령이 실행 중입니다. 다른 명령은 끝날 때까지 기다립니다.
+    .pill-progress = { $command } { $percent } %
+    .refused = { $command }이(가) 아직 실행 중입니다. 기다리거나 상태 표시줄에서 취소하세요(Esc).
+    .cancel = 취소
+    .cancel-tip = 플러그인에 명령 중지를 요청합니다(Esc)
+    .cancelling = { $command } 중지를 요청했습니다 …
+    .cancel-asked = 중지하는 중 …
 
 gpu =
     .title = 그래픽 경고

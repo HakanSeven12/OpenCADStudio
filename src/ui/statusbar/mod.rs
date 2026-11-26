@@ -77,10 +77,22 @@ pub struct StatusBarLayoutState<'a> {
     /// A georeferenced drawing's coordinate system: its name and the
     /// tooltip's details (#2686). `None` hides the pill.
     pub geo_system: Option<(String, String)>,
-    /// A plugin command that is about to run or running (#3650): the
-    /// window does not draw while it runs, so this pill stays on screen
-    /// until it has finished. `None` hides the pill.
-    pub plugin_busy: Option<&'a str>,
+    /// A plugin command that is about to run or running (#3650). `None`
+    /// hides the pill.
+    pub plugin_busy: Option<PluginBusy<'a>>,
+}
+
+/// A running plugin command as the status bar shows it.
+#[derive(Debug, Clone, Copy)]
+pub struct PluginBusy<'a> {
+    pub command: &'a str,
+    /// The progress the plugin reported, if any.
+    pub percent: Option<u8>,
+    /// The latest output line it reported, if any.
+    pub line: Option<&'a str>,
+    /// It runs beside the window and can be asked to stop; `Some(true)`
+    /// once asked.
+    pub cancel: Option<bool>,
 }
 
 /// Drafting modes and document settings represented by status bar controls.
@@ -321,15 +333,47 @@ impl StatusBar {
         let mut pills: Vec<Element<'_, Message>> = Vec::new();
         // Not a `StatusPill` and not hideable: it is there only while a
         // plugin command runs, and leads so it is the first thing seen.
-        if let Some(command) = plugin_busy {
-            pills.push(tip(
-                busy_pill(crate::i18n::plain(crate::tr!(
+        if let Some(busy) = plugin_busy {
+            let label = match busy.percent {
+                Some(percent) => crate::tr!(
                     "plugin-busy",
-                    "pill",
-                    command = command.to_string()
-                ))),
+                    "pill-progress",
+                    command = busy.command.to_string(),
+                    percent = percent.to_string()
+                ),
+                None => crate::tr!("plugin-busy", "pill", command = busy.command.to_string()),
+            };
+            pills.push(tip(
+                busy_pill(crate::i18n::plain(label)),
                 crate::tr!("plugin-busy", "pill-tip").into(),
             ));
+            if let Some(line) = busy.line {
+                pills.push(
+                    container(
+                        text(crate::ui::text_util::elide(line, BUSY_LINE_CHARS))
+                            .size(12)
+                            .style(|theme: &Theme| iced::widget::text::Style {
+                                color: Some(crate::ui::style::readable::muted_text(theme)),
+                            }),
+                    )
+                    .padding([4, 2])
+                    .into(),
+                );
+            }
+            match busy.cancel {
+                Some(false) => pills.push(tip(
+                    button(text(crate::tr!("plugin-busy", "cancel")).size(12))
+                        .on_press(Message::PluginRunCancel)
+                        .padding([3, 8])
+                        .into(),
+                    crate::tr!("plugin-busy", "cancel-tip").into(),
+                )),
+                Some(true) => pills.push(busy_pill(crate::i18n::plain(crate::tr!(
+                    "plugin-busy",
+                    "cancel-asked"
+                )))),
+                None => {}
+            }
         }
         if vis(StatusPill::SpaceMouse) {
             if let Some(pill) = spacemouse {
@@ -1278,6 +1322,10 @@ fn gpu_pill_label(status: &crate::scene::pipeline::GpuStatus) -> Option<String> 
         GpuStatus::Unknown | GpuStatus::Hardware(_) => None,
     }
 }
+
+/// The most characters of a running plugin command's output line the status
+/// bar shows.
+const BUSY_LINE_CHARS: usize = 60;
 
 /// A pill in the theme's primary colours: work is in progress, nothing to
 /// click.

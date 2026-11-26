@@ -768,13 +768,17 @@ impl OpenCADStudio {
             // of its own edge, or acquired for OTRACK, while nearest/tangent-
             // style snaps can never pull the point back onto the old shape.
             // The grip's own starting point is skipped so it does not stick
-            // where the drag began.
+            // where the drag began. The rest of the drawing rides along so a
+            // crossing of the old shape with another object is an Intersection
+            // (a rectangle corner dropped where an XLINE crosses its edge, #3680).
             let reference_snap_hit = if !self.grip_reference_wires.is_empty() {
+                let reference_candidates =
+                    ChainedWireSource::new(&snap_candidates, &self.grip_reference_wires);
                 self.snapper
                     .snap(
                         raw,
                         p,
-                        &self.grip_reference_wires,
+                        &reference_candidates,
                         view_rot,
                         eye,
                         bounds,
@@ -799,11 +803,14 @@ impl OpenCADStudio {
                 None
             };
 
-            // A real object snap on the rest of the drawing wins; otherwise the
+            // The two passes compete by the snap ordering (a coincident real
+            // snap on the rest of the drawing keeps the tie); otherwise the
             // reference point both shows and places the grip, so the marker is
             // always the point the grip lands on.
             let snap_hit = match snap_hit {
-                Some(hit) if hit.snap_type != crate::snap::SnapType::Grid => Some(hit),
+                Some(hit) if hit.snap_type != crate::snap::SnapType::Grid => {
+                    crate::snap::merge_snap(Some(hit), reference_snap_hit, p)
+                }
                 _ => reference_snap_hit.or(snap_hit),
             };
 

@@ -75,7 +75,6 @@ dependencies = [
  "resvg",
  "rfd",
  "roxmltree 0.21.2",
- "rstar",
  "rstest",
  "rust-embed",
  "rustc-hash 2.1.3",

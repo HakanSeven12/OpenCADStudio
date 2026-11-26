@@ -289,7 +289,7 @@ pub fn view_window<'a>(
     // The framed list keeps its height whatever the filter leaves in it, so
     // typing in the search box never moves the buttons below.
     let body: Element<'a, Message> = if shown_empty {
-        empty_note(crate::tf!("No shortcut matches \"{}\"", filter))
+        empty_note(crate::tf!("No shortcut matches \"{}\"", filter).into_owned())
     } else {
         crate::ui::kit::scroll_area(list)
     };

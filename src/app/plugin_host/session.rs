@@ -13,7 +13,7 @@ impl<'a> HostSession<'a> {
         }
     }
 
-    fn undo_group_open(&self) -> bool {
+    pub(super) fn undo_group_open(&self) -> bool {
         self.app.tabs[self.tab]
             .history
             .pending

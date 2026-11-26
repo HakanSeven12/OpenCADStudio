@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = レイアウトを準備中…
 
+plugin-busy =
+    .prompt = { $command } を実行中…
+    .pill = { $command }
+    .pill-tip = プラグインのコマンドを実行中です。完了するとウィンドウは再び応答します。
+
 gpu =
     .title = グラフィックスの警告
     .software-headline = 動作する GPU ドライバーが見つからないため、図面は CPU 上でソフトウェア描画されています ({ $adapter })。

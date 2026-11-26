@@ -434,6 +434,11 @@ viewport =
 
     .preparing-layout = Preparando layout…
 
+plugin-busy =
+    .prompt = { $command } em execução …
+    .pill = { $command }
+    .pill-tip = Um comando de plugin está em execução. A janela voltará a responder quando ele terminar.
+
 gpu =
     .title = Aviso de gráficos
     .software-headline = Nenhum driver de GPU funcional foi encontrado, então o desenho está sendo renderizado por software na CPU ({ $adapter }).

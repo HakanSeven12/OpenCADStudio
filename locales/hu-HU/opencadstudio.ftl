@@ -427,6 +427,11 @@ viewport =
 
     .preparing-layout = Elrendezés előkészítése…
 
+plugin-busy =
+    .prompt = { $command } fut …
+    .pill = { $command }
+    .pill-tip = Egy bővítményparancs fut. Az ablak a befejezése után ismét reagál.
+
 gpu =
     .title = Grafikai figyelmeztetés
     .software-headline = Nem található működő GPU-illesztőprogram, ezért a rajz szoftveresen, a CPU-n jelenik meg ({ $adapter }).

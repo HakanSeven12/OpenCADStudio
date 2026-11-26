@@ -4739,4 +4739,266 @@ fn plugin_class_parameters_panel_binds_and_commits() {
     );
 }
 
+#[test]
+fn undo_group_keeps_execute_command_and_entity_writes_in_one_step() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+    app.finish_all_pending_history();
+    let undo_before = app.tabs[0].history.undo_stack.len();
+
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        host.begin_undo_group("LISP batch");
+        let h = host.add_entity(EntityType::Line(Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(1.0, 0.0, 0.0),
+        )));
+        assert!(!h.is_null());
+    }
+    // Simulate a message boundary between IPC requests while the group is held.
+    app.finish_all_pending_history();
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(host.execute_command("LINE 0,0 10,0\n"));
+    }
+    app.finish_all_pending_history();
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(host.execute_command("POINT 5,5\n"));
+        host.end_undo_group();
+    }
+
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 3);
+    assert_eq!(
+        app.tabs[0].history.undo_stack.len(),
+        undo_before + 1,
+        "direct entity writes and execute_command calls inside begin_undo_group must produce one undo step"
+    );
+    assert_eq!(
+        app.tabs[0]
+            .history
+            .undo_stack
+            .last()
+            .unwrap()
+            .display_label(),
+        "LISP batch"
+    );
+
+    app.undo_active_tab();
+    assert_eq!(
+        app.tabs[0].scene.document.entities().count(),
+        0,
+        "one undo must remove every entity created in the group"
+    );
+
+    app.redo_active_tab();
+    assert_eq!(
+        app.tabs[0].scene.document.entities().count(),
+        3,
+        "one redo must restore every entity created in the group"
+    );
+}
+
+#[test]
+fn undo_group_keeps_push_undo_snapshot_and_layer_commands_in_one_step() {
+    use ocs_plugin_api::host::{LayerConfig, TableOperation};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+    app.finish_all_pending_history();
+    let undo_before = app.tabs[0].history.undo_stack.len();
+    let layer0_color_before = app.tabs[0].scene.document.layers.get("0").unwrap().color;
+
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        host.begin_undo_group("LISP layer batch");
+        host.table_operation(TableOperation::LayerCreate {
+            config: LayerConfig {
+                name: "WALLS".to_owned(),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        assert!(host.execute_command("CLAYER WALLS\n"));
+        assert!(host.execute_command("LINE 0,0 10,0\n"));
+
+        // Exercise commands that use begin_layer_undo / commit_layer_undo and
+        // push_undo_snapshot / finish_pending_history while a plugin request is active.
+        {
+            let mut req = PluginRequest::new(&mut host, false);
+            let undo = req.app.begin_layer_undo(0, "LAYER COLOR", &["0".to_owned()]);
+            req.app.tabs[0]
+                .scene
+                .document
+                .layers
+                .get_mut("0")
+                .unwrap()
+                .color = document::types::Color::Index(1);
+            req.app.commit_layer_undo(0, undo);
+
+            req.app.push_undo_snapshot(0, "INNER SNAPSHOT");
+            req.app.finish_pending_history(0);
+        }
+
+        host.end_undo_group();
+    }
+
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 1);
+    assert_eq!(
+        app.tabs[0].scene.document.header.current_layer_name,
+        "WALLS"
+    );
+    assert!(app.tabs[0].scene.document.layers.contains("WALLS"));
+    assert_eq!(
+        app.tabs[0].scene.document.layers.get("0").unwrap().color,
+        document::types::Color::Index(1)
+    );
+    assert_eq!(
+        app.tabs[0].history.undo_stack.len(),
+        undo_before + 1,
+        "mixed table, CLAYER, LINE, layer delta, and snapshot edits must stay in one undo step"
+    );
+
+    app.undo_active_tab();
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 0);
+    assert_eq!(app.tabs[0].scene.document.header.current_layer_name, "0");
+    assert!(!app.tabs[0].scene.document.layers.contains("WALLS"));
+    assert_eq!(
+        app.tabs[0].scene.document.layers.get("0").unwrap().color,
+        layer0_color_before
+    );
+
+    app.redo_active_tab();
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 1);
+    assert_eq!(
+        app.tabs[0].scene.document.header.current_layer_name,
+        "WALLS"
+    );
+    assert!(app.tabs[0].scene.document.layers.contains("WALLS"));
+    assert_eq!(
+        app.tabs[0].scene.document.layers.get("0").unwrap().color,
+        document::types::Color::Index(1)
+    );
+}
+
+#[test]
+fn undo_group_survives_refused_block_table_operation() {
+    use ocs_plugin_api::host::TableOperation;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+    app.finish_all_pending_history();
+    let undo_before = app.tabs[0].history.undo_stack.len();
+
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        host.begin_undo_group("LISP block batch");
+        assert!(!host
+            .add_entity(EntityType::Line(Line::from_points(
+                document::types::Vector3::new(0.0, 0.0, 0.0),
+                document::types::Vector3::new(1.0, 0.0, 0.0),
+            )))
+            .is_null());
+        assert!(host
+            .table_operation(TableOperation::BlockDelete {
+                name: "NoSuchBlock".to_owned(),
+            })
+            .is_err());
+        assert!(!host
+            .add_entity(EntityType::Line(Line::from_points(
+                document::types::Vector3::new(0.0, 1.0, 0.0),
+                document::types::Vector3::new(1.0, 1.0, 0.0),
+            )))
+            .is_null());
+        host.end_undo_group();
+    }
+
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 2);
+    assert_eq!(app.tabs[0].history.undo_stack.len(), undo_before + 1);
+
+    app.undo_active_tab();
+    assert_eq!(
+        app.tabs[0].scene.document.entities().count(),
+        0,
+        "refused BlockDelete inside begin_undo_group must not discard the held undo group"
+    );
+
+    app.redo_active_tab();
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 2);
+}
+
+#[test]
+fn undo_group_keeps_interactive_plugin_command_commit_in_one_step() {
+    use ocs_plugin_api::host::{CommandStep, InteractiveCommand};
+
+    struct OneShotPluginCommand;
+
+    impl InteractiveCommand for OneShotPluginCommand {
+        fn prompt(&self) -> String {
+            "Pick point: ".to_owned()
+        }
+        fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+            CommandStep::CommitManyAndEnd(vec![EntityType::Point(Point::at(
+                document::types::Vector3::new(pt[0], pt[1], pt[2]),
+            ))])
+        }
+        fn on_enter(&mut self) -> CommandStep {
+            CommandStep::Cancel
+        }
+    }
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+    app.finish_all_pending_history();
+    let undo_before = app.tabs[0].history.undo_stack.len();
+
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        host.begin_undo_group("LISP interactive batch");
+        assert!(!host
+            .add_entity(EntityType::Line(Line::from_points(
+                document::types::Vector3::new(0.0, 0.0, 0.0),
+                document::types::Vector3::new(5.0, 0.0, 0.0),
+            )))
+            .is_null());
+        host.start_interactive(Box::new(OneShotPluginCommand));
+    }
+    app.finish_all_pending_history();
+
+    let step = app.tabs[0]
+        .active_cmd
+        .as_mut()
+        .expect("plugin interactive command must be active")
+        .on_point(glam::DVec3::new(3.0, 4.0, 0.0));
+    let _ = app.apply_cmd_result(step);
+    app.finish_all_pending_history();
+
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        host.end_undo_group();
+    }
+
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 2);
+    assert_eq!(
+        app.tabs[0].history.undo_stack.len(),
+        undo_before + 1,
+        "entities committed by an interactive plugin command while an undo group is held must join that group"
+    );
+    assert_eq!(
+        app.tabs[0]
+            .history
+            .undo_stack
+            .last()
+            .unwrap()
+            .display_label(),
+        "LISP interactive batch"
+    );
+
+    app.undo_active_tab();
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 0);
+
+    app.redo_active_tab();
+    assert_eq!(app.tabs[0].scene.document.entities().count(), 2);
+}
+
 mod plugin_panels;

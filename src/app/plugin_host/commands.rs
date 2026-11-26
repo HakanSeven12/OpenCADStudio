@@ -229,10 +229,14 @@ impl<'a> HostSession<'a> {
         }
     }
 
-    /// Run a command string on the active tab's command line (AutoLISP style).
-    /// Supports AutoCAD-style `PAUSE` (and `\`) input queuing, explicit `ENTER` /
-    /// `RETURN` tokens, and `\n` trailing newline execution.
+    /// Run a command string on the active tab's command line (scripted style).
+    /// Supports `PAUSE` (and `\`) input queuing, explicit `ENTER` / `RETURN`
+    /// tokens, and `\n` trailing newline execution.
     pub fn execute_command(&mut self, cmd: &str) -> bool {
+        PluginRequest::new(self, false).execute_command_inner(cmd)
+    }
+
+    fn execute_command_inner(&mut self, cmd: &str) -> bool {
         let has_newline = cmd.ends_with('\n') || cmd.ends_with('\r');
         let trimmed = cmd.trim();
 

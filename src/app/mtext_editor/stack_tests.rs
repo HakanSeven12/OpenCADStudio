@@ -42,8 +42,8 @@ fn every_selection_of_abc12_raises_and_lowers_and_restores_exactly() {
         for b in a + 1..=text.len() {
             let (head, part, tail) = (&text[..a], &text[a..b], &text[b..]);
             for (script, code) in [
-                (Script::Super, format!(r"\S{part}^;")),
-                (Script::Sub, format!(r"\S^{part};")),
+                (Script::Super, format!(r"{{\H0.7x;\S{part}^;}}")),
+                (Script::Sub, format!(r"{{\H0.7x;\S^{part};}}")),
             ] {
                 let mut app = app(text);
                 select(&mut app, a, b);
@@ -70,19 +70,19 @@ fn switching_index_kind_swaps_it_and_undo_restores_each_step() {
     let mut app = app("x2");
     select(&mut app, 1, 2);
     let _ = app.update(Message::MTextScript(true));
-    assert_eq!(raw(&app), r"x\S2^;");
+    assert_eq!(raw(&app), r"x{\H0.7x;\S2^;}");
     let _ = app.update(Message::MTextScript(false));
-    assert_eq!(raw(&app), r"x\S^2;");
+    assert_eq!(raw(&app), r"x{\H0.7x;\S^2;}");
     assert!(ed(&app).script_active(Script::Sub));
     let selected = ed(&app).sel.unwrap();
     assert_eq!(stacks(&app).len(), 1);
     assert_eq!(selected.1 - selected.0, 2, "the stack's own visible slots");
     app.mtext_undo();
-    assert_eq!(raw(&app), r"x\S2^;");
+    assert_eq!(raw(&app), r"x{\H0.7x;\S2^;}");
     app.mtext_undo();
     assert_eq!(raw(&app), "x2");
     app.mtext_redo();
-    assert_eq!(raw(&app), r"x\S2^;");
+    assert_eq!(raw(&app), r"x{\H0.7x;\S2^;}");
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn an_index_keeps_the_formatting_of_its_characters_and_the_text_around_it() {
     let mut app = app(r"{\C1;\Labc}12");
     select(&mut app, 0, 2);
     let _ = app.update(Message::MTextScript(true));
-    assert_eq!(raw(&app), r"{\C1;\L\Sab^;c}12");
+    assert_eq!(raw(&app), r"{\C1;\L{\H0.7x;\Sab^;}c}12");
     let cells = doc_to_cells(&ed(&app).doc);
     let Cell::Stack { props, .. } = &cells[0] else {
         panic!()
@@ -154,7 +154,7 @@ fn fractions_are_created_in_all_three_forms_and_empty_parts_are_refused() {
         ));
         let _ = app.update(Message::MTextFractionKind(kind));
         let _ = app.update(Message::MTextFractionInsert);
-        assert_eq!(raw(&app), format!("a{code}b"));
+        assert_eq!(raw(&app), format!("a{{\\H0.7x;{code}}}b"));
         assert!(ed(&app).menu.is_none());
         assert_eq!(
             stacks(&app),
@@ -223,7 +223,7 @@ fn a_plain_a_slash_b_selection_prefills_and_nothing_else_is_guessed() {
     );
     let _ = app.update(Message::MTextFractionOpen);
     let _ = app.update(Message::MTextFractionInsert);
-    assert_eq!(raw(&app), r"\S3/4; in");
+    assert_eq!(raw(&app), r"{\H0.7x;\S3/4;} in");
     for (raw, b) in [("1/2/3", 5), ("abc", 3)] {
         let mut other = self::app(raw);
         select(&mut other, 0, b);
@@ -248,9 +248,9 @@ fn the_fraction_row_toggles_its_popup_and_escape_steps_back() {
 
 #[test]
 fn an_index_preview_has_one_box_per_caret_slot_and_the_drawn_forms() {
-    // The renderer draws exactly these forms raised / lowered and smaller:
-    // text_support::upstream_compat_one_sided_mtext_stacks_use_the_correct_baseline.
-    for (script, source, slots) in [(Script::Super, r"x\S2^;", 2), (Script::Sub, r"x\S^2;", 3)] {
+    // The renderer draws a stack's halves at the height of their run, so
+    // the index takes the stack text size (70 %) in a group of its own.
+    for (script, source, slots) in [(Script::Super, r"x{\H0.7x;\S2^;}", 2), (Script::Sub, r"x{\H0.7x;\S^2;}", 3)] {
         let mut app = app("x2");
         select(&mut app, 1, 2);
         let _ = app.update(Message::MTextScript(script == Script::Super));
@@ -267,10 +267,10 @@ fn an_index_preview_has_one_box_per_caret_slot_and_the_drawn_forms() {
 #[test]
 fn stack_splits_the_selection_at_its_first_separator_as_before() {
     for (text, raw_after) in [
-        ("1/2", r"\S1/2;"),
-        ("3#4", r"\S3#4;"),
-        ("2^", r"\S2^;"),
-        ("^2", r"\S^2;"),
+        ("1/2", r"{\H0.7x;\S1/2;}"),
+        ("3#4", r"{\H0.7x;\S3#4;}"),
+        ("2^", r"{\H0.7x;\S2^;}"),
+        ("^2", r"{\H0.7x;\S^2;}"),
     ] {
         let mut app = app(&format!("x{text}"));
         select(&mut app, 1, 1 + text.chars().count());

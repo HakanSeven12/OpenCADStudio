@@ -532,56 +532,96 @@ impl OpenCADStudio {
         };
         self.edit_raw(|_, index| {
             let edit = index.stack(range.clone(), &data)?;
-            let width = edit.caret - range.start;
-            // The stack's size: a `{\H…x;` group of its own, replaced, or one
-            // put round it.
-            let after = SourceIndex::new(&edit.raw);
-            let count = after.validate(false)?;
-            let unit = after
-                .units
-                .iter()
-                .find(|u| u.kind == Kind::Stack && u.visible.start == range.start)
-                .ok_or(EditError::ProjectionMismatch)?
-                .raw
-                .clone();
-            let before_unit = &edit.raw[..unit.start];
-            let own_group = before_unit
-                .rfind('{')
-                .filter(|open| {
-                    let head = &before_unit[open + 1..];
-                    head.starts_with("\\H")
-                        && head.ends_with("x;")
-                        && head.matches(';').count() == 1
-                        && edit.raw[unit.end..].starts_with('}')
-                });
-            let stack_code = &edit.raw[unit.clone()];
-            let sized = if percent >= 100 {
-                stack_code.to_string()
-            } else {
-                format!(
-                    "{{\\H{}x;{stack_code}}}",
-                    raw_span::number(f64::from(percent) / 100.0)
-                )
-            };
-            let mut patches = match own_group {
-                Some(open) => vec![(open..unit.end + 1, sized)],
-                None => vec![(unit.clone(), sized)],
-            };
-            // Where stacks sit: the text's leading `\A` code.
-            for t in after.tokens.iter().filter(|t| t.kind == Kind::Control('A')) {
-                patches.push((t.raw.clone(), String::new()));
-            }
-            if let Some(align) = align {
-                patches.push((0..0, align.to_string()));
-            }
-            let raw = apply_patches(&edit.raw, patches)?;
-            after.certify(&raw, count)?;
-            Ok(TextEdit {
-                raw,
-                caret: range.start + width,
-            })
+            size_stack(edit, range.start, percent, Some(align))
         });
     }
+}
+
+/// The opening brace of the `{\H…x;` group that holds only the stack at
+/// `unit`: its text size.
+fn size_group(raw: &str, unit: &Range<usize>) -> Option<usize> {
+    let before_unit = &raw[..unit.start];
+    before_unit.rfind('{').filter(|open| {
+        let head = &before_unit[open + 1..];
+        head.starts_with("\\H")
+            && head.ends_with("x;")
+            && head.matches(';').count() == 1
+            && raw[unit.end..].starts_with('}')
+    })
+}
+
+/// `raw` with the size group of the stack at visible `start` taken off, so
+/// the stack's text goes back to the size around it.
+pub(super) fn unsize_stack(raw: &str, start: usize) -> Result<String, EditError> {
+    let index = SourceIndex::new(raw);
+    let count = index.validate(false)?;
+    let Some(unit) = index
+        .units
+        .iter()
+        .find(|u| u.kind == Kind::Stack && u.visible.start == start)
+        .map(|u| u.raw.clone())
+    else {
+        return Ok(raw.to_string());
+    };
+    let Some(open) = size_group(raw, &unit) else {
+        return Ok(raw.to_string());
+    };
+    let bare = apply_patches(
+        raw,
+        vec![(open..unit.start, String::new()), (unit.end..unit.end + 1, String::new())],
+    )?;
+    index.certify(&bare, count)?;
+    Ok(bare)
+}
+
+/// The stack at visible `start` of `edit` sized to `percent` of the text
+/// height: a `{\H…x;` group of its own, replaced, or one put round it. With
+/// `align`, the text's `\A` codes give way to that one (`None`: removed).
+pub(super) fn size_stack(
+    edit: TextEdit,
+    start: usize,
+    percent: u8,
+    align: Option<Option<&str>>,
+) -> Result<TextEdit, EditError> {
+    let width = edit.caret - start;
+    let after = SourceIndex::new(&edit.raw);
+    let count = after.validate(false)?;
+    let unit = after
+        .units
+        .iter()
+        .find(|u| u.kind == Kind::Stack && u.visible.start == start)
+        .ok_or(EditError::ProjectionMismatch)?
+        .raw
+        .clone();
+    let own_group = size_group(&edit.raw, &unit);
+    let stack_code = &edit.raw[unit.clone()];
+    let sized = if percent >= 100 {
+        stack_code.to_string()
+    } else {
+        format!(
+            "{{\\H{}x;{stack_code}}}",
+            raw_span::number(f64::from(percent) / 100.0)
+        )
+    };
+    let mut patches = match own_group {
+        Some(open) => vec![(open..unit.end + 1, sized)],
+        None => vec![(unit.clone(), sized)],
+    };
+    // Where stacks sit: the text's leading `\A` code.
+    if let Some(align) = align {
+        for t in after.tokens.iter().filter(|t| t.kind == Kind::Control('A')) {
+            patches.push((t.raw.clone(), String::new()));
+        }
+        if let Some(align) = align {
+            patches.push((0..0, align.to_string()));
+        }
+    }
+    let raw = apply_patches(&edit.raw, patches)?;
+    after.certify(&raw, count)?;
+    Ok(TextEdit {
+        raw,
+        caret: start + width,
+    })
 }
 
 /// The halves, style and text size of a stack, for the Stack Properties

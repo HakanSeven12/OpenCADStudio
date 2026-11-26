@@ -83,6 +83,8 @@ impl Shape {
 
 struct Piece {
     curve: usize,
+    /// The index of the segment, for a piece of a polyline.
+    segment: Option<usize>,
     shape: Shape,
 }
 
@@ -130,10 +132,12 @@ fn pieces_of(curves: &[Curve]) -> Vec<Piece> {
         match item {
             Curve::Line(line) => pieces.push(Piece {
                 curve,
+                segment: None,
                 shape: Shape::Line(*line),
             }),
             Curve::Arc(arc) => pieces.push(Piece {
                 curve,
+                segment: None,
                 shape: Shape::Arc(*arc),
             }),
             Curve::Polyline(polyline) => {
@@ -165,7 +169,11 @@ fn pieces_of(curves: &[Curve]) -> Vec<Piece> {
                             end: to.position,
                         }),
                     };
-                    pieces.push(Piece { curve, shape });
+                    pieces.push(Piece {
+                        curve,
+                        segment: Some(index),
+                        shape,
+                    });
                 }
             }
             _ => {}
@@ -653,14 +661,19 @@ pub struct AngleTolerances {
     pub relative: Vec<AngleTolerance>,
 }
 
-/// A line a little off an angle.
+/// A line, or a straight segment of a polyline, a little off an angle.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AngleError {
     pub kind: AngleErrorKind,
-    /// The index of the line.
+    /// The index of the line or polyline.
     pub curve: usize,
-    /// The line that it meets (Relative).
+    /// The index of the segment, when `curve` is a polyline: segment `n`
+    /// runs from vertex `n` to the next one.
+    pub segment: Option<usize>,
+    /// The line or polyline that it meets (Relative).
     pub other: Option<usize>,
+    /// The segment of `other`, when it is a polyline.
+    pub other_segment: Option<usize>,
     /// The middle of the line, or the point where the two lines meet.
     pub location: [f64; 2],
     /// The standard angle, in degrees.
@@ -699,8 +712,9 @@ fn nearest(
 /// `weld`; they make two angles, θ and 180° − θ, and a standard angle
 /// matches the nearer one.
 ///
-/// Only lines are read. Absolute errors come first, by line; then the
-/// Relative ones, by pair.
+/// Lines and the straight segments of polylines are read; two segments of
+/// one polyline can make a Relative error. Absolute errors come first, by
+/// line or segment; then the Relative ones, by pair.
 pub fn angle_errors(
     curves: &[Curve],
     tolerances: &AngleTolerances,
@@ -708,11 +722,12 @@ pub fn angle_errors(
     weld: Tolerance,
 ) -> Vec<AngleError> {
     let weld = weld.linear();
-    let lines: Vec<(usize, Line)> = curves
+    let pieces = pieces_of(curves);
+    // Each line or straight segment: its curve, its segment and the line.
+    let lines: Vec<(usize, Option<usize>, Line)> = pieces
         .iter()
-        .enumerate()
-        .filter_map(|(index, curve)| match curve {
-            Curve::Line(line) if line.length() > weld => Some((index, *line)),
+        .filter_map(|piece| match piece.shape {
+            Shape::Line(line) if line.length() > weld => Some((piece.curve, piece.segment, line)),
             _ => None,
         })
         .collect();
@@ -725,7 +740,6 @@ pub fn angle_errors(
             .to_degrees()
             - x_axis.to_degrees()
     };
-    let pieces = pieces_of(curves);
     let mean = pieces.iter().map(|p| shape_length(p.shape)).sum::<f64>() / pieces.len() as f64;
     let size = if mean.is_finite() && mean > 0.0 {
         mean
@@ -733,15 +747,17 @@ pub fn angle_errors(
         1.0
     };
     let grid = Grid::new(&pieces, size, weld);
-    let meets = |curve: usize, point: [f64; 2]| {
+    // Whether `point` meets geometry other than the line or segment: the
+    // next segment of the same polyline counts.
+    let meets = |curve: usize, segment: Option<usize>, point: [f64; 2]| {
         grid.near(point).any(|k| {
-            pieces[k].curve != curve
+            (pieces[k].curve, pieces[k].segment) != (curve, segment)
                 && super::containment::distance_to(&pieces[k].shape.curve(), point) <= weld
         })
     };
 
     let mut errors = Vec::new();
-    for (curve, line) in &lines {
+    for (curve, segment, line) in &lines {
         let angle = direction(line);
         let candidates = tolerances
             .absolute
@@ -751,7 +767,9 @@ pub fn angle_errors(
             errors.push(AngleError {
                 kind: AngleErrorKind::Absolute,
                 curve: *curve,
+                segment: *segment,
                 other: None,
+                other_segment: None,
                 location: [
                     (line.start[0] + line.end[0]) / 2.0,
                     (line.start[1] + line.end[1]) / 2.0,
@@ -759,7 +777,10 @@ pub fn angle_errors(
                 angle: standard.angle,
                 deviation: turn.abs(),
                 turn: turn.to_radians(),
-                meets: [meets(*curve, line.start), meets(*curve, line.end)],
+                meets: [
+                    meets(*curve, *segment, line.start),
+                    meets(*curve, *segment, line.end),
+                ],
             });
         }
     }
@@ -771,8 +792,9 @@ pub fn angle_errors(
     let line_grid = Grid::new(
         &lines
             .iter()
-            .map(|(curve, line)| Piece {
+            .map(|(curve, segment, line)| Piece {
                 curve: *curve,
+                segment: *segment,
                 shape: Shape::Line(*line),
             })
             .collect::<Vec<_>>(),
@@ -795,7 +817,7 @@ pub fn angle_errors(
     let mut pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|(a, b)| a != b).collect();
     pairs.sort_unstable();
     for (a, b) in pairs {
-        let ((first, one), (second, two)) = (lines[a], lines[b]);
+        let ((first, first_segment, one), (second, second_segment, two)) = (lines[a], lines[b]);
         let crossings = intersect(&Curve::Line(one), &Curve::Line(two), Tolerance::new(weld));
         let Some(meet) = crossings.first().map(|crossing| crossing.point) else {
             continue;
@@ -816,12 +838,17 @@ pub fn angle_errors(
         errors.push(AngleError {
             kind: AngleErrorKind::Relative,
             curve: first,
+            segment: first_segment,
             other: Some(second),
+            other_segment: second_segment,
             location: meet,
             angle: standard.angle,
             deviation: turn.abs(),
             turn: turn.to_radians(),
-            meets: [meets(first, one.start), meets(first, one.end)],
+            meets: [
+                meets(first, first_segment, one.start),
+                meets(first, first_segment, one.end),
+            ],
         });
     }
     errors
@@ -1469,14 +1496,9 @@ mod tests {
     }
 
     #[test]
-    fn arcs_and_polylines_have_no_angle_errors() {
-        let (sin, cos) = 91.7f64.to_radians().sin_cos();
-        let path = polyline(
-            &[[1.2, 3.4], [1.2 + 5.0 * cos, 3.4 + 5.0 * sin], [8.9, 7.1]],
-            false,
-        );
+    fn arcs_have_no_angle_errors() {
         let bow = arc([4.1, -3.3], 2.6, 0.1, 1.6);
-        assert!(angles(&[path, bow], &[90.0], &[90.0], 0.0).is_empty());
+        assert!(angles(&[bow], &[90.0], &[90.0], 0.0).is_empty());
     }
 
     #[test]

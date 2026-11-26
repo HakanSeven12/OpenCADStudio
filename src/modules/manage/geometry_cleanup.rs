@@ -182,6 +182,66 @@ pub fn rotated(entity: &EntityType, centre: [f64; 2], angle: f64) -> EntityType 
     result
 }
 
+/// The start and the end of the straight part of `entity` that an angle
+/// error is on: a LINE (`segment` is `None`), or segment `segment` of a
+/// LWPOLYLINE, from its vertex `segment` to the next one.
+pub fn straight_part(entity: &EntityType, segment: Option<usize>) -> Option<[[f64; 2]; 2]> {
+    match (entity, segment) {
+        (EntityType::Line(line), None) => {
+            Some([[line.start.x, line.start.y], [line.end.x, line.end.y]])
+        }
+        (EntityType::LwPolyline(polyline), Some(segment)) => {
+            let [from, to] =
+                segment_vertices(polyline.vertices.len(), polyline.is_closed, segment)?;
+            let point = |index: usize| {
+                let location = polyline.vertices[index].location;
+                [location.x, location.y]
+            };
+            Some([point(from), point(to)])
+        }
+        _ => None,
+    }
+}
+
+/// The two vertices of segment `segment` of a polyline of `count` vertices;
+/// the last segment of a closed one ends at the first vertex.
+fn segment_vertices(count: usize, closed: bool, segment: usize) -> Option<[usize; 2]> {
+    let segments = if closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    (count >= 2 && segment < segments).then(|| [segment, (segment + 1) % count])
+}
+
+/// `entity` with its straight part (see [`straight_part`]) turned by `angle`
+/// radians counter-clockwise about `centre`: the Rotate repairs. A LINE
+/// turns whole. A polyline segment moves its two vertices, so the segments
+/// next to it keep their other vertices: a vertex on `centre` stays.
+pub fn rotated_part(
+    entity: &EntityType,
+    segment: Option<usize>,
+    centre: [f64; 2],
+    angle: f64,
+) -> Option<EntityType> {
+    let Some(segment) = segment else {
+        return matches!(entity, EntityType::Line(_)).then(|| rotated(entity, centre, angle));
+    };
+    let EntityType::LwPolyline(polyline) = entity else {
+        return None;
+    };
+    let vertices = segment_vertices(polyline.vertices.len(), polyline.is_closed, segment)?;
+    let (sin, cos) = angle.sin_cos();
+    let mut result = polyline.clone();
+    for index in vertices {
+        let location = &mut result.vertices[index].location;
+        let (dx, dy) = (location.x - centre[0], location.y - centre[1]);
+        location.x = centre[0] + dx * cos - dy * sin;
+        location.y = centre[1] + dx * sin + dy * cos;
+    }
+    Some(EntityType::LwPolyline(result))
+}
+
 /// "Select objects" in the palette: a selection, then the scan.
 pub struct SelectObjects;
 

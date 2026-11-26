@@ -138,6 +138,8 @@ impl OpenCADStudio {
                     angle: error.angle,
                     turn: error.turn,
                     meets: error.meets,
+                    segment: error.segment,
+                    other_segment: error.other_segment,
                 }),
             });
         ends.chain(lines).collect()
@@ -503,9 +505,14 @@ impl OpenCADStudio {
                 let document = &self.tabs[i].scene.document;
                 let mut low = finding.location;
                 let mut high = finding.location;
-                let handles = std::iter::once(finding.handle).chain(finding.other.map(|o| o.0));
-                for p in handles
-                    .filter_map(|h| line_ends(document.get_entity(h)?))
+                let segments = finding.angle.map(|a| (a.segment, a.other_segment));
+                let (segment, other_segment) = segments.unwrap_or_default();
+                let parts = std::iter::once((finding.handle, segment))
+                    .chain(finding.other.map(|o| (o.0, other_segment)));
+                for p in parts
+                    .filter_map(|(h, segment)| {
+                        cleanup::straight_part(document.get_entity(h)?, segment)
+                    })
                     .flatten()
                 {
                     low = [low[0].min(p[0]), low[1].min(p[1])];
@@ -589,28 +596,32 @@ impl OpenCADStudio {
                     ));
                 }
                 Fix::RotateAtStart | Fix::RotateAtEnd => {
-                    let ends = line_ends(own)?;
+                    let angle = finding.angle?;
+                    let ends = cleanup::straight_part(own, angle.segment)?;
                     let pivot = ends[usize::from(fix == Fix::RotateAtEnd)];
-                    let turn = finding.angle?.turn;
-                    edits.push((finding.handle, cleanup::rotated(own, pivot, turn)));
+                    edits.push((
+                        finding.handle,
+                        cleanup::rotated_part(own, angle.segment, pivot, angle.turn)?,
+                    ));
                 }
                 Fix::RotateShorter | Fix::RotateLonger => {
                     let (other, _) = finding.other?;
-                    let length = |handle| {
-                        let [a, b] = line_ends(entity(handle)?)?;
+                    let angle = finding.angle?;
+                    let length = |handle, segment| {
+                        let [a, b] = cleanup::straight_part(entity(handle)?, segment)?;
                         Some((b[0] - a[0]).hypot(b[1] - a[1]))
                     };
                     // At equal lengths, the first line is the shorter.
-                    let first_shorter = length(finding.handle)? <= length(other)?;
-                    let turn = finding.angle?.turn;
-                    let (handle, turn) = if first_shorter == (fix == Fix::RotateShorter) {
-                        (finding.handle, turn)
+                    let first_shorter = length(finding.handle, angle.segment)?
+                        <= length(other, angle.other_segment)?;
+                    let (handle, segment, turn) = if first_shorter == (fix == Fix::RotateShorter) {
+                        (finding.handle, angle.segment, angle.turn)
                     } else {
-                        (other, -turn)
+                        (other, angle.other_segment, -angle.turn)
                     };
                     edits.push((
                         handle,
-                        cleanup::rotated(entity(handle)?, finding.location, turn),
+                        cleanup::rotated_part(entity(handle)?, segment, finding.location, turn)?,
                     ));
                 }
             }
@@ -640,12 +651,4 @@ impl OpenCADStudio {
 /// The tolerances of a scan, for a rescan.
 fn scan_tolerances(scan: &Scan) -> (Tolerances, AngleTolerances) {
     (scan.tolerances, scan.angles.clone())
-}
-
-/// The start and the end of a LINE.
-fn line_ends(entity: &EntityType) -> Option<[[f64; 2]; 2]> {
-    match entity {
-        EntityType::Line(line) => Some([[line.start.x, line.start.y], [line.end.x, line.end.y]]),
-        _ => None,
-    }
 }

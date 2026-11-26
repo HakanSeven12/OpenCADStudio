@@ -170,15 +170,21 @@ pub struct AngleFinding {
     pub turn: f64,
     /// Whether the start and the end of the line meet other geometry.
     pub meets: [bool; 2],
+    /// The segment of a polyline that is off the angle, and the segment of
+    /// the other polyline (Relative); `None` for a line.
+    pub segment: Option<usize>,
+    pub other_segment: Option<usize>,
 }
 
 impl Finding {
     /// Whether `other` is the same error: the same type at the same end,
-    /// or of the same two lines.
+    /// or of the same lines or segments.
     pub fn same_error(&self, other: &Finding) -> bool {
+        let segments = |f: &Finding| f.angle.map(|a| (a.segment, a.other_segment));
         self.kind == other.kind
             && self.handle == other.handle
             && self.at_start == other.at_start
+            && segments(self) == segments(other)
             && (self.kind != ErrorType::RelativeAngle
                 || self.other.map(|o| o.0) == other.other.map(|o| o.0))
     }

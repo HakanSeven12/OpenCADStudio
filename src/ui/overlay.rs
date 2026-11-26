@@ -73,28 +73,52 @@ fn draw_concentric_constraint_glyph(frame: &mut canvas::Frame, center: Point, co
     frame.stroke(&canvas::Path::circle(center, 2.15), stroke);
 }
 
-/// Strokes a closed four-corner polygon — the outline half of the brush glyph.
-fn stroke_quad(frame: &mut canvas::Frame, corners: [Point; 4], stroke: &canvas::Stroke<'_>) {
-    let path = canvas::Path::new(|p| {
-        p.move_to(corners[0]);
-        p.line_to(corners[1]);
-        p.line_to(corners[2]);
-        p.line_to(corners[3]);
-        p.close();
-    });
-    frame.stroke(&path, *stroke);
+/// Which MATCHPROP glyph rides beside the pickbox. The two prompts must read
+/// apart at a glance: an eyedropper while the source is being picked, a filled
+/// paintbrush once it is taken and destinations are painted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchCursorGlyph {
+    /// MATCHPROP is not running.
+    None,
+    /// "Select source object": eyedropper, hollow pickbox.
+    SourcePick,
+    /// "Select destination object(s)": filled brush, filled pickbox.
+    Destination,
 }
 
-/// MATCHPROP's paintbrush cursor.
+impl MatchCursorGlyph {
+    /// The glyph for the command state: running at all, and still asking for
+    /// the source.
+    pub fn for_state(matchprop_running: bool, asking_source: bool) -> Self {
+        match (matchprop_running, asking_source) {
+            (false, _) => Self::None,
+            (true, true) => Self::SourcePick,
+            (true, false) => Self::Destination,
+        }
+    }
+}
+
+impl CrosshairOptions {
+    /// The MATCHPROP glyph these options ask for.
+    pub fn match_glyph(&self) -> MatchCursorGlyph {
+        MatchCursorGlyph::for_state(self.matchprop_pickbox, self.matchprop_source_pick)
+    }
+}
+
+/// Accent ink of the MATCHPROP glyphs (the pickbox blue).
+const MATCH_ACCENT: Color = Color {
+    r: 0.24,
+    g: 0.52,
+    b: 0.98,
+    a: 1.0,
+};
+
+/// MATCHPROP destination cursor: a filled paintbrush in the accent colour.
 ///
-/// While the user is transferring properties the CAD crosshair is replaced by a
-/// paintbrush whose tip sits exactly on the pick point, as the reference does. The
-/// body leans up-and-right so it never covers the object being picked.
-///
-/// Deliberately monochrome and geometric: the crosshair's own colour, a single
-/// stroke weight and one filled wedge, so the glyph reads as part of the CAD
-/// cursor family rather than clip-art.
-fn draw_match_brush(frame: &mut canvas::Frame, tip: Point, color: Color) {
+/// While the user paints properties onto objects the brush tip sits at the pick
+/// point; the body leans up-and-right so it never covers the object picked.
+/// Bristles, ferrule and handle are all solid so it reads at cursor size.
+fn draw_match_brush(frame: &mut canvas::Frame, tip: Point, _ink: Color) {
     let inv = std::f32::consts::FRAC_1_SQRT_2;
     // `along` runs up-and-right (handle direction); `across` is perpendicular.
     let along = (inv, -inv);
@@ -105,36 +129,54 @@ fn draw_match_brush(frame: &mut canvas::Frame, tip: Point, color: Color) {
             tip.y + along.1 * a + across.1 * w,
         )
     };
-    let stroke = canvas::Stroke {
-        width: 1.25,
-        style: canvas::Style::Solid(color),
-        line_join: canvas::LineJoin::Miter,
-        ..Default::default()
+    let fill_quad = |frame: &mut canvas::Frame, q: [Point; 4], color: Color| {
+        let path = canvas::Path::new(|p| {
+            p.move_to(q[0]);
+            p.line_to(q[1]);
+            p.line_to(q[2]);
+            p.line_to(q[3]);
+            p.close();
+        });
+        frame.fill(&path, color);
     };
-
-    // Bristles: the only solid mass, so the working end carries the weight and
-    // the silhouette still reads at cursor size.
     let bristles = canvas::Path::new(|p| {
         p.move_to(at(0.0, 0.0));
-        p.line_to(at(9.0, -3.2));
-        p.line_to(at(12.0, -3.2));
-        p.line_to(at(12.0, 3.2));
-        p.line_to(at(9.0, 3.2));
+        p.line_to(at(10.0, -4.0));
+        p.line_to(at(14.0, -4.0));
+        p.line_to(at(14.0, 4.0));
+        p.line_to(at(10.0, 4.0));
         p.close();
     });
-    frame.fill(&bristles, color);
+    frame.fill(&bristles, MATCH_ACCENT);
+    // Ferrule: light band so bristles and handle separate.
+    fill_quad(
+        frame,
+        [at(14.0, -4.0), at(18.5, -4.0), at(18.5, 4.0), at(14.0, 4.0)],
+        Color::from_rgb(0.85, 0.90, 1.0),
+    );
+    fill_quad(
+        frame,
+        [at(18.5, -2.8), at(36.0, -2.3), at(36.0, 2.3), at(18.5, 2.8)],
+        MATCH_ACCENT,
+    );
+}
 
-    // Ferrule and handle stay outline-only: line work, not clip-art.
-    stroke_quad(
-        frame,
-        [at(12.0, -3.2), at(15.5, -3.2), at(15.5, 3.2), at(12.0, 3.2)],
-        &stroke,
-    );
-    stroke_quad(
-        frame,
-        [at(15.5, -2.3), at(30.0, -1.9), at(30.0, 1.9), at(15.5, 2.3)],
-        &stroke,
-    );
+/// MATCHPROP source cursor: a small eyedropper, tip on the pick point. Outline
+/// tube plus a filled bulb in the cursor ink, distinct from the brush.
+fn draw_match_dropper(frame: &mut canvas::Frame, tip: Point, ink: Color) {
+    let inv = std::f32::consts::FRAC_1_SQRT_2;
+    let along = (inv, -inv);
+    let at = |a: f32| Point::new(tip.x + along.0 * a, tip.y + along.1 * a);
+    let stroke = canvas::Stroke {
+        width: 1.5,
+        style: canvas::Style::Solid(ink),
+        line_cap: canvas::LineCap::Round,
+        ..Default::default()
+    };
+    let tube = canvas::Path::line(at(0.0), at(14.0));
+    frame.stroke(&tube, stroke);
+    let bulb = canvas::Path::circle(at(18.0), 4.0);
+    frame.fill(&bulb, ink);
 }
 
 /// The reference bar's padlock: white with a small orange point marker
@@ -3173,16 +3215,18 @@ impl canvas::Program<Message> for SelectionCanvas {
                     } else {
                         cp
                     };
-                    draw_match_brush(
-                        frame,
-                        brush_tip,
-                        Color {
-                            r: cr,
-                            g: cg,
-                            b: cb,
-                            a: ca,
-                        },
-                    );
+                    let ink = Color {
+                        r: cr,
+                        g: cg,
+                        b: cb,
+                        a: ca,
+                    };
+                    match self.crosshair.match_glyph() {
+                        MatchCursorGlyph::SourcePick => {
+                            draw_match_dropper(frame, brush_tip, ink)
+                        }
+                        _ => draw_match_brush(frame, brush_tip, ink),
+                    }
                     if self.crosshair.matchprop_pickbox {
                         let half = pickbox_half;
                         let square = canvas::Path::rectangle(
@@ -7624,5 +7668,20 @@ mod autosnap_magnet_tests {
             crosshair_centre(Some(grip), snap, true, Some(POINTER)),
             Some(grip)
         );
+    }
+}
+
+#[cfg(test)]
+mod match_cursor_glyph_tests {
+    use super::MatchCursorGlyph;
+
+    #[test]
+    fn matchprop_glyph_differs_between_source_and_destination_phase() {
+        let source = MatchCursorGlyph::for_state(true, true);
+        let destination = MatchCursorGlyph::for_state(true, false);
+        assert_eq!(source, MatchCursorGlyph::SourcePick);
+        assert_eq!(destination, MatchCursorGlyph::Destination);
+        assert_ne!(source, destination);
+        assert_eq!(MatchCursorGlyph::for_state(false, true), MatchCursorGlyph::None);
     }
 }

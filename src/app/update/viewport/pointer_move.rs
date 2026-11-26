@@ -2557,11 +2557,23 @@ impl OpenCADStudio {
                             candidate_handles.as_ref(),
                         )
                     })
+                    // A fill the preview hides no longer hit-tests; its
+                    // stand-in does, or the hover would flicker.
+                    .or_else(|| {
+                        self.tabs[i].scene.preview_hidden_hatch_hit(
+                            p,
+                            view_rot,
+                            eye,
+                            bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        )
+                    })
                 };
                 let preview = self.tabs[i].active_cmd.as_ref().and_then(|command| {
                     command.selection_hover_preview(&self.tabs[i].scene, hovered)
                 });
                 if let Some(preview) = preview {
+                    self.tabs[i].scene.set_command_preview_hidden(&preview.hidden);
                     self.tabs[i]
                         .scene
                         .set_command_preview_hatches(preview.hatches);

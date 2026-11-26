@@ -63,6 +63,9 @@ pub struct SelectionEntity {
 pub struct SelectionHoverPreview {
     pub wires: Vec<WireModel>,
     pub hatches: Vec<HatchModel>,
+    /// Entities the preview replaces: hidden while it shows, so the original
+    /// fill does not draw through the restyled one.
+    pub hidden: Vec<Handle>,
 }
 
 /// Association source with an optional sub-entity marker.

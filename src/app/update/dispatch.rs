@@ -10704,6 +10704,9 @@ impl OpenCADStudio {
                 if self.mtext_navigation_key(&key) {
                     return Task::none();
                 }
+                if self.table_cell_line_break(&key) {
+                    return Task::none();
+                }
                 if let Some(task) = self.layer_manager_key(&key) {
                     return task;
                 }

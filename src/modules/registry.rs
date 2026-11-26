@@ -856,6 +856,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "FACETERMESHTYPE",
     "FACETERSMOOTHLEV",
     "HPNAME",
+    "MODEMACRO",
     "CURSORTYPE",
     "DELOBJ",
     "DGNFRAME",

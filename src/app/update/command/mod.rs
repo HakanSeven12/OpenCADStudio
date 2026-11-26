@@ -461,6 +461,8 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .is_some_and(|c| c.is_free_text_step())
+            // MODEMACRO's value, asked for after the bare variable name.
+            || self.pending_setvar.as_deref() == Some("MODEMACRO")
     }
 
     /// What Space / Enter currently mean. Previously every key handler

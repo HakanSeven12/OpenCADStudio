@@ -122,6 +122,8 @@ pub struct StatusBarReadout {
     pub coords_mode: i16,
     pub last_point: Option<glam::DVec3>,
     pub picking: bool,
+    /// MODEMACRO's value, shown at the bar's left end when not empty.
+    pub modemacro: String,
 }
 
 #[derive(Clone, Default)]
@@ -225,6 +227,7 @@ impl StatusBar {
             coords_mode,
             last_point,
             picking,
+            modemacro,
         } = readout;
         let StatusMenuData {
             layout_names,
@@ -331,6 +334,9 @@ impl StatusBar {
         // when the width can't hold them all on one line.
         let vis = |p: StatusPill| config.is_visible(p);
         let mut pills: Vec<Element<'_, Message>> = Vec::new();
+        if !modemacro.is_empty() {
+            pills.push(status_pill(modemacro));
+        }
         // Not a `StatusPill` and not hideable: it is there only while a
         // plugin command runs, and leads so it is the first thing seen.
         if let Some(busy) = plugin_busy {

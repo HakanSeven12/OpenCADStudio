@@ -3826,6 +3826,11 @@ bg={bg_ms:.1}ms n={view_count}"
                             coords_mode,
                             last_point: last_coord,
                             picking,
+                            modemacro: if self.modemacro.is_empty() {
+                                String::new()
+                            } else {
+                                crate::app::commands::diesel(&tab.scene.document, &self.modemacro)
+                            },
                         },
                         &self.statusbar_config,
                         status_menu_data,

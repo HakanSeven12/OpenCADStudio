@@ -54,6 +54,8 @@ mod fileops;
 mod group_display;
 mod hatch_dialogs;
 mod hatch_vars;
+mod modemacro;
+pub(in crate::app) use modemacro::diesel;
 mod layer_variable;
 mod log_file;
 mod mleader_layer;
@@ -221,6 +223,12 @@ impl OpenCADStudio {
         }
         if self.mtext_editor.is_some() {
             self.mtext_cancel();
+        }
+        // `$M=` macro: the DIESEL string's value is the macro that runs.
+        if let Some(expr) = cmd.trim_start().strip_prefix("$M=") {
+            let i = self.active_tab;
+            let expanded = diesel(&self.tabs[i].scene.document, expr);
+            return self.dispatch_ribbon_command(&expanded);
         }
         if !cmd.contains(';') {
             return self.dispatch_command(cmd);
@@ -813,6 +821,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_hatch_var(cmd) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_modemacro_var(cmd) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_layer_variable(cmd, i) {
             return Some(t);
         }
@@ -1089,6 +1100,7 @@ inventory::submit!(crate::command::CommandRegistration {
         // Dispatched commands that the alias file names (#2452).
         "CTABLESTYLE",
         "HPNAME",
+        "MODEMACRO",
         "SELHANDLES",
         "SELH",
         // Implemented command-line block forms must also validate in ALIASEDIT.

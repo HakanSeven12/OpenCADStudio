@@ -723,6 +723,13 @@ impl CadCommand for TwoValuePromptCommand {
         true
     }
 
+    /// MODEMACRO's value is a string with spaces in it.
+    fn is_free_text_step(&self) -> bool {
+        self.first
+            .as_deref()
+            .is_some_and(|first| first.eq_ignore_ascii_case("MODEMACRO"))
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let t = text.trim();
         match &self.first {

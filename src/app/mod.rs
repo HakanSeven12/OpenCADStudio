@@ -966,6 +966,8 @@ pub(super) struct OpenCADStudio {
     hatch_associative: bool,
     /// The Hatch panel's numbers as typed.
     hatch_drafts: crate::ui::window::hatch_panel::Drafts,
+    /// MODEMACRO, the DIESEL string the status bar shows (session only).
+    modemacro: String,
     /// The user's changes to the right-click menu.
     context_menu_custom: crate::ui::popup::context_menu::MenuCustomization,
     /// Customize User Interface while it is open.
@@ -3050,6 +3052,7 @@ impl OpenCADStudio {
             autosnap_magnet: true,
             hatch_associative: true,
             hatch_drafts: Default::default(),
+            modemacro: String::new(),
             context_menu_custom: Default::default(),
             ribbon_customize: None,
             context_menu_editing: None,

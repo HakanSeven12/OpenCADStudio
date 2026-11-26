@@ -137,6 +137,12 @@ impl OpenCADStudio {
             FilesMsg::Menu(path, action) => match action {
                 FileAction::Open => return self.files_palette_open(path),
                 FileAction::Insert => return self.palette_insert(Item::File(path), None),
+                // The web build has no file manager to show it in.
+                #[cfg(target_arch = "wasm32")]
+                FileAction::Reveal => {
+                    let _ = path;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 FileAction::Reveal => {
                     if let Err(error) = crate::sys::reveal_in_file_manager(&path) {
                         self.command_line.push_error(

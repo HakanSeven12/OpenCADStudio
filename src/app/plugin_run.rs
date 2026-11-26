@@ -21,9 +21,11 @@
 //! is dispatched the waiting way, as before.
 
 use std::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex};
 
 use iced::Task;
+#[cfg(not(target_arch = "wasm32"))]
 use ocs_plugin_api::process::PluginProcess;
 
 use super::{Message, OpenCADStudio};
@@ -33,13 +35,17 @@ use super::{Message, OpenCADStudio};
 pub(super) const CHECK_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// A plugin command running beside the window.
+// The web build never starts a run, so it reads none of this.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) struct PluginRun {
     /// The command word, as the command line and the status bar name it.
     pub(crate) label: String,
     /// The whole line dispatched.
     line: String,
     plugin_id: String,
-    /// `None` only in tests, which have no plugin process.
+    /// `None` only in tests, which have no plugin process. The web build
+    /// runs no plugin processes, so a run never starts there.
+    #[cfg(not(target_arch = "wasm32"))]
     process: Option<Arc<PluginProcess>>,
     /// The drawing it works on.
     tab_id: u64,
@@ -183,6 +189,7 @@ impl OpenCADStudio {
             return;
         }
         run.cancel_requested = true;
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(process) = run.process.as_ref() {
             let _ = process.notify_plugin(None, ocs_plugin_api::host::HostNotification::Cancel);
         }
@@ -299,6 +306,7 @@ impl PluginRun {
             label: verb(line).to_ascii_uppercase(),
             line: line.to_string(),
             plugin_id: "test".into(),
+            #[cfg(not(target_arch = "wasm32"))]
             process: None,
             tab_id,
             percent: None,

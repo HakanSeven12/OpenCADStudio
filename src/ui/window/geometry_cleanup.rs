@@ -258,6 +258,11 @@ pub enum GeometryCleanupMsg {
     SettingsUseProposed(EndErrorKind),
     SettingsRemove(EndErrorKind),
     SettingsAdd(EndErrorKind),
+    /// The angle rows, by their index in the dialog.
+    SettingsAngle(usize, String),
+    SettingsAngleTolerance(usize, String),
+    SettingsRemoveAngle(usize),
+    SettingsAddAngle(AngleErrorKind),
     SettingsImport,
     SettingsImported(std::path::PathBuf),
     SettingsExport,

@@ -10,7 +10,9 @@
 //! (`absolute-angle`, `relative-angle`) have a row for each standard angle,
 //! with the angle in degrees in `subName`.
 
-use ocs_geom::geom2d::cleanup::{AngleTolerance, AngleTolerances, EndErrorKind, Tolerances};
+use ocs_geom::geom2d::cleanup::{
+    AngleErrorKind, AngleTolerance, AngleTolerances, EndErrorKind, Tolerances,
+};
 use serde::{Deserialize, Serialize};
 
 /// The smallest tolerance. A smaller value becomes this one.
@@ -28,7 +30,7 @@ const DEFAULT_ANGLES: [(&str, &str); 4] = [
     (RELATIVE_ANGLE, "0"),
     (RELATIVE_ANGLE, "90"),
 ];
-const DEFAULT_ANGLE_TOLERANCE: f64 = 5.0;
+pub const DEFAULT_ANGLE_TOLERANCE: f64 = 5.0;
 
 /// The length types, in the order of their rows.
 const LENGTH_KINDS: [EndErrorKind; 3] = [
@@ -66,6 +68,21 @@ pub fn kind_name(kind: EndErrorKind) -> &'static str {
         EndErrorKind::Overshoot => "overshoot",
         EndErrorKind::Undershoot => "undershoot",
     }
+}
+
+/// The name of an angle type in a `.gcs` file.
+pub fn angle_kind_name(kind: AngleErrorKind) -> &'static str {
+    match kind {
+        AngleErrorKind::Absolute => ABSOLUTE_ANGLE,
+        AngleErrorKind::Relative => RELATIVE_ANGLE,
+    }
+}
+
+/// The angle type of a `.gcs` name; `None` for the other types.
+pub fn angle_kind_of(name: &str) -> Option<AngleErrorKind> {
+    [AngleErrorKind::Absolute, AngleErrorKind::Relative]
+        .into_iter()
+        .find(|&kind| angle_kind_name(kind) == name)
 }
 
 /// The length type of a `.gcs` name; `None` for the other types.

@@ -343,6 +343,26 @@ impl OpenCADStudio {
                     dialog.add(kind);
                 }
             }
+            GeometryCleanupMsg::SettingsAngle(index, value) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.set_angle(index, value);
+                }
+            }
+            GeometryCleanupMsg::SettingsAngleTolerance(index, value) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.set_angle_tolerance(index, value);
+                }
+            }
+            GeometryCleanupMsg::SettingsRemoveAngle(index) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.remove_angle(index);
+                }
+            }
+            GeometryCleanupMsg::SettingsAddAngle(kind) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.add_angle(kind);
+                }
+            }
             GeometryCleanupMsg::SettingsImport => {
                 return Task::perform(
                     async {

@@ -281,8 +281,10 @@ fn panel_editor<'a>(
         text(crate::tr!("ribbon-customize", "commands"))
             .size(12)
             .style(muted_style),
-        well(commands, height),
+        // The add box sits above the list: its suggestions float over the
+        // list, never over the dialog's footer.
         row![input, add].spacing(6).align_y(iced::Center),
+        well(commands, height),
     ]
     .spacing(6)
     .width(Length::Fill)

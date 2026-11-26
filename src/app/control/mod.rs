@@ -739,6 +739,7 @@ impl OpenCADStudio {
                 | "query"
                 | "civil_station_offset"
                 | "civil_surface_stats"
+                | "civil_surface_mesh"
                 | "records"
                 | "record_schema"
                 | "capabilities"

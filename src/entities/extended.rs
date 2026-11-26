@@ -1721,23 +1721,6 @@ fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: docume
             props
         }
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => data.feature_line_name().map(named).unwrap_or_default(),
-        // A pipe network part carries its name in the record's text list:
-        // the writers name parts `Structure - (n)` / `Pipe - (n)`, and the
-        // application keeps part-data texts around the name (a 24-inch
-        // pipe's name sits past its `AeccNetworkPartDataField` texts;
-        // Pipe Networks-3B's headwall structure likewise). The name is the
-        // first text the part's class prefixes — the read the corpus
-        // roundtrip verifier records for the family (W1-3), not a fixed
-        // text index.
-        CivilKind::Other if matches!(data.dxf_name.as_str(), "AECC_STRUCTURE" | "AECC_PIPE") => {
-            let prefix = if data.dxf_name == "AECC_STRUCTURE" { "Structure - (" } else { "Pipe - (" };
-            data.decode()
-                .strings
-                .iter()
-                .find(|text| text.starts_with(prefix))
-                .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name.clone())])
-                .unwrap_or_default()
-        }
         // The network's own name is its third text.
         CivilKind::Other if data.dxf_name == "AECC_NETWORK" => data
             .decode()

@@ -1093,20 +1093,27 @@ impl PropertiesPanel {
                     open,
                     Message::PropBlockPickerToggle { key, quick },
                 );
-                let rows = options
-                    .iter()
-                    .enumerate()
-                    .map(|(index, option)| {
-                        crate::ui::kit::dropdown_option(
-                            option.as_str(),
-                            option.as_str(),
-                            Message::PropBlockChoice { key, index },
-                            index == *selected,
-                        )
-                    })
-                    .collect();
+                // A drawing can hold thousands of blocks: the rows and their
+                // width are built only while the list is open, not per frame.
+                let (rows, width) = if open {
+                    let rows = options
+                        .iter()
+                        .enumerate()
+                        .map(|(index, option)| {
+                            crate::ui::kit::dropdown_option(
+                                option.as_str(),
+                                option.as_str(),
+                                Message::PropBlockChoice { key, index },
+                                index == *selected,
+                            )
+                        })
+                        .collect();
+                    (rows, self.list_width(options.iter().map(String::as_str)))
+                } else {
+                    (Vec::new(), 0.0)
+                };
                 let list = crate::ui::dropdown_list::DropdownList::new(rows)
-                    .selected((*selected < options.len()).then_some(*selected))
+                    .selected((open && *selected < options.len()).then_some(*selected))
                     .on_escape(Message::PropBlockPickerDismiss { key, quick });
                 // The overlay reports its own Escape before the global shortcut
                 // repeats it; a distinct dismiss message lets the later repeat
@@ -1114,7 +1121,7 @@ impl PropertiesPanel {
                 let value = crate::ui::kit::dropdown(
                     head,
                     list,
-                    self.list_width(options.iter().map(String::as_str)),
+                    width,
                     Message::PropBlockPickerDismiss { key, quick },
                     open,
                 );
@@ -1552,7 +1559,8 @@ impl PropertiesPanel {
         let mut rows = Vec::with_capacity(options.len());
         let mut selected = None;
         let mut labels = Vec::with_capacity(options.len());
-        for (index, option) in options.iter().enumerate() {
+        // Rows are built only while the list is open (see `BlockChoice`).
+        for (index, option) in options.iter().enumerate().filter(|_| open) {
             let is_current = !varies && option.as_str() == current;
             if is_current {
                 selected = Some(index);
@@ -1570,7 +1578,11 @@ impl PropertiesPanel {
             ));
             labels.push(label);
         }
-        let list_w = self.list_width(labels.iter().map(String::as_str));
+        let list_w = if open {
+            self.list_width(labels.iter().map(String::as_str))
+        } else {
+            0.0
+        };
         let list = crate::ui::dropdown_list::DropdownList::new(rows)
             .selected(selected)
             .select_first_by_default(selected.is_some())
@@ -1732,7 +1744,8 @@ impl PropertiesPanel {
             .map(|s| s.to_lowercase());
         let mut rows = Vec::new();
         let mut initial_selected: Option<usize> = None;
-        for opt in options {
+        // Rows are built only while the list is open (see `BlockChoice`).
+        for opt in options.iter().filter(|_| open) {
             if let Some(f) = &filter {
                 if !opt.to_lowercase().contains(f.as_str()) {
                     continue;
@@ -1764,7 +1777,11 @@ impl PropertiesPanel {
             crate::ui::kit::dropdown(
                 head.into(),
                 list,
-                self.list_width(options.iter().map(|o| o.as_str())),
+                if open {
+                    self.list_width(options.iter().map(|o| o.as_str()))
+                } else {
+                    0.0
+                },
                 Message::PropEditChoiceToggle(field),
                 open,
             ),

@@ -1348,7 +1348,8 @@ pub fn block_contains_mesh(
     })
 }
 
-fn block_contains_kind(
+/// Whether the block, or a block it nests, holds an entity `is_kind` accepts.
+pub(crate) fn block_contains_kind(
     document: &Document,
     block_name: &str,
     memo: &mut std::collections::HashMap<String, bool>,

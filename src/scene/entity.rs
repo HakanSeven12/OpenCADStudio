@@ -2898,6 +2898,7 @@ impl Scene {
         .with_annotation_scale(self.annotation_scale);
         let mut models = Vec::new();
         let mut wipeout_sources = rustc_hash::FxHashMap::default();
+        let mut wipeout_block_memo = std::collections::HashMap::new();
         graph.walk_root(
             self.render_scene_root(target_block),
             |entity, context| {
@@ -2905,7 +2906,27 @@ impl Scene {
                 if plot_only && !self.layer_plottable_in_context(entity, context) {
                     return false;
                 }
-                context.is_instanced() || !self.entity_temporarily_hidden(common.handle)
+                if context.is_instanced() {
+                    return true;
+                }
+                if self.entity_temporarily_hidden(common.handle) {
+                    return false;
+                }
+                // Skip the placements of blocks that hold no mask, as the
+                // hatch walk does: they are most of a large drawing.
+                let block_uses: Vec<_> =
+                    crate::scene::render_graph::entity_render_block_uses(&self.document, entity, 1.0)
+                        .into_iter()
+                        .filter(|block_use| block_use.active)
+                        .collect();
+                block_uses.is_empty()
+                    || block_uses.into_iter().any(|block_use| {
+                        crate::scene::render_graph::block_contains_wipeout(
+                            &self.document,
+                            &block_use.insert.block_name,
+                            &mut wipeout_block_memo,
+                        )
+                    })
             },
             |entity, context| {
                 let EntityType::Wipeout(source) = entity else {

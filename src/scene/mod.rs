@@ -7067,17 +7067,42 @@ impl Scene {
             None
         }
         .unwrap_or_else(|| self.render_scene_root(target_block));
+        let mut image_block_memo = std::collections::HashMap::new();
+        let is_image = |entity: &EntityType| self.images.contains_key(&entity.common().handle);
         graph.walk_root(
             root,
             |entity, context| {
-                (!plotting
-                    || self
+                if plotting
+                    && self
                         .document
                         .layers
                         .get(&entity.common().layer)
-                        .is_none_or(|layer| layer.is_plottable))
-                    && (context.is_instanced()
-                        || !self.entity_temporarily_hidden(entity.common().handle))
+                        .is_some_and(|layer| !layer.is_plottable)
+                {
+                    return false;
+                }
+                if context.is_instanced() {
+                    return true;
+                }
+                if self.entity_temporarily_hidden(entity.common().handle) {
+                    return false;
+                }
+                // Skip the placements of blocks that hold no picture, as the
+                // hatch walk does: they are most of a large drawing.
+                let block_uses: Vec<_> =
+                    render_graph::entity_render_block_uses(&self.document, entity, 1.0)
+                        .into_iter()
+                        .filter(|block_use| block_use.active)
+                        .collect();
+                block_uses.is_empty()
+                    || block_uses.into_iter().any(|block_use| {
+                        render_graph::block_contains_kind(
+                            &self.document,
+                            &block_use.insert.block_name,
+                            &mut image_block_memo,
+                            &is_image,
+                        )
+                    })
             },
             |entity, context| {
                 let handle = entity.common().handle;

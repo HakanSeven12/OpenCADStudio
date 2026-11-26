@@ -5,6 +5,7 @@ use crate::ui::window::geometry_cleanup::{ErrorType, Finding, Fix, GeometryClean
 use document::entities::{Arc, Line, LwPolyline};
 use document::types::{Vector2, Vector3};
 use document::{EntityType, Handle};
+use ocs_geom::geom2d::cleanup::AngleErrorKind::{self, Absolute, Relative};
 use ocs_geom::geom2d::cleanup::EndErrorKind;
 
 fn app() -> (OpenCADStudio, usize) {
@@ -1258,4 +1259,214 @@ fn the_title_bar_close_of_the_settings_dialog_drops_its_changes() {
         "0.7",
         "the dialog opens with the saved settings"
     );
+}
+
+/// The dialog's settings, which must be complete.
+fn dialog_settings(app: &OpenCADStudio) -> CleanupSettings {
+    app.geometry_cleanup
+        .dialog
+        .as_ref()
+        .unwrap()
+        .parsed()
+        .expect("every box holds a value it can take")
+}
+
+/// The standard angles of one angle type of `settings`, with their
+/// tolerances.
+fn standards(settings: &CleanupSettings, kind: AngleErrorKind) -> Vec<(f64, f64)> {
+    let angles = settings.angle_tolerances();
+    let rows = match kind {
+        Absolute => angles.absolute,
+        Relative => angles.relative,
+    };
+    rows.iter().map(|row| (row.angle, row.tolerance)).collect()
+}
+
+#[test]
+fn the_dialog_shows_the_angle_rows_of_the_settings() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    let dialog = app.geometry_cleanup.dialog.as_ref().unwrap();
+    let rows: Vec<_> = dialog
+        .angles
+        .iter()
+        .map(|row| (row.kind, row.angle.as_str(), row.tolerance.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (Absolute, "0", "5"),
+            (Absolute, "90", "5"),
+            (Relative, "0", "5"),
+            (Relative, "90", "5"),
+        ]
+    );
+}
+
+#[test]
+fn a_changed_angle_row_is_saved_and_scanned() {
+    let (mut app, _) = app();
+    let off = at(&mut app, [0.0, 0.0], 44.0, 10.0);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAngle(1, "45".to_string()),
+    );
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAngleTolerance(1, "2.5".to_string()),
+    );
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    let saved = app.geometry_cleanup.settings.as_ref().expect("saved");
+    assert_eq!(standards(saved, Absolute), [(0.0, 5.0), (45.0, 2.5)]);
+    let found = findings(&app);
+    assert!(
+        found
+            .iter()
+            .any(|f| f.handle == off && f.kind == ErrorType::AbsoluteAngle),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn an_angle_from_0_up_to_180_is_taken_and_any_other_keeps_scan_off() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    for (typed, taken) in [
+        ("0", true),
+        ("179.5", true),
+        (" 30 ", true),
+        ("180", false),
+        ("-1", false),
+        ("x", false),
+        ("", false),
+    ] {
+        settings_msg(
+            &mut app,
+            GeometryCleanupMsg::SettingsAngle(0, typed.to_string()),
+        );
+        let parsed = app.geometry_cleanup.dialog.as_ref().unwrap().parsed();
+        assert_eq!(parsed.is_some(), taken, "{typed:?}");
+    }
+}
+
+#[test]
+fn an_angle_tolerance_below_zero_keeps_scan_off_and_zero_becomes_the_minimum() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAngleTolerance(0, "-1".to_string()),
+    );
+    assert!(app
+        .geometry_cleanup
+        .dialog
+        .as_ref()
+        .unwrap()
+        .parsed()
+        .is_none());
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAngleTolerance(0, "0".to_string()),
+    );
+    assert_eq!(
+        standards(&dialog_settings(&app), Absolute)[0],
+        (
+            0.0,
+            crate::modules::manage::geometry_cleanup_settings::MIN_TOLERANCE
+        )
+    );
+}
+
+#[test]
+fn a_removed_angle_row_is_not_saved() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsRemoveAngle(0));
+    let settings = dialog_settings(&app);
+    assert_eq!(standards(&settings, Absolute), [(90.0, 5.0)]);
+    assert_eq!(standards(&settings, Relative), [(0.0, 5.0), (90.0, 5.0)]);
+}
+
+#[test]
+fn removing_an_angle_row_that_is_gone_changes_nothing() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    let before = app.geometry_cleanup.dialog.as_ref().unwrap().angles.clone();
+    // A second click on the ✕ of the last row, after the row is gone.
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsRemoveAngle(before.len()),
+    );
+    assert_eq!(app.geometry_cleanup.dialog.as_ref().unwrap().angles, before);
+}
+
+#[test]
+fn an_added_angle_row_waits_for_its_angle() {
+    let (mut app, _) = app();
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsAddAngle(Relative));
+    let dialog = app.geometry_cleanup.dialog.as_ref().unwrap();
+    let added = dialog.angles.last().unwrap();
+    assert_eq!(
+        (added.kind, added.angle.as_str(), added.tolerance.as_str()),
+        (Relative, "", "5")
+    );
+    assert!(dialog.parsed().is_none(), "Scan waits for the angle");
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAngle(4, "45".to_string()),
+    );
+    assert_eq!(
+        standards(&dialog_settings(&app), Relative),
+        [(0.0, 5.0), (90.0, 5.0), (45.0, 5.0)]
+    );
+}
+
+#[test]
+fn settings_with_no_angle_rows_open_with_none_and_get_none() {
+    let (mut app, _) = app();
+    let mut settings = CleanupSettings::proposed(0.4);
+    settings
+        .tolerances
+        .retain(|row| !row.name.ends_with("-angle"));
+    app.geometry_cleanup.settings = Some(settings);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    assert!(app
+        .geometry_cleanup
+        .dialog
+        .as_ref()
+        .unwrap()
+        .angles
+        .is_empty());
+    let parsed = dialog_settings(&app);
+    assert!(standards(&parsed, Absolute).is_empty());
+    assert!(standards(&parsed, Relative).is_empty());
+}
+
+#[test]
+fn a_changed_angle_row_keeps_the_fields_that_ocs_does_not_know() {
+    let (mut app, _) = app();
+    let mut settings = CleanupSettings::proposed(0.4);
+    let row = settings
+        .tolerances
+        .iter_mut()
+        .find(|row| row.name == "relative-angle" && row.sub_name == "90")
+        .unwrap();
+    row.extra
+        .insert("enabled".to_string(), serde_json::json!(true));
+    app.geometry_cleanup.settings = Some(settings);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAngleTolerance(3, "1".to_string()),
+    );
+    let parsed = dialog_settings(&app);
+    let row = parsed
+        .tolerances
+        .iter()
+        .find(|row| row.name == "relative-angle" && row.sub_name == "90")
+        .unwrap();
+    assert_eq!(row.tolerance, 1.0);
+    assert_eq!(row.extra["enabled"], true);
 }

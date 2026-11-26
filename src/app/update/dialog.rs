@@ -2727,6 +2727,122 @@ mod tests {
             "List cleared. 0 items in table."
         );
     }
+
+    /// A text field in a dialog reports each edit to the command as a
+    /// "change" with its text, as a panel's text field and a dialog's file
+    /// field do, so the command can follow the input: here it keeps a count
+    /// label in step. A Number field reports its text as typed.
+    #[test]
+    fn interactive_dialog_text_field_reports_each_edit() {
+        use crate::command::{CadCommand, CmdResult};
+        use ocs_plugin_api::dialog::{
+            DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
+        };
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        struct FilterCmd {
+            events: Arc<Mutex<Vec<DialogEvent>>>,
+        }
+
+        impl CadCommand for FilterCmd {
+            fn name(&self) -> &'static str {
+                "FILTERTEST"
+            }
+            fn prompt(&self) -> String {
+                "Filter test".to_string()
+            }
+            fn on_point(&mut self, _pt: glam::DVec3) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_enter(&mut self) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_dialog_action(&mut self, event: DialogEvent) -> DialogActionResponse {
+                self.events.lock().unwrap().push(event.clone());
+                match (
+                    event.control_id.as_str(),
+                    event.action.as_str(),
+                    event.value,
+                ) {
+                    ("filter", "change", Some(DialogValue::Text(t))) => {
+                        let n = ["alpha", "beta", "alphabet"]
+                            .iter()
+                            .filter(|name| name.contains(t.as_str()))
+                            .count();
+                        DialogActionResponse::UpdateValues(HashMap::from([(
+                            "count".to_string(),
+                            DialogValue::Text(format!("{n} match")),
+                        )]))
+                    }
+                    _ => DialogActionResponse::None,
+                }
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].active_cmd = Some(Box::new(FilterCmd {
+            events: events.clone(),
+        }));
+        app.open_plugin_dialog(
+            DialogDef::new("Filter")
+                .with_control(DialogControl::Text {
+                    id: "filter".to_string(),
+                    label: "Name".to_string(),
+                    default: String::new(),
+                })
+                .with_control(DialogControl::Number {
+                    id: "size".to_string(),
+                    label: "Size".to_string(),
+                    default: 1.0,
+                    min: None,
+                    max: None,
+                    step: None,
+                })
+                .with_control(DialogControl::Label {
+                    id: "count".to_string(),
+                    text: "3 match".to_string(),
+                    align_h: None,
+                }),
+        );
+
+        for typed in ["a", "al", "alp"] {
+            let _ = app.update(Message::PluginDialogTextChange(
+                "filter".to_string(),
+                typed.to_string(),
+            ));
+        }
+        let state = app.plugin_dialog_state.as_ref().unwrap();
+        assert_eq!(state.text_values.get("filter").unwrap(), "alp");
+        assert_eq!(state.text_values.get("count").unwrap(), "2 match");
+        {
+            let events = events.lock().unwrap();
+            assert_eq!(events.len(), 3);
+            let last = events.last().unwrap();
+            assert_eq!(last.action, "change");
+            assert_eq!(last.value, Some(DialogValue::Text("alp".to_string())));
+            assert_eq!(
+                last.current_values.get("filter"),
+                Some(&DialogValue::Text("alp".to_string()))
+            );
+        }
+
+        let _ = app.update(Message::PluginDialogTextChange(
+            "size".to_string(),
+            "2.".to_string(),
+        ));
+        let events = events.lock().unwrap();
+        let last = events.last().unwrap();
+        assert_eq!(last.control_id, "size");
+        assert_eq!(last.value, Some(DialogValue::Text("2.".to_string())));
+        assert_eq!(
+            last.current_values.get("size"),
+            Some(&DialogValue::Number(2.0))
+        );
+        assert!(app.plugin_dialog_state.is_some(), "the dialog stays open");
+    }
 }
 
 /// Xref copies a dimension association points at, as modified changes.

@@ -2347,62 +2347,26 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginDialogFilePick(id) => {
-                let (is_save, extensions) = if let Some(state) = &self.plugin_dialog_state {
-                    fn find_fp(
-                        ctrls: &[ocs_plugin_api::dialog::DialogControl],
-                        target: &str,
-                    ) -> Option<(bool, Vec<String>)> {
-                        for c in ctrls {
-                            match c {
-                                ocs_plugin_api::dialog::DialogControl::FilePicker {
-                                    id: cid,
-                                    extensions,
-                                    save,
-                                    ..
-                                } if cid == target => return Some((*save, extensions.clone())),
-                                ocs_plugin_api::dialog::DialogControl::Fields {
-                                    controls, ..
-                                }
-                                | ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
-                                | ocs_plugin_api::dialog::DialogControl::Column {
-                                    controls, ..
-                                } => {
-                                    if let Some(res) = find_fp(controls, target) {
-                                        return Some(res);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        None
-                    }
-                    state
-                        .def
-                        .rows
-                        .iter()
-                        .find_map(|r| find_fp(&r.controls, &id))
-                        .unwrap_or((false, Vec::new()))
-                } else {
-                    (false, Vec::new())
+                use crate::ui::window::plugin_dialog::{pick_path, pick_target, PickTarget};
+                let (target, start) = match &self.plugin_dialog_state {
+                    Some(state) => (
+                        state
+                            .def
+                            .rows
+                            .iter()
+                            .find_map(|r| pick_target(&r.controls, &id)),
+                        state.file_values.get(&id).map(std::path::PathBuf::from),
+                    ),
+                    None => (None, None),
                 };
+                let target = target.unwrap_or(PickTarget::File {
+                    save: false,
+                    extensions: Vec::new(),
+                });
                 let id_clone = id.clone();
-                iced::Task::perform(
-                    async move {
-                        let mut dialog = rfd::AsyncFileDialog::new();
-                        if !extensions.is_empty() {
-                            let ext_strs: Vec<&str> =
-                                extensions.iter().map(|s| s.as_str()).collect();
-                            dialog = dialog.add_filter("Files", &ext_strs);
-                        }
-                        let handle = if is_save {
-                            dialog.save_file().await
-                        } else {
-                            dialog.pick_file().await
-                        };
-                        handle.map(|h| crate::sys::handle_path(&h))
-                    },
-                    move |path| Message::PluginDialogFilePicked(id_clone, path),
-                )
+                iced::Task::perform(pick_path(target, start), move |path| {
+                    Message::PluginDialogFilePicked(id_clone, path)
+                })
             }
             Message::PluginDialogFilePicked(id, path) => {
                 if let Some(p) = path {
@@ -2779,16 +2743,29 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginPanelFilePick(panel_id, control_id) => {
+                use crate::ui::window::plugin_dialog::{pick_path, pick_target, PickTarget};
+                // A panel's file field opens files without a filter, as
+                // before; its folder field the folder dialog.
+                let panel = self.plugin_panels.get(&panel_id);
+                let folder = panel.is_some_and(|p| {
+                    pick_target(&p.def.controls, &control_id) == Some(PickTarget::Folder)
+                });
+                let target = if folder {
+                    PickTarget::Folder
+                } else {
+                    PickTarget::File {
+                        save: false,
+                        extensions: Vec::new(),
+                    }
+                };
+                let start = panel
+                    .and_then(|p| p.file_values.get(&control_id))
+                    .map(std::path::PathBuf::from);
                 let pid = panel_id.clone();
                 let cid = control_id.clone();
-                iced::Task::perform(
-                    async move {
-                        let dialog = rfd::AsyncFileDialog::new();
-                        let handle = dialog.pick_file().await;
-                        handle.map(|h| crate::sys::handle_path(&h))
-                    },
-                    move |path| Message::PluginPanelFilePicked(pid, cid, path),
-                )
+                iced::Task::perform(pick_path(target, start), move |path| {
+                    Message::PluginPanelFilePicked(pid, cid, path)
+                })
             }
             Message::PluginPanelFilePicked(panel_id, control_id, path) => {
                 if let Some(p) = path {

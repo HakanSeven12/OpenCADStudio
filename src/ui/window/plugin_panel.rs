@@ -102,6 +102,9 @@ impl PluginPanelState {
                 }
                 DialogControl::FilePicker {
                     id, default_path, ..
+                }
+                | DialogControl::FolderPicker {
+                    id, default_path, ..
                 } => {
                     fv.insert(id.clone(), default_path.clone());
                 }
@@ -353,7 +356,8 @@ impl PluginPanelState {
                             errors.push(format!("missing color value for control id '{id}'"));
                         }
                     }
-                    DialogControl::FilePicker { id, .. } => {
+                    DialogControl::FilePicker { id, .. }
+                    | DialogControl::FolderPicker { id, .. } => {
                         declare_control(
                             id,
                             Some(SnapshotValueKind::FilePath),
@@ -728,7 +732,8 @@ impl PluginPanelState {
                     ),
                 )
             }
-            DialogControl::FilePicker { id, label, .. } => {
+            DialogControl::FilePicker { id, label, .. }
+            | DialogControl::FolderPicker { id, label, .. } => {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let pid = panel_id.clone();
                 let cid = id.clone();
@@ -940,7 +945,8 @@ impl PluginPanelState {
             | DialogControl::Checkbox { .. }
             | DialogControl::Choice { .. }
             | DialogControl::Color { .. }
-            | DialogControl::FilePicker { .. } => self.view_field_item(control, parent_disabled),
+            | DialogControl::FilePicker { .. }
+            | DialogControl::FolderPicker { .. } => self.view_field_item(control, parent_disabled),
             DialogControl::Fields {
                 id,
                 title,
@@ -1657,6 +1663,30 @@ mod tests {
         assert_eq!(
             form_state.snapshot(1).values,
             palette_state.snapshot(1).values
+        );
+    }
+
+    /// A panel's folder field (API v32) reads back like a file field: its
+    /// path as a `FilePath` value and its exact text.
+    #[test]
+    fn a_folder_picker_reads_back_like_a_file_field() {
+        let mut state = panel_state(vec![DialogControl::FolderPicker {
+            id: "out".to_string(),
+            label: "Folder".to_string(),
+            default_path: "/plots".to_string(),
+        }]);
+        state
+            .file_values
+            .insert("out".to_string(), " /plots/2026 ".to_string());
+        let snapshot = state.snapshot(5);
+        assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
+        assert_eq!(
+            snapshot.values.get("out"),
+            Some(&DialogValue::FilePath(" /plots/2026 ".to_string()))
+        );
+        assert_eq!(
+            snapshot.raw_text.get("out").map(String::as_str),
+            Some(" /plots/2026 ")
         );
     }
 }

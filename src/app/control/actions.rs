@@ -1443,6 +1443,7 @@ impl OpenCADStudio {
                         | ocs_plugin_api::dialog::DialogControl::Choice { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Color { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::FilePicker { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::FolderPicker { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Fields { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Table { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Label { id, .. }

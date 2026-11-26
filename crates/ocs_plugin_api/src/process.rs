@@ -372,7 +372,7 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
         return base.max(Duration::from_secs(secs));
     }
     let floor = match kind {
-        "GetManifest" | "GetRibbon" => Duration::from_secs(5),
+        "GetManifest" | "GetRibbon" | "GetRibbonTabs" => Duration::from_secs(5),
         "Dispatch" | "CustomGripSettle" => Duration::from_secs(10),
         "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" | "CustomGripBegin"
         | "CustomGripCancel" => Duration::from_secs(2),
@@ -423,6 +423,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
     match req {
         HostRequest::GetManifest => "GetManifest",
         HostRequest::GetRibbon => "GetRibbon",
+        HostRequest::GetRibbonTabs => "GetRibbonTabs",
         HostRequest::Dispatch { .. } => "Dispatch",
         HostRequest::InteractiveEvent { .. } => "InteractiveEvent",
         HostRequest::GetPrompt { .. } => "GetPrompt",
@@ -481,10 +482,20 @@ pub struct PluginProcess {
     id: String,
     manifest: OwnedPluginManifest,
     ribbon: Vec<OwnedRibbonGroupAlias>,
+    /// Extra ribbon tabs (API v31); empty for older plugins.
+    ribbon_tabs: Vec<crate::ribbon::owned::OwnedRibbonTab>,
     io_lines: Mutex<Option<mpsc::Receiver<PluginIoLine>>>,
     /// Command-line messages the plugin sent during calls that had no host
     /// surface, in order. `replay_held_messages` shows them.
     held_messages: Mutex<Vec<HeldMessage>>,
+}
+
+static HOST_LANGUAGE: Mutex<String> = Mutex::new(String::new());
+
+/// The UI language plugin runners started from now on are told
+/// ([`crate::host_language`]).
+pub fn set_host_language(tag: &str) {
+    *HOST_LANGUAGE.lock().unwrap_or_else(|e| e.into_inner()) = tag.to_string();
 }
 
 impl PluginProcess {
@@ -517,7 +528,9 @@ impl PluginProcess {
         let listener = ListenerOptions::new().name(socket_name_ref).create_sync()?;
 
         let mut command = Command::new(&runner_path);
+        let language = HOST_LANGUAGE.lock().unwrap_or_else(|e| e.into_inner()).clone();
         command
+            .env(crate::HOST_LANGUAGE_ENV, language)
             .arg("--ocs-plugin-runner")
             .arg(&socket_name)
             .arg(cdylib_path)
@@ -647,6 +660,7 @@ impl PluginProcess {
         let no_op = &mut |_| {};
         let manifest;
         let ribbon;
+        let mut ribbon_tabs = Vec::new();
         let v4: Option<V4Connection>;
         if is_v4 {
             // V4 path: split the stream into reader/writer halves and start
@@ -693,6 +707,13 @@ impl PluginProcess {
                 HostResponse::Ribbon(r) => r,
                 other => return Err(PluginError::UnexpectedResponse(Box::new(other))),
             };
+            // A runner older than v31 cannot decode the request.
+            if manifest.api_version >= 31 {
+                ribbon_tabs = match v4_conn.call(host, HostRequest::GetRibbonTabs, no_op)? {
+                    HostResponse::RibbonTabs(tabs) => tabs,
+                    other => return Err(PluginError::UnexpectedResponse(Box::new(other))),
+                };
+            }
             v4 = Some(v4_conn);
         } else {
             // The runner first answers GetManifest and GetRibbon so the host can
@@ -745,6 +766,7 @@ impl PluginProcess {
             id,
             manifest,
             ribbon,
+            ribbon_tabs,
             io_lines: Mutex::new(Some(io_rx)),
             held_messages: Mutex::new(Vec::new()),
         })
@@ -760,6 +782,11 @@ impl PluginProcess {
 
     pub fn ribbon(&self) -> &[OwnedRibbonGroupAlias] {
         &self.ribbon
+    }
+
+    /// The plugin's extra ribbon tabs (API v31).
+    pub fn ribbon_tabs(&self) -> &[crate::ribbon::owned::OwnedRibbonTab] {
+        &self.ribbon_tabs
     }
 
     /// Drain any stdout/stderr lines that have accumulated from the plugin
@@ -1951,6 +1978,7 @@ impl PluginProcess {
             id: manifest.id.clone(),
             manifest,
             ribbon: vec![],
+            ribbon_tabs: vec![],
             io_lines: Mutex::new(None),
             held_messages: Mutex::new(Vec::new()),
         }
@@ -2209,6 +2237,7 @@ mod timeout_tests {
             id: "test.plugin".to_string(),
             manifest: fake_manifest(),
             ribbon: vec![],
+            ribbon_tabs: vec![],
             io_lines: Mutex::new(None),
             held_messages: Mutex::new(Vec::new()),
         };

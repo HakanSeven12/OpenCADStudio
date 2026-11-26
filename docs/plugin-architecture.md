@@ -345,6 +345,28 @@ as JSON text, or an `Err` message. See `docs/plugin-template/src/lib.rs`
 - Only plugins whose manifest declares v25 or newer are asked; older ones
   simply offer no tools.
 
+### More ribbon tabs and contextual tabs (API v31)
+
+`ribbon()` is the plugin's main tab. `ribbon_tabs()` returns more, each a
+`RibbonTab { module, contextual }`; the module's `id` must be unique within
+the plugin (the host names the tab `<plugin id>:<tab id>`), and all of them
+sit at the plugin's `ribbon_order`.
+
+A tab with `contextual: Some(ContextualTab { xdata_app, value_prefix })` is
+shown only while the selection holds an entity with an XDATA record of
+`xdata_app` whose string values include one starting with `value_prefix`
+(any record of the app when `None`). When such a tab appears it is brought
+forward; when the selection stops matching, the ribbon returns to the tab
+that was active before. Only plugins declaring v31 or newer are asked.
+
+### Translations
+
+The host starts every plugin runner with `OCS_LANGUAGE` set to its UI
+language (`de-DE`, `tr-TR`, ...); `ocs_plugin_api::host_language()` reads
+it. A plugin that ships its own `.ftl` files picks its labels from it when
+it builds its manifest, ribbon and dialogs. A language change reaches a
+plugin when it is next started.
+
 ### XDATA — domain persistence
 
 Store domain data on entities as XDATA (under your `xdata_apps` ids), not in a

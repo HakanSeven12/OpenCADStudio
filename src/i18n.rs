@@ -220,6 +220,10 @@ fn load_language(
     }
     #[allow(unused_variables)]
     let selected = i18n_embed::select(loader, &Localizations, &requested)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(language) = selected.first() {
+        ocs_plugin_api::process::set_host_language(&language.to_string());
+    }
     #[cfg(target_arch = "wasm32")]
     if let Some(language) = selected.first() {
         if let Some(root) = web_sys::window()

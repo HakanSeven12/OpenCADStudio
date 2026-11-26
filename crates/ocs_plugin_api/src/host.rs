@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::manifest::{EntityClasses, PluginManifest};
-use crate::ribbon::CadModule;
+use crate::ribbon::{CadModule, RibbonTab};
 
 // Re-export the document crate and the types that appear in the HostApi trait
 // so out-of-tree plugins can use them without adding their own document
@@ -1147,6 +1147,17 @@ pub trait BuiltinPlugin: Send + Sync {
         _arguments: &str,
     ) -> Result<String, String> {
         Err(format!("unknown tool '{name}'"))
+    }
+
+    /// More ribbon tabs beside [`Self::ribbon`] (API v31). A tab with
+    /// [`RibbonTab::contextual`] set is shown only while the selection holds
+    /// an entity its rule matches, the way a corridor or alignment gets its
+    /// own tab while it is selected.
+    ///
+    /// The runner only calls this for plugins whose exported
+    /// `ocs_plugin_api_version` symbol reports API major 31 or newer.
+    fn ribbon_tabs(&self) -> Vec<RibbonTab> {
+        Vec::new()
     }
 }
 

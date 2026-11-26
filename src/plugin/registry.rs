@@ -31,6 +31,51 @@ pub fn ribbon_modules_enabled(disabled: &rustc_hash::FxHashSet<String>) -> Vec<B
     core
 }
 
+/// Whether `entity` matches a contextual plugin tab's rule (API v27): an
+/// XDATA record of the rule's application, holding a string that starts
+/// with the rule's prefix when it has one.
+#[cfg(not(target_arch = "wasm32"))]
+fn contextual_rule_matches(
+    rule: &ocs_plugin_api::ContextualTab,
+    entity: &document::EntityType,
+) -> bool {
+    entity.common().extended_data.records().iter().any(|record| {
+        record.application_name == rule.xdata_app
+            && rule.value_prefix.as_deref().is_none_or(|prefix| {
+                record.values.iter().any(|value| {
+                    matches!(value, document::xdata::XDataValue::String(text) if text.starts_with(prefix))
+                })
+            })
+    })
+}
+
+/// The ids of the contextual plugin tabs (API v27) of loaded plugins not in
+/// `disabled`, and the ones among them that `selected` matches.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn plugin_context_tabs<'a>(
+    disabled: &rustc_hash::FxHashSet<String>,
+    selected: impl Iterator<Item = &'a document::EntityType>,
+) -> (rustc_hash::FxHashSet<&'static str>, rustc_hash::FxHashSet<&'static str>) {
+    let rules = crate::plugin::external::with_manager(|manager| {
+        manager.contextual_tabs(|id| disabled.contains(id))
+    });
+    let all = rules.iter().map(|(id, _)| *id).collect();
+    let mut on = rustc_hash::FxHashSet::default();
+    if !rules.is_empty() {
+        for entity in selected {
+            for (id, rule) in &rules {
+                if contextual_rule_matches(rule, entity) {
+                    on.insert(*id);
+                }
+            }
+            if on.len() == rules.len() {
+                break;
+            }
+        }
+    }
+    (all, on)
+}
+
 /// Command names contributed by loaded external plugins whose id is **not** in
 /// `disabled` — every ribbon tool's command id plus manifest command prefixes.
 /// The host merges these into command-line autocomplete so plugin commands are

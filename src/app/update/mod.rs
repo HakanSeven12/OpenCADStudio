@@ -563,6 +563,13 @@ impl OpenCADStudio {
         self.last_plugin_selection = Some(key);
         let revision = self.bump_selection_revision(tab_id);
         let handles = self.tabs[i].scene.selected_handles_in_order();
+        let document = &self.tabs[i].scene.document;
+        let (contextual, on) = crate::plugin::registry::plugin_context_tabs(
+            &self.disabled_plugins,
+            handles.iter().filter_map(|handle| document.get_entity(*handle)),
+        );
+        self.ribbon.set_plugin_contextual(contextual);
+        self.ribbon.set_plugin_context(on);
         // Per-endpoint API routing (v22): digest to v22+ runners, the exact
         // legacy streams (v4..v21 handle list; plain below v4) to older ones.
         crate::plugin::v4_support::publish_selection_changed_versioned(

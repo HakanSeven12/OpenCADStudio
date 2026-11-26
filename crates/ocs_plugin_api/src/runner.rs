@@ -612,6 +612,7 @@ fn handle_host_request(
         // The V3 path serves plugins far older than v24.
         HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
         HostRequest::ListTools => HostResponse::Tools(Vec::new()),
+        HostRequest::GetRibbonTabs => HostResponse::RibbonTabs(Vec::new()),
         HostRequest::CallTool { .. } => {
             HostResponse::Error("AI tools require the V4 protocol".to_string())
         }
@@ -882,6 +883,20 @@ fn handle_host_request_v4(
             command_id,
             api_version,
         ))),
+        // API v31 gate: an older cdylib's vtable has no `ribbon_tabs` slot.
+        HostRequest::GetRibbonTabs => {
+            if api_version < 31 {
+                return Some(HostResponse::RibbonTabs(Vec::new()));
+            }
+            Some(
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    plugin.ribbon_tabs()
+                })) {
+                    Ok(tabs) => HostResponse::RibbonTabs(tabs.iter().map(Into::into).collect()),
+                    Err(_) => HostResponse::Error("plugin ribbon_tabs() panicked".to_string()),
+                },
+            )
+        }
         // API v25 gate: an older cdylib's vtable has neither slot.
         HostRequest::ListTools => {
             if api_version < 25 {

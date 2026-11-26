@@ -79,7 +79,21 @@ pub use manifest::{
     API_VERSION, API_VERSION_MIN_SUPPORTED, ApiVersion, MAX_API_VERSION_ENV, PluginManifest,
     effective_max_api_version, host_accepts_plugin_version,
 };
-pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
+/// Environment variable through which the host hands its plugin runners the
+/// UI language (a BCP 47 tag such as `de-DE`), see [`host_language`].
+pub const HOST_LANGUAGE_ENV: &str = "OCS_LANGUAGE";
+
+/// The host's UI language when this plugin was started, for a plugin that
+/// ships its own translations (`.ftl` files) to pick one; `None` when the
+/// host did not say.
+pub fn host_language() -> Option<String> {
+    std::env::var(HOST_LANGUAGE_ENV).ok().filter(|tag| !tag.is_empty())
+}
+
+pub use ribbon::{
+    CadModule, ContextualTab, IconKind, ModuleEvent, RibbonGroup, RibbonItem, RibbonTab, StyleKey,
+    ToolDef,
+};
 pub use scene::{
     PanelScene, PanelSurface, Rect2D, Rgba8, SceneBuilder, SceneColor, SceneElement, SceneError,
     SceneRevision, StableId, Stroke, SurfaceReject, SurfaceRejectCode, ThemeColor, Vec2,

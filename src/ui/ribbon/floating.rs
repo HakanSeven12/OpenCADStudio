@@ -737,7 +737,7 @@ impl Ribbon {
     pub fn toolbars(&self) -> Vec<(&'static str, &'static str, bool)> {
         let mut out = Vec::new();
         for (index, module) in self.modules.iter().enumerate() {
-            if super::is_contextual(module.id()) {
+            if self.is_contextual(module.id()) {
                 continue;
             }
             for group in self.ordered_groups(index) {

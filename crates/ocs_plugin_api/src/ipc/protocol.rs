@@ -157,6 +157,9 @@ pub enum HostRequest {
     GetInputKind {
         command_id: u64,
     },
+    /// V31 (additive): the plugin's extra ribbon tabs. The runner answers
+    /// with [`HostResponse::RibbonTabs`]; sent only to plugins declaring v31.
+    GetRibbonTabs,
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -186,6 +189,8 @@ pub enum HostResponse {
     ToolResult(Result<String, String>),
     /// V27 (additive): answer to [`HostRequest::GetInputKind`].
     InputKind(InteractiveInputKind),
+    /// V31 (additive): answer to [`HostRequest::GetRibbonTabs`].
+    RibbonTabs(Vec<crate::ribbon::owned::OwnedRibbonTab>),
 }
 
 /// Requests the plugin runner sends to the host.

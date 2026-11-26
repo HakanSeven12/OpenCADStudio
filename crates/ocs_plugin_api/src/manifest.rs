@@ -214,7 +214,11 @@
 /// v30 appends `ModuleEvent::PluginFolderDialog`: a ribbon tool asks the host
 /// for a native folder picker and gets `"<command> <folder>"` dispatched back.
 /// A v29 host cannot decode the event, so a plugin that sends it declares v30.
-pub const API_VERSION: u32 = 30;
+/// v31 appends `BuiltinPlugin::ribbon_tabs`: more ribbon tabs per plugin,
+/// contextual ones shown while the selection matches their XDATA rule, with
+/// the `HostRequest::GetRibbonTabs` / `HostResponse::RibbonTabs` pair. Older
+/// runners cannot decode it, so the host asks only plugins declaring v31.
+pub const API_VERSION: u32 = 31;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

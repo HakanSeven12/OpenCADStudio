@@ -58,6 +58,9 @@ thread_local! {
 struct LoadedPlugin {
     process: Arc<PluginProcess>,
     module: SharedCadModule,
+    /// Extra tabs (API v27), in `process.ribbon_tabs()` order; ids are
+    /// `<plugin id>:<tab id>`.
+    tabs: Vec<SharedCadModule>,
     /// API v13 notification-attach state (interior: broadcasts reach the
     /// manager through a shared reference): notifications to this process
     /// are deferred (parked) until its runner acks
@@ -217,9 +220,21 @@ impl PluginManager {
             }
             let name = process.manifest().name.clone();
             let module = to_shared_module(id.clone(), name, process.ribbon().to_vec());
+            let tabs = process
+                .ribbon_tabs()
+                .iter()
+                .map(|tab| {
+                    to_shared_module(
+                        format!("{id}:{}", tab.id),
+                        tab.title.clone(),
+                        tab.groups.clone(),
+                    )
+                })
+                .collect();
             self.plugins.push(LoadedPlugin {
                 process: Arc::new(process),
                 module,
+                tabs,
                 attach: std::sync::Mutex::new(NotificationAttach {
                     grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
                     ..Default::default()
@@ -470,9 +485,34 @@ impl PluginManager {
             .plugins
             .iter()
             .filter(|p| !is_disabled(p.process.id()) && p.process.is_alive())
-            .map(|p| (p.process.manifest().ribbon_order, p.module.clone()))
+            .flat_map(|p| {
+                let order = p.process.manifest().ribbon_order;
+                std::iter::once(&p.module)
+                    .chain(&p.tabs)
+                    .map(move |module| (order, module.clone()))
+            })
             .collect();
         out.sort_by_key(|(order, _)| *order);
+        out
+    }
+
+    /// The contextual tabs (API v27) of alive, non-disabled plugins, as
+    /// `(ribbon module id, rule)`.
+    pub fn contextual_tabs<F: Fn(&str) -> bool>(
+        &self,
+        is_disabled: F,
+    ) -> Vec<(&'static str, crate::ribbon::ContextualTab)> {
+        let mut out = Vec::new();
+        for p in &self.plugins {
+            if is_disabled(p.process.id()) || !p.process.is_alive() {
+                continue;
+            }
+            for (module, tab) in p.tabs.iter().zip(p.process.ribbon_tabs()) {
+                if let Some(rule) = &tab.contextual {
+                    out.push((crate::ribbon::CadModule::id(module), rule.clone()));
+                }
+            }
+        }
         out
     }
 
@@ -590,6 +630,11 @@ impl PluginManager {
             }
             for group in p.process.ribbon() {
                 out.append(&mut group.command_ids());
+            }
+            for tab in p.process.ribbon_tabs() {
+                for group in &tab.groups {
+                    out.append(&mut group.command_ids());
+                }
             }
             out.extend(p.process.manifest().command_prefixes.iter().cloned());
         }
@@ -833,6 +878,7 @@ mod tests {
                 "test.live",
             ))),
             module: to_shared_module("test.live".into(), "Live".into(), vec![]),
+            tabs: Vec::new(),
             attach: std::sync::Mutex::new(NotificationAttach {
                 grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
                 ..Default::default()
@@ -841,6 +887,7 @@ mod tests {
         manager.plugins.push(LoadedPlugin {
             process: Arc::new(PluginProcess::fake(plain_manifest("test.plain"))),
             module: to_shared_module("test.plain".into(), "Plain".into(), vec![]),
+            tabs: Vec::new(),
             attach: std::sync::Mutex::new(NotificationAttach {
                 grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
                 ..Default::default()
@@ -851,6 +898,7 @@ mod tests {
                 "test.off",
             ))),
             module: to_shared_module("test.off".into(), "Off".into(), vec![]),
+            tabs: Vec::new(),
             attach: std::sync::Mutex::new(NotificationAttach {
                 grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
                 ..Default::default()
@@ -884,6 +932,7 @@ mod tests {
                 "test.live",
             ))),
             module: to_shared_module("test.live".into(), "Live".into(), vec![]),
+            tabs: Vec::new(),
             attach: std::sync::Mutex::new(NotificationAttach {
                 grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
                 ..Default::default()
@@ -974,6 +1023,7 @@ mod tests {
             id: manifest.id.clone(),
             manifest,
             ribbon: vec![],
+            ribbon_tabs: vec![],
             io_lines: std::sync::Mutex::new(None),
             held_messages: std::sync::Mutex::new(Vec::new()),
         };
@@ -1022,6 +1072,7 @@ mod tests {
         manager.plugins.push(LoadedPlugin {
             process: Arc::new(pre27_process),
             module: to_shared_module("test.delta.pre27".into(), "Pre27".into(), vec![]),
+            tabs: Vec::new(),
             attach: std::sync::Mutex::new(NotificationAttach {
                 attached: true,
                 ..Default::default()
@@ -1030,6 +1081,7 @@ mod tests {
         manager.plugins.push(LoadedPlugin {
             process: Arc::new(v27_process),
             module: to_shared_module("test.delta.v27".into(), "V27".into(), vec![]),
+            tabs: Vec::new(),
             attach: std::sync::Mutex::new(NotificationAttach {
                 attached: true,
                 ..Default::default()

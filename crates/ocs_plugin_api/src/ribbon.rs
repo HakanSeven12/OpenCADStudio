@@ -173,6 +173,24 @@ pub trait CadModule: Send + Sync {
     fn ribbon_groups(&self) -> &[RibbonGroup];
 }
 
+/// One extra ribbon tab of a plugin (API v27), see
+/// [`crate::BuiltinPlugin::ribbon_tabs`]. The module's `id` must be unique
+/// within the plugin.
+pub struct RibbonTab {
+    pub module: Box<dyn CadModule>,
+    /// `Some`: a contextual tab, shown only while the selection matches.
+    pub contextual: Option<ContextualTab>,
+}
+
+/// When a contextual tab is shown: some selected entity carries an XDATA
+/// record of application `xdata_app`, and, when `value_prefix` is set, that
+/// record holds a string value starting with it (`"CIVIL-CLASS:CORRIDOR"`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContextualTab {
+    pub xdata_app: String,
+    pub value_prefix: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

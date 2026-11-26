@@ -346,11 +346,6 @@ fn panel_height(titles: bool) -> f32 {
     }
 }
 
-/// Whether module `id`'s tab is contextual: shown only while its context
-/// lasts (a block being edited).
-fn is_contextual(id: &str) -> bool {
-    matches!(id, "block_editor" | "table_cell" | "text_editor")
-}
 
 // ── Ribbon state ───────────────────────────────────────────────────────────
 
@@ -484,6 +479,12 @@ pub struct Ribbon {
     /// The tab shown before the Text Editor tab opened, while a multiline
     /// text is edited.
     text_editor_open: Option<usize>,
+    /// Plugin tabs (API v27) shown only while the selection matches them.
+    plugin_contextual: rustc_hash::FxHashSet<&'static str>,
+    /// The plugin contextual tabs the selection matches now, and the tab
+    /// that was active before the first of them showed.
+    plugin_context_on: rustc_hash::FxHashSet<&'static str>,
+    plugin_context_prev: Option<usize>,
     block_testing: Option<usize>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
@@ -660,6 +661,9 @@ impl Ribbon {
             block_editing: None,
             table_cell_open: None,
             text_editor_open: None,
+            plugin_contextual: Default::default(),
+            plugin_context_on: Default::default(),
+            plugin_context_prev: None,
             block_testing: None,
             xref_fade: 50,
             text_find: String::new(),
@@ -1001,6 +1005,54 @@ impl Ribbon {
         (id == "block_editor" && self.block_editing.is_none())
             || (id == "table_cell" && self.table_cell_open.is_none())
             || (id == "text_editor" && self.text_editor_open.is_none())
+            || (self.plugin_contextual.contains(id) && !self.plugin_context_on.contains(id))
+    }
+
+    /// Whether module `id`'s tab is contextual: shown only while its context
+    /// lasts (a block being edited, a plugin object selected).
+    fn is_contextual(&self, id: &str) -> bool {
+        matches!(id, "block_editor" | "table_cell" | "text_editor")
+            || self.plugin_contextual.contains(id)
+    }
+
+    /// The plugin tabs that are contextual (API v27).
+    pub fn set_plugin_contextual(&mut self, ids: rustc_hash::FxHashSet<&'static str>) {
+        self.plugin_contextual = ids;
+        self.plugin_context_on.retain(|id| self.plugin_contextual.contains(id));
+    }
+
+    /// Show the plugin contextual tabs `on` matches, bringing the first one
+    /// forward when they appear, and return to the previous tab when the
+    /// selection no longer matches any.
+    pub fn set_plugin_context(&mut self, on: rustc_hash::FxHashSet<&'static str>) {
+        if on == self.plugin_context_on {
+            return;
+        }
+        let first = self
+            .modules
+            .iter()
+            .position(|module| on.contains(module.id()) && !self.layout.hidden_tabs.contains(module.id()));
+        let active_id = self.modules.get(self.active).map(|module| module.id());
+        let active_was_on = active_id.is_some_and(|id| self.plugin_context_on.contains(id));
+        match (first, self.plugin_context_prev) {
+            (Some(index), None) => {
+                self.plugin_context_prev = Some(self.active);
+                self.active = index;
+            }
+            (Some(index), Some(_)) => {
+                if active_id.is_some_and(|id| !on.contains(id)) && active_was_on {
+                    self.active = index;
+                }
+            }
+            (None, Some(previous)) => {
+                self.plugin_context_prev = None;
+                if active_was_on {
+                    self.active = previous.min(self.modules.len().saturating_sub(1));
+                }
+            }
+            (None, None) => {}
+        }
+        self.plugin_context_on = on;
     }
 
     pub fn set_block_testing(&mut self, testing: bool) {
@@ -1253,7 +1305,7 @@ impl Ribbon {
         };
         // The contextual tabs' panels and the test-block Close panel stay in
         // the ribbon.
-        let floatable = !is_contextual(module_id) && !(module_id == "draw" && g.title == "Close");
+        let floatable = !self.is_contextual(module_id) && !(module_id == "draw" && g.title == "Close");
         // Each form reports where it is, for docking a floating panel
         // between two.
         let row_id = row_panel_id(module_id, g.title);
@@ -1280,7 +1332,7 @@ impl Ribbon {
             .ordered_groups(index)
             .iter()
             .any(|group| group.title == title);
-        if !known || is_contextual(module) || self.layout.floating_panel(module, title).is_some() {
+        if !known || self.is_contextual(module) || self.layout.floating_panel(module, title).is_some() {
             return false;
         }
         let z = self.top_float_z() + 1;
@@ -1441,7 +1493,7 @@ impl Ribbon {
                 }
 
                 let is_active = i == self.active;
-                let is_contextual = is_contextual(module.id());
+                let is_contextual = self.is_contextual(module.id());
                 let holds_tool = holding_tab == Some(i);
                 let tab = button(
                     container(
@@ -1924,7 +1976,7 @@ impl Ribbon {
         let tool_bar = if self
             .modules
             .get(effective_active)
-            .is_some_and(|module| is_contextual(module.id()))
+            .is_some_and(|module| self.is_contextual(module.id()))
         {
             let line = |width: Length| {
                 container(

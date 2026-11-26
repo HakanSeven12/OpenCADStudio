@@ -69,6 +69,26 @@ pub struct OwnedRibbonGroup {
     pub tools: Vec<OwnedRibbonItem>,
 }
 
+/// Wire form of [`crate::ribbon::RibbonTab`] (API v27).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnedRibbonTab {
+    pub id: String,
+    pub title: String,
+    pub groups: Vec<OwnedRibbonGroup>,
+    pub contextual: Option<crate::ribbon::ContextualTab>,
+}
+
+impl From<&crate::ribbon::RibbonTab> for OwnedRibbonTab {
+    fn from(tab: &crate::ribbon::RibbonTab) -> Self {
+        Self {
+            id: tab.module.id().to_string(),
+            title: tab.module.title().to_string(),
+            groups: tab.module.ribbon_groups().iter().map(OwnedRibbonGroup::from).collect(),
+            contextual: tab.contextual.clone(),
+        }
+    }
+}
+
 impl OwnedRibbonGroup {
     /// Every command id a user could invoke from this group's tools. The host
     /// feeds these into the command-line autocomplete so a loaded plugin's

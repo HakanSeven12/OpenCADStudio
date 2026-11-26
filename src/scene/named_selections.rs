@@ -255,3 +255,166 @@ impl Scene {
         Some(recall)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn lines(count: usize) -> (Scene, Vec<Handle>) {
+        let mut scene = Scene::new();
+        let handles = (0..count)
+            .map(|row| {
+                let y = row as f64 * 5.0;
+                scene.add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, y, 0.0),
+                    Vector3::new(10.0, y, 0.0),
+                )))
+            })
+            .collect();
+        (scene, handles)
+    }
+
+    fn sets_dictionary(scene: &Scene) -> Option<Handle> {
+        let root = scene.document.header.named_objects_dict_handle;
+        match scene.document.objects.get(&root) {
+            Some(ObjectType::Dictionary(root)) => root.get(NAMED_SELECTIONS_DICTIONARY),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_saved_set_is_read_back_by_name_in_any_case() {
+        let (mut scene, handles) = lines(2);
+        scene.save_named_selection("FRAME", &handles);
+        assert_eq!(
+            scene.named_selection("frame"),
+            Some(("FRAME".to_string(), handles.clone()))
+        );
+        assert!(sets_dictionary(&scene).is_some());
+    }
+
+    #[test]
+    fn saving_under_a_used_name_replaces_the_set() {
+        let (mut scene, handles) = lines(2);
+        assert!(!scene.save_named_selection("A", &handles[..1]));
+        assert!(scene.save_named_selection("a", &handles[1..]));
+        assert_eq!(
+            scene.named_selections(),
+            vec![("A".to_string(), vec![handles[1]])]
+        );
+        let dictionary = sets_dictionary(&scene).unwrap();
+        let Some(ObjectType::Dictionary(dictionary)) = scene.document.objects.get(&dictionary)
+        else {
+            panic!("the sets dictionary is a dictionary");
+        };
+        assert_eq!(dictionary.len(), 1);
+        let xrecords = scene
+            .document
+            .objects
+            .values()
+            .filter(|object| matches!(object, ObjectType::XRecord(_)))
+            .count();
+        assert_eq!(xrecords, 1, "the replaced set's record is gone");
+    }
+
+    #[test]
+    fn a_set_keeps_only_handles_of_objects_in_the_drawing() {
+        let (mut scene, handles) = lines(1);
+        let missing = scene.document.allocate_handle();
+        scene.save_named_selection("A", &[handles[0], missing]);
+        assert_eq!(scene.named_selection("A").unwrap().1, vec![handles[0]]);
+    }
+
+    #[test]
+    fn rename_and_delete_change_only_that_set() {
+        let (mut scene, handles) = lines(2);
+        scene.save_named_selection("A", &handles[..1]);
+        scene.save_named_selection("B", &handles[1..]);
+        assert!(scene.rename_named_selection("a", "C"));
+        assert!(scene.delete_named_selection("b"));
+        assert!(!scene.delete_named_selection("ghost"));
+        assert!(!scene.rename_named_selection("ghost", "D"));
+        assert_eq!(
+            scene.named_selections(),
+            vec![("C".to_string(), vec![handles[0]])]
+        );
+
+        let dictionary = sets_dictionary(&scene).unwrap();
+        assert!(scene.delete_named_selection("C"));
+        assert_eq!(sets_dictionary(&scene), None);
+        assert!(!scene.document.objects.contains_key(&dictionary));
+    }
+
+    #[test]
+    fn the_sets_are_listed_by_name_without_case() {
+        let (mut scene, handles) = lines(1);
+        for name in ["beta", "Alpha", "GAMMA"] {
+            scene.save_named_selection(name, &handles);
+        }
+        let names: Vec<String> = scene
+            .named_selections()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(names, ["Alpha", "beta", "GAMMA"]);
+    }
+
+    #[test]
+    fn recall_leaves_out_erased_and_other_space_members() {
+        let (mut scene, handles) = lines(3);
+        let paper = scene
+            .document
+            .block_records
+            .get("*Paper_Space")
+            .expect("a new drawing has a paper space")
+            .handle;
+        scene
+            .document
+            .get_entity_mut(handles[1])
+            .unwrap()
+            .common_mut()
+            .owner_handle = paper;
+        scene.save_named_selection("A", &handles);
+        scene.erase_entities(&[handles[2]]);
+
+        let recall = scene.named_selection_recall("a").unwrap();
+        assert_eq!(recall.name, "A");
+        assert_eq!(recall.selectable, vec![handles[0]]);
+        assert_eq!(recall.erased, 1);
+        assert_eq!(recall.other_space, 1);
+        assert!(scene.named_selection_recall("ghost").is_none());
+    }
+
+    #[test]
+    fn recall_leaves_out_hidden_and_locked_members() {
+        let (mut scene, handles) = lines(5);
+        let mut frozen = document::tables::Layer::new("FROZEN");
+        frozen.flags.frozen = true;
+        let _ = scene.document.layers.add(frozen);
+        let mut locked = document::tables::Layer::new("LOCKED");
+        locked.flags.locked = true;
+        let _ = scene.document.layers.add(locked);
+        for (index, layer) in [(1, "FROZEN"), (3, "LOCKED")] {
+            let entity = scene.document.get_entity_mut(handles[index]).unwrap();
+            entity.common_mut().layer = layer.to_string();
+        }
+        let entity = scene.document.get_entity_mut(handles[2]).unwrap();
+        entity.common_mut().invisible = true;
+        scene.select_entity(handles[4], false);
+        scene.hide_selected();
+        scene.deselect_all();
+        scene.save_named_selection("A", &handles);
+
+        let recall = scene.named_selection_recall("A").unwrap();
+        assert_eq!(recall.selectable, vec![handles[0], handles[3]]);
+        assert_eq!(recall.unpickable, 3);
+
+        crate::scene::set_pick_locked(false);
+        let recall = scene.named_selection_recall("A").unwrap();
+        crate::scene::set_pick_locked(true);
+        assert_eq!(recall.selectable, vec![handles[0]]);
+        assert_eq!(recall.unpickable, 4);
+    }
+}

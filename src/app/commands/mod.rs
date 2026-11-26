@@ -42,6 +42,8 @@ mod ifc_plan;
 #[cfg(test)]
 mod layer_variable_tests;
 mod named_selections;
+#[cfg(test)]
+mod named_selections_tests;
 pub(in crate::app) use dgn_import::read_reference_drawings;
 pub(in crate::app) use named_selections::NamedSelectionSaveError;
 mod dim;

@@ -185,3 +185,122 @@ impl CadCommand for NamedSelCommand {
 inventory::submit!(crate::command::CommandRegistration {
     names: &["NAMEDSEL"]
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dispatched(result: Option<CmdResult>) -> String {
+        match result {
+            Some(CmdResult::Dispatch(text)) => text,
+            _ => panic!("expected a dispatch"),
+        }
+    }
+
+    fn command(selection: &[u64]) -> NamedSelCommand {
+        NamedSelCommand::new(
+            selection.iter().copied().map(Handle::new).collect(),
+            vec!["FRAME".to_string()],
+        )
+    }
+
+    #[test]
+    fn each_option_dispatches_its_typed_form() {
+        let mut save = command(&[0x2A, 0x31]);
+        assert!(matches!(
+            save.on_text_input("S"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            dispatched(save.on_text_input("Frame")),
+            "NAMEDSEL SAVE Frame 2A 31"
+        );
+
+        let mut recall = command(&[]);
+        let _ = recall.on_text_input("r");
+        assert_eq!(
+            dispatched(recall.on_text_input("FRAME")),
+            "NAMEDSEL RECALL FRAME"
+        );
+
+        let mut rename = command(&[]);
+        let _ = rename.on_text_input("REN");
+        let _ = rename.on_text_input("FRAME");
+        assert!(rename.prompt().contains("\"FRAME\""), "{}", rename.prompt());
+        assert_eq!(
+            dispatched(rename.on_text_input("BOX")),
+            "NAMEDSEL RENAME FRAME BOX"
+        );
+
+        let mut delete = command(&[]);
+        let _ = delete.on_text_input("D");
+        assert_eq!(
+            dispatched(delete.on_text_input("FRAME")),
+            "NAMEDSEL DELETE FRAME"
+        );
+
+        let mut list = command(&[]);
+        assert_eq!(dispatched(list.on_text_input("?")), "NAMEDSEL ?");
+    }
+
+    #[test]
+    fn only_the_option_step_offers_options() {
+        let mut command = command(&[]);
+        let keys: Vec<String> = command
+            .options()
+            .into_iter()
+            .map(|option| option.keyword)
+            .collect();
+        assert_eq!(keys, ["S", "R", "REN", "D", "?"]);
+        let _ = command.on_text_input("R");
+        assert!(command.options().is_empty());
+    }
+
+    #[test]
+    fn save_with_no_selection_gathers_objects_first() {
+        let mut save = command(&[]);
+        assert!(!save.is_selection_gathering());
+        let _ = save.on_text_input("SAVE");
+        assert!(save.is_selection_gathering());
+        assert!(matches!(
+            save.on_selection_complete(Vec::new()),
+            CmdResult::Cancel
+        ));
+
+        let mut save = command(&[]);
+        let _ = save.on_text_input("SAVE");
+        let _ = save.on_selection_complete(vec![Handle::new(0x2A)]);
+        assert!(!save.is_selection_gathering());
+        assert_eq!(dispatched(save.on_text_input("A")), "NAMEDSEL SAVE A 2A");
+    }
+
+    #[test]
+    fn a_name_with_a_space_is_refused() {
+        let mut save = command(&[0x2A]);
+        let _ = save.on_text_input("S");
+        assert!(matches!(
+            save.on_text_input("TWO WORDS"),
+            Some(CmdResult::ReportError(_))
+        ));
+        assert_eq!(
+            dispatched(save.on_text_input("ONE")),
+            "NAMEDSEL SAVE ONE 2A"
+        );
+    }
+
+    #[test]
+    fn the_name_steps_suggest_the_saved_names() {
+        let mut recall = command(&[]);
+        assert!(
+            recall.text_suggestions("F").is_empty(),
+            "no names at the option step"
+        );
+        let _ = recall.on_text_input("R");
+        let names: Vec<String> = recall
+            .text_suggestions("f")
+            .into_iter()
+            .map(|suggestion| suggestion.value)
+            .collect();
+        assert_eq!(names, ["FRAME"]);
+    }
+}

@@ -3331,8 +3331,10 @@ impl OpenCADStudio {
                 }
                 if self.command_line.has_contextual_suggestions() {
                     self.command_line.autocomplete_prev();
+                    return self.focus_cmd_input();
                 }
-                self.focus_cmd_input()
+                let moved = self.cycle_object_snap_back();
+                Task::batch([moved, self.focus_cmd_input()])
             }
 
             Message::SplitModelViewport(horizontal) => {

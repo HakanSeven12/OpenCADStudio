@@ -54,7 +54,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.16"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "e944adc8130f0817976e885ddb6b02fd0f2d9d83", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "840feb9e8f881e30d37f70d5627e2d0e5aad4217", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -195,11 +195,6 @@ iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b
 iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
-
-# The pinned codec plus the points' own marker scales and rotations
-# (hakanaktt/acadrust#714); drop once the document crate pins a codec past it.
-[patch."https://github.com/hakanaktt/acadrust.git"]
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "752e4e10f513c4e48a758eac262c5c7df135a52c" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

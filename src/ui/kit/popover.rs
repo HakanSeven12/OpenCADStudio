@@ -54,7 +54,7 @@ fn check<'a>(label: String, checked: bool, on_toggle: Option<Message>) -> Elemen
         text = text.on_press(message);
     }
     row![box_, text]
-        .spacing(km::CELL_PAD_X)
+        .spacing(km::CHECK_GAP)
         .align_y(iced::Center)
         .into()
 }
@@ -73,6 +73,14 @@ pub fn check_row<'a>(
         false,
         None,
     )
+}
+
+/// A row's name without a check box, starting where the labels after the
+/// check boxes start ([`km::CHECK_LABEL_X`]), so all labels line up.
+pub fn aligned_name<'a>(name: impl Into<String>) -> Element<'a, Message> {
+    container(super::name_text(name))
+        .padding(Padding::ZERO.left(km::CHECK_LABEL_X - km::CELL_PAD_X))
+        .into()
 }
 
 /// A check box and `label` in the left half and a choice (`dropdown`, a

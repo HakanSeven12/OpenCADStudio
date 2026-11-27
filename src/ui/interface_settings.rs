@@ -200,7 +200,7 @@ fn choice<'a>(
 /// A row with a name and a choice, each half the width.
 fn select_row<'a>(name: String, value: Element<'a, Message>) -> Element<'a, Message> {
     kit::row_view_split(
-        kit::name_text(name),
+        kit::aligned_name(name),
         value,
         kit::NameWidth::Half,
         false,

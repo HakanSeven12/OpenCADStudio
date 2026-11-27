@@ -110,6 +110,12 @@ pub const BAR_BUTTON: f32 = 18.0;
 pub const BAR_ICON: f32 = 12.0;
 /// Size of a check box in a row.
 pub const CHECK: f32 = 14.0;
+/// Gap between a check box and its label.
+pub const CHECK_GAP: f32 = 4.0;
+/// Where a label starts in a name cell, from the cell's left edge: after a
+/// check box when the row has one, at the same x when it has none, so the
+/// labels of a popover line up.
+pub const CHECK_LABEL_X: f32 = CELL_PAD_X + CHECK + CHECK_GAP;
 
 // ── Drawing-tab bar ───────────────────────────────────────────────────────
 

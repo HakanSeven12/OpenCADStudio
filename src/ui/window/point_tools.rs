@@ -504,8 +504,9 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
                         .width(Fill),
                 );
             }
+            // The list and its buttons take the room of the selected list.
             column![
-                scrollable(list).height(Length::Fixed(120.0)),
+                scrollable(list).height(Length::Fixed(86.0)),
                 row![
                     small(t!("Click rows to select the point groups.")).style(muted_style),
                     Space::new().width(Fill),

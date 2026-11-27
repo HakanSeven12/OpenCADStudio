@@ -36,9 +36,9 @@ pub enum Scale {
 
 impl LocalGrid {
     /// From the drawing's GEODATA; none while its reference point is still
-    /// a longitude/latitude (no transformation was set up).
-    // ponytail: a set-up transformation that is switched off is not told
-    // apart (the switch was not found in the drawing); use it once it is.
+    /// a longitude/latitude (no transformation was set up). A set-up
+    /// transformation the drawing settings switch off is left out by the
+    /// caller.
     pub fn of(geo: &document::objects::GeoData) -> Option<LocalGrid> {
         let r = geo.reference_point;
         if r.x.abs() <= 180.0 && r.y.abs() <= 90.0 {

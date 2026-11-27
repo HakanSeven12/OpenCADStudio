@@ -2734,7 +2734,11 @@ impl OpenCADStudio {
             "CREATEPTGEODETICDIR" => match crate::io::crs::document_crs(&self.tabs[i].scene.document) {
                 Ok(Some(crs)) if !crs.is_geographic() => {
                     use crate::modules::civil::point_geodetic::{GeodeticDirectCommand, LocalGrid};
-                    let transform = crate::io::crs::model_space_geo_data(&self.tabs[i].scene.document).and_then(LocalGrid::of);
+                    // A transformation the drawing settings switch off leaves
+                    // the drawing coordinates as grid coordinates.
+                    let document = &self.tabs[i].scene.document;
+                    let applied = document::classes::civil::transformation_applied(document) != Some(false);
+                    let transform = crate::io::crs::model_space_geo_data(document).filter(|_| applied).and_then(LocalGrid::of);
                     let c = GeodeticDirectCommand::new(crs, transform);
                     self.command_line.push_info(&c.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(c));

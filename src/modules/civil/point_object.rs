@@ -110,6 +110,9 @@ enum Step {
     Third(DVec3, DVec3),
     FirstAngle([DVec3; 3]),
     SecondAngle([DVec3; 3]),
+    /// A station, offset, interval or distance prompt answered with a point:
+    /// the second point closes it, the value being the distance between.
+    ValuePoint(Box<Step>, DVec3),
 }
 
 pub struct ObjectPointCommand {
@@ -151,12 +154,21 @@ fn resection(p: [DVec3; 3], a: f64, b: f64) -> Result<DVec3, &'static str> {
     use glam::DVec2;
     let mul = |x: DVec2, y: DVec2| DVec2::new(x.x * y.x - x.y * y.y, x.x * y.y + x.y * y.x);
     let div = |x: DVec2, y: DVec2| mul(x, DVec2::new(y.x, -y.y)) / y.length_squared();
-    let colinear = |deg: f64| (deg.rem_euclid(180.0)).min(180.0 - deg.rem_euclid(180.0)) < 1e-9;
-    if colinear(a) {
+    // Measured: a zero angle puts the station on the line through 1 and 2
+    // (or 1 and 3), equal angles on the one through 2 and 3; 180° is no
+    // solution, not a colinear pair.
+    let zero = |deg: f64| {
+        let r = deg.rem_euclid(360.0);
+        r < 1e-9 || 360.0 - r < 1e-9
+    };
+    if zero(a) {
         return Err("Points 1 and 2 are colinear.");
     }
-    if colinear(b) {
+    if zero(b) {
         return Err("Points 1 and 3 are colinear.");
+    }
+    if zero(a - b) {
+        return Err("Points 2 and 3 are colinear.");
     }
     let [p1, p2, p3] = p.map(|v| DVec2::new(v.x, v.y));
     // The centre seeing `p`–`q` under the clockwise angle `deg`.
@@ -279,7 +291,96 @@ impl ObjectPointCommand {
             number(typed)
         }
     }
+
+    /// The prompts that also take a point (the distance to a second one
+    /// is the value; measured).
+    fn takes_points(step: &Step) -> bool {
+        matches!(step, Step::DefaultElevation | Step::StartStation | Step::EndStation | Step::Station | Step::Offset | Step::Interval | Step::Distance)
+    }
+
+    /// The value a numbered prompt offers; the distance offers none.
+    fn default_of(&self, step: &Step) -> Option<f64> {
+        Some(match step {
+            Step::StartStation => self.start_station,
+            Step::EndStation => self.end_station,
+            Step::Station => self.station,
+            Step::Offset => self.offset,
+            Step::Interval => self.interval,
+            _ => return None,
+        })
+    }
+
+    /// The message a numbered prompt gives for text it cannot read.
+    fn unreadable(step: &Step, typed: &str) -> CmdResult {
+        match step {
+            Step::Distance => CmdResult::ReportError(t("Requires numeric distance, second point, or option keyword.")),
+            _ => CmdResult::ReportError(crate::tf!("Invalid characters found in input string '{}'.", typed).into_owned()),
+        }
+    }
+
+    /// A value given at a numbered prompt (typed, or the distance between
+    /// two points): the prompt's next step.
+    fn apply(&mut self, step: Step, v: f64) -> CmdResult {
+        match step {
+            Step::DefaultElevation => {
+                self.default_elevation = v;
+                self.step = Step::Object;
+            }
+            Step::StartStation => {
+                self.start_station = v;
+                // The ending station offered is the path's far end.
+                self.end_station = v + self.path.as_ref().map_or(0.0, Path::length);
+                self.step = if self.kind == Kind::Measure { Step::EndStation } else { Step::Station };
+            }
+            Step::EndStation => {
+                self.end_station = v;
+                self.step = Step::Offset;
+            }
+            Step::Station => {
+                self.station = v;
+                self.step = Step::Offset;
+            }
+            Step::Offset => {
+                self.offset = v;
+                let points = match self.kind {
+                    Kind::Divide => self.divided(),
+                    Kind::Measure => {
+                        self.step = Step::Interval;
+                        return CmdResult::NeedPoint;
+                    }
+                    _ => match self.path.as_ref() {
+                        Some(path) => vec![path.at(self.station - self.start_station, v)],
+                        None => Vec::new(),
+                    },
+                };
+                return self.queue_and_ask(points);
+            }
+            Step::Interval => {
+                self.step = Step::Interval;
+                if !(f64::EPSILON..=1e24).contains(&v) {
+                    return CmdResult::ReportError(t(DISTANCE_RANGE));
+                }
+                self.interval = v;
+                let points = self.measured();
+                return self.queue_and_ask(points);
+            }
+            Step::Distance => {
+                // Measured: a distance not above zero is refused and the
+                // distance is asked again.
+                self.step = Step::Distance;
+                if !(f64::EPSILON..=1e24).contains(&v) {
+                    return CmdResult::ReportError(t(DISTANCE_RANGE));
+                }
+                let Some(p) = self.path.as_ref().map(|path| path.at(v, 0.0)) else { return CmdResult::NeedPoint };
+                return self.queue_and_ask(vec![p]);
+            }
+            other => self.step = other,
+        }
+        CmdResult::NeedPoint
+    }
 }
+
+const DISTANCE_RANGE: &str = "Please enter a value greater than or equal to 2.220446E-16 and  less than or equal to 1.000000E+24";
 
 impl CadCommand for ObjectPointCommand {
     fn name(&self) -> &'static str {
@@ -306,7 +407,19 @@ impl CadCommand for ObjectPointCommand {
             Step::Distance => t("Specify a distance:"),
             Step::Description => crate::tf!("Enter a point description <{}>:", self.description.as_deref().unwrap_or(".")).into_owned(),
             Step::Elevation(_) => t("Specify a point elevation <.>:"),
+            Step::ValuePoint(ref inner, _) => match self.default_of(inner) {
+                Some(d) => crate::tf!("Specify second point <{:.3}>:", d).into_owned(),
+                // The default elevation offers none (".").
+                None if matches!(**inner, Step::DefaultElevation) => t("Specify second point <.>:"),
+                None => t("Specify second point:"),
+            },
         }
+    }
+
+    /// A typed coordinate at a station, offset, interval or distance prompt
+    /// is a point (the start of a two-point distance).
+    fn point_step_accepts_keywords(&self) -> bool {
+        Self::takes_points(&self.step) || matches!(self.step, Step::ValuePoint(..))
     }
 
     fn input_kind(&self) -> InputKind {
@@ -360,8 +473,10 @@ impl CadCommand for ObjectPointCommand {
             }
             return self.next();
         }
-        let Some(curve) = self.picked.take().and_then(|e| entity_curve(&e)) else {
-            return CmdResult::NeedPoint;
+        let Some(picked) = self.picked.take() else { return CmdResult::NeedPoint };
+        // Measured on a COGO point: an object without a path is refused.
+        let Some(curve) = entity_curve(&picked) else {
+            return CmdResult::ReportError(t("ERROR: Invalid selection set!"));
         };
         let len = curve.length();
         let start = flat(curve.point_at_distance(0.0));
@@ -384,7 +499,7 @@ impl CadCommand for ObjectPointCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         let pt = DVec3::new(pt.x, pt.y, 0.0);
-        match self.step {
+        match self.step.clone() {
             Step::Object if self.kind == Kind::Resection => {
                 self.step = Step::Second(pt);
                 CmdResult::NeedPoint
@@ -398,6 +513,11 @@ impl CadCommand for ObjectPointCommand {
                 CmdResult::NeedPoint
             }
             Step::Object => CmdResult::NeedPoint,
+            Step::ValuePoint(inner, a) => self.apply(*inner, a.truncate().distance(pt.truncate())),
+            step if Self::takes_points(&step) => {
+                self.step = Step::ValuePoint(Box::new(step), pt);
+                CmdResult::NeedPoint
+            }
             _ => CmdResult::ReportError(t("Invalid input")),
         }
     }
@@ -406,7 +526,15 @@ impl CadCommand for ObjectPointCommand {
         let typed = text.trim();
         let bad = Some(CmdResult::ReportError(t("Invalid input")));
         match self.step.clone() {
-            Step::Object | Step::Second(_) | Step::Third(..) => return None,
+            // Measured: a word at the resection's first point, at its second
+            // and third, and at an object prompt.
+            Step::Object if self.kind == Kind::Resection => return Some(CmdResult::ReportError(t("Point or option keyword required."))),
+            Step::Second(_) | Step::Third(..) => return Some(CmdResult::ReportError(t("2D point or option keyword required."))),
+            // A typed coordinate picks the object there.
+            Step::Object if self.kind != Kind::Automatic && crate::entities::coord_parse::parse_coord(typed).is_none() => {
+                return Some(CmdResult::ReportError(format!("{}\n{}", t("*Invalid selection*"), t("Expects a single object."))));
+            }
+            Step::Object => return None,
             Step::FirstAngle(p) => match Self::value(typed, self.angles.0) {
                 Some(a) => {
                     self.angles.0 = a;
@@ -439,68 +567,43 @@ impl CadCommand for ObjectPointCommand {
                         self.default_elevation = z;
                         self.step = Step::Object;
                     }
-                    None => return bad,
+                    None => return Some(Self::unreadable(&Step::DefaultElevation, typed)),
                 },
             },
-            Step::StartStation => match Self::value(typed, self.start_station) {
-                Some(s) => {
-                    self.start_station = s;
-                    // The ending station offered is the path's far end.
-                    self.end_station = s + self.path.as_ref().map_or(0.0, Path::length);
-                    self.step = if self.kind == Kind::Measure { Step::EndStation } else { Step::Station };
-                }
-                None => return bad,
-            },
-            Step::EndStation => match Self::value(typed, self.end_station) {
-                Some(s) => {
-                    self.end_station = s;
-                    self.step = Step::Offset;
-                }
-                None => return bad,
-            },
-            Step::Station => match Self::value(typed, self.station) {
-                Some(s) => {
-                    self.station = s;
-                    self.step = Step::Offset;
-                }
-                None => return bad,
-            },
-            Step::Segments => match if typed.is_empty() { Some(self.segments) } else { typed.parse::<u32>().ok().filter(|n| *n > 0) } {
-                Some(n) => {
-                    self.segments = n;
-                    self.step = Step::Offset;
-                }
-                None => return bad,
-            },
-            Step::Offset => match Self::value(typed, self.offset) {
-                Some(o) => {
-                    self.offset = o;
-                    let points = match self.kind {
-                        Kind::Divide => self.divided(),
-                        Kind::Measure => {
-                            self.step = Step::Interval;
-                            return Some(CmdResult::NeedPoint);
+            Step::ValuePoint(inner, _) => {
+                return Some(match (typed.is_empty(), number(typed)) {
+                    // Enter takes the prompt's own value; without one the
+                    // prompt is asked again.
+                    (true, _) => match self.default_of(&inner) {
+                        Some(d) => self.apply(*inner, d),
+                        None if matches!(*inner, Step::DefaultElevation) => self.apply(*inner, 0.0),
+                        None => {
+                            self.step = *inner;
+                            CmdResult::NeedPoint
                         }
-                        _ => vec![self.path.as_ref()?.at(self.station - self.start_station, o)],
-                    };
-                    return Some(self.queue_and_ask(points));
+                    },
+                    (false, Some(v)) => self.apply(*inner, v),
+                    (false, None) => Self::unreadable(&inner, typed),
+                });
+            }
+            // Measured: Enter at the distance goes back to the object.
+            Step::Distance if typed.is_empty() => self.step = Step::Object,
+            step @ (Step::StartStation | Step::EndStation | Step::Station | Step::Offset | Step::Interval | Step::Distance) => {
+                let default = self.default_of(&step).unwrap_or(0.0);
+                return Some(match Self::value(typed, default) {
+                    Some(v) => self.apply(step, v),
+                    None => Self::unreadable(&step, typed),
+                });
+            }
+            // Measured: zero and negative counts, then text, decimals and
+            // points.
+            Step::Segments => match if typed.is_empty() { Some(i64::from(self.segments)) } else { typed.parse::<i64>().ok() } {
+                Some(n) if n > 0 => {
+                    self.segments = u32::try_from(n).unwrap_or(u32::MAX);
+                    self.step = Step::Offset;
                 }
-                None => return bad,
-            },
-            Step::Interval => match Self::value(typed, self.interval).filter(|v| *v > 0.0) {
-                Some(v) => {
-                    self.interval = v;
-                    let points = self.measured();
-                    return Some(self.queue_and_ask(points));
-                }
-                None => return bad,
-            },
-            Step::Distance => match number(typed) {
-                Some(d) => {
-                    let p = self.path.as_ref()?.at(d, 0.0);
-                    return Some(self.queue_and_ask(vec![p]));
-                }
-                None => return bad,
+                Some(_) => return Some(CmdResult::ReportError(t("A positive value is required"))),
+                None => return Some(CmdResult::ReportError(t("'Generic Integer' validation error.  Please enter an integer."))),
             },
             Step::Description => {
                 let d = match typed {
@@ -554,6 +657,7 @@ impl CadCommand for ObjectPointCommand {
         self.queue.clear();
         self.step = match (self.kind, &self.step) {
             (_, Step::Object | Step::DefaultElevation) => return CmdResult::Cancel,
+            (_, Step::ValuePoint(inner, _)) if matches!(**inner, Step::DefaultElevation) => return CmdResult::Cancel,
             (Kind::StationOffset, Step::Station) => Step::StartStation,
             (Kind::StationOffset, Step::Offset | Step::Description | Step::Elevation(_)) => Step::Station,
             (Kind::Along, Step::Description | Step::Elevation(_)) => Step::Distance,

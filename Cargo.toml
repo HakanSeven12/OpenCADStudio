@@ -54,7 +54,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.16"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "b5925f27edda425f936a3469b756ecdb36c10445", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "a42aff6c75d244c51e82ee36d13aed9191613075", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -195,11 +195,6 @@ iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b
 iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
-
-# The pinned codec plus rewriting the point group draw order
-# (hakanaktt/acadrust#711); drop once the document crate pins a codec past it.
-[patch."https://github.com/hakanaktt/acadrust.git"]
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "fd4c3aaa2e4c9a071dd7b17a25784a1f106095c3" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

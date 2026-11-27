@@ -3,7 +3,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
 
 #[allow(dead_code)]
 #[path = "src/manifest.rs"]
@@ -56,6 +55,7 @@ fn main() {
     println!("cargo:rerun-if-changed=entity_coverage_policy.json");
     println!("cargo:rerun-if-changed=src/entity_coverage_types.rs");
     println!("cargo:rerun-if-changed=src/manifest.rs");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1274,17 +1274,11 @@ fn generate_version_info(out_dir: &Path) {
     let lock_path = workspace_cargo_lock_path();
     let lockfile = Lockfile::load(&lock_path).expect("load Cargo.lock");
 
-    // Use Cargo.lock's mtime as the build timestamp so the embedded JSON stays
-    // stable across normal incremental builds and only changes when dependencies
-    // are updated. Stored as Unix seconds to avoid an extra date-formatting
-    // dependency in the build script.
-    let build_timestamp = fs::metadata(&lock_path)
-        .and_then(|m| m.modified())
-        .and_then(|t| {
-            t.duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .map_err(std::io::Error::other)
-        })
+    // Derive the embedded timestamp from SOURCE_DATE_EPOCH (0 when unset) so
+    // builds are reproducible across clean checkouts and incremental rebuilds.
+    let build_timestamp = env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(0);
 
     let ocs = lockfile
@@ -1327,10 +1321,9 @@ fn generate_version_info(out_dir: &Path) {
 
 fn workspace_cargo_lock_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    // CARGO_MANIFEST_DIR is crates/ocs_plugin_api; walk up to the workspace root.
     manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("Cargo.lock"))
-        .expect("Cargo.lock in workspace root")
+        .ancestors()
+        .map(|dir| dir.join("Cargo.lock"))
+        .find(|candidate| candidate.is_file())
+        .expect("Cargo.lock in workspace ancestors")
 }

@@ -10,5 +10,5 @@ publish = false
 workspace = true
 
 [dependencies]
-solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }

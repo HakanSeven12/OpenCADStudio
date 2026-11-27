@@ -9,6 +9,13 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+try:
+    import tomllib
+except ImportError:  # Python < 3.11 (e.g. ubuntu-22.04)
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 
 def run(*args):
@@ -136,6 +143,78 @@ def rotate_changelog(tag, day, page):
     index.write_text(text, encoding="utf-8")
 
 
+def update_cargo_toml_version(content, old, new):
+    header = re.search(r"^\[package\]\s*$", content, re.M)
+    if not header:
+        raise ValueError("Missing [package] section in Cargo.toml")
+    next_header = re.search(r"^\[", content[header.end():], re.M)
+    sec_end = header.end() + next_header.start() if next_header else len(content)
+    section = content[header.end():sec_end]
+    matches = list(re.finditer(r'^(version\s*=\s*)"([^"]+)"(.*)$', section, re.M))
+    if len(matches) != 1 or matches[0].group(2) != old:
+        raise ValueError(f"Expected package version {old!r} in Cargo.toml [package] section")
+    m = matches[0]
+    updated_section = (
+        section[:m.start()]
+        + f'{m.group(1)}"{new}"{m.group(3)}'
+        + section[m.end():]
+    )
+    updated = content[:header.end()] + updated_section + content[sec_end:]
+    if tomllib is not None and tomllib.loads(updated)["package"]["version"] != new:
+        raise ValueError("Updated Cargo.toml failed TOML version verification")
+    return updated
+
+
+def update_cargo_lock_version(content, package_name, old, new):
+    headers = list(re.finditer(r"^\[\[package\]\]\s*$", content, re.M))
+    if not headers:
+        raise ValueError("Missing [[package]] entries in Cargo.lock")
+    target_bounds = None
+    for idx, header in enumerate(headers):
+        end = headers[idx + 1].start() if idx + 1 < len(headers) else len(content)
+        block = content[header.end():end]
+        if re.search(rf'^name\s*=\s*"{re.escape(package_name)}"\s*$', block, re.M):
+            if target_bounds is not None:
+                raise ValueError(f"Multiple [[package]] entries for {package_name} in Cargo.lock")
+            target_bounds = (header.end(), end)
+    if target_bounds is None:
+        raise ValueError(f"Missing [[package]] entry for {package_name} in Cargo.lock")
+    start, end = target_bounds
+    block = content[start:end]
+    matches = list(re.finditer(r'^(version\s*=\s*)"([^"]+)"(.*)$', block, re.M))
+    if len(matches) != 1 or matches[0].group(2) != old:
+        raise ValueError(f"Expected {package_name} version {old!r} in Cargo.lock")
+    m = matches[0]
+    updated_block = (
+        block[:m.start()]
+        + f'{m.group(1)}"{new}"{m.group(3)}'
+        + block[m.end():]
+    )
+    updated = content[:start] + updated_block + content[end:]
+    if tomllib is not None:
+        parsed = tomllib.loads(updated)
+        found = [pkg for pkg in parsed.get("package", []) if pkg.get("name") == package_name]
+        if len(found) != 1 or found[0].get("version") != new:
+            raise ValueError(f"Updated Cargo.lock failed TOML version verification for {package_name}")
+    return updated
+
+
+def sync_homebrew(tag, arm_sha, intel_sha, cask_path=Path("packaging/homebrew/open-cad-studio.rb")):
+    version = versions(tag)["version"]
+    for label, digest in (("arm", arm_sha), ("intel", intel_sha)):
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"Invalid {label} SHA-256 digest: {digest!r}")
+    cask_path = Path(cask_path)
+    text = cask_path.read_text(encoding="utf-8")
+    text, v_count = re.subn(r'^(\s*version\s+")[^"]+(")', rf'\g<1>{version}\g<2>', text, count=1, flags=re.M)
+    text, arm_count = re.subn(r'^(\s*sha256\s+arm:\s*")[^"]+(")', rf'\g<1>{arm_sha}\g<2>', text, count=1, flags=re.M)
+    text, intel_count = re.subn(r'^(\s*intel:\s*")[^"]+(")', rf'\g<1>{intel_sha}\g<2>', text, count=1, flags=re.M)
+    if (v_count, arm_count, intel_count) != (1, 1, 1):
+        raise ValueError(f"Could not update Homebrew cask fields cleanly in {cask_path}")
+    cask_path.write_text(text, encoding="utf-8")
+    return version
+
+
 def prepare(publish):
     if run("git", "status", "--porcelain"):
         raise ValueError("Release preparation requires a clean working tree")
@@ -176,13 +255,16 @@ def prepare(publish):
         return
     if not existing:
         old = cargo_version()
-        updates = {}
-        for path, prefix in ((Path("Cargo.toml"), ""), (Path("Cargo.lock"), 'name = "OpenCADStudio"\n')):
-            content = path.read_text(encoding="utf-8")
-            before = f'{prefix}version = "{old}"'
-            if before not in content:
-                raise ValueError(f"Cannot update version in {path}")
-            updates[path] = content.replace(before, f'{prefix}version = "{version["cargo"]}"', 1)
+        cargo_toml_path = Path("Cargo.toml")
+        cargo_lock_path = Path("Cargo.lock")
+        updates = {
+            cargo_toml_path: update_cargo_toml_version(
+                cargo_toml_path.read_text(encoding="utf-8"), old, version["cargo"]
+            ),
+            cargo_lock_path: update_cargo_lock_version(
+                cargo_lock_path.read_text(encoding="utf-8"), "OpenCADStudio", old, version["cargo"]
+            ),
+        }
         for path, content in updates.items():
             path.write_text(content, encoding="utf-8")
         run("git", "config", "user.name", "github-actions[bot]")
@@ -229,11 +311,19 @@ def main():
     version_parser.add_argument("--tag", default="")
     verify_parser = commands.add_parser("verify-native")
     verify_parser.add_argument("--tag", required=True)
+    homebrew_parser = commands.add_parser("sync-homebrew")
+    homebrew_parser.add_argument("--tag", required=True)
+    homebrew_parser.add_argument("--arm-sha", required=True)
+    homebrew_parser.add_argument("--intel-sha", required=True)
+    homebrew_parser.add_argument("--cask", default="packaging/homebrew/open-cad-studio.rb")
     args = parser.parse_args()
     if args.command == "prepare":
         prepare(args.publish)
     elif args.command == "verify-native":
         verify_native(args.tag)
+    elif args.command == "sync-homebrew":
+        version = sync_homebrew(args.tag, args.arm_sha, args.intel_sha, args.cask)
+        output({"version": version, "cask": str(args.cask)})
     else:
         version = versions(args.tag or display_version(cargo_version()))
         if args.tag and version["cargo"] != cargo_version():

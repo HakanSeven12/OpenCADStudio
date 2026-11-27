@@ -111,14 +111,14 @@ fn main() {
     // Release builds generate the icon before compiling.
     #[cfg(windows)]
     {
-        println!("cargo:rerun-if-changed=packaging/windows/AppIcon.ico");
         if Path::new("packaging/windows/AppIcon.ico").exists() {
+            println!("cargo:rerun-if-changed=packaging/windows/AppIcon.ico");
             let mut res = winresource::WindowsResource::new();
             res.set_icon("packaging/windows/AppIcon.ico");
             res.set("ProductVersion", &full_version);
             res.set("FileVersion", &app_version);
             if let Err(e) = res.compile() {
-                println!("cargo:warning=failed to embed Windows icon: {e}");
+                panic!("failed to embed Windows icon: {e}");
             }
         }
     }
@@ -135,6 +135,9 @@ fn write_icon_pairs() {
         println!("cargo:rerun-if-changed=assets/icons");
     }
     let large_root = icons.join("32");
+    if large_root.is_dir() {
+        println!("cargo:rerun-if-changed=assets/icons/32");
+    }
     let mut relative = Vec::new();
     collect_svgs(&large_root, &large_root, &mut relative);
     relative.sort();
@@ -149,6 +152,9 @@ fn write_icon_pairs() {
             );
             continue;
         }
+        let rel = path.display();
+        println!("cargo:rerun-if-changed=assets/icons/{rel}");
+        println!("cargo:rerun-if-changed=assets/icons/32/{rel}");
         let large = large_root.join(path);
         source.push_str(&format!(
             "    (include_bytes!({:?}), include_bytes!({:?})),\n",
@@ -193,6 +199,7 @@ fn write_command_summaries() {
             if path.extension().is_none_or(|ext| ext != "md") {
                 continue;
             }
+            println!("cargo:rerun-if-changed={}", path.display());
             let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };

@@ -229,6 +229,59 @@ class ReleaseTests(unittest.TestCase):
             finally:
                 os.chdir(previous_directory)
 
+    def test_scoped_manifest_version_updates(self):
+        cargo_toml = textwrap.dedent("""\
+            [package]
+            name = "OpenCADStudio"
+            version = "2026.47.0"
+            edition = "2021"
+
+            [dependencies]
+            other = { version = "2026.47.0" }
+        """)
+        updated_toml = release.update_cargo_toml_version(cargo_toml, "2026.47.0", "2026.48.0")
+        self.assertIn('[package]\nname = "OpenCADStudio"\nversion = "2026.48.0"', updated_toml)
+        self.assertIn('other = { version = "2026.47.0" }', updated_toml)
+
+        cargo_lock = textwrap.dedent("""\
+            version = 4
+
+            [[package]]
+            name = "unrelated"
+            version = "2026.47.0"
+
+            [[package]]
+            name = "OpenCADStudio"
+            version = "2026.47.0"
+        """)
+        updated_lock = release.update_cargo_lock_version(cargo_lock, "OpenCADStudio", "2026.47.0", "2026.48.0")
+        self.assertIn('name = "unrelated"\nversion = "2026.47.0"', updated_lock)
+        self.assertIn('name = "OpenCADStudio"\nversion = "2026.48.0"', updated_lock)
+
+    def test_sync_homebrew_validation_and_update(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cask = Path(temp) / "open-cad-studio.rb"
+            cask.write_text(textwrap.dedent("""\
+                cask "open-cad-studio" do
+                  arch arm: "arm64", intel: "x86_64"
+
+                  version "2026.44"
+                  sha256 arm:   "0" * 64
+                end
+            """).replace('"0" * 64', '"' + ("0" * 64) + '",\n         intel: "' + ("1" * 64) + '"'), encoding="utf-8")
+            arm_sha = "a" * 64
+            intel_sha = "b" * 64
+            updated_version = release.sync_homebrew("v2026.47", arm_sha, intel_sha, cask)
+            self.assertEqual(updated_version, "2026.47")
+            text = cask.read_text(encoding="utf-8")
+            self.assertIn('version "2026.47"', text)
+            self.assertIn(f'sha256 arm:   "{arm_sha}"', text)
+            self.assertIn(f'intel: "{intel_sha}"', text)
+            with self.assertRaises(ValueError):
+                release.sync_homebrew("v2026.47", "not-a-sha", intel_sha, cask)
+            with self.assertRaises(ValueError):
+                release.sync_homebrew("bad-tag", arm_sha, intel_sha, cask)
+
 
 if __name__ == "__main__":
     unittest.main()

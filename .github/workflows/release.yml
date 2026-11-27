@@ -766,7 +766,7 @@ jobs:
           SHA=$(shasum -a 256 "OpenCADStudio-${RELEASE_TAG}-macos-${ARCH}.dmg" | awk '{print $1}')
           {
             echo "## Homebrew cask bump ($ARCH)"
-            echo "Update \`packaging/homebrew/open-cad-studio.rb\`:"
+            echo "Update \`packaging/homebrew/open-cad-studio.rb\` (or run \`python3 scripts/release.py sync-homebrew --tag \"$RELEASE_TAG\" --arm-sha <arm> --intel-sha <intel>\`):"
             echo '```ruby'
             echo "  version \"$VERSION\""
             echo "  sha256 \"$SHA\""

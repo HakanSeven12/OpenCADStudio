@@ -2,6 +2,7 @@
 name = "ocs_save"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-3.0-only"
 publish = false
 
 # Pure-Rust SAVE pipeline pieces shared by the app crate (native host and the

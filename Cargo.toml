@@ -2,6 +2,7 @@
 name = "OpenCADStudio"
 version = "2026.47.0"
 edition = "2021"
+license = "GPL-3.0-only"
 build = "build.rs"
 default-run = "OpenCADStudio"
 autotests = false
@@ -46,7 +47,7 @@ url = "2"
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
 iced_runtime = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", branch = "agent/fix-iced-fonts", features = ["menu", "context_menu", "drop_down", "number_input"] }
+iced_aw = { git = "https://github.com/HakanSeven12/iced_aw.git", rev = "cf24e6498265ed6a5f91a8c5b0c92734c0c4c925", features = ["menu", "context_menu", "drop_down", "number_input"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.34", features = ["bytemuck"] }
 rfd = "0.18"
@@ -59,17 +60,17 @@ document = { package = "opencaddocument", git = "https://github.com/HakanSeven12
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
 ocs_constraints = { path = "crates/ocs_constraints" }
-solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
-solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
-solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
-solidcore-tess = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
-solidcore-step = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
+solidcore-tess = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
+solidcore-step = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
 ocs_solid = { path = "crates/ocs_solid" }
 # Solidcore's record model (B-rep, STEP exchange structure); the STEP writer
 # is vendored with OCS changes (Apache-2.0; see crates/step-export/VENDORED.md).
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db5092898f2f7a8e51ca631b390e8365dea5a" }
 step-export = { path = "crates/step-export" }
-graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
+graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20c50d1280bed312598fb757ecf71513b54" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one
 # implementation for the inline (fallback/native) path and the worker path.
@@ -312,6 +313,10 @@ ocs_save = { opt-level = 0 }
 ocs_web_worker = { opt-level = 0 }
 dwg-thumbnailer = { opt-level = 0 }
 dwg-thumbnailer-win = { opt-level = 0 }
+ocs_solid = { opt-level = 0 }
+step-export = { opt-level = 0 }
+ocs_geom = { opt-level = 0 }
+ocs_constraints = { opt-level = 0 }
 
 # Keep translation-resource and manifest parsing fast during macro expansion.
 i18n-embed = { opt-level = 2 }

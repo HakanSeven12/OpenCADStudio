@@ -1654,3 +1654,14 @@ pub fn terminate_requests() -> impl iced::futures::Stream<Item = ()> + Send + 's
         }
     })
 }
+
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (&x, &y) in a.iter().zip(b) {
+        difference |= x ^ y;
+    }
+    std::hint::black_box(difference) == 0
+}

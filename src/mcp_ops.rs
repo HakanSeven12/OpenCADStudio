@@ -3,6 +3,8 @@
 
 use serde_json::{Map, Value, json};
 
+pub const MAX_BATCH_STEPS: usize = 64;
+
 pub const TARGET_VERSIONS: &[&str] = &[
     "R14", "2000", "2004", "2007", "2010", "2013", "2018", "AC1014", "AC1015", "AC1018", "AC1021",
     "AC1024", "AC1027", "AC1032",
@@ -75,6 +77,7 @@ pub struct OpDef {
     pub batchable: bool,
     pub params: &'static [Param],
     pub rules: &'static [Rule],
+    pub rest_envelope: bool,
     /// Minimal valid payload (JSON text). Drives schema, validator and parity tests.
     pub example: &'static str,
 }
@@ -113,6 +116,7 @@ pub static NEW: OpDef = OpDef {
         "Optional template drawing path whose styles and tables survive.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"new"}"#,
 };
 
@@ -122,6 +126,7 @@ pub static OPEN: OpDef = OpDef {
     batchable: true,
     params: &[req("path", Ty::Str, "Absolute path to the drawing file.")],
     rules: &[],
+    rest_envelope: false,
     example: r#"{"op":"open","path":"drawing.dxf"}"#,
 };
 
@@ -135,6 +140,7 @@ pub static ACTIVATE: OpDef = OpDef {
         "Target document ID to activate.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"activate","document_id":1}"#,
 };
 
@@ -148,6 +154,7 @@ pub static SWITCH_DOCUMENT: OpDef = OpDef {
         "Target document ID to activate.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"switch_document","document_id":1}"#,
 };
 
@@ -157,6 +164,7 @@ pub static RUN: OpDef = OpDef {
     batchable: true,
     params: &[req("cmd", Ty::Str, "Command name and arguments.")],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#,
 };
 
@@ -166,6 +174,7 @@ pub static START: OpDef = OpDef {
     batchable: true,
     params: &[req("cmd", Ty::Str, "Command name to start.")],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"start","cmd":"LINE"}"#,
 };
 
@@ -227,6 +236,7 @@ pub static INPUT: OpDef = OpDef {
             then: &["handle", "point"],
         },
     ],
+    rest_envelope: true,
     example: r#"{"op":"input","kind":"point","point":[10,20]}"#,
 };
 
@@ -240,6 +250,7 @@ pub static CANCEL: OpDef = OpDef {
         "Also cancel a command another client started.",
     )],
     rules: &[],
+    rest_envelope: false,
     example: r#"{"op":"cancel"}"#,
 };
 
@@ -249,6 +260,7 @@ pub static UNDO: OpDef = OpDef {
     batchable: true,
     params: &[],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"undo"}"#,
 };
 
@@ -258,6 +270,7 @@ pub static REDO: OpDef = OpDef {
     batchable: true,
     params: &[],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"redo"}"#,
 };
 
@@ -293,6 +306,7 @@ pub static SELECT: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"select","clear":true}"#,
 };
 
@@ -309,6 +323,7 @@ pub static PROPERTY: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"property","field":"color","value":1}"#,
 };
 
@@ -339,6 +354,7 @@ pub static GRIP_DRAG: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"grip_drag","plugin":"opencad.civil_ifc","grip_id":7,"point":[10,0,0]}"#,
 };
 
@@ -355,6 +371,7 @@ pub static CLICK: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"click","point":[10,0,0],"modifiers":"ctrl"}"#,
 };
 
@@ -377,6 +394,7 @@ pub static POINTER: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"pointer","events":[{"move_world":[10,0,0]},{"press":"left"},{"release":"left"},{"move_world":[12,3,0]},{"press":"left"},{"release":"left"}]}"#,
 };
 
@@ -390,6 +408,7 @@ pub static KEY: OpDef = OpDef {
         "Key name with optional CTRL, CMD, ALT, SHIFT or ACCEL modifiers joined by +: a letter or digit, ENTER, SPACE, ESCAPE, DELETE, BACKSPACE, TAB, the arrows, HOME, END, PAGEUP, PAGEDOWN, INSERT, F1-F12.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"key","key":"ACCEL+PAGEDOWN"}"#,
 };
 
@@ -414,6 +433,7 @@ pub static SET_PROPERTIES: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"set_properties","collection":"layers","name":"Walls","updates":[{"path":"/color","value":3}]}"#,
 };
 
@@ -444,6 +464,7 @@ pub static PLUGIN_PANELS: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"plugin_panels"}"#,
 };
 
@@ -469,6 +490,7 @@ pub static PLUGIN_PANEL_ACTION: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"plugin_panel_action","panel_id":"acme:tree","element":7,"kind":"node_activated"}"#,
 };
 
@@ -487,6 +509,7 @@ pub static PANEL_INPUT: OpDef = OpDef {
         opt("value", Ty::Num, "Finite numeric draft converted to text."),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"panel_input","panel_id":"cvifc.ifc_h_properties","control_id":"SegmentLength","text":"101.5"}"#,
 };
 
@@ -503,6 +526,7 @@ pub static PANEL_BUTTON: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"panel_button","panel_id":"cvifc.ifc_h_properties","control_id":"apply"}"#,
 };
 
@@ -527,6 +551,7 @@ pub static PANEL_ACTION: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"panel_action","panel_id":"epl_panel","control_id":"epl_button_ping","action":"click"}"#,
 };
 
@@ -540,6 +565,7 @@ pub static ACTION: OpDef = OpDef {
         "Name of the UI action to execute.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"action","name":"zoom_extents"}"#,
 };
 
@@ -585,6 +611,7 @@ pub static EMBED_IMAGE: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"embed_image","path":"plan.png","linked":true,"calibrate":{"point_a":[52,910],"point_b":[450,910],"distance":6500},"layer":"_XREF","lock_layer":true}"#,
 };
 
@@ -616,6 +643,7 @@ pub static DGN_IMPORT: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"dgn_import","path":"cadastral.dgn","model":"Default","units":"Master","mapping":"Standard","codepage":1250}"#,
 };
 
@@ -639,6 +667,7 @@ pub static WBLOCK: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"wblock","path":"part.dwg","handles":["2A"]}"#,
 };
 
@@ -750,6 +779,7 @@ pub static PLOT: OpDef = OpDef {
         equals: "window",
         then: &["window"],
     }],
+    rest_envelope: true,
     example: r#"{"op":"plot","path":"out.pdf","area":"extents","scale":"1:100"}"#,
 };
 
@@ -763,6 +793,7 @@ pub static ENTITIES_CREATE: OpDef = OpDef {
         "Entity definitions. Read ocs_read op entity_schema with parameters.type for fields and examples before creating an unfamiliar type.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"entities_create","entities":[{"type":"Line","start":[0,0],"end":[10,10]}]}"#,
 };
 
@@ -803,6 +834,7 @@ pub static ENTITIES_SET: OpDef = OpDef {
         Rule::AnyOf(&["layer", "color", "linetype", "linetype_scale", "invisible"]),
         Rule::RejectUnknown,
     ],
+    rest_envelope: true,
     example: r#"{"op":"entities_set","handles":["2A","2B"],"layer":"Walls","color":"ByLayer","label":"Cadastral cleanup"}"#,
 };
 
@@ -816,6 +848,7 @@ pub static ENTITIES_DELETE: OpDef = OpDef {
         "Handles of entities to delete.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"entities_delete","handles":["2A"]}"#,
 };
 
@@ -869,6 +902,7 @@ pub static ENTITIES_TRANSFORM: OpDef = OpDef {
             then: &["axis"],
         },
     ],
+    rest_envelope: true,
     example: r#"{"op":"entities_transform","handles":["2A"],"action":"move","vector":[10,0]}"#,
 };
 
@@ -922,6 +956,7 @@ pub static TEXT_REPLACE: OpDef = OpDef {
         ),
     ],
     rules: &[Rule::AnyOf(&["find", "pairs"])],
+    rest_envelope: true,
     example: r#"{"op":"text_replace","find":"OLD","replace":"NEW"}"#,
 };
 
@@ -945,6 +980,7 @@ pub static BLOCK_DEFINE: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"block_define","name":"DOOR_90","handles":["2A","2B"],"base":[0,0]}"#,
 };
 
@@ -961,6 +997,7 @@ pub static BLOCK_DELETE: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"block_delete","name":"DOOR","force":true}"#,
 };
 
@@ -980,6 +1017,7 @@ pub static XDATA_SET: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"xdata_set","app":"APP","handles":["2A"],"data":[{"code":1000,"value":"tag"}]}"#,
 };
 
@@ -999,6 +1037,7 @@ pub static PLUGIN_CALL: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"plugin_call","plugin":"opencad.example","tool":"hello","arguments":{}}"#,
 };
 
@@ -1015,6 +1054,7 @@ pub static VIEW_FOCUS: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"view_focus","handles":["2A"]}"#,
 };
 
@@ -1040,6 +1080,7 @@ pub static ENTITIES_COPY_TO: OpDef = OpDef {
         ),
     ],
     rules: &[Rule::AnyOf(&["target_document_id", "document_id"])],
+    rest_envelope: true,
     example: r#"{"op":"entities_copy_to","handles":["2A"],"target_document_id":2}"#,
 };
 
@@ -1052,6 +1093,7 @@ pub static GROUP_CREATE: OpDef = OpDef {
         req("handles", Ty::Handles, "Entities in the group."),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"group_create","name":"Group1","handles":["2A"]}"#,
 };
 
@@ -1064,6 +1106,7 @@ pub static SELECTION_SET_SAVE: OpDef = OpDef {
         req("handles", Ty::Handles, "Entities to save."),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"selection_set_save","name":"Sel1","handles":["2A"]}"#,
 };
 
@@ -1080,6 +1123,7 @@ pub static SELECTION_SET_LOAD: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"selection_set_load","name":"Sel1"}"#,
 };
 
@@ -1107,6 +1151,7 @@ pub static USER_SELECT: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: false,
     example: r#"{"op":"user_select","prompt":"Pick entities"}"#,
 };
 
@@ -1120,6 +1165,7 @@ pub static GETPOINT: OpDef = OpDef {
         "Prompt text displayed while waiting for click.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"getpoint","prompt":"Click start point"}"#,
 };
 
@@ -1133,6 +1179,7 @@ pub static CLOSE: OpDef = OpDef {
         "Erase unsaved changes instead of refusing a dirty document.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"close"}"#,
 };
 
@@ -1153,6 +1200,7 @@ pub static SYSVAR: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"sysvar","get":["LTSCALE"]}"#,
 };
 
@@ -1162,6 +1210,7 @@ pub static LAYOUT_CREATE: OpDef = OpDef {
     batchable: true,
     params: &[req("name", Ty::Str, "Layout tab name.")],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"layout_create","name":"Sheet1"}"#,
 };
 
@@ -1174,6 +1223,7 @@ pub static LAYOUT_RENAME: OpDef = OpDef {
         req("new_name", Ty::Str, "New unique layout name."),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"layout_rename","name":"Sheet1","new_name":"Floor Plan"}"#,
 };
 
@@ -1183,6 +1233,7 @@ pub static LAYOUT_ACTIVATE: OpDef = OpDef {
     batchable: true,
     params: &[req("name", Ty::Str, "Layout name (case-insensitive).")],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"layout_activate","name":"Floor Plan"}"#,
 };
 
@@ -1192,6 +1243,7 @@ pub static LAYOUT_DELETE: OpDef = OpDef {
     batchable: true,
     params: &[req("name", Ty::Str, "Layout name (case-insensitive).")],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"layout_delete","name":"Floor Plan"}"#,
 };
 
@@ -1233,6 +1285,7 @@ pub static PAGE_SETUP_SET: OpDef = OpDef {
         equals: "window",
         then: &["window"],
     }],
+    rest_envelope: true,
     example: r#"{"op":"page_setup_set","layout":"Sheet1","paper":"A4"}"#,
 };
 
@@ -1242,6 +1295,7 @@ pub static XREF_RELOAD: OpDef = OpDef {
     batchable: true,
     params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
     rules: &[Rule::RejectUnknown],
+    rest_envelope: true,
     example: r#"{"op":"xref_reload","id":"2A"}"#,
 };
 
@@ -1251,6 +1305,7 @@ pub static XREF_UNLOAD: OpDef = OpDef {
     batchable: true,
     params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
     rules: &[Rule::RejectUnknown],
+    rest_envelope: true,
     example: r#"{"op":"xref_unload","id":"2A"}"#,
 };
 
@@ -1260,6 +1315,7 @@ pub static XREF_DETACH: OpDef = OpDef {
     batchable: true,
     params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
     rules: &[Rule::RejectUnknown],
+    rest_envelope: true,
     example: r#"{"op":"xref_detach","id":"2A"}"#,
 };
 
@@ -1269,6 +1325,7 @@ pub static XREF_BIND: OpDef = OpDef {
     batchable: true,
     params: &[req("id", Ty::Handle, "Direct DWG xref id from xrefs.")],
     rules: &[Rule::RejectUnknown],
+    rest_envelope: true,
     example: r#"{"op":"xref_bind","id":"2A"}"#,
 };
 
@@ -1293,6 +1350,7 @@ pub static XREF_SET_PATH: OpDef = OpDef {
         Rule::ExactlyOneOf(&["path", "path_type"]),
         Rule::RejectUnknown,
     ],
+    rest_envelope: true,
     example: r#"{"op":"xref_set_path","id":"2A","path_type":"relative"}"#,
 };
 
@@ -1309,6 +1367,7 @@ pub static XREF_SET_TYPE: OpDef = OpDef {
         ),
     ],
     rules: &[Rule::RejectUnknown],
+    rest_envelope: true,
     example: r#"{"op":"xref_set_type","id":"2A","reference_type":"overlay"}"#,
 };
 
@@ -1322,6 +1381,7 @@ pub static FILE_IDENTITY: OpDef = OpDef {
         "Generate fresh document identity tokens.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"file_identity"}"#,
 };
 
@@ -1348,6 +1408,7 @@ pub static SAVE: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"save"}"#,
 };
 
@@ -1379,6 +1440,7 @@ pub static SAVE_VERIFIED: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"save_verified","path":"drawing.dwg"}"#,
 };
 
@@ -1388,6 +1450,7 @@ pub static STOP: OpDef = OpDef {
     batchable: false,
     params: &[],
     rules: &[],
+    rest_envelope: false,
     example: r#"{"op":"stop"}"#,
 };
 
@@ -1401,6 +1464,7 @@ pub static BATCH: OpDef = OpDef {
         "List of batch steps to execute.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"batch","steps":[{"op":"run","cmd":"LINE 0,0 10,0"}]}"#,
 };
 
@@ -1412,6 +1476,7 @@ pub static STATE: OpDef = OpDef {
     batchable: false,
     params: &[],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"state"}"#,
 };
 
@@ -1474,6 +1539,7 @@ pub static QUERY: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"query","layer":"Walls"}"#,
 };
 
@@ -1505,6 +1571,7 @@ pub static TEXT_SEARCH: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"text_search","find":"DOOR"}"#,
 };
 
@@ -1530,6 +1597,7 @@ pub static AUDIT: OpDef = OpDef {
         ),
     ],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"audit","target_format":"dxf","target_version":"2018"}"#,
 };
 
@@ -1539,6 +1607,7 @@ pub static COMMANDS: OpDef = OpDef {
     batchable: false,
     params: &[opt("name", Ty::Str, "Command name manifest to return.")],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"commands","name":"LINE"}"#,
 };
 
@@ -1552,6 +1621,7 @@ pub static MEASURE: OpDef = OpDef {
         "Exact entity handles; omit to measure the selection.",
     )],
     rules: &[],
+    rest_envelope: true,
     example: r#"{"op":"measure","handles":["2A"]}"#,
 };
 
@@ -1662,6 +1732,7 @@ pub static NODE_GRAPH: OpDef = OpDef {
             then: &["path"],
         },
     ],
+    rest_envelope: true,
     example: r#"{"op":"node_graph","action":"add","type":"Line"}"#,
 };
 
@@ -1733,6 +1804,12 @@ pub fn find_op(name: &str) -> Option<&'static OpDef> {
     OPS.iter().copied().find(|op| op.name == name)
 }
 
+/// Whether `POST /api/v1/{name}` wraps the call in the protocol-1 mutation
+/// envelope (`request_id`, active `document_id`, stale retry, compacted reply).
+pub fn is_rest_envelope_op(name: &str) -> bool {
+    matches!(name, "capture" | "get_selection") || find_op(name).is_some_and(|op| op.rest_envelope)
+}
+
 // ============================================================================
 // SCHEMA EMITTERS
 // ============================================================================
@@ -1754,12 +1831,12 @@ fn ty_schema(ty: &Ty) -> Value {
         }
         Ty::ArrayOf(inner) => json!({"type": "array", "items": ty_schema(inner)}),
         Ty::BatchSteps => {
-            json!({"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/batch_step"}})
+            json!({"type":"array","minItems":1,"maxItems":MAX_BATCH_STEPS,"items":{"$ref":"#/$defs/batch_step"}})
         }
         Ty::Entities => {
             json!({"type":"array","minItems":1,"items":{"type":"object","required":["type"],"properties":{"type":{"type":"string"}}}})
         }
-        Ty::Raw(s) => serde_json::from_str(s).expect("Raw fragment must be valid JSON"),
+        Ty::Raw(s) => serde_json::from_str(s).unwrap_or_else(|_| json!({})),
     }
 }
 
@@ -1854,13 +1931,25 @@ fn request_envelope_schema() -> Value {
     })
 }
 
-pub fn execute_request_schema() -> Value {
+pub fn execute_request_schema_parts() -> (Value, Value, &'static str) {
     let mut schema = request_envelope_schema();
-    schema["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
-    schema["properties"]["steps"] = json!({"type":"array","minItems":1,"maxItems":64,"description":"Sequential batch operations.","items":{"$ref":"#/$defs/batch_step"}});
+    schema["properties"]["steps"] = json!({"type":"array","minItems":1,"maxItems":MAX_BATCH_STEPS,"description":"Sequential batch operations.","items":{"$ref":"#/$defs/batch_step"}});
     schema["required"] = json!(["op", "request_id"]);
     schema["anyOf"] = Value::Array(OPS.iter().map(|op| op_ref(op)).collect());
-    schema["$defs"] = shared_defs();
+    if let Some(obj) = schema.as_object_mut() {
+        obj.remove("$defs");
+    }
+    (
+        schema,
+        shared_defs(),
+        "https://json-schema.org/draft/2020-12/schema",
+    )
+}
+
+pub fn execute_request_schema() -> Value {
+    let (mut schema, defs, dialect) = execute_request_schema_parts();
+    schema["$schema"] = json!(dialect);
+    schema["$defs"] = defs;
     schema
 }
 
@@ -2013,8 +2102,15 @@ fn validate_type(ty: &Ty, val: &Value) -> Result<(), String> {
             validate_execute_request(&json!({"op":"batch","steps":val}), "batch")?;
         }
         Ty::Raw(fragment) => {
-            let schema: Value = serde_json::from_str(fragment).expect("valid inline schema");
-            crate::schema_validation::validate_shape(&schema, val, "")?;
+            crate::schema_validation::validate_static_schema(
+                fragment,
+                || {
+                    serde_json::from_str(fragment)
+                        .map_err(|e| format!("invalid inline schema: {e}"))
+                },
+                val,
+                "",
+            )?;
         }
     }
     Ok(())
@@ -2031,10 +2127,12 @@ fn validate_parameter(ty: &Ty, val: &Value, path: &str) -> Result<(), String> {
             }
             Ok(())
         }
-        Ty::Raw(fragment) => {
-            let schema: Value = serde_json::from_str(fragment).expect("valid inline schema");
-            crate::schema_validation::validate_shape(&schema, val, path)
-        }
+        Ty::Raw(fragment) => crate::schema_validation::validate_static_schema(
+            fragment,
+            || serde_json::from_str(fragment).map_err(|e| format!("invalid inline schema: {e}")),
+            val,
+            path,
+        ),
         Ty::Entities => validate_type(ty, val),
         _ => validate_type(ty, val).map_err(|error| format!("{path}: {error}")),
     }
@@ -2183,7 +2281,14 @@ pub fn validate_request_deferred(
     Ok(ValidationResult { warnings })
 }
 
-const MAX_BATCH_STEPS: usize = 64;
+fn request_envelope_validator() -> Result<&'static jsonschema::Validator, String> {
+    static VALIDATOR: std::sync::OnceLock<Result<jsonschema::Validator, String>> =
+        std::sync::OnceLock::new();
+    VALIDATOR
+        .get_or_init(|| crate::schema_validation::compile_validator(&request_envelope_schema()))
+        .as_ref()
+        .map_err(Clone::clone)
+}
 
 /// Validate bindings without dispatching or substituting untyped placeholder values.
 pub fn batch_bindings(step: &Value, index: usize) -> Result<Vec<&str>, String> {
@@ -2233,7 +2338,8 @@ pub fn batch_bindings(step: &Value, index: usize) -> Result<Vec<&str>, String> {
 }
 
 pub fn validate_execute_request(request: &Value, op: &str) -> Result<ValidationResult, String> {
-    crate::schema_validation::validate_shape(&request_envelope_schema(), request, "")?;
+    let envelope = request_envelope_validator()?;
+    crate::schema_validation::validate_with_validator(envelope, request, "")?;
     if request["request_id"]
         .as_str()
         .is_some_and(|id| id.len() > 128)
@@ -2269,9 +2375,11 @@ pub fn validate_execute_request(request: &Value, op: &str) -> Result<ValidationR
             let deferred = batch_bindings(step, index)
                 .map_err(|error| format!("batch step {index}: {error}"))?;
             let mut literal = step.clone();
-            literal.as_object_mut().unwrap().remove("bindings");
-            crate::schema_validation::validate_shape(
-                &request_envelope_schema(),
+            if let Some(obj) = literal.as_object_mut() {
+                obj.remove("bindings");
+            }
+            crate::schema_validation::validate_with_validator(
+                envelope,
                 &literal,
                 &format!("/steps/{index}"),
             )?;

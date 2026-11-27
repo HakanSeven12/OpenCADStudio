@@ -43,6 +43,7 @@ dependencies = [
  "js-sys",
  "jsonschema 0.63.1",
  "kurbo 0.13.1",
+ "libc",
  "libloading 0.9.1",
  "log",
  "lopdf",

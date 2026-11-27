@@ -593,6 +593,8 @@ pub enum Message {
     PluginDialogFilePicked(String, Option<std::path::PathBuf>),
     /// Live text edit in a file picker text input in a plugin modal dialog.
     PluginDialogFileTextChange(String, String),
+    /// The calendar of a date field in a plugin modal dialog (API v33).
+    PluginDialogDate(String, crate::ui::window::date_field::DateMsg),
     /// Table cell text change in a plugin modal dialog.
     PluginDialogTableCellChange(String, usize, usize, String),
     /// Add empty row to a table in a plugin modal dialog.
@@ -615,6 +617,9 @@ pub enum Message {
     PluginPanelFilePick(String, String),
     PluginPanelFilePicked(String, String, Option<std::path::PathBuf>),
     PluginPanelFileTextChange(String, String, String),
+    /// The calendar of a date field in a plugin dock panel (API v33): panel,
+    /// control.
+    PluginPanelDate(String, String, crate::ui::window::date_field::DateMsg),
     PluginPanelTableCellChange(String, String, usize, usize, String),
     PluginPanelTableAddRow(String, String),
     PluginPanelTableRemoveRow(String, String, usize),

@@ -221,7 +221,10 @@
 /// v32 appends `DialogControl::FolderPicker`: a path field whose Browse
 /// button opens the system's folder dialog, in dialogs and dock panels. A v31
 /// host cannot decode it, so a plugin that sends it declares v32.
-pub const API_VERSION: u32 = 32;
+/// v33 appends `DialogControl::Date`: a text field with a calendar button
+/// that writes the picked day in the plugin's format, in dialogs and dock
+/// panels. A v32 host cannot decode it, so a plugin that sends it declares v33.
+pub const API_VERSION: u32 = 33;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

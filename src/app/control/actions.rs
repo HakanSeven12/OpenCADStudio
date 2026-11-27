@@ -1444,6 +1444,7 @@ impl OpenCADStudio {
                         | ocs_plugin_api::dialog::DialogControl::Color { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::FilePicker { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::FolderPicker { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Date { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Fields { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Table { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Label { id, .. }
@@ -1548,7 +1549,10 @@ impl OpenCADStudio {
                     text,
                 )))
             }
-            (DialogControl::Text { .. } | DialogControl::Number { .. }, "change") => {
+            (
+                DialogControl::Text { .. } | DialogControl::Number { .. } | DialogControl::Date { .. },
+                "change",
+            ) => {
                 // RAW: a plain string or finite number (the widget sends
                 // the draft text); tagged `{"Text": …}` / `{"Number": …}`
                 // DialogValue JSON is tolerated.

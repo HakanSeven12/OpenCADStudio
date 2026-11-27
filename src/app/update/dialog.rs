@@ -2728,6 +2728,123 @@ mod tests {
         );
     }
 
+    /// A date field (API v33): its calendar opens at the month the field
+    /// names, steps between months, and a picked day goes into the field in
+    /// the plugin's format and reaches the command as a "pick"; typing is a
+    /// "change" as in a text field, and the calendar then opens there.
+    #[test]
+    fn interactive_dialog_date_field_picks_a_day_from_its_calendar() {
+        use crate::command::{CadCommand, CmdResult};
+        use crate::ui::window::date_field::DateMsg;
+        use ocs_plugin_api::dialog::{
+            DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
+        };
+        use std::sync::{Arc, Mutex};
+
+        struct DateCmd {
+            events: Arc<Mutex<Vec<DialogEvent>>>,
+        }
+        impl CadCommand for DateCmd {
+            fn name(&self) -> &'static str {
+                "DATETEST"
+            }
+            fn prompt(&self) -> String {
+                "Date test".to_string()
+            }
+            fn on_point(&mut self, _pt: glam::DVec3) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_enter(&mut self) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_dialog_action(&mut self, event: DialogEvent) -> DialogActionResponse {
+                self.events.lock().unwrap().push(event);
+                DialogActionResponse::None
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].active_cmd = Some(Box::new(DateCmd {
+            events: events.clone(),
+        }));
+        app.open_plugin_dialog(DialogDef::new("Sheet").with_control(DialogControl::Date {
+            id: "issued".to_string(),
+            label: "Issued".to_string(),
+            default: "26.11.2026".to_string(),
+            format: "DD.MM.YYYY".to_string(),
+        }));
+        let date = |app: &mut OpenCADStudio, msg| {
+            let _ = app.update(Message::PluginDialogDate("issued".to_string(), msg));
+        };
+        let open = |app: &OpenCADStudio| {
+            app.plugin_dialog_state
+                .as_ref()
+                .unwrap()
+                .open_calendar
+                .clone()
+        };
+
+        date(&mut app, DateMsg::Toggle);
+        assert_eq!(open(&app), Some(("issued".to_string(), 2026, 11)));
+        date(&mut app, DateMsg::Month(2026, 12));
+        assert_eq!(open(&app), Some(("issued".to_string(), 2026, 12)));
+        date(&mut app, DateMsg::Pick("03.12.2026".to_string()));
+        assert_eq!(open(&app), None);
+        let state = app.plugin_dialog_state.as_ref().unwrap();
+        assert_eq!(state.text_values.get("issued").unwrap(), "03.12.2026");
+        assert_eq!(
+            state.collect_response_map().get("issued"),
+            Some(&DialogValue::Text("03.12.2026".to_string()))
+        );
+        {
+            let events = events.lock().unwrap();
+            let last = events.last().unwrap();
+            assert_eq!(
+                (last.control_id.as_str(), last.action.as_str()),
+                ("issued", "pick")
+            );
+            assert_eq!(
+                last.value,
+                Some(DialogValue::Text("03.12.2026".to_string()))
+            );
+        }
+
+        let _ = app.update(Message::PluginDialogTextChange(
+            "issued".to_string(),
+            "1.2.2027".to_string(),
+        ));
+        assert_eq!(events.lock().unwrap().last().unwrap().action, "change");
+        date(&mut app, DateMsg::Toggle);
+        assert_eq!(open(&app), Some(("issued".to_string(), 2027, 2)));
+        date(&mut app, DateMsg::Close);
+        assert_eq!(open(&app), None);
+        assert!(app.plugin_dialog_state.is_some(), "the dialog stays open");
+
+        // Escape closes the open calendar first, the dialog only after.
+        date(&mut app, DateMsg::Toggle);
+        app.active_modal = Some(crate::app::ModalKind::PluginDialog);
+        let _ = app.update(Message::CommandEscape);
+        assert_eq!(open(&app), None);
+        assert!(
+            app.plugin_dialog_state.is_some(),
+            "Esc closed the calendar only"
+        );
+
+        // The calendar closes on Escape itself and passes the key on: that
+        // Escape is the calendar's too.
+        date(&mut app, DateMsg::Toggle);
+        date(&mut app, DateMsg::Close);
+        let _ = app.update(Message::CommandEscape);
+        assert!(
+            app.plugin_dialog_state.is_some(),
+            "the calendar's Escape left the dialog open"
+        );
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.plugin_dialog_state.is_none(), "the next Esc closes it");
+    }
+
     /// A text field in a dialog reports each edit to the command as a
     /// "change" with its text, as a panel's text field and a dialog's file
     /// field do, so the command can follow the input: here it keeps a count

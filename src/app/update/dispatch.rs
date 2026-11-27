@@ -2391,6 +2391,42 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::PluginDialogDate(id, msg) => {
+                let Some(state) = &mut self.plugin_dialog_state else {
+                    return Task::none();
+                };
+                let dismissed = msg == crate::ui::window::date_field::DateMsg::Close
+                    && state
+                        .open_calendar
+                        .as_ref()
+                        .is_some_and(|(o, _, _)| *o == id);
+                if dismissed {
+                    self.calendar_dismissed = Some(iced::time::Instant::now());
+                }
+                let Some(state) = &mut self.plugin_dialog_state else {
+                    return Task::none();
+                };
+                let controls: Vec<_> = state
+                    .def
+                    .rows
+                    .iter()
+                    .flat_map(|r| r.controls.iter().cloned())
+                    .collect();
+                match crate::ui::window::date_field::step(
+                    &mut state.open_calendar,
+                    &mut state.text_values,
+                    &controls,
+                    &id,
+                    msg,
+                ) {
+                    Some(picked) => self.dispatch_plugin_dialog_action(
+                        id,
+                        "pick".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Text(picked)),
+                    ),
+                    None => Task::none(),
+                }
+            }
             Message::PluginDialogFileTextChange(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
                     state.file_values.insert(id.clone(), val.clone());
@@ -2775,6 +2811,38 @@ impl OpenCADStudio {
                 iced::Task::perform(pick_path(target, start), move |path| {
                     Message::PluginPanelFilePicked(pid, cid, path)
                 })
+            }
+            Message::PluginPanelDate(panel_id, control_id, msg) => {
+                let Some(panel) = self.plugin_panels.get_mut(&panel_id) else {
+                    return Task::none();
+                };
+                if msg == crate::ui::window::date_field::DateMsg::Close
+                    && panel
+                        .open_calendar
+                        .as_ref()
+                        .is_some_and(|(o, _, _)| *o == control_id)
+                {
+                    self.calendar_dismissed = Some(iced::time::Instant::now());
+                }
+                let Some(panel) = self.plugin_panels.get_mut(&panel_id) else {
+                    return Task::none();
+                };
+                let controls = panel.def.controls.clone();
+                if let Some(picked) = crate::ui::window::date_field::step(
+                    &mut panel.open_calendar,
+                    &mut panel.text_values,
+                    &controls,
+                    &control_id,
+                    msg,
+                ) {
+                    crate::plugin::v4_support::publish_panel_action(
+                        panel_id,
+                        control_id,
+                        "pick".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Text(picked)),
+                    );
+                }
+                Task::none()
             }
             Message::PluginPanelFilePicked(panel_id, control_id, path) => {
                 if let Some(p) = path {

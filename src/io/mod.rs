@@ -3155,6 +3155,66 @@ fn replace_save_file_inner(
     }
 }
 
+/// Create a uniquely named sibling temporary file with `create_new(true)` so
+/// atomic writes never follow or collide with a predictable temp path.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn create_atomic_temp(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let dir = save_folder(path);
+    let base = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty() && name != "." && name != "..")
+        .unwrap_or_else(|| "file".to_string());
+    for _ in 0..32 {
+        let seq = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut rand_bytes = [0u8; 8];
+        let _ = getrandom::fill(&mut rand_bytes);
+        let rand_val = u64::from_le_bytes(rand_bytes);
+        let candidate = dir.join(format!(
+            ".{base}.ocs-tmp-{}-{seq:x}-{rand_val:016x}",
+            std::process::id()
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return Ok((candidate, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate unique temporary file",
+    ))
+}
+
+/// Replace `dest` with `temp_path`, removing `temp_path` if replacement fails.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn commit_atomic_temp(temp_path: &Path, dest: &Path) -> std::io::Result<()> {
+    let result = replace_save_file(temp_path, dest, false);
+    if result.is_err() {
+        let _ = std::fs::remove_file(temp_path);
+    }
+    result
+}
+
+/// Write `bytes` atomically to `path` via a unique sibling temp file + `sync_all`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn write_file_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let (temp_path, mut file) = create_atomic_temp(path)?;
+    let write_res = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(err) = write_res {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    commit_atomic_temp(&temp_path, path)
+}
+
 /// Save using the document's existing version.
 pub fn save(doc: &Document, path: &Path) -> Result<(), String> {
     save_as_version(doc, path, doc.version)
@@ -4715,5 +4775,32 @@ mod ole_save_loss_tests {
         edited.storage.trailing_records =
             document::compound_file::BinaryRecord::split(&[1, 2, 3], 4096);
         assert_eq!(dropped(edited), 1);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod atomic_write_tests {
+    use super::write_file_atomic;
+
+    #[test]
+    fn write_file_atomic_creates_and_replaces_without_temp_residue() {
+        let root = std::env::temp_dir().join(format!("ocs-atomic-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let missing = root.join("missing").join("nope.bin");
+        assert!(write_file_atomic(&missing, b"x").is_err());
+        assert!(!root.join("missing").exists());
+        let target = root.join("nested").join("data.bin");
+        std::fs::create_dir_all(target.parent().unwrap()).expect("create test parent dir");
+        write_file_atomic(&target, b"first").expect("initial atomic write");
+        assert_eq!(std::fs::read(&target).unwrap(), b"first");
+        write_file_atomic(&target, b"second").expect("overwrite atomic write");
+        assert_eq!(std::fs::read(&target).unwrap(), b"second");
+        let entries: Vec<_> = std::fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec!["data.bin".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

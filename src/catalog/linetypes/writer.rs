@@ -252,17 +252,21 @@ fn shape_reference(doc: &Document, handle: Handle, number: i16) -> Result<String
     Ok(format!("{name},{shape_file}"))
 }
 
-/// Write through a temporary file beside `path`, so a failure leaves whatever
-/// was there intact.
+/// Write through a unique temporary file beside `path`, so a failure leaves
+/// whatever was there intact.
 pub fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(".tmp");
-    let temporary = PathBuf::from(temporary);
-    let result = std::fs::write(&temporary, text).and_then(|()| std::fs::rename(&temporary, path));
-    if result.is_err() && temporary.is_file() {
-        let _ = std::fs::remove_file(&temporary);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::io::write_file_atomic(path, text.as_bytes())
     }
-    result
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (path, text);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "linetype file writing is unsupported on wasm",
+        ))
+    }
 }
 
 /// The web build has no user folder.
@@ -787,19 +791,23 @@ mod tests {
         let dir = temp_dir("failed");
         let path = dir.join("user.lin");
         let old = "*KEEP,Old\nA,1,-1\n";
-        std::fs::write(&path, old).unwrap();
-        // The temporary file's name is taken by a folder, so writing fails.
-        std::fs::create_dir(dir.join("user.lin.tmp")).unwrap();
+        // Occupy `path` with a directory so replacing via `write_atomic` fails
+        // reliably even as root, and verify zero temporary files remain.
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("keep.lin"), old).unwrap();
+        assert!(write_atomic(&path, "*POSTS,New\nA,3,-1\n").is_err());
         let doc = doc_with(&[simple("POSTS", "", &[3.0, -1.0])]);
         assert!(matches!(
             save_definition(&path, &doc, "POSTS", |_| false),
             Err(SaveError::Io(_))
         ));
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), old);
-        assert!(
-            dir.join("user.lin.tmp").is_dir(),
-            "the blocker is untouched"
-        );
+        assert_eq!(std::fs::read_to_string(path.join("keep.lin")).unwrap(), old);
+        let entries: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec!["user.lin".to_string()]);
         let _ = std::fs::remove_dir_all(dir);
     }
 

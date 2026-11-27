@@ -63,13 +63,36 @@ impl PickedPlotStyle {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn is_valid_sha256_hex(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_safe_table_filename(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+        return false;
+    }
+    let mut components = std::path::Path::new(name).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn picked_table_path(name: &str, hash: &str) -> Result<PathBuf, String> {
+    if !is_valid_sha256_hex(hash) {
+        return Err("Invalid plot style hash".to_string());
+    }
+    if !is_safe_table_filename(name) {
+        return Err(format!("Invalid plot style filename: {name}"));
+    }
     let dir = crate::config::config_dir()
         .ok_or_else(|| "Plot styles folder could not be resolved".to_string())?;
     Ok(dir
         .join("plotstyles")
         .join("by-sha256")
-        .join(hash)
+        .join(hash.to_ascii_lowercase())
         .join(name.to_ascii_lowercase()))
 }
 
@@ -78,8 +101,11 @@ fn cache_picked_table(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if std::fs::read(path).is_ok_and(|cached| cached == bytes) {
         return Ok(());
     }
-    std::fs::create_dir_all(path.parent().expect("table cache directory"))
-        .and_then(|_| std::fs::write(path, bytes))
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Cannot retain the selected plot table: {error}"))?;
+    }
+    crate::io::write_file_atomic(path, bytes)
         .map_err(|error| format!("Cannot retain the selected plot table: {error}"))
 }
 
@@ -812,5 +838,17 @@ mod lenient_loading_tests {
         let preserved = PlotStyleTable::load_named_at(&reference, Some(&nested)).unwrap();
         assert_eq!(preserved.aci_entries[1].lineweight, 13);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn picked_table_path_rejects_traversal_and_invalid_hashes() {
+        let valid_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        assert!(super::picked_table_path("custom.ctb", valid_hash).is_ok());
+        assert!(super::picked_table_path("../evil.ctb", valid_hash).is_err());
+        assert!(super::picked_table_path("dir/evil.ctb", valid_hash).is_err());
+        assert!(super::picked_table_path("..", valid_hash).is_err());
+        assert!(super::picked_table_path("custom.ctb", "../../evil").is_err());
+        assert!(super::picked_table_path("custom.ctb", "not-hex").is_err());
     }
 }

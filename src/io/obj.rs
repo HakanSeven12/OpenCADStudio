@@ -35,11 +35,16 @@ pub fn parse_obj(src: &str) -> Option<Vec<Mesh>> {
         let mut parts = line.split_whitespace();
         match parts.next().unwrap_or("") {
             "v" => {
-                let vals: Vec<f64> = parts.filter_map(|s| s.parse().ok()).collect();
-                if vals.len() >= 3 {
-                    // OBJ is Y-up right-handed; OpenCADStudio's world is Z-up.
-                    // Rotate +90° about X so OBJ Y→world Z (up): (x, y, z) → (x, -z, y).
-                    positions.push(Vector3::new(vals[0], -vals[2], vals[1]));
+                if let (Some(xs), Some(ys), Some(zs)) = (parts.next(), parts.next(), parts.next()) {
+                    if let (Ok(x), Ok(y), Ok(z)) =
+                        (xs.parse::<f64>(), ys.parse::<f64>(), zs.parse::<f64>())
+                    {
+                        if x.is_finite() && y.is_finite() && z.is_finite() {
+                            // OBJ is Y-up right-handed; OpenCADStudio's world is Z-up.
+                            // Rotate +90° about X so OBJ Y→world Z (up): (x, y, z) → (x, -z, y).
+                            positions.push(Vector3::new(x, -z, y));
+                        }
+                    }
                 }
             }
             // An object with no faces yet is simply continued.
@@ -119,5 +124,11 @@ mod tests {
         let roof = &meshes[1];
         assert_eq!(roof.vertices.len(), 3);
         assert_eq!(roof.vertices[2].z, 1.0);
+    }
+
+    #[test]
+    fn non_finite_and_malformed_vertices_are_rejected_strictly() {
+        let src = "v NaN 1 2\nv inf 1 2\nv -inf 1 2\nv bad 1 2 3\nf 1 2 3\n";
+        assert!(parse_obj(src).is_none());
     }
 }

@@ -39,6 +39,7 @@ impl OpenCADStudio {
             Some(K::Overkill) => crate::t!("Delete Duplicate Objects").into_owned(),
             Some(K::GeometryCleanupSettings) => crate::t!("Geometry Cleanup Settings").into_owned(),
             Some(K::PluginManager) => crate::tr!("modal", "plugin-manager"),
+            Some(K::PluginConsent) => crate::t!("Approve Native Plugins").into_owned(),
             Some(K::UpdateNotice) => crate::tr!("modal", "update-available"),
             Some(K::DonationPrompt) => crate::tr!("donation", "title"),
             Some(K::LayerStateManager) => crate::tr!("modal", "layer-state-manager"),
@@ -503,6 +504,7 @@ impl OpenCADStudio {
                                     })
                                     .collect(),
                                 status: &self.marketplace_status,
+                                pending_approvals: &self.pending_plugin_approvals,
                             },
                             &self.active_theme,
                             flow,
@@ -519,6 +521,12 @@ impl OpenCADStudio {
                     })
                 }
             }
+            super::super::ModalKind::PluginConsent => sized_flow(ex, 640, 480, |flow| {
+                crate::ui::window::plugin_manager::view_consent_modal(
+                    &self.pending_plugin_approvals,
+                    flow,
+                )
+            }),
             super::super::ModalKind::UpdateNotice => {
                 let latest = self.update_notice_version.as_deref().unwrap_or("?");
                 let body = self.update_notice_body.as_deref().unwrap_or("");

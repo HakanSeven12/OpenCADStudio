@@ -39,6 +39,7 @@ impl ModalKind {
             | K::Shortcuts
             | K::Aliases
             | K::PluginManager
+            | K::PluginConsent
             | K::Options
             | K::XrefHelp
             | K::UpdateNotice
@@ -90,6 +91,7 @@ impl ModalKind {
             | K::TableCellWarning
             | K::TableCellEntry
             | K::PdfPassword
+            | K::PluginConsent
             | K::DataExtractionUnsaved => true,
             #[cfg(not(target_arch = "wasm32"))]
             K::FileInUse | K::ExternalChange => true,

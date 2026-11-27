@@ -12993,6 +12993,8 @@ impl OpenCADStudio {
                     // Refresh the on-disk external-plugin list each time the manager
                     // opens so newly dropped-in packages show up.
                     self.external_plugins = crate::plugin::external::discover();
+                    self.pending_plugin_approvals =
+                        crate::plugin::external::collect_pending_approvals(&self.external_plugins);
                     self.refresh_plugin_tools();
                     self.marketplace_status.clear();
                     self.active_modal = Some(super::super::ModalKind::PluginManager);
@@ -13316,6 +13318,8 @@ impl OpenCADStudio {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.external_plugins = crate::plugin::external::discover();
+                    self.pending_plugin_approvals =
+                        crate::plugin::external::collect_pending_approvals(&self.external_plugins);
                 }
                 Task::none()
             }
@@ -13347,6 +13351,7 @@ impl OpenCADStudio {
                                 crate::tf!("Uninstalled '{id}'.").into_owned();
                             self.plugin_load_errors.remove(&id);
                             self.loaded_plugin_ids.remove(&id);
+                            self.pending_plugin_approvals.retain(|a| a.id != id);
                             self.rebuild_ribbon_modules();
                             self.external_plugins = crate::plugin::external::discover();
                         }
@@ -13358,6 +13363,52 @@ impl OpenCADStudio {
                 }
                 #[cfg(target_arch = "wasm32")]
                 let _ = id;
+                Task::none()
+            }
+            Message::PluginApprove(id) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.external_plugins = crate::plugin::external::discover();
+                    if let Some(plugin) = self
+                        .external_plugins
+                        .iter()
+                        .find(|plugin| plugin.id == id)
+                        .cloned()
+                    {
+                        match crate::plugin::external::approve_plugin(&plugin).and_then(|_| {
+                            crate::plugin::external::load_single_approved(self, &plugin)
+                        }) {
+                            Ok(loaded_id) => {
+                                self.plugin_load_errors.remove(&id);
+                                self.plugin_load_errors.remove(&loaded_id);
+                                self.loaded_plugin_ids =
+                                    crate::plugin::external::loaded_ids().into_iter().collect();
+                                self.refresh_plugin_tools();
+                                self.rebuild_ribbon_modules();
+                                self.marketplace_status =
+                                    crate::tf!("Trusted and loaded '{loaded_id}'.").into_owned();
+                            }
+                            Err(err) => {
+                                self.plugin_load_errors.insert(id.clone(), err.clone());
+                                self.marketplace_status =
+                                    crate::tf!("Approval failed for '{id}': {err}").into_owned();
+                            }
+                        }
+                    }
+                    self.pending_plugin_approvals =
+                        crate::plugin::external::collect_pending_approvals(&self.external_plugins);
+                    if self.active_modal == Some(super::super::ModalKind::PluginConsent)
+                        && self.pending_plugin_approvals.is_empty()
+                    {
+                        self.close_active_modal();
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = id;
+                Task::none()
+            }
+            Message::PluginConsentDismiss => {
+                self.close_active_modal();
                 Task::none()
             }
             Message::PointStyleSetMode(mode) => {

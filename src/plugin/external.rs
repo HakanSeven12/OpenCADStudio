@@ -121,17 +121,99 @@ pub fn bundled_plugins_dir() -> Option<PathBuf> {
 
 /// Delete an installed package's folder. It stays loaded for the current
 /// session (the library is resident); the removal takes effect on next start.
+pub(crate) fn is_valid_plugin_id(id: &str) -> bool {
+    if id.is_empty()
+        || id.len() > 64
+        || id == "."
+        || id == ".."
+        || id.contains("..")
+        || id.ends_with('.')
+    {
+        return false;
+    }
+    let bytes = id.as_bytes();
+    if !bytes[0].is_ascii_alphanumeric() {
+        return false;
+    }
+    if !bytes
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return false;
+    }
+    let stem = id.split('.').next().unwrap_or(id).to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn uninstall(id: &str) -> Result<(), String> {
-    let user_root = plugins_dir().ok_or("cannot locate the plugins folder")?;
-    let dir = discover_from_roots(None, Some(&user_root))
-        .into_iter()
-        .find(|p| p.id == id)
-        .map(|p| p.dir)
-        .unwrap_or_else(|| user_root.join(id));
-    if dir.is_dir() {
-        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    if !is_valid_plugin_id(id) {
+        return Err(format!("invalid plugin id `{id}`"));
     }
+    let root = plugins_dir().ok_or("cannot locate the plugins folder")?;
+    uninstall_in_root(&root, id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn uninstall_in_root(user_root: &std::path::Path, id: &str) -> Result<(), String> {
+    if !is_valid_plugin_id(id) {
+        return Err(format!("invalid plugin id `{id}`"));
+    }
+    if !user_root.exists() {
+        return Ok(());
+    }
+    let root_canon = std::fs::canonicalize(user_root).map_err(|e| e.to_string())?;
+    let mut discovered = std::collections::BTreeMap::new();
+    discover_root(&root_canon, false, &mut discovered);
+    let candidate = discovered
+        .get(id)
+        .map(|plugin| plugin.dir.clone())
+        .unwrap_or_else(|| root_canon.join(id));
+    match std::fs::symlink_metadata(&candidate) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "refusing to uninstall symlinked plugin directory for `{id}`"
+                ));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    }
+    let dir_canon = std::fs::canonicalize(&candidate).map_err(|e| e.to_string())?;
+    if dir_canon == root_canon || dir_canon.parent() != Some(root_canon.as_path()) {
+        return Err(format!(
+            "plugin directory for `{id}` escapes plugins folder"
+        ));
+    }
+    if dir_canon.is_dir() {
+        std::fs::remove_dir_all(&dir_canon).map_err(|e| e.to_string())?;
+    }
+    let _ = revoke_lock_entry_in_root(&root_canon, id);
     Ok(())
 }
 
@@ -196,16 +278,413 @@ fn discover_root(root: &Path, bundled: bool, found: &mut BTreeMap<String, Extern
     }
 }
 
-/// True when a file with this platform's dynamic-library extension exists in
-/// `dir` (any name — the package owns its lib naming).
+/// True when a regular non-symlink file with this platform's dynamic-library
+/// extension exists in `dir`.
 fn lib_present_in(dir: &std::path::Path) -> bool {
+    lib_file(dir).is_some()
+}
+
+/// Path to the first non-symlink native library beside `plugin.toml`, if any.
+fn lib_file(dir: &Path) -> Option<PathBuf> {
     let ext = lib_extension();
-    std::fs::read_dir(dir)
-        .map(|rd| {
-            rd.flatten()
-                .any(|e| e.path().extension().and_then(|s| s.to_str()) == Some(ext))
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().and_then(|s| s.to_str()) == Some(ext)
+                && std::fs::symlink_metadata(p)
+                    .is_ok_and(|meta| !meta.file_type().is_symlink() && meta.file_type().is_file())
         })
-        .unwrap_or(false)
+        .collect();
+    entries.sort();
+    entries.into_iter().next()
+}
+
+/// The package's native library: the exact `library` file named by
+/// `plugin.toml` when declared, otherwise the first regular file with this
+/// platform's extension. Refuses symlinks and multi-segment paths.
+pub(crate) fn lib_file_for(plugin: &ExternalPlugin) -> Option<PathBuf> {
+    if let Some(name) = plugin.library.as_deref() {
+        let mut comps = Path::new(name).components();
+        let Some(std::path::Component::Normal(file_name)) = comps.next() else {
+            return None;
+        };
+        if comps.next().is_some() {
+            return None;
+        }
+        let path = plugin.dir.join(file_name);
+        let matches_ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s == lib_extension());
+        let is_regular_file = std::fs::symlink_metadata(&path)
+            .is_ok_and(|meta| !meta.file_type().is_symlink() && meta.file_type().is_file());
+        return if matches_ext && is_regular_file {
+            Some(path)
+        } else {
+            None
+        };
+    }
+    lib_file(&plugin.dir)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PluginLockEntry {
+    pub sha256: String,
+    pub library: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_tag: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PluginLockfile {
+    pub version: u32,
+    #[serde(default)]
+    pub plugins: BTreeMap<String, PluginLockEntry>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for PluginLockfile {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            plugins: BTreeMap::new(),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginTrustState {
+    Bundled,
+    Approved { sha256: String },
+    Unapproved { sha256: String, library: String },
+    HashMismatch {
+        expected: String,
+        actual: String,
+        library: String,
+    },
+    Unverifiable(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn is_valid_sha256_hex(hex: &str) -> bool {
+    hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    crate::io::recovery::hex_digest(sha2::Sha256::digest(bytes))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::Digest;
+    use std::io::Read;
+
+    let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+        return Err(format!(
+            "refusing to hash symlinked or non-regular plugin binary `{}`",
+            path.display()
+        ));
+    }
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(crate::io::recovery::hex_digest(hasher.finalize()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn lockfile_path_in(plugins_root: &Path) -> PathBuf {
+    plugins_root.join("plugin.lock.json")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn lockfile_path() -> Option<PathBuf> {
+    plugins_dir().map(|root| lockfile_path_in(&root))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn load_lockfile_from(path: &Path) -> Result<PluginLockfile, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+                return Err("refusing to read symlinked plugin.lock.json".to_string());
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(PluginLockfile::default()),
+        Err(e) => return Err(e.to_string()),
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut lock: PluginLockfile =
+        serde_json::from_str(&text).map_err(|e| format!("invalid plugin.lock.json: {e}"))?;
+    if lock.version != 1 {
+        return Err(format!(
+            "unsupported plugin.lock.json version {}",
+            lock.version
+        ));
+    }
+    for (id, entry) in &mut lock.plugins {
+        if !is_valid_plugin_id(id) {
+            return Err(format!("invalid plugin id `{id}` in plugin.lock.json"));
+        }
+        if !is_valid_sha256_hex(&entry.sha256) {
+            return Err(format!("invalid sha256 digest for `{id}` in plugin.lock.json"));
+        }
+        let mut comps = Path::new(&entry.library).components();
+        if !matches!(
+            (comps.next(), comps.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        ) {
+            return Err(format!(
+                "invalid library filename `{}` for `{id}` in plugin.lock.json",
+                entry.library
+            ));
+        }
+        entry.sha256 = entry.sha256.to_ascii_lowercase();
+    }
+    Ok(lock)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn save_lockfile_to(path: &Path, lock: &PluginLockfile) -> Result<(), String> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "plugin.lock.json path has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err("refusing to overwrite symlinked plugin.lock.json".to_string());
+        }
+    }
+    let json = serde_json::to_vec_pretty(lock).map_err(|e| e.to_string())?;
+    let mut nonce = [0u8; 8];
+    getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
+    let nonce_hex: String = nonce.iter().map(|b| format!("{b:02x}")).collect();
+    let tmp_path = parent.join(format!(
+        "plugin.lock.json.tmp-{}-{nonce_hex}",
+        std::process::id()
+    ));
+    let write_res = (|| -> Result<(), String> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut file = opts.open(&tmp_path).map_err(|e| e.to_string())?;
+        file.write_all(&json).map_err(|e| e.to_string())?;
+        file.write_all(b"\n").map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        std::fs::rename(&tmp_path, path).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    write_res
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn record_lock_entry_in_root(
+    plugins_root: &Path,
+    id: &str,
+    library: &str,
+    sha256: &str,
+    version: Option<&str>,
+    repository: Option<&str>,
+    release_tag: Option<&str>,
+) -> Result<PluginLockEntry, String> {
+    if !is_valid_plugin_id(id) {
+        return Err(format!("invalid plugin id `{id}`"));
+    }
+    if !is_valid_sha256_hex(sha256) {
+        return Err(format!("invalid sha256 digest for `{id}`"));
+    }
+    let mut comps = Path::new(library).components();
+    if !matches!(
+        (comps.next(), comps.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) {
+        return Err(format!("invalid library filename `{library}`"));
+    }
+    let lock_path = lockfile_path_in(plugins_root);
+    let mut lock = load_lockfile_from(&lock_path)?;
+    let entry = PluginLockEntry {
+        sha256: sha256.to_ascii_lowercase(),
+        library: library.to_string(),
+        version: version.map(str::to_string),
+        repository: repository.map(str::to_string),
+        release_tag: release_tag.map(str::to_string),
+    };
+    lock.plugins.insert(id.to_string(), entry.clone());
+    save_lockfile_to(&lock_path, &lock)?;
+    Ok(entry)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn revoke_lock_entry_in_root(plugins_root: &Path, id: &str) -> Result<(), String> {
+    let lock_path = lockfile_path_in(plugins_root);
+    let mut lock = load_lockfile_from(&lock_path)?;
+    if lock.plugins.remove(id).is_some() {
+        save_lockfile_to(&lock_path, &lock)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn evaluate_plugin_trust(
+    plugin: &ExternalPlugin,
+    lockfile: &Result<PluginLockfile, String>,
+) -> PluginTrustState {
+    if plugin.bundled {
+        return PluginTrustState::Bundled;
+    }
+    let lock = match lockfile {
+        Ok(lock) => lock,
+        Err(error) => return PluginTrustState::Unverifiable(error.clone()),
+    };
+    let Some(lib_path) = lib_file_for(plugin) else {
+        return PluginTrustState::Unverifiable("no valid native library in package".to_string());
+    };
+    let library = lib_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let actual = match sha256_file(&lib_path) {
+        Ok(digest) => digest,
+        Err(error) => return PluginTrustState::Unverifiable(error),
+    };
+    match lock.plugins.get(&plugin.id) {
+        None => PluginTrustState::Unapproved {
+            sha256: actual,
+            library,
+        },
+        Some(entry) => {
+            let expected = entry.sha256.to_ascii_lowercase();
+            let same_digest =
+                crate::rest::constant_time_eq(expected.as_bytes(), actual.as_bytes());
+            if same_digest && entry.library == library {
+                PluginTrustState::Approved { sha256: actual }
+            } else {
+                PluginTrustState::HashMismatch {
+                    expected,
+                    actual,
+                    library,
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn evaluate_plugin_trust_on_disk(plugin: &ExternalPlugin) -> PluginTrustState {
+    let lockfile = lockfile_path()
+        .ok_or_else(|| "cannot locate plugins folder for plugin.lock.json".to_string())
+        .and_then(|path| load_lockfile_from(&path));
+    evaluate_plugin_trust(plugin, &lockfile)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn approve_plugin_in_root(
+    plugins_root: &Path,
+    plugin: &ExternalPlugin,
+    release_tag: Option<&str>,
+) -> Result<PluginLockEntry, String> {
+    let lib_path = lib_file_for(plugin)
+        .ok_or_else(|| format!("no valid native library in package `{}`", plugin.id))?;
+    let library = lib_path
+        .file_name()
+        .ok_or_else(|| "plugin library has no filename".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let sha256 = sha256_file(&lib_path)?;
+    record_lock_entry_in_root(
+        plugins_root,
+        &plugin.id,
+        &library,
+        &sha256,
+        (!plugin.version.is_empty()).then_some(plugin.version.as_str()),
+        plugin.repository.as_deref(),
+        release_tag,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn approve_plugin(plugin: &ExternalPlugin) -> Result<PluginLockEntry, String> {
+    let root = plugins_dir().ok_or("cannot locate the plugins folder")?;
+    approve_plugin_in_root(&root, plugin, None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn collect_pending_approvals(plugins: &[ExternalPlugin]) -> Vec<PendingPluginApproval> {
+    let lockfile = lockfile_path()
+        .ok_or_else(|| "cannot locate plugins folder for plugin.lock.json".to_string())
+        .and_then(|path| load_lockfile_from(&path));
+    plugins
+        .iter()
+        .filter(|plugin| {
+            !plugin.bundled
+                && plugin.lib_present
+                && plugin.api_compatible()
+                && plugin.acadrust_compatible()
+                && plugin.rustc_compatible()
+        })
+        .filter_map(|plugin| match evaluate_plugin_trust(plugin, &lockfile) {
+            PluginTrustState::Unapproved { sha256, library } => Some(PendingPluginApproval {
+                id: plugin.id.clone(),
+                name: if plugin.name.is_empty() {
+                    plugin.id.clone()
+                } else {
+                    plugin.name.clone()
+                },
+                version: plugin.version.clone(),
+                repository: plugin.repository.clone(),
+                library,
+                sha256,
+                previous_sha256: None,
+            }),
+            PluginTrustState::HashMismatch {
+                expected,
+                actual,
+                library,
+            } => Some(PendingPluginApproval {
+                id: plugin.id.clone(),
+                name: if plugin.name.is_empty() {
+                    plugin.id.clone()
+                } else {
+                    plugin.name.clone()
+                },
+                version: plugin.version.clone(),
+                repository: plugin.repository.clone(),
+                library,
+                sha256: actual,
+                previous_sha256: Some(expected),
+            }),
+            PluginTrustState::Bundled
+            | PluginTrustState::Approved { .. }
+            | PluginTrustState::Unverifiable(_) => None,
+        })
+        .collect()
 }
 
 /// Minimal `plugin.toml` reader for the documented `[plugin]` / `[opencad]`
@@ -270,8 +749,9 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         }
     }
 
+    let id = id.filter(|id| is_valid_plugin_id(id))?;
     Some(ExternalPlugin {
-        id: id?,
+        id,
         name,
         version,
         description,
@@ -292,21 +772,31 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
 
 /// Convert a plugin source URL or shorthand to the marketplace's canonical
 /// `owner/repo` form.
+fn is_valid_github_slug_segment(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg != "."
+        && seg != ".."
+        && seg
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 pub(crate) fn normalize_repository(value: &str) -> Option<String> {
-    let repo = value
-        .trim()
-        .trim_start_matches("https://github.com/")
-        .trim_start_matches("http://github.com/")
-        .trim_end_matches('/')
-        .trim_end_matches(".git");
+    let raw = value.trim();
+    let repo = raw
+        .strip_prefix("https://github.com/")
+        .or_else(|| raw.strip_prefix("http://github.com/"))
+        .unwrap_or(raw)
+        .trim_end_matches('/');
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
     let mut parts = repo.split('/');
     let (Some(owner), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
         return None;
     };
-    if owner.is_empty() || name.is_empty() {
-        None
-    } else {
+    if is_valid_github_slug_segment(owner) && is_valid_github_slug_segment(name) {
         Some(format!("{owner}/{name}"))
+    } else {
+        None
     }
 }
 
@@ -345,21 +835,20 @@ pub(crate) use loader::{shutdown_plugins, with_manager};
 pub(crate) use loader::{shutdown_plugins, with_fresh_installed_manager, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-pub(crate) use loader::{load_at_startup, loaded_ids};
-
+pub(crate) use loader::load_at_startup;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use loader::remove_plugin;
+pub(crate) use loader::{load_single_approved, loaded_ids, remove_plugin};
 #[cfg(test)]
 pub(crate) use loader::{remove_plugin_for_tests, spawn_into_manager_for_tests};
-pub use crate::plugin_catalog::{ExternalPlugin, RegistryEntry, ReleaseInfo};
+pub use crate::plugin_catalog::{ExternalPlugin, PendingPluginApproval, RegistryEntry, ReleaseInfo};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(test, allow(dead_code))]
 mod loader {
-    use super::lib_extension;
+    #[cfg(test)]
+    pub(super) use super::lib_file_for;
     use crate::plugin::v4_support;
     use ocs_plugin_api::process::PluginManager;
-    use std::path::{Path, PathBuf};
 
     // Plugin manager. THREAD-LOCAL and REENTRANT (RefCell immutable borrows
     // nest): every with_manager caller runs on the app's thread — dispatch
@@ -387,6 +876,9 @@ mod loader {
         app: &mut crate::app::OpenCADStudio,
     ) -> Vec<(String, Result<(), String>)> {
         let discovered = super::discover();
+        let lockfile = super::lockfile_path()
+            .ok_or_else(|| "cannot locate plugins folder for plugin.lock.json".to_string())
+            .and_then(|path| super::load_lockfile_from(&path));
         let mut manager = PluginManager::new();
         manager.set_notification_handler(v4_support::notification_handler());
         let mut out = Vec::new();
@@ -449,7 +941,39 @@ mod loader {
                 ));
                 continue;
             }
-            let Some(path) = lib_file_for(&d) else {
+            match super::evaluate_plugin_trust(d, &lockfile) {
+                super::PluginTrustState::Bundled | super::PluginTrustState::Approved { .. } => {}
+                super::PluginTrustState::Unapproved { sha256, .. } => {
+                    out.push((
+                        d.id.clone(),
+                        Err(format!(
+                            "plugin_untrusted: awaiting first-load approval (sha256: {sha256})"
+                        )),
+                    ));
+                    continue;
+                }
+                super::PluginTrustState::HashMismatch {
+                    expected, actual, ..
+                } => {
+                    out.push((
+                        d.id.clone(),
+                        Err(format!(
+                            "plugin_hash_mismatch: native library changed on disk (expected {expected}, actual {actual})"
+                        )),
+                    ));
+                    continue;
+                }
+                super::PluginTrustState::Unverifiable(error) => {
+                    out.push((
+                        d.id.clone(),
+                        Err(format!(
+                            "plugin_untrusted: cannot verify plugin.lock.json ({error})"
+                        )),
+                    ));
+                    continue;
+                }
+            }
+            let Some(path) = super::lib_file_for(d) else {
                 out.push((
                     d.id.clone(),
                     Err("no native library in package".to_string()),
@@ -470,6 +994,44 @@ mod loader {
         }
         MANAGER.with(|m| *m.borrow_mut() = Some(manager));
         out
+    }
+
+    pub(crate) fn load_single_approved(
+        app: &mut crate::app::OpenCADStudio,
+        plugin: &super::ExternalPlugin,
+    ) -> Result<String, String> {
+        if !plugin.api_compatible() {
+            return Err(format!("plugin `{}` has incompatible API version", plugin.id));
+        }
+        if !plugin.acadrust_compatible() || !plugin.rustc_compatible() {
+            return Err(format!("plugin `{}` ABI is incompatible with this host", plugin.id));
+        }
+        match super::evaluate_plugin_trust_on_disk(plugin) {
+            super::PluginTrustState::Bundled | super::PluginTrustState::Approved { .. } => {}
+            super::PluginTrustState::Unapproved { .. } => {
+                return Err("plugin is not approved in plugin.lock.json".to_string());
+            }
+            super::PluginTrustState::HashMismatch { .. } => {
+                return Err("plugin binary hash does not match plugin.lock.json".to_string());
+            }
+            super::PluginTrustState::Unverifiable(err) => {
+                return Err(format!("cannot verify plugin trust: {err}"));
+            }
+        }
+        let path = super::lib_file_for(plugin)
+            .ok_or_else(|| "no valid native library in package".to_string())?;
+        let mut manager = MANAGER.with(|m| m.borrow_mut().take()).unwrap_or_default();
+        manager.set_notification_handler(v4_support::notification_handler());
+        let load_res = if manager.ids().iter().any(|id| id == &plugin.id) {
+            Ok(plugin.id.clone())
+        } else {
+            let mut host = crate::app::plugin_host::HostSession::new(app, 0);
+            manager
+                .load_with_expected_id(&path, Some(&plugin.id), &mut host)
+                .map_err(|e| e.to_string())
+        };
+        MANAGER.with(|m| *m.borrow_mut() = Some(manager));
+        load_res
     }
 
     /// Ids of the plugins currently loaded in the process store.
@@ -583,35 +1145,6 @@ mod loader {
         })
     }
 
-    /// Path to the native library beside `plugin.toml`, if any.
-    fn lib_file(dir: &Path) -> Option<PathBuf> {
-        let ext = lib_extension();
-        std::fs::read_dir(dir).ok()?.flatten().find_map(|e| {
-            let p = e.path();
-            (p.extension().and_then(|s| s.to_str()) == Some(ext)).then_some(p)
-        })
-    }
-
-    /// The package's native library: the exact `library` file named by
-    /// `plugin.toml` when declared, otherwise the first file with this
-    /// platform's extension. A declared name that is missing or does not
-    /// carry the platform extension refuses the load with an honest error
-    /// instead of silently loading some other `.so`/`.dll` in the folder.
-    fn lib_file_for(plugin: &super::ExternalPlugin) -> Option<PathBuf> {
-        if let Some(name) = plugin.library.as_deref() {
-            let path = plugin.dir.join(name);
-            let matches_ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s == lib_extension());
-            return if matches_ext && path.is_file() {
-                Some(path)
-            } else {
-                None
-            };
-        }
-        lib_file(&plugin.dir)
-    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1106,5 +1639,309 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
             );
             process.shutdown();
         }
+    }
+
+    struct ScratchDir(std::path::PathBuf);
+    impl ScratchDir {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("ocs_ext_{label}_{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn plugin_id_validation_rejects_traversal_and_reserved_names() {
+        assert!(is_valid_plugin_id("opencad.my_plugin-1"));
+        assert!(is_valid_plugin_id("A1.b"));
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../evil",
+            "a/b",
+            "a\\b",
+            "C:evil",
+            "foo\0bar",
+            ".hidden",
+            "foo.",
+            "foo..bar",
+            "con",
+            "CON.plugin",
+            "prn",
+            "aux",
+            "nul",
+            "com1",
+            "COM9.extra",
+            "lpt1",
+            "LPT9",
+        ] {
+            assert!(!is_valid_plugin_id(bad), "expected rejection for {bad:?}");
+        }
+        let too_long = "a".repeat(65);
+        assert!(!is_valid_plugin_id(&too_long));
+    }
+
+    #[test]
+    fn parse_plugin_toml_rejects_invalid_and_traversal_ids() {
+        for bad_id in ["../escape", "foo/bar", "CON", ""] {
+            let toml = format!("id = \"{bad_id}\"\napi_version = 14\n");
+            assert!(
+                parse_plugin_toml(&toml).is_none(),
+                "expected rejection for id {bad_id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lib_file_for_rejects_traversal_and_nested_library_paths() {
+        let dir = ScratchDir::new("lib_file_for_guard");
+        let ext = lib_extension();
+        let nested_dir = dir.0.join("nested");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        std::fs::write(nested_dir.join(format!("sub.{ext}")), b"nested").unwrap();
+        let valid_name = format!("good.{ext}");
+        std::fs::write(dir.0.join(&valid_name), b"good").unwrap();
+
+        let base = ExternalPlugin {
+            id: "opencad.test".into(),
+            name: String::new(),
+            version: String::new(),
+            description: String::new(),
+            repository: None,
+            library: Some(valid_name),
+            api_version: 14,
+            acadrust_source: None,
+            acadrust_declared: false,
+            rustc_version: None,
+            rustc_declared: false,
+            ribbon_order: 0,
+            command_prefixes: Vec::new(),
+            dir: dir.0.clone(),
+            lib_present: true,
+            bundled: false,
+        };
+        assert!(loader::lib_file_for(&base).is_some());
+
+        for bad_lib in [
+            format!("../escape.{ext}"),
+            format!("nested/sub.{ext}"),
+            format!("/abs/lib.{ext}"),
+            format!("./good.{ext}"),
+        ] {
+            let mut tampered = base.clone();
+            tampered.library = Some(bad_lib.clone());
+            assert!(
+                loader::lib_file_for(&tampered).is_none(),
+                "expected rejection for library path {bad_lib:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_in_root_rejects_traversal_and_removes_discovered_dir() {
+        let sandbox = ScratchDir::new("uninstall_guard");
+        let plugins_root = sandbox.0.join("plugins");
+        let victim = sandbox.0.join("victim");
+        std::fs::create_dir_all(&plugins_root).unwrap();
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("keep.txt"), b"keep").unwrap();
+
+        assert!(uninstall_in_root(&plugins_root, "../victim").is_err());
+        assert!(victim.exists());
+
+        #[cfg(unix)]
+        {
+            let link = plugins_root.join("opencad.linked");
+            std::os::unix::fs::symlink(&victim, &link).unwrap();
+            assert!(uninstall_in_root(&plugins_root, "opencad.linked").is_err());
+            assert!(victim.join("keep.txt").exists());
+            let _ = std::fs::remove_file(&link);
+        }
+
+        let custom_dir = plugins_root.join("custom-folder");
+        std::fs::create_dir_all(&custom_dir).unwrap();
+        std::fs::write(
+            custom_dir.join("plugin.toml"),
+            "id = \"opencad.custom\"\napi_version = 14\n",
+        )
+        .unwrap();
+        uninstall_in_root(&plugins_root, "opencad.custom").unwrap();
+        assert!(!custom_dir.exists());
+    }
+
+    #[test]
+    fn normalize_repository_rejects_malformed_and_preserves_git_suffix_names() {
+        assert_eq!(
+            normalize_repository("https://github.com/owner/rust"),
+            Some("owner/rust".to_string())
+        );
+        assert_eq!(
+            normalize_repository("https://github.com/owner/demo.git/"),
+            Some("owner/demo".to_string())
+        );
+        for bad in [
+            "../evil",
+            "owner/..",
+            "owner/repo?x=1",
+            "owner/repo#frag",
+            "https://evil.com/owner/repo",
+            "owner/repo/extra",
+        ] {
+            assert_eq!(
+                normalize_repository(bad),
+                None,
+                "expected None for {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_plugin_is_pre_trusted_while_user_override_requires_lockfile() {
+        let sandbox = ScratchDir::new("bundled_trust");
+        let plugins_root = sandbox.0.join("user");
+        let pkg_dir = sandbox.0.join("bundled/opencad.python");
+        std::fs::create_dir_all(&plugins_root).unwrap();
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let lib_name = format!("py.{}", lib_extension());
+        std::fs::write(pkg_dir.join(&lib_name), b"bundled-binary").unwrap();
+
+        let bundled = ExternalPlugin {
+            id: "opencad.python".into(),
+            name: "Python".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            repository: None,
+            api_version: ocs_plugin_api::manifest::API_VERSION,
+            acadrust_source: Some(ocs_plugin_api::version_info::host_acadrust_source().to_string()),
+            acadrust_declared: true,
+            rustc_version: Some(ocs_plugin_api::version_info::host_rustc_version().to_string()),
+            rustc_declared: true,
+            ribbon_order: 0,
+            command_prefixes: Vec::new(),
+            dir: pkg_dir.clone(),
+            bundled: true,
+            lib_present: true,
+            library: Some(lib_name.clone()),
+        };
+
+        let lock = load_lockfile_from(&lockfile_path_in(&plugins_root));
+        assert_eq!(evaluate_plugin_trust(&bundled, &lock), PluginTrustState::Bundled);
+
+        let mut user_override = bundled.clone();
+        user_override.bundled = false;
+        assert!(matches!(
+            evaluate_plugin_trust(&user_override, &lock),
+            PluginTrustState::Unapproved { .. }
+        ));
+    }
+
+    #[test]
+    fn lockfile_round_trip_detects_approval_tampering_and_corrupt_lockfile() {
+        let sandbox = ScratchDir::new("lock_round_trip");
+        let plugins_root = sandbox.0.join("plugins");
+        let pkg_dir = plugins_root.join("opencad.demo");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let lib_name = format!("demo.{}", lib_extension());
+        let lib_path = pkg_dir.join(&lib_name);
+        std::fs::write(&lib_path, b"plugin-binary-v1").unwrap();
+
+        let plugin = ExternalPlugin {
+            id: "opencad.demo".into(),
+            name: "Demo".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            repository: Some("owner/demo".into()),
+            api_version: ocs_plugin_api::manifest::API_VERSION,
+            acadrust_source: Some(ocs_plugin_api::version_info::host_acadrust_source().to_string()),
+            acadrust_declared: true,
+            rustc_version: Some(ocs_plugin_api::version_info::host_rustc_version().to_string()),
+            rustc_declared: true,
+            ribbon_order: 0,
+            command_prefixes: Vec::new(),
+            dir: pkg_dir.clone(),
+            bundled: false,
+            lib_present: true,
+            library: Some(lib_name.clone()),
+        };
+
+        let lock_path = lockfile_path_in(&plugins_root);
+        let initial_lock = load_lockfile_from(&lock_path);
+        assert!(matches!(
+            evaluate_plugin_trust(&plugin, &initial_lock),
+            PluginTrustState::Unapproved { .. }
+        ));
+
+        let entry = approve_plugin_in_root(&plugins_root, &plugin, Some("v1.0.0")).unwrap();
+        let approved_lock = load_lockfile_from(&lock_path);
+        assert_eq!(
+            evaluate_plugin_trust(&plugin, &approved_lock),
+            PluginTrustState::Approved {
+                sha256: entry.sha256.clone()
+            }
+        );
+
+        // Modifying 1 byte triggers HashMismatch with exact digests.
+        std::fs::write(&lib_path, b"plugin-binary-v2").unwrap();
+        let tampered_digest = sha256_bytes(b"plugin-binary-v2");
+        assert_eq!(
+            evaluate_plugin_trust(&plugin, &approved_lock),
+            PluginTrustState::HashMismatch {
+                expected: entry.sha256.clone(),
+                actual: tampered_digest.clone(),
+                library: lib_name.clone(),
+            }
+        );
+
+        // Re-approving updates the lockfile to the new digest.
+        let reapproved = approve_plugin_in_root(&plugins_root, &plugin, Some("v1.0.1")).unwrap();
+        assert_eq!(reapproved.sha256, tampered_digest);
+        let refreshed_lock = load_lockfile_from(&lock_path);
+        assert_eq!(
+            evaluate_plugin_trust(&plugin, &refreshed_lock),
+            PluginTrustState::Approved {
+                sha256: tampered_digest
+            }
+        );
+
+        // Corrupt plugin.lock.json fails closed as Unverifiable.
+        std::fs::write(&lock_path, b"{not valid json").unwrap();
+        let corrupt = load_lockfile_from(&lock_path);
+        assert!(matches!(
+            evaluate_plugin_trust(&plugin, &corrupt),
+            PluginTrustState::Unverifiable(_)
+        ));
+    }
+
+    #[test]
+    fn uninstall_in_root_revokes_lockfile_entry() {
+        let sandbox = ScratchDir::new("revoke_lock");
+        let plugins_root = sandbox.0.join("plugins");
+        let pkg_dir = plugins_root.join("opencad.temp");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let lib_name = format!("temp.{}", lib_extension());
+        std::fs::write(pkg_dir.join(&lib_name), b"bin").unwrap();
+        std::fs::write(pkg_dir.join("plugin.toml"), "id = \"opencad.temp\"\napi_version = 14\n")
+            .unwrap();
+        record_lock_entry_in_root(
+            &plugins_root,
+            "opencad.temp",
+            &lib_name,
+            &sha256_bytes(b"bin"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        uninstall_in_root(&plugins_root, "opencad.temp").unwrap();
+        let lock = load_lockfile_from(&lockfile_path_in(&plugins_root)).unwrap();
+        assert!(!lock.plugins.contains_key("opencad.temp"));
     }
 }

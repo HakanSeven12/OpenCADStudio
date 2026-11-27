@@ -5484,7 +5484,7 @@ mod tests {
             .unwrap()
         };
         let catalog = call("entity_schema", json!({}));
-        assert_eq!(catalog["types"].as_array().unwrap().len(), 13);
+        assert_eq!(catalog["types"].as_array().unwrap().len(), 15);
         assert!(catalog.get("schema").is_none());
         let circle = call("entity_schema", json!({"type":"Circle"}));
         assert_eq!(

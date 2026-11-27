@@ -416,7 +416,7 @@ fn nested_placement_subtracts_each_source_base_and_scales_once() {
                 EntityType::Line(line) => out.push((map(line.start), map(line.end))),
                 EntityType::Insert(insert) => {
                     let br = doc.block_records.get(&insert.block_name).unwrap();
-                    let (s, c) = insert.rotation.to_radians().sin_cos();
+                    let (s, c) = insert.rotation.sin_cos();
                     let x = [c * insert.x_scale(), s * insert.x_scale()];
                     let y = [-s * insert.y_scale(), c * insert.y_scale()];
                     let mul = |v: [f64; 2]| {
@@ -441,7 +441,7 @@ fn nested_placement_subtracts_each_source_base_and_scales_once() {
     for e in a.document.entities_mut() {
         if let EntityType::Insert(i) = e {
             i.insert_point = Vector3::new(100., 200., 0.);
-            i.rotation = 90.;
+            i.rotation = std::f64::consts::FRAC_PI_2;
             i.set_x_scale(2.);
             i.set_y_scale(2.);
             i.set_z_scale(2.);
@@ -866,4 +866,123 @@ fn browser_current_drawing_reuse_reports_direct_cycle_and_can_be_replaced() {
         "replacement must clear Circular"
     );
     assert!(rows[0].diagnostic.is_none());
+}
+
+#[test]
+fn xref_placement_nested_local_blocks_keep_shear_and_cut_only_external_overlays() {
+    use crate::scene::render_graph::{BlockRoot, BlockRootRole, RenderSceneGraph, SceneRoot};
+    let mut root =
+        (*source(&[("B", false), ("HiddenOverlay", true), ("PaperOnly", false)])).clone();
+    let mut local = BlockRecord::new("LOCAL");
+    local.handle = root.document.allocate_handle();
+    local.base_point = Vector3::new(1., 2., 3.);
+    let owner = local.handle;
+    root.document.block_records.add(local).unwrap();
+    let paper = root
+        .document
+        .block_records
+        .iter()
+        .find(|b| b.is_paper_space())
+        .unwrap()
+        .handle;
+    let moving: Vec<_> = root
+        .document
+        .entities()
+        .filter(|e| matches!(e, EntityType::Insert(_)))
+        .map(|e| e.common().handle)
+        .collect();
+    for handle in moving {
+        // Reinsert under its new owner so the CAD block membership stays valid.
+        let mut e = root.document.remove_entity(handle).unwrap();
+        if let EntityType::Insert(i) = &mut e {
+            i.common.owner_handle = if i.block_name == "PaperOnly" {
+                paper
+            } else {
+                owner
+            };
+            i.insert_point = Vector3::new(4., 5., 6.);
+            i.rotation = std::f64::consts::FRAC_PI_4;
+            i.set_x_scale(-2.);
+            i.set_y_scale(3.);
+            i.set_z_scale(4.);
+        }
+        root.document.add_entity(e).unwrap();
+    }
+    for o in [Vector3::new(100., 0., 0.), Vector3::new(0., 100., 0.)] {
+        let mut i = Insert::new("LOCAL", o);
+        i.rotation = 0.5;
+        i.set_x_scale(2.);
+        i.set_y_scale(3.);
+        i.set_z_scale(4.);
+        root.document.add_entity(EntityType::Insert(i)).unwrap();
+    }
+    let mut access = Access::default();
+    for name in ["B", "HiddenOverlay", "PaperOnly"] {
+        access.sources.insert(id(name), source(&[]));
+    }
+    let graph = prepare_xref_closure(id("A"), Arc::new(root), 10, &[], &mut access).unwrap();
+    assert_eq!(
+        access.reads, 1,
+        "local blocks propagate Attach; source Paper and Overlay do not"
+    );
+    assert!(graph
+        .rows
+        .iter()
+        .any(|r| r.name == "B" && r.status == "Loaded"));
+    assert!(graph
+        .rows
+        .iter()
+        .any(|r| r.name == "PaperOnly" && r.status == "Unreferenced"));
+    assert!(!graph.rows.iter().any(|r| r.name == "HiddenOverlay"));
+    let depths = Default::default();
+    let render = RenderSceneGraph::new(&graph.document, None, None, true, &depths);
+    let mut lines = vec![];
+    render.walk_root(
+        SceneRoot::Block(BlockRoot {
+            record: graph.document.header.model_space_block_handle,
+            role: BlockRootRole::ModelSpace,
+        }),
+        |_, _| true,
+        |e, c| {
+            if c.insert_path.len() == 2 {
+                if let EntityType::Line(l) = e {
+                    lines.push((c.transform.apply(l.start), c.transform.apply(l.end)));
+                }
+            }
+        },
+    );
+    assert_eq!(lines.len(), 2);
+    let (s, c) = 0.5f64.sin_cos();
+    let q = 2f64.sqrt();
+    let delta = Vector3::new(-2. * q * c + 3. * q * s, -2. * q * s - 3. * q * c, 0.);
+    for ((a, b), o) in lines
+        .into_iter()
+        .zip([Vector3::new(100., 0., 0.), Vector3::new(0., 100., 0.)])
+    {
+        let want = o + Vector3::new(6. * c - 9. * s, 6. * s + 9. * c, 12.);
+        assert!((a - want).length() < 1e-10, "{a:?} != {want:?}");
+        assert!((b - a - delta).length() < 1e-10);
+    }
+    let second = Vector3::new(
+        -3. / q * 2. * c - 3. / q * 3. * s,
+        -3. / q * 2. * s + 3. / q * 3. * c,
+        0.,
+    );
+    assert!(
+        delta.dot(&second).abs() > 1.,
+        "composed axes have effective shear"
+    );
+    let inner = graph
+        .document
+        .entities()
+        .find_map(|e| match e {
+            EntityType::Insert(i) if i.common.owner_handle == owner => Some(i),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(inner.rotation, std::f64::consts::FRAC_PI_4);
+    assert_eq!(
+        [inner.x_scale(), inner.y_scale(), inner.z_scale()],
+        [-2., 3., 4.]
+    );
 }

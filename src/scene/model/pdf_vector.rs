@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use hayro::hayro_interpret::font::{Glyph, GlyphRun};
+use hayro::hayro_interpret::pattern::{Pattern, TilingPattern};
 use hayro::hayro_interpret::util::TransformExt;
 use hayro::hayro_interpret::{
     interpret_page, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image,
@@ -1028,7 +1029,13 @@ struct Collector {
     /// Each clip as a convex polygon in inches (`None` when it is not one),
     /// within the one before it.
     clips: Vec<Option<Vec<[f64; 2]>>>,
+    collecting_tile_images: bool,
+    pattern_cells: usize,
+    pattern_pixels: u64,
 }
+
+const MAX_PATTERN_CELLS: usize = 512;
+const MAX_PATTERN_PIXELS: u64 = 16_000_000;
 
 impl Collector {
     fn finish_text(&mut self) {
@@ -1039,6 +1046,56 @@ impl Collector {
                 self.texts.push(text);
             }
         }
+    }
+
+    /// Some exporters paint a logo as an image inside a tiling pattern.
+    /// Replay the intersecting cells through the image reader. Leave vector
+    /// pattern artwork to the normal path collector.
+    fn collect_tiled_images<'a>(&mut self, clip: ClipPath, tile: &TilingPattern<'a>) -> bool {
+        if tile.opacity != 1.0 || self.pattern_cells >= MAX_PATTERN_CELLS {
+            return false;
+        }
+        self.push_clip_path(&clip);
+        let before = self.images.len();
+        if let (Some(area), Some(Some(polygon))) = (self.visible.last(), self.clips.last()) {
+            if area.width() > 0.0 && area.height() > 0.0 && polygon.len() >= 3 {
+                let area = tile.matrix.inverse().transform_rect_bbox(*area);
+                let dx = f64::from(tile.x_step.abs());
+                let dy = f64::from(tile.y_step.abs());
+                let copies = |lo: f64, hi: f64, cell_lo: f64, cell_hi: f64, step: f64| {
+                    let first = ((lo - cell_hi) / step).floor() + 1.0;
+                    let last = ((hi - cell_lo) / step).ceil() - 1.0;
+                    (first <= last && first >= f64::from(i32::MIN) && last <= f64::from(i32::MAX))
+                        .then_some(i64::from(first as i32)..=i64::from(last as i32))
+                };
+                let ranges = copies(area.x0, area.x1, tile.bbox.x0, tile.bbox.x1, dx).zip(copies(
+                    area.y0,
+                    area.y1,
+                    tile.bbox.y0,
+                    tile.bbox.y1,
+                    dy,
+                ));
+                if let Some((xs, ys)) = ranges {
+                    let count = |range: &std::ops::RangeInclusive<i64>| {
+                        (*range.end() - *range.start() + 1) as u64
+                    };
+                    let cells = count(&xs).saturating_mul(count(&ys));
+                    if cells <= (MAX_PATTERN_CELLS - self.pattern_cells) as u64 {
+                        self.pattern_cells += cells as usize;
+                        self.collecting_tile_images = true;
+                        for j in ys {
+                            for i in xs.clone() {
+                                let offset = Affine::translate((i as f64 * dx, j as f64 * dy));
+                                tile.interpret(self, tile.matrix * offset, false);
+                            }
+                        }
+                        self.collecting_tile_images = false;
+                    }
+                }
+            }
+        }
+        self.pop_clip();
+        self.images.len() > before
     }
 }
 
@@ -1159,10 +1216,28 @@ fn subpaths(path: &BezPath, transform: Affine) -> (Vec<SubPath>, Vec<SubClose>) 
 
 impl<'a> Device<'a> for Collector {
     fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
+        if self.collecting_tile_images {
+            return;
+        }
         let (transform, paint) = (props.transform, &props.paint);
         // Graphics drawn between glyphs do not end a text run: the next
         // glyph still joins it when it follows on along the baseline.
         self.path_calls.push(None);
+        // Once the raster has been read, the pattern fill path serves only
+        // as its clip. Importing it as a solid would cover the logo.
+        if self.want_images && props.soft_mask.is_none() && props.blend_mode == BlendMode::Normal {
+            if let (Paint::Pattern(pattern), DrawMode::Fill(fill)) = (paint, mode) {
+                if let Pattern::Tiling(tile) = pattern.as_ref() {
+                    let clip = ClipPath {
+                        path: transform * path.clone(),
+                        fill: *fill,
+                    };
+                    if self.collect_tiled_images(clip, tile) {
+                        return;
+                    }
+                }
+            }
+        }
         let (subpaths, closes) = subpaths(path, transform);
         if subpaths.is_empty() {
             return;
@@ -1244,7 +1319,7 @@ impl<'a> Device<'a> for Collector {
     fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
     fn draw_glyph_run(&mut self, run: &GlyphRun<'_, 'a>, props: DrawProps<'a>, mode: &DrawMode) {
         // Invisible text (render mode 3, as over a scan) is not drawn.
-        if matches!(mode, DrawMode::Invisible) {
+        if self.collecting_tile_images || matches!(mode, DrawMode::Invisible) {
             return;
         }
         for glyph in run.glyphs() {
@@ -1256,7 +1331,7 @@ impl<'a> Device<'a> for Collector {
         tag: &[u8],
         _: Option<&hayro::hayro_syntax::object::Dict<'_>>,
     ) {
-        if tag == b"OC" {
+        if !self.collecting_tile_images && tag == b"OC" {
             self.oc_sections += 1;
         }
     }
@@ -1268,6 +1343,32 @@ impl<'a> Device<'a> for Collector {
         if !self.want_images {
             return;
         }
+        let clip = if self.collecting_tile_images {
+            let Some(Some(clip)) = self.clips.last() else {
+                return;
+            };
+            let bounds = transform.transform_rect_bbox(Rect::new(
+                0.0,
+                0.0,
+                f64::from(raster.width()),
+                f64::from(raster.height()),
+            ));
+            let Some(area) = self.visible.last() else {
+                return;
+            };
+            let overlap = area.intersect(bounds);
+            if clip.len() < 3 || overlap.width() <= 0.0 || overlap.height() <= 0.0 {
+                return;
+            }
+            let pixels = u64::from(raster.width()) * u64::from(raster.height());
+            if pixels > MAX_PATTERN_PIXELS - self.pattern_pixels {
+                return;
+            }
+            self.pattern_pixels += pixels;
+            Some(clip.as_slice())
+        } else {
+            None
+        };
         let mut decoded: Option<PdfImage> = None;
         raster.with_rgba(
             |data, alpha| {
@@ -1294,6 +1395,20 @@ impl<'a> Device<'a> for Collector {
                 }
                 // The transform maps pixel space (y down) onto the page.
                 let at = |x: f64, y: f64| pt(transform * Point::new(x, y));
+                if let Some(clip) = clip {
+                    let mut any_visible = false;
+                    for (i, pixel) in rgba.chunks_exact_mut(4).enumerate() {
+                        let x = (i % w as usize) as f64 + 0.5;
+                        let y = (i / w as usize) as f64 + 0.5;
+                        if pixel[3] != 0 && !inside_convex(clip, at(x, y)) {
+                            pixel[3] = 0;
+                        }
+                        any_visible |= pixel[3] != 0;
+                    }
+                    if !any_visible {
+                        return;
+                    }
+                }
                 let (wf, hf) = (w as f64, h as f64);
                 let (o, x1, y1) = (at(0.0, hf), at(wf, hf), at(0.0, 0.0));
                 decoded = Some(PdfImage {
@@ -2144,6 +2259,51 @@ mod tests {
         // The snapping read leaves images out.
         let path = source("image-snap", page.bytes());
         assert!(page_vectors(&path, "1").expect("a page").images.is_empty());
+    }
+
+    #[test]
+    fn a_logo_in_a_tiling_pattern_uses_the_fill_as_its_clip() {
+        let page = Pdf {
+            content: "BT /F1 12 Tf 72 216 Td (Title) Tj ET \
+                      q 1 0 0 1 75 74 cm /Pattern cs /Logo scn 0 0 102 68 re f Q \
+                      72 180 m 216 180 l S",
+            resources: "/Pattern << /Logo 5 0 R >> /Font << /F1 8 0 R >>",
+            objects: &[
+                stream(
+                    "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 \
+                     /BBox [0 0 144 72] /XStep 144 /YStep 72 /Matrix [1 0 0 1 72 72] \
+                     /Resources << /XObject << /Im1 6 0 R >> >>",
+                    "144 0 0 72 0 0 cm /Im1 Do",
+                ),
+                stream(
+                    "/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceRGB \
+                     /BitsPerComponent 8 /Filter /ASCIIHexDecode /SMask 7 0 R",
+                    "FF9900000000>",
+                ),
+                stream(
+                    "/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray \
+                     /BitsPerComponent 8 /Filter /ASCIIHexDecode",
+                    "80FF>",
+                ),
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+            ],
+            ..Pdf::default()
+        }
+        .read("clipped-tiled-logo");
+
+        assert_eq!(page.texts[0].text, "Title");
+        assert_eq!(page.paths.len(), 1);
+        assert_eq!(page.images.len(), 1);
+        assert_eq!(
+            page.order,
+            [Drawn::Image(0), Drawn::Path(0), Drawn::Text(0)]
+        );
+        let logo = &page.images[0];
+        assert_eq!((logo.width, logo.height), (2, 1));
+        assert_eq!(logo.rgba, [255, 153, 0, 128, 0, 0, 0, 0]);
+        assert_point(logo.origin, [1.0, 1.0], "image origin");
+        assert_point(logo.u, [1.0, 0.0], "one pixel along");
+        assert_point(logo.v, [0.0, 1.0], "one pixel up");
     }
 
     #[test]

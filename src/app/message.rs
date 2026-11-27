@@ -118,7 +118,7 @@ pub enum Message {
     /// The third field tags an autosave-restore file with its snapshot key so
     /// the snapshot is deleted only when this exact open succeeds.
     #[cfg(target_arch = "wasm32")]
-    WebFileDropped(String, Vec<u8>, Option<String>),
+    WebFileDropped(String, Vec<u8>, Option<String>, bool),
     /// Web only: Ctrl+V captured by a focused text field, whose iced-internal
     /// paste is inert there — read the async clipboard instead (#346).
     WebFieldPaste,

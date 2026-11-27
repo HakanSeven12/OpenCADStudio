@@ -32,7 +32,12 @@ class Page(HTMLParser):
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory)
     (output / 'app').mkdir()
-    (output / 'app/index.html').write_text('<html><head><link rel="icon" href="/old.svg" integrity="old" /></head><body>App</body></html>')
+    (output / 'app/index.html').write_text(
+        '<html><head>'
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\';" />'
+        '<link rel="icon" href="/old.svg" integrity="old" />'
+        '</head><body>App<script type="module">import init from "/app/app.js";init();</script></body></html>'
+    )
     subprocess.run(['sh', 'scripts/assemble-site.sh', str(output)], cwd=ROOT, check=True)
     catalogs = {p.stem: json.loads(p.read_text()) for p in (ROOT / 'site/locales').glob('*.json')}
     supported = set(re.findall(r'#\[serde\(rename = "([a-z]{2}-[A-Z]{2})"\)\]', (ROOT / 'src/i18n.rs').read_text()))
@@ -100,6 +105,9 @@ with tempfile.TemporaryDirectory() as directory:
                     assert value != catalogs['en-US'][key], (locale, key)
     app = (output / 'app/index.html').read_text()
     assert 'old.svg' not in app and 'integrity="old"' not in app and '>App<' in app
+    assert "'sha256-" in app and "'unsafe-inline'" not in app
+    assert 'open-aec.com/shared/analytics.js' not in (output / 'index.html').read_text()
+    assert 'open-aec.com/shared/analytics.js' not in (output / 'download/index.html').read_text()
     icon = next(attrs['href'] for tag, attrs in Page(app).tags if attrs.get('type') == 'image/svg+xml')
     assert icon == '/favicon.svg'
     assert (output / icon.lstrip('/')).read_bytes() == (ROOT / 'site/favicon.svg').read_bytes()

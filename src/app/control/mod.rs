@@ -12,15 +12,17 @@ pub(super) use transport::subscribe;
 pub(super) fn session_id() -> &'static str {
     static ID: OnceLock<String> = OnceLock::new();
     ID.get_or_init(|| {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut bytes = [0u8; 16];
-            getrandom::fill(&mut bytes).expect("OS random source");
-            bytes.iter().map(|v| format!("{v:02x}")).collect()
+        let mut bytes = [0u8; 16];
+        if getrandom::fill(&mut bytes).is_ok() {
+            return bytes.iter().map(|v| format!("{v:02x}")).collect();
         }
         #[cfg(target_arch = "wasm32")]
         {
             format!("web-{}", js_sys::Date::now())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            "fallback-session".to_string()
         }
     })
 }

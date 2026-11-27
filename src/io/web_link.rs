@@ -204,13 +204,14 @@ pub enum LinkOutcome {
 pub(crate) async fn open_link(target: LinkTarget) -> LinkOutcome {
     match target {
         LinkTarget::Url { url, name } => {
+            let cache_recent = same_origin(&url);
             match crate::scene::model::image_model::fetch_url_bytes(&url).await {
-                Ok(bytes) => enqueue_or_full(name, bytes),
+                Ok(bytes) => enqueue_or_full(name, bytes, cache_recent),
                 Err(error) => LinkOutcome::Error(fetch_error_text(&url, error)),
             }
         }
         LinkTarget::RecentName(name) => match super::web_recent::read(&name).await {
-            Ok(bytes) => enqueue_or_full(name, bytes),
+            Ok(bytes) => enqueue_or_full(name, bytes, true),
             Err(_) => LinkOutcome::Info(format!(
                 "\"{name}\" is not in this browser's recent drawings; open or drop it once and the link can reopen it."
             )),
@@ -221,8 +222,13 @@ pub(crate) async fn open_link(target: LinkTarget) -> LinkOutcome {
 /// Hand the bytes to the guarded open queue (the same door a drop uses), or
 /// report a full queue — the fetch succeeded, so the loss must be visible.
 #[cfg(target_arch = "wasm32")]
-fn enqueue_or_full(name: String, bytes: Vec<u8>) -> LinkOutcome {
-    if super::web_drop::enqueue_open(name.clone(), bytes) {
+fn enqueue_or_full(name: String, bytes: Vec<u8>, cache_recent: bool) -> LinkOutcome {
+    let queued = if cache_recent {
+        super::web_drop::enqueue_open(name.clone(), bytes)
+    } else {
+        super::web_drop::enqueue_open_uncached(name.clone(), bytes)
+    };
+    if queued {
         LinkOutcome::Queued
     } else {
         LinkOutcome::Error(format!(

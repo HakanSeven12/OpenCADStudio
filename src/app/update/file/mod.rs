@@ -231,7 +231,7 @@ impl OpenCADStudio {
                 host_bridge::clear_pending_saves();
                 self.read_only = read_only;
                 self.active_modal = None;
-                self.update(Message::WebFileDropped(name, bytes, None))
+                self.update(Message::WebFileDropped(name, bytes, None, !read_only))
             }
             HostCommand::RequestSave { format } => {
                 if self.read_only {

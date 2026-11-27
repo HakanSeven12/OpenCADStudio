@@ -692,6 +692,8 @@ pub struct Graph {
     zoom_steps: i32,
     pub cursor: Point,
     pub drag: Option<Drag>,
+    /// Undo snapshot captured right before `InPress` detaches an existing link.
+    pub detached_undo: Option<GraphUndo>,
     pub drafts: HashMap<Port, String>,
     /// Categories the user has flipped from their initial state: Objects
     /// starts open, the rest closed.
@@ -747,6 +749,7 @@ impl Graph {
         self.created = state.created;
         self.drafts.clear();
         self.drag = None;
+        self.detached_undo = None;
         self.hovered_label = None;
         self.picker = None;
         self.readers = None;
@@ -2456,6 +2459,7 @@ impl Graph {
             }
             GraphMsg::NodePress(id) => {
                 self.selected = Some(*id);
+                self.detached_undo = None;
                 self.flash = None;
                 self.readers = None;
                 // Raise the grabbed node above the others.
@@ -2474,10 +2478,15 @@ impl Graph {
                     }
                 }
             }
-            GraphMsg::OutPress(port) => self.drag = Some(Drag::Link(port.clone())),
+            GraphMsg::OutPress(port) => {
+                self.detached_undo = None;
+                self.drag = Some(Drag::Link(port.clone()));
+            }
             GraphMsg::InPress(port) => {
                 // Grabbing a linked input detaches the link to re-route it.
+                let before = self.undo_state();
                 if let Some(link) = self.engine.disconnect(port) {
+                    self.detached_undo = Some(before);
                     self.drag = Some(Drag::Link(link.from));
                 }
             }

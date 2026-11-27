@@ -504,9 +504,18 @@ impl OpenCADStudio {
         i: usize,
         edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
     ) -> Task<Message> {
+        self.graph_step_with_before(i, None, edit)
+    }
+
+    fn graph_step_with_before(
+        &mut self,
+        i: usize,
+        before: Option<crate::ui::node_graph::GraphUndo>,
+        edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
+    ) -> Task<Message> {
         self.push_undo_snapshot(i, "GRAPH");
         self.tabs[i].graph_files.edited();
-        let before = self.tabs[i].graph.undo_state();
+        let before = before.unwrap_or_else(|| self.tabs[i].graph.undo_state());
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.graph_before = Some(before);
         }
@@ -522,20 +531,39 @@ impl OpenCADStudio {
         edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
     ) -> Task<Message> {
         self.graph_undo_open = true;
-        self.graph_unwind(i);
-        let mut tasks = edit(self);
-        self.graph_drop_driven_params(i);
-        self.tabs[i].graph_files.begin_run();
-        let mut engine = std::mem::take(&mut self.tabs[i].graph.engine);
-        let mut host = AppHost {
-            app: self,
-            i,
-            tasks: Vec::new(),
+        let prep = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.graph_unwind(i);
+            let tasks = edit(self);
+            self.graph_drop_driven_params(i);
+            self.tabs[i].graph_files.begin_run();
+            tasks
+        }));
+        let mut tasks = match prep {
+            Ok(tasks) => tasks,
+            Err(payload) => {
+                self.graph_undo_open = false;
+                std::panic::resume_unwind(payload);
+            }
         };
-        engine.evaluate(&mut host);
-        tasks.append(&mut host.tasks);
+        let mut engine = std::mem::take(&mut self.tabs[i].graph.engine);
+        let eval_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut host = AppHost {
+                app: self,
+                i,
+                tasks: Vec::new(),
+            };
+            engine.evaluate(&mut host);
+            host.tasks
+        }));
         self.tabs[i].graph.engine = engine;
         self.tabs[i].graph_files.end_run();
+        match eval_result {
+            Ok(mut eval_tasks) => tasks.append(&mut eval_tasks),
+            Err(payload) => {
+                self.graph_undo_open = false;
+                std::panic::resume_unwind(payload);
+            }
+        }
         let reading = self.tabs[i].graph_files.reading();
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.held = reading;
@@ -668,45 +696,54 @@ impl OpenCADStudio {
             }
             GraphMsg::PaletteRelease => {
                 if let Some(Drag::Palette(item)) = self.tabs[i].graph.drag.take() {
-                    let pos = self.tabs[i].graph.drop_position(false);
-                    self.tabs[i].graph.add_node(item, Vec::new(), pos);
-                    return self.graph_run(i);
+                    return self.graph_step(i, move |app| {
+                        let pos = app.tabs[i].graph.drop_position(false);
+                        app.tabs[i].graph.add_node(item, Vec::new(), pos);
+                        Vec::new()
+                    });
                 }
             }
             GraphMsg::Released => {
                 let sections = self.graph_all_sections(i);
                 match self.tabs[i].graph.drag.take() {
                     Some(Drag::Palette(item)) => {
-                        let pos = self.tabs[i].graph.drop_position(true);
-                        self.tabs[i].graph.add_node(item, Vec::new(), pos);
-                        return self.graph_run(i);
+                        return self.graph_step(i, move |app| {
+                            let pos = app.tabs[i].graph.drop_position(true);
+                            app.tabs[i].graph.add_node(item, Vec::new(), pos);
+                            Vec::new()
+                        });
                     }
                     Some(Drag::Link(from)) => {
-                        if let Some(to) = self.tabs[i].graph.hit_input(&sections) {
-                            self.graph_connect(i, from, to);
-                        }
-                        // A link dropped on nothing was detached from an input.
-                        return self.graph_run(i);
+                        let before = self.tabs[i].graph.detached_undo.take();
+                        let target = self.tabs[i].graph.hit_input(&sections);
+                        return self.graph_step_with_before(i, before, move |app| {
+                            if let Some(to) = target {
+                                app.graph_connect(i, from, to);
+                            }
+                            Vec::new()
+                        });
                     }
                     _ => {}
                 }
             }
             GraphMsg::NodeDelete(id) => {
-                let graph = &mut self.tabs[i].graph;
-                // Only the entities a node made go with it.
-                let owns = graph.engine.node(id).is_some_and(|node| match &node.kind {
-                    Kind::Object(name) => ObjectKind::from_name(name).is_some_and(ObjectKind::owns),
-                    Kind::Op(_) => false,
-                });
-                graph.engine.remove(id);
-                graph.drafts.retain(|port, _| port.node != id);
-                let handles = graph
-                    .ui
-                    .remove(&id)
-                    .filter(|_| owns)
-                    .map(|ui| ui.handles)
-                    .unwrap_or_default();
-                return self.graph_step(i, |app| {
+                return self.graph_step(i, move |app| {
+                    let graph = &mut app.tabs[i].graph;
+                    // Only the entities a node made go with it.
+                    let owns = graph.engine.node(id).is_some_and(|node| match &node.kind {
+                        Kind::Object(name) => {
+                            ObjectKind::from_name(name).is_some_and(ObjectKind::owns)
+                        }
+                        Kind::Op(_) => false,
+                    });
+                    graph.engine.remove(id);
+                    graph.drafts.retain(|port, _| port.node != id);
+                    let handles = graph
+                        .ui
+                        .remove(&id)
+                        .filter(|_| owns)
+                        .map(|ui| ui.handles)
+                        .unwrap_or_default();
                     let live: Vec<Handle> = handles
                         .into_iter()
                         .filter(|handle| app.tabs[i].scene.document.get_entity(*handle).is_some())
@@ -908,20 +945,22 @@ impl OpenCADStudio {
             graph.applied.clear();
             graph.created.clear();
         }
-        // Evaluating unwinds what the open graph did first.
-        let (applied, created, records) = {
-            let open = &mut self.tabs[i].graph;
-            (
-                std::mem::take(&mut open.applied),
-                std::mem::take(&mut open.created),
-                std::mem::take(&mut open.applied_records),
-            )
-        };
-        graph.applied_records.splice(0..0, records);
-        graph.applied.splice(0..0, applied);
-        graph.created.extend(created);
-        self.tabs[i].graph = graph;
-        self.graph_run(i)
+        self.graph_step(i, move |app| {
+            // Evaluating unwinds what the open graph did first.
+            let (applied, created, records) = {
+                let open = &mut app.tabs[i].graph;
+                (
+                    std::mem::take(&mut open.applied),
+                    std::mem::take(&mut open.created),
+                    std::mem::take(&mut open.applied_records),
+                )
+            };
+            graph.applied_records.splice(0..0, records);
+            graph.applied.splice(0..0, applied);
+            graph.created.extend(created);
+            app.tabs[i].graph = graph;
+            Vec::new()
+        })
     }
 
     /// Ends the rename in progress, keeping the typed name: trimmed, and the
@@ -986,7 +1025,7 @@ impl OpenCADStudio {
     fn graph_commit(&mut self, i: usize, ports: Vec<Port>) -> Task<Message> {
         let sections = self.graph_all_sections(i);
         let graph = &mut self.tabs[i].graph;
-        let mut changed = false;
+        let mut updates = Vec::new();
         for port in ports {
             let Some(raw) = graph.drafts.remove(&port) else {
                 continue;
@@ -1003,16 +1042,21 @@ impl OpenCADStudio {
             let value = row.and_then(|row| {
                 typed_value(row, &raw).filter(|value| !unchanged(row, &raw, value))
             });
-            let Some(value) = value else {
-                continue;
-            };
-            if let Some(node) = graph.engine.node_mut(port.node) {
-                set_param(&mut node.params, port.field, value);
-                changed = true;
+            if let Some(value) = value {
+                if graph.engine.node(port.node).is_some() {
+                    updates.push((port, value));
+                }
             }
         }
-        if changed {
-            self.graph_run(i)
+        if !updates.is_empty() {
+            self.graph_step(i, move |app| {
+                for (port, value) in updates {
+                    if let Some(node) = app.tabs[i].graph.engine.node_mut(port.node) {
+                        set_param(&mut node.params, port.field, value);
+                    }
+                }
+                Vec::new()
+            })
         } else {
             Task::none()
         }
@@ -1022,11 +1066,15 @@ impl OpenCADStudio {
     /// while nothing is linked, an object node writes it to every entity it
     /// stands for on each evaluation.
     fn graph_set(&mut self, i: usize, port: Port, value: Value) -> Task<Message> {
-        let Some(node) = self.tabs[i].graph.engine.node_mut(port.node) else {
+        if self.tabs[i].graph.engine.node(port.node).is_none() {
             return Task::none();
-        };
-        set_param(&mut node.params, port.field, value);
-        self.graph_run(i)
+        }
+        self.graph_step(i, move |app| {
+            if let Some(node) = app.tabs[i].graph.engine.node_mut(port.node) {
+                set_param(&mut node.params, port.field, value);
+            }
+            Vec::new()
+        })
     }
 }
 

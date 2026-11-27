@@ -113,7 +113,8 @@ impl OpenCADStudio {
     /// Cancels the command in progress and takes back what was recorded
     /// after `before` (the active tab and the depth of its undo stack when
     /// the handler started). Returns the number of undo records taken back.
-    fn take_back_failed_command(&mut self, before: Option<(u64, usize)>) -> usize {
+    pub(in crate::app) fn take_back_failed_command(&mut self, before: Option<(u64, usize)>) -> usize {
+        self.graph_undo_open = false;
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_some() {
             let _ = self.apply_cmd_result(crate::command::CmdResult::Cancel);

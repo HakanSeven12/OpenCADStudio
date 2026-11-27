@@ -169,16 +169,26 @@ impl NurbsCurve3 {
     /// `None` for a closed curve or a parameter outside the open domain.
     pub fn split_at(&self, at: f64) -> Option<(Self, Self)> {
         let (from, to) = self.domain();
-        if self.closed || at <= from || at >= to {
+        if self.closed
+            || !(at.is_finite() && from.is_finite() && to.is_finite() && at > from && at < to)
+        {
             return None;
         }
         let degree = self.degree;
         let mut work = self.clone();
         let count = |knots: &[f64]| knots.iter().filter(|knot| (*knot - at).abs() < 1e-12).count();
-        while count(&work.knots) < degree {
+        let needed = degree.saturating_sub(count(&work.knots));
+        for _ in 0..needed {
+            let before = work.knots.len();
             work.insert_knot(at);
+            if work.knots.len() == before {
+                return None;
+            }
         }
         let first = work.knots.iter().position(|knot| (*knot - at).abs() < 1e-12)?;
+        if first < 1 || first + degree > work.knots.len() || first > work.control_points.len() {
+            return None;
+        }
         let mut left_knots = work.knots[..first].to_vec();
         left_knots.extend(std::iter::repeat_n(at, degree + 1));
         let mut right_knots = vec![at; degree + 1];
@@ -343,8 +353,11 @@ impl NurbsCurve3 {
 
     fn bezier_segments(&self) -> (Vec<Vec<[f64; 4]>>, Vec<f64>) {
         let (start, end) = self.domain();
+        if !(start.is_finite() && end.is_finite() && start < end) {
+            return (Vec::new(), Vec::new());
+        }
         let mut work = self.clone();
-        loop {
+        for _ in 0..=work.degree {
             let mut multiplicities: Vec<(f64, usize)> = Vec::new();
             for &knot in &work.knots {
                 if knot <= start + 1e-12 || knot >= end - 1e-12 {
@@ -366,8 +379,12 @@ impl NurbsCurve3 {
             if missing.is_empty() {
                 break;
             }
+            let before_len = work.knots.len();
             for at in missing {
                 work.insert_knot(at);
+            }
+            if work.knots.len() == before_len {
+                break;
             }
         }
 
@@ -383,7 +400,12 @@ impl NurbsCurve3 {
             }
         }
         let homogeneous = work.homogeneous();
-        let segments = (0..(homogeneous.len() - 1) / work.degree)
+        let seg_count = if work.degree == 0 || homogeneous.len() < work.degree + 1 {
+            0
+        } else {
+            (homogeneous.len() - 1) / work.degree
+        };
+        let segments = (0..seg_count)
             .map(|index| {
                 let from = index * work.degree;
                 homogeneous[from..=from + work.degree].to_vec()
@@ -394,7 +416,8 @@ impl NurbsCurve3 {
 
     fn insert_knot(&mut self, knot: f64) {
         let (start, end) = self.domain();
-        if knot <= start || knot >= end {
+        if !(knot.is_finite() && start.is_finite() && end.is_finite() && knot > start && knot < end)
+        {
             return;
         }
         let span = super::spline::span_of(
@@ -403,6 +426,9 @@ impl NurbsCurve3 {
             self.control_points.len() - 1,
             knot,
         );
+        if span < self.degree || span >= self.control_points.len() {
+            return;
+        }
         let homogeneous = self.homogeneous();
         let mut updated = Vec::with_capacity(homogeneous.len() + 1);
         updated.extend_from_slice(&homogeneous[..=span - self.degree]);
@@ -418,6 +444,9 @@ impl NurbsCurve3 {
             }));
         }
         updated.extend_from_slice(&homogeneous[span..]);
+        if updated.iter().any(|p| !p[3].is_finite() || p[3] <= 0.0) {
+            return;
+        }
 
         self.knots.insert(span + 1, knot);
         self.control_points = updated
@@ -497,6 +526,9 @@ impl NurbsCurve3 {
         let (start, end) = self.domain();
         let parameter = wrap_parameter(parameter, start, end, self.closed);
         let scale = self.weights.iter().copied().fold(0.0_f64, f64::max);
+        if !(scale.is_finite() && scale > 0.0) {
+            return [f64::NAN; 3];
+        }
         let homogeneous = |index: usize| {
             let weight = self.weights[index] / scale;
             let point = self.control_points[index];
@@ -556,13 +588,22 @@ impl NurbsCurve3 {
             return None;
         }
         let wanted = control_points.len() + degree + 1;
-        let knots = if knots.len() == wanted {
+        let valid_knots = knots.len() == wanted
+            && knots.iter().all(|k| k.is_finite())
+            && knots.windows(2).all(|w| w[0] <= w[1])
+            && knots[degree] < knots[wanted - degree - 1];
+        let knots = if valid_knots {
             knots
         } else {
             clamped_uniform_knots(degree, control_points.len())
         };
         let weights = match weights {
-            Some(weights) if weights.len() == control_points.len() => weights,
+            Some(weights)
+                if weights.len() == control_points.len()
+                    && weights.iter().all(|w| w.is_finite() && *w > 0.0) =>
+            {
+                weights
+            }
             _ => vec![1.0; control_points.len()],
         };
         Some(Self {
@@ -2034,5 +2075,42 @@ mod tests {
             vec![[0.0; 3], [1.0; 3], [2.0; 3]],
         ];
         assert!(NurbsSurface3::new(2, 2, net, Vec::new(), Vec::new(), None).is_none());
+    }
+
+    #[test]
+    fn malformed_curve_inputs_do_not_hang_or_produce_zero_weight_nan_loops() {
+        let pts = vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [3.0, 1.0, 0.0], [4.0, 0.0, 0.0]];
+        let mut curve = NurbsCurve3::new(
+            2,
+            pts.clone(),
+            vec![0.0, 0.0, 0.0, 1.0, 0.5, 2.0, 2.0],
+            Some(vec![1.0, 0.0, -2.0, 1.0]),
+        )
+        .unwrap();
+        assert!(curve.knots.windows(2).all(|w| w[0] <= w[1]));
+        assert!(curve.weights.iter().all(|w| *w > 0.0));
+        assert!(curve.split_at(f64::NAN).is_none());
+        let before_knots = curve.knots.clone();
+        curve.insert_knot(f64::NAN);
+        assert_eq!(curve.knots, before_knots);
+
+        let curve_nan_knots = NurbsCurve3::new(
+            2,
+            pts.clone(),
+            vec![0.0, 0.0, 0.0, f64::NAN, 1.0, 1.0, 1.0],
+            None,
+        )
+        .unwrap();
+        assert!(curve_nan_knots.knots.iter().all(|k| k.is_finite()));
+
+        let zero_weights = NurbsCurve3 {
+            degree: 2,
+            knots: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+            control_points: pts,
+            weights: vec![0.0; 4],
+            closed: false,
+        };
+        let deriv = zero_weights.derivative_at_knot(0.25);
+        assert!(deriv.iter().all(|c| c.is_nan()));
     }
 }

@@ -3428,7 +3428,14 @@ impl canvas::Program<Message> for SelectionCanvas {
                     ucs.bounds,
                     ucs.origin_screen,
                 );
-                ucs_icon_debug(ucs.canvas, bounds.size(), ucs_bounds, ucs.view_proj, ucs.axes, ucs_origin);
+                ucs_icon_debug(
+                    ucs.canvas,
+                    bounds.size(),
+                    ucs_bounds,
+                    ucs.view_proj,
+                    ucs.axes,
+                    ucs_origin,
+                );
                 draw_ucs_icon(
                     frame,
                     ucs.view_proj,
@@ -4952,11 +4959,21 @@ pub fn fit_ucs_icon_to_canvas(
         width: bounds.width * sx,
         height: bounds.height * sy,
     };
+    // The camera's scale follows the viewport height (an orthographic view
+    // keeps its half-height, a perspective one its vertical field of view), so
+    // a projected point keeps its offset from the viewport centre times the
+    // height ratio, on both axes. Scaling the point itself by the width ratio
+    // from the top-left edge moves it sideways whenever only the width differs.
     let origin = origin.map(|p| {
-        Point::new(
-            fitted.x + (p.x - bounds.x) * sx,
-            fitted.y + (p.y - bounds.y) * sy,
-        )
+        let (old_cx, old_cy) = (
+            bounds.x + bounds.width * 0.5,
+            bounds.y + bounds.height * 0.5,
+        );
+        let (new_cx, new_cy) = (
+            fitted.x + fitted.width * 0.5,
+            fitted.y + fitted.height * 0.5,
+        );
+        Point::new(new_cx + (p.x - old_cx) * sy, new_cy + (p.y - old_cy) * sy)
     });
     (fitted, origin)
 }
@@ -4992,7 +5009,8 @@ fn ucs_icon_debug(
     if !recent {
         return;
     }
-    let anchor = ucs_icon_geometry(vp, bounds, axes, origin).map(|(o, at_origin, _)| (o, at_origin));
+    let anchor =
+        ucs_icon_geometry(vp, bounds, axes, origin).map(|(o, at_origin, _)| (o, at_origin));
     eprintln!(
         "[ucsicon] built_for={built_for:?} canvas={:?} rect={bounds:?} origin={origin:?} anchor={anchor:?}",
         (actual.width, actual.height)
@@ -5092,13 +5110,8 @@ fn ucs_icon_geometry(
 /// Where the icon is anchored for the given rectangle (test seam).
 #[cfg(test)]
 fn ucs_icon_anchor(bounds: iced::Rectangle, origin: Option<Point>) -> Option<Point> {
-    ucs_icon_geometry(
-        Mat4::IDENTITY,
-        bounds,
-        (Vec3::X, Vec3::Y, Vec3::Z),
-        origin,
-    )
-    .map(|(o, _, _)| o)
+    ucs_icon_geometry(Mat4::IDENTITY, bounds, (Vec3::X, Vec3::Y, Vec3::Z), origin)
+        .map(|(o, _, _)| o)
 }
 
 /// Screen grip targets for the UCS icon, or `None` when it is pinned to the
@@ -7814,7 +7827,12 @@ mod ucs_icon_canvas_fit_tests {
     fn the_ucs_icon_stays_bottom_left_when_the_view_was_built_from_a_transient_size() {
         let real = Size::new(1600.0, 860.0);
         let built_for = (1600.0, 90.0);
-        let rect = Rectangle { x: 0.0, y: 0.0, width: built_for.0, height: built_for.1 };
+        let rect = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: built_for.0,
+            height: built_for.1,
+        };
         // Unfitted, the corner formula puts it at the top (y = 50).
         assert_eq!(ucs_icon_anchor(rect, None).unwrap().y, 50.0);
         let (fitted, origin) = fit_ucs_icon_to_canvas(built_for, real, rect, None);
@@ -7824,8 +7842,14 @@ mod ucs_icon_canvas_fit_tests {
 
     #[test]
     fn a_tracked_origin_scales_with_the_canvas_and_matching_sizes_change_nothing() {
-        let rect = Rectangle { x: 100.0, y: 0.0, width: 800.0, height: 400.0 };
-        let (same, _) = fit_ucs_icon_to_canvas((1000.0, 400.0), Size::new(1000.0, 400.0), rect, None);
+        let rect = Rectangle {
+            x: 100.0,
+            y: 0.0,
+            width: 800.0,
+            height: 400.0,
+        };
+        let (same, _) =
+            fit_ucs_icon_to_canvas((1000.0, 400.0), Size::new(1000.0, 400.0), rect, None);
         assert_eq!(same, rect);
         let (fitted, origin) = fit_ucs_icon_to_canvas(
             (1000.0, 400.0),
@@ -7833,7 +7857,39 @@ mod ucs_icon_canvas_fit_tests {
             rect,
             Some(Point::new(300.0, 100.0)),
         );
-        assert_eq!(fitted, Rectangle { x: 200.0, y: 0.0, width: 1600.0, height: 800.0 });
+        assert_eq!(
+            fitted,
+            Rectangle {
+                x: 200.0,
+                y: 0.0,
+                width: 1600.0,
+                height: 800.0
+            }
+        );
         assert_eq!(origin, Some(Point::new(600.0, 200.0)));
+    }
+
+    /// A canvas only a few pixels narrower than the one the view was built for
+    /// must not drag a tracked origin sideways: the projected point keeps its
+    /// offset from the viewport centre (the height did not change).
+    #[test]
+    fn a_tracked_origin_keeps_its_offset_from_the_centre_when_only_the_width_differs() {
+        let rect = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 500.0,
+        };
+        let (fitted, origin) = fit_ucs_icon_to_canvas(
+            (1000.0, 500.0),
+            Size::new(980.0, 500.0),
+            rect,
+            Some(Point::new(600.0, 200.0)),
+        );
+        assert_eq!(fitted.width, 980.0);
+        let o = origin.unwrap();
+        // The centre moved from 500 to 490; the offset (+100, -50) stays.
+        assert!((o.x - 590.0).abs() < 1e-3, "x = {}", o.x);
+        assert!((o.y - 200.0).abs() < 1e-3, "y = {}", o.y);
     }
 }

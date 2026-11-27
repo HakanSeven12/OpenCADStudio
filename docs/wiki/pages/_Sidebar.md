@@ -54,3 +54,4 @@
 - [Glossary](Glossary)
 - [What's New](Whats-New)
 - [Troubleshooting](Troubleshooting)
+- [Code Health](Code-Health)

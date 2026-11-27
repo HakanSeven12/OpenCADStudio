@@ -260,35 +260,7 @@ impl<'a> HostSession<'a> {
     /// denylist that reads the token as typed would let a user-defined alias
     /// (`Q` for `QUIT`, added with ALIASEDIT) walk straight past it.
     pub(super) fn script_command_allowed(&self, line: &str) -> Result<(), String> {
-        const DENIED: &[&str] = &[
-            "QUIT",
-            "EXIT",
-            "CLOSE",
-            "CLOSEALL",
-            "NEW",
-            "QNEW",
-            "OPEN",
-            "SAVE",
-            "QSAVE",
-            "SAVEAS",
-            "SAVEALL",
-            "RECOVER",
-            "SCRIPT",
-            "RUNSCRIPT",
-            "SCRIPTCOMMANDS",
-        ];
-        let Some(token) = line.split_whitespace().next() else {
-            return Ok(());
-        };
-        let token = token.trim_start_matches(['\'', '_']);
-        let resolved = self.app.resolve_alias(token);
-        let first = resolved.as_deref().unwrap_or(token).to_uppercase();
-        let first = first.split_whitespace().next().unwrap_or(&first);
-        if DENIED.contains(&first) || first.starts_with("PY_") {
-            Err(format!("the command {first} cannot be run from a script"))
-        } else {
-            Ok(())
-        }
+        self.app.check_script_command_allowed(line)
     }
 
     /// Simple linetype create/modify/rename/delete.

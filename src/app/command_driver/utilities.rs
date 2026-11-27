@@ -1252,6 +1252,10 @@ impl OpenCADStudio {
         self.run_command_line_impl(cmd, finish, true, false)
     }
 
+    /// Whether a script may run this command line: the one denylist every
+    /// script route (plugin `run_command`, `execute_command`, plugin scripts)
+    /// checks. The alias is resolved first, as the dispatcher does, so a
+    /// user alias (`Q` for `QUIT`) cannot walk past it.
     pub(in crate::app) fn check_script_command_allowed(&self, line: &str) -> Result<(), String> {
         fn normalize_script_verb(token: &str) -> String {
             let stripped = token.trim_start_matches(['\'', '_', '.']);

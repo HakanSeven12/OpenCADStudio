@@ -153,12 +153,12 @@ fn sized_button(
 fn panel_button(t: &ToolDef, labelled: bool) -> Element<'static, Message> {
     let face: Element<'static, Message> = if labelled {
         let label = crate::t!(t.label).replace('\n', " ");
-        iced::widget::row![icon_el(t.icon), text(label).size(11)]
+        iced::widget::row![icon_el(t.icon, ICON_SIZE), text(label).size(11)]
             .spacing(6)
             .align_y(iced::Center)
             .into()
     } else {
-        container(icon_el(t.icon))
+        container(icon_el(t.icon, ICON_SIZE))
             .width(Length::Fill)
             .align_x(iced::Center)
             .into()
@@ -193,8 +193,8 @@ fn panel_button(t: &ToolDef, labelled: bool) -> Element<'static, Message> {
 }
 
 /// The tools as a titled panel in the hatch panel's style (frame, title,
-/// section labels and rules), floated at the right edge like [`view`]. Each
-/// section is `(label, tools, per_row)`.
+/// section labels and rules), at the drawing's top left where the hatch panel
+/// sits. Each section is `(label, tools, per_row)`.
 pub fn view_panel(
     title: &str,
     sections: &[(&str, &[ToolDef], usize)],
@@ -239,7 +239,23 @@ pub fn view_panel(
             ..Default::default()
         }
     });
-    Some(pin_right(panel.into()))
+    Some(pin_top_left(panel.into()))
+}
+
+/// `panel` at the canvas's top left, where the hatch panel floats; the drawing
+/// under it never takes the pointer.
+fn pin_top_left(panel: Element<'static, Message>) -> Element<'static, Message> {
+    container(iced::widget::opaque(panel))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Left)
+        .align_y(iced::Top)
+        .padding(iced::Padding {
+            left: 12.0,
+            top: 40.0,
+            ..iced::Padding::ZERO
+        })
+        .into()
 }
 
 /// Build the floating right-edge vertical toolbar from `tools`, vertically

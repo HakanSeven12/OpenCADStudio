@@ -600,8 +600,8 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
             .spacing(1);
             column![
                 row![scrollable(list).height(Length::Fixed(86.0)), arrows].spacing(6),
+                small(t!("Click rows to select the point groups; the arrows set their draw order.")).style(muted_style),
                 row![
-                    small(t!("Click rows to select the point groups; the arrows set their draw order.")).style(muted_style),
                     Space::new().width(Fill),
                     button(small(t!("Cancel"))).on_press(msg(PointToolMsg::PickerCancel)).style(button_style(false)).padding([4, 10]),
                     button(small(t!("Apply"))).on_press(msg(PointToolMsg::PickerApply)).style(button_style(false)).padding([4, 10]),

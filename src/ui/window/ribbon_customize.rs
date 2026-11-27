@@ -547,10 +547,13 @@ mod footer_tests {
         }
     }
 
-    const SIZES: [iced::Size; 2] = [
+    const SIZES: [iced::Size; 3] = [
         iced::Size::new(1280.0, 900.0),
         // The smallest window the app is used at.
         iced::Size::new(900.0, 600.0),
+        // A small window or a high display scale: the dialog is capped by the
+        // window, so only the labels themselves keep the footer on one row.
+        iced::Size::new(640.0, 480.0),
     ];
 
     #[test]

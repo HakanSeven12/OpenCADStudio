@@ -342,17 +342,23 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
     if snap.toolbar_layout {
         // ── Toolbars ──────────────────────────────────────────────────────
         bands = bands.push(form::section(crate::tr!("interface-settings", "toolbars")));
-        for &(module, title, shown) in &snap.toolbars {
-            bands = bands.push(form::check(
-                crate::t!(title).into_owned(),
-                shown,
-                Some(msg(InterfaceMsg::Toolbar {
-                    module,
-                    title,
-                    show: !shown,
-                })),
-            ));
-        }
+        // Two columns, so the list stays short.
+        let toolbars = snap
+            .toolbars
+            .iter()
+            .map(|&(module, title, shown)| {
+                form::check(
+                    crate::t!(title).into_owned(),
+                    shown,
+                    Some(msg(InterfaceMsg::Toolbar {
+                        module,
+                        title,
+                        show: !shown,
+                    })),
+                )
+            })
+            .collect();
+        bands = bands.push(form::two_columns(toolbars));
         bands = bands.push(form::row(
             crate::tr!("interface-settings", "toolbar-title"),
             choice(

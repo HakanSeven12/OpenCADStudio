@@ -171,6 +171,21 @@ fn halves<'a>(left: Element<'a, Message>, right: Element<'a, Message>) -> Elemen
     .into()
 }
 
+/// `items` (usually [`check`]s) in two columns, filled row by row, each
+/// row `km::FORM_ROW_GAP` from the next: a long list of switches at half
+/// its height. An odd last item leaves the right half empty.
+pub fn two_columns<'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    let mut rows = Vec::with_capacity(items.len().div_ceil(2));
+    let mut items = items.into_iter();
+    while let Some(left) = items.next() {
+        let right = items.next().unwrap_or_else(|| Space::new().into());
+        rows.push(halves(left, right));
+    }
+    iced::widget::Column::with_children(rows)
+        .spacing(km::FORM_ROW_GAP)
+        .into()
+}
+
 /// A row: `label` in the left half, `km::FORM_LABEL_X` in, and `control` in
 /// the right half.
 pub fn row<'a>(name: impl Into<String>, control: Element<'a, Message>) -> Element<'a, Message> {

@@ -3,6 +3,7 @@
 //! plugin host (`plugin::external`) fills these; the Plugin Manager shows
 //! them.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// An add-on package found on disk (not necessarily loaded or compatible).
@@ -47,6 +48,23 @@ pub struct RegistryEntry {
     pub repo: String,
     pub name: String,
     pub description: String,
+    /// Optional hex SHA-256 digests keyed by asset filename, release tag, or `*`.
+    pub sha256: BTreeMap<String, String>,
+    /// Optional signature metadata string carried by the registry entry.
+    pub signature: Option<String>,
+}
+
+/// Pending first-load approval or re-approval after hash mismatch for a
+/// third-party native plugin package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPluginApproval {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub repository: Option<String>,
+    pub library: String,
+    pub sha256: String,
+    pub previous_sha256: Option<String>,
 }
 
 /// Installable release metadata shown by the marketplace before download.

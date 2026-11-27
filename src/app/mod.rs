@@ -1826,6 +1826,9 @@ pub(super) struct OpenCADStudio {
     /// Startup load failures keyed by plugin id. The Plugin Manager uses these
     /// to distinguish an installed-but-failed package from one awaiting restart.
     plugin_load_errors: rustc_hash::FxHashMap<String, String>,
+    /// Third-party native plugins blocked at startup/discovery awaiting first-load
+    /// approval or re-approval after an on-disk hash mismatch.
+    pending_plugin_approvals: Vec<crate::plugin::external::PendingPluginApproval>,
     /// Curated plugin registry fetched from the OpenCADStudio repo.
     plugin_registry: Vec<crate::plugin::external::RegistryEntry>,
     /// True while the curated registry request is in flight.
@@ -2646,6 +2649,7 @@ pub enum ModalKind {
     About,
     Shortcuts,
     PluginManager,
+    PluginConsent,
     UpdateNotice,
     DonationPrompt,
     LayerStateManager,
@@ -3417,6 +3421,7 @@ impl OpenCADStudio {
             external_plugins: Vec::new(),
             loaded_plugin_ids: rustc_hash::FxHashSet::default(),
             plugin_load_errors: rustc_hash::FxHashMap::default(),
+            pending_plugin_approvals: Vec::new(),
             plugin_registry: Vec::new(),
             plugin_registry_loading: false,
             plugin_registry_error: None,
@@ -3723,6 +3728,13 @@ impl OpenCADStudio {
             }
             crate::sys::startup_times::mark("App::new: external plugins loaded");
             app.loaded_plugin_ids = crate::plugin::external::loaded_ids().into_iter().collect();
+            app.external_plugins = crate::plugin::external::discover();
+            app.pending_plugin_approvals =
+                crate::plugin::external::collect_pending_approvals(&app.external_plugins);
+            if !app.pending_plugin_approvals.is_empty() {
+                app.pending_startup_modals
+                    .push_back(ModalKind::PluginConsent);
+            }
             app.rebuild_ribbon_modules();
         }
         crate::sys::startup_times::mark("App::new: done");

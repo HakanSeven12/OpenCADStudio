@@ -7,7 +7,9 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use crate::app::Message;
-use crate::plugin_catalog::{ExternalPlugin, RegistryEntry, ReleaseInfo};
+use crate::plugin_catalog::{
+    ExternalPlugin, PendingPluginApproval, RegistryEntry, ReleaseInfo,
+};
 use crate::t;
 use crate::ui::style::common::muted_style;
 use iced::widget::{
@@ -45,6 +47,7 @@ pub struct MarketView<'a> {
     /// Names of the AI tools each loaded plugin offers.
     pub ai_tools: FxHashMap<String, Vec<String>>,
     pub status: &'a str,
+    pub pending_approvals: &'a [PendingPluginApproval],
 }
 
 /// Latest desktop builds, used by the browser-only plugin notice.
@@ -225,9 +228,19 @@ fn external_card<'a>(
     selected: bool,
     progress: Option<Element<'a, Message>>,
     ai_tools: Option<&[String]>,
+    pending_approval: Option<&PendingPluginApproval>,
 ) -> Element<'a, Message> {
     let failed_old_api = load_error.is_some() && !p.api_compatible();
-    let installed = InstalledStatus::of(p, loaded, disabled, load_error);
+    let mut installed = InstalledStatus::of(p, loaded, disabled, load_error);
+    if installed == InstalledStatus::RestartToLoad {
+        if let Some(approval) = pending_approval {
+            installed = if approval.previous_sha256.is_some() {
+                InstalledStatus::HashMismatch
+            } else {
+                InstalledStatus::AwaitingApproval
+            };
+        }
+    }
     let (status, kind) = (installed.label(), installed.kind());
     let header = row![
         text(p.name.clone()).size(15),
@@ -262,7 +275,29 @@ fn external_card<'a>(
                 .style(muted_style),
         );
     }
-    if let Some(error) = load_error {
+    if let Some(approval) = pending_approval {
+        let notice = if let Some(prev) = &approval.previous_sha256 {
+            t!(
+                "Binary hash changed (was %{prev}…, now %{cur}…). Re-approve only if you updated or rebuilt it.",
+                prev = &prev[..16.min(prev.len())],
+                cur = &approval.sha256[..16.min(approval.sha256.len())],
+            )
+        } else {
+            t!(
+                "Awaiting first-load approval (SHA-256: %{sha}…).",
+                sha = &approval.sha256[..16.min(approval.sha256.len())],
+            )
+        };
+        let is_mismatch = approval.previous_sha256.is_some();
+        info_body = info_body.push(text(notice).size(11).width(Fill).style(move |theme: &Theme| {
+            let color = if is_mismatch {
+                theme.palette().danger.base.color
+            } else {
+                theme.palette().warning.base.color
+            };
+            iced::widget::text::Style { color: Some(color) }
+        }));
+    } else if let Some(error) = load_error {
         let detail = if failed_old_api {
             t!(
                 "Plugin API  %{plugin}  is incompatible with this build's API  %{build}  ribbon ABI. Update or rebuild the plugin.",
@@ -291,6 +326,21 @@ fn external_card<'a>(
     };
 
     let mut actions = row![Space::new().width(Fill)].align_y(iced::Center);
+    if !loaded {
+        if let Some(approval) = pending_approval {
+            let label = if approval.previous_sha256.is_some() {
+                t!("Re-approve & Load")
+            } else {
+                t!("Trust & Load")
+            };
+            actions = actions.push(pill_button(
+                label,
+                Message::PluginApprove(p.id.clone()),
+                button::primary,
+            ));
+            actions = actions.push(Space::new().width(6));
+        }
+    }
     if let Some(progress) = progress {
         actions = actions.push(progress);
         actions = actions.push(Space::new().width(6));
@@ -438,6 +488,8 @@ fn market_incompatible(m: &MarketView, repo: &str) -> bool {
 pub(crate) enum InstalledStatus {
     Disabled,
     Loaded,
+    AwaitingApproval,
+    HashMismatch,
     ApiIncompatible,
     Incompatible,
     LoadFailed,
@@ -463,6 +515,10 @@ impl InstalledStatus {
                 && !p.rustc_compatible())
         {
             Self::Incompatible
+        } else if load_error.is_some_and(|e| e.starts_with("plugin_hash_mismatch:")) {
+            Self::HashMismatch
+        } else if load_error.is_some_and(|e| e.starts_with("plugin_untrusted:")) {
+            Self::AwaitingApproval
         } else if load_error.is_some() {
             Self::LoadFailed
         } else if !p.lib_present {
@@ -481,6 +537,8 @@ impl InstalledStatus {
         match self {
             Self::Disabled => "disabled",
             Self::Loaded => "loaded",
+            Self::AwaitingApproval => "awaiting_approval",
+            Self::HashMismatch => "hash_mismatch",
             Self::ApiIncompatible => "api_incompatible",
             Self::Incompatible => "incompatible",
             Self::LoadFailed => "load_failed",
@@ -493,6 +551,8 @@ impl InstalledStatus {
         match self {
             Self::Disabled => t!("Disabled"),
             Self::Loaded => t!("Loaded"),
+            Self::AwaitingApproval => t!("Approval required"),
+            Self::HashMismatch => t!("Hash mismatch"),
             Self::ApiIncompatible => t!("API incompatible"),
             Self::Incompatible => t!("Incompatible"),
             Self::LoadFailed => t!("Load failed"),
@@ -505,8 +565,11 @@ impl InstalledStatus {
         match self {
             Self::Disabled => StatusKind::Muted,
             Self::Loaded => StatusKind::Success,
-            Self::ApiIncompatible | Self::Incompatible | Self::LoadFailed => StatusKind::Danger,
-            Self::NoLibrary | Self::RestartToLoad => StatusKind::Warning,
+            Self::ApiIncompatible
+            | Self::Incompatible
+            | Self::LoadFailed
+            | Self::HashMismatch => StatusKind::Danger,
+            Self::NoLibrary | Self::RestartToLoad | Self::AwaitingApproval => StatusKind::Warning,
         }
     }
 }
@@ -1052,6 +1115,7 @@ pub fn view_window<'a>(
                 .as_deref()
                 .and_then(|repo| progress_action(&market, repo));
             let load_error = load_errors.get(&p.id).map(String::as_str);
+            let pending_approval = market.pending_approvals.iter().find(|a| a.id == p.id);
             let card = external_card(
                 p,
                 repository,
@@ -1062,6 +1126,7 @@ pub fn view_window<'a>(
                 selected,
                 progress,
                 market.ai_tools.get(&p.id).map(Vec::as_slice),
+                pending_approval,
             );
             if InstalledStatus::of(
                 p,
@@ -1143,6 +1208,135 @@ pub fn view_window<'a>(
     .into()
 }
 
+/// First-load consent modal for unapproved or hash-changed native third-party plugins.
+pub fn view_consent_modal<'a>(
+    pending: &'a [PendingPluginApproval],
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let width = sizing.width;
+    let height = sizing.height;
+    let title = text(t!("Unapproved Third-Party Plugins")).size(18);
+    let warning = text(t!(
+        "Native plugins run machine code with full host privileges. Review the SHA-256 fingerprint before trusting a plugin."
+    ))
+    .size(12)
+    .style(muted_style);
+
+    let mut list = column![].spacing(10);
+    if pending.is_empty() {
+        list = list.push(
+            text(t!("No third-party plugins are awaiting approval."))
+                .size(13)
+                .style(muted_style),
+        );
+    } else {
+        for item in pending {
+            let title_row = row![
+                text(item.name.clone()).size(14),
+                Space::new().width(8),
+                badge(format!("v{}", item.version)),
+                Space::new().width(Fill),
+                status_badge(
+                    if item.previous_sha256.is_some() {
+                        t!("Hash changed")
+                    } else {
+                        t!("New binary")
+                    },
+                    if item.previous_sha256.is_some() {
+                        StatusKind::Danger
+                    } else {
+                        StatusKind::Warning
+                    },
+                ),
+            ]
+            .align_y(iced::Center);
+            let mut details = column![
+                title_row,
+                text(format!("{}  ({})", item.id, item.library))
+                    .size(11)
+                    .style(muted_style),
+                text(format!("SHA-256: {}", item.sha256))
+                    .size(11)
+                    .style(muted_style),
+            ]
+            .spacing(4);
+            if let Some(repo) = &item.repository {
+                details = details.push(
+                    text(t!("Repository:  %{repo}", repo = repo))
+                        .size(11)
+                        .style(muted_style),
+                );
+            }
+            if let Some(prev) = &item.previous_sha256 {
+                details = details.push(
+                    text(format!("Previous approved SHA-256: {prev}"))
+                        .size(11)
+                        .style(|theme: &Theme| iced::widget::text::Style {
+                            color: Some(theme.palette().danger.base.color),
+                        }),
+                );
+            }
+            let approve_label = if item.previous_sha256.is_some() {
+                t!("Re-approve & Load")
+            } else {
+                t!("Trust & Load")
+            };
+            let actions = row![
+                Space::new().width(Fill),
+                pill_button(
+                    approve_label,
+                    Message::PluginApprove(item.id.clone()),
+                    button::primary,
+                ),
+            ];
+            list = list.push(
+                container(column![details, actions].spacing(8).padding([10, 12]))
+                    .width(Fill)
+                    .style(|theme: &Theme| card_style(theme, false)),
+            );
+        }
+    }
+
+    let body = scrollable(container(list.width(Fill)).padding(iced::Padding {
+        top: 0.0,
+        right: SCROLLBAR_GUTTER,
+        bottom: 0.0,
+        left: 0.0,
+    }))
+    .height(Fill)
+    .width(Fill);
+
+    let footer = row![
+        pill_button(
+            t!("Open Plugin Manager"),
+            Message::PluginManagerOpen,
+            button::secondary,
+        ),
+        Space::new().width(Fill),
+        pill_button(
+            t!("Keep Blocked"),
+            Message::PluginConsentDismiss,
+            button::secondary,
+        ),
+    ]
+    .align_y(iced::Center);
+
+    container(
+        column![title, warning, rule::horizontal(1), body, footer]
+            .spacing(10)
+            .padding(18)
+            .width(width)
+            .height(height),
+    )
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        ..Default::default()
+    })
+    .width(width)
+    .height(height)
+    .into()
+}
+
 /// Browser replacement for the native Plugin Manager.
 #[cfg(target_arch = "wasm32")]
 pub fn view_web_notice<'a>() -> Element<'a, Message> {
@@ -1210,7 +1404,7 @@ mod tests {
         let releases = vec![
             ReleaseInfo {
                 tag: "v1.4.0".to_string(),
-                api_version: 4,
+                api_version: ocs_plugin_api::API_VERSION,
                 acadrust_source: None,
                 acadrust_declared: false,
                 acadrust_compatible: true,
@@ -1220,7 +1414,7 @@ mod tests {
             },
             ReleaseInfo {
                 tag: "v2.0.0".to_string(),
-                api_version: 4,
+                api_version: ocs_plugin_api::API_VERSION,
                 acadrust_source: None,
                 acadrust_declared: false,
                 acadrust_compatible: true,
@@ -1230,7 +1424,7 @@ mod tests {
             },
             ReleaseInfo {
                 tag: "v1.9.9".to_string(),
-                api_version: 4,
+                api_version: ocs_plugin_api::API_VERSION,
                 acadrust_source: None,
                 acadrust_declared: false,
                 acadrust_compatible: true,
@@ -1248,7 +1442,7 @@ mod tests {
         let releases = vec![
             ReleaseInfo {
                 tag: "v1.4.0".to_string(),
-                api_version: 4,
+                api_version: ocs_plugin_api::API_VERSION,
                 acadrust_source: Some(
                     "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd".to_string(),
                 ),
@@ -1260,7 +1454,7 @@ mod tests {
             },
             ReleaseInfo {
                 tag: "v2.0.0".to_string(),
-                api_version: 4,
+                api_version: ocs_plugin_api::API_VERSION,
                 acadrust_source: Some(
                     "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb".to_string(),
                 ),
@@ -1272,6 +1466,52 @@ mod tests {
             },
         ];
         assert_eq!(newest_update("1.3.0", &releases).as_deref(), Some("v1.4.0"));
+    }
+
+    #[test]
+    fn installed_status_classifies_untrusted_and_hash_mismatch() {
+        let plugin = crate::plugin_catalog::ExternalPlugin {
+            id: "opencad.test".into(),
+            name: "Test".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            repository: None,
+            api_version: ocs_plugin_api::API_VERSION,
+            acadrust_source: Some(ocs_plugin_api::version_info::host_acadrust_source().to_string()),
+            acadrust_declared: true,
+            rustc_version: Some(ocs_plugin_api::version_info::host_rustc_version().to_string()),
+            rustc_declared: true,
+            ribbon_order: 0,
+            command_prefixes: Vec::new(),
+            dir: std::path::PathBuf::new(),
+            bundled: false,
+            lib_present: true,
+            library: None,
+        };
+        assert_eq!(
+            super::InstalledStatus::of(
+                &plugin,
+                false,
+                false,
+                Some("plugin_untrusted: awaiting first-load approval")
+            )
+            .key(),
+            "awaiting_approval"
+        );
+        assert_eq!(
+            super::InstalledStatus::of(
+                &plugin,
+                false,
+                false,
+                Some("plugin_hash_mismatch: changed on disk")
+            )
+            .key(),
+            "hash_mismatch"
+        );
+        assert_eq!(
+            super::InstalledStatus::of(&plugin, false, false, Some("dlopen error")).key(),
+            "load_failed"
+        );
     }
 
     #[test]

@@ -1721,6 +1721,15 @@ fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: docume
             props
         }
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => data.feature_line_name().map(named).unwrap_or_default(),
+        // A pipe network part carries its name where its record's layout
+        // pins the name slot (the text after the record's
+        // `AeccNetworkPartDataField` groups), so renamed parts read too —
+        // the grammar read 2c545f67e asked this row to wait for.
+        CivilKind::Other if matches!(data.dxf_name.as_str(), "AECC_STRUCTURE" | "AECC_PIPE") => data
+            .network_part_name()
+            .filter(|name| !name.is_empty())
+            .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name)])
+            .unwrap_or_default(),
         // The network's own name is its third text.
         CivilKind::Other if data.dxf_name == "AECC_NETWORK" => data
             .decode()

@@ -75,24 +75,18 @@ pub fn check_row<'a>(
     )
 }
 
-/// A check box and `label` in the left half and a choice (`dropdown`) in
-/// the right half. Without a `dropdown`, because the box is cleared or the
-/// choice is fixed for now, the right half shows the current choice
-/// (`shown`) muted.
+/// A check box and `label` in the left half and a choice (`dropdown`, a
+/// [`super::dropdown_field`], disabled while the box is cleared or the
+/// choice is fixed for now) in the right half.
 pub fn check_select_row<'a>(
     label: impl Into<String>,
     checked: bool,
     on_toggle: Option<Message>,
-    dropdown: Option<Element<'a, Message>>,
-    shown: &str,
+    dropdown: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let value = match dropdown {
-        Some(dropdown) => dropdown,
-        None => super::read_only_field(shown),
-    };
     super::row_view_split(
         check(label.into(), checked, on_toggle),
-        value,
+        dropdown,
         super::NameWidth::Half,
         false,
         None,

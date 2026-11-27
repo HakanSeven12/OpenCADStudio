@@ -162,16 +162,21 @@ fn title_side_label(side: bool) -> String {
 }
 
 /// A kit dropdown for `list`: `options` (label, message), the one shown
-/// `current`.
+/// `current`. While not `enabled` it shows `current` greyed, with nothing
+/// to open.
 fn choice<'a>(
     state: &State,
     list: List,
     options: Vec<(String, InterfaceMsg)>,
     current: &str,
+    enabled: bool,
 ) -> Element<'a, Message> {
+    if !enabled {
+        return kit::dropdown_field(current.to_string(), false, None);
+    }
     let open = state.open_list == Some(list);
     let toggle = msg(InterfaceMsg::List(if open { None } else { Some(list) }));
-    let head = kit::dropdown_head(current.to_string(), false, open, toggle);
+    let head = kit::dropdown_field(current.to_string(), open, Some(toggle));
     let width = kit::dropdown_width(
         options.iter().map(|(label, _)| label.as_str()),
         km::POPOVER_W / 2.0,
@@ -245,7 +250,13 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         .collect();
     bands = bands.push(select_row(
         crate::tr!("interface-settings", "color-theme"),
-        choice(state, List::Theme, theme_options, &theme_label(&snap.theme)),
+        choice(
+            state,
+            List::Theme,
+            theme_options,
+            &theme_label(&snap.theme),
+            true,
+        ),
     ));
 
     // The toolbar stays in the title bar with the Toolbar layout: the
@@ -255,32 +266,30 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
     } else {
         snap.qat_position
     };
-    let qat_choice = (snap.qat_shown && !snap.toolbar_layout).then(|| {
-        choice(
-            state,
-            List::QatPosition,
-            [
-                QatPosition::TitleBar,
-                QatPosition::BeforeTabs,
-                QatPosition::BelowRibbon,
-            ]
-            .into_iter()
-            .map(|position| {
-                (
-                    qat_position_label(position),
-                    InterfaceMsg::QatPosition(position),
-                )
-            })
-            .collect(),
-            &qat_position_label(snap.qat_position),
-        )
-    });
+    let qat_choice = choice(
+        state,
+        List::QatPosition,
+        [
+            QatPosition::TitleBar,
+            QatPosition::BeforeTabs,
+            QatPosition::BelowRibbon,
+        ]
+        .into_iter()
+        .map(|position| {
+            (
+                qat_position_label(position),
+                InterfaceMsg::QatPosition(position),
+            )
+        })
+        .collect(),
+        &qat_position_label(qat_shown_position),
+        snap.qat_shown && !snap.toolbar_layout,
+    );
     let qat_row = kit::check_select_row(
         crate::tr!("interface-settings", "quick-access"),
         snap.qat_shown,
         Some(msg(InterfaceMsg::QatShown(!snap.qat_shown))),
         qat_choice,
-        &qat_position_label(qat_shown_position),
     );
     // The full name, and why the place is fixed with the Toolbar layout.
     let qat_tip = if snap.toolbar_layout && snap.qat_shown {
@@ -294,28 +303,26 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
     };
     bands = bands.push(kit::tooltip(qat_row, qat_tip, kit::TipPosition::Bottom));
 
-    let menu_choice = snap.menu_bar_shown.then(|| {
-        choice(
-            state,
-            List::MenuBarPosition,
-            [MenuBarPosition::TitleBar, MenuBarPosition::OwnRow]
-                .into_iter()
-                .map(|position| {
-                    (
-                        menu_bar_position_label(position),
-                        InterfaceMsg::MenuBarPosition(position),
-                    )
-                })
-                .collect(),
-            &menu_bar_position_label(snap.menu_bar_position),
-        )
-    });
+    let menu_choice = choice(
+        state,
+        List::MenuBarPosition,
+        [MenuBarPosition::TitleBar, MenuBarPosition::OwnRow]
+            .into_iter()
+            .map(|position| {
+                (
+                    menu_bar_position_label(position),
+                    InterfaceMsg::MenuBarPosition(position),
+                )
+            })
+            .collect(),
+        &menu_bar_position_label(snap.menu_bar_position),
+        snap.menu_bar_shown,
+    );
     bands = bands.push(kit::check_select_row(
         crate::tr!("interface-settings", "menu-bar"),
         snap.menu_bar_shown,
         Some(msg(InterfaceMsg::MenuBarShown(!snap.menu_bar_shown))),
         menu_choice,
-        &menu_bar_position_label(snap.menu_bar_position),
     ));
     if snap.menu_bar_shown && snap.menus_fall_back {
         bands = bands.push(kit::note_row(crate::tr!(
@@ -324,23 +331,21 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         )));
     }
 
-    let tabs_choice = snap.file_tabs_shown.then(|| {
-        choice(
-            state,
-            List::FileTabs,
-            [true, false]
-                .into_iter()
-                .map(|above| (file_tabs_label(above), InterfaceMsg::FileTabsAbove(above)))
-                .collect(),
-            &file_tabs_label(snap.file_tabs_above),
-        )
-    });
+    let tabs_choice = choice(
+        state,
+        List::FileTabs,
+        [true, false]
+            .into_iter()
+            .map(|above| (file_tabs_label(above), InterfaceMsg::FileTabsAbove(above)))
+            .collect(),
+        &file_tabs_label(snap.file_tabs_above),
+        snap.file_tabs_shown,
+    );
     bands = bands.push(kit::check_select_row(
         crate::tr!("interface-settings", "file-tabs"),
         snap.file_tabs_shown,
         Some(msg(InterfaceMsg::FileTabsShown(!snap.file_tabs_shown))),
         tabs_choice,
-        &file_tabs_label(snap.file_tabs_above),
     ));
     bands = bands.push(kit::check_row(
         crate::tr!("interface-settings", "command-line"),
@@ -382,6 +387,7 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
                     .map(|side| (title_side_label(side), InterfaceMsg::ToolbarTitleSide(side)))
                     .collect(),
                 &title_side_label(snap.toolbar_titles_side),
+                true,
             ),
         ));
         bands = bands.push(kit::band(kit::text_button(
@@ -410,6 +416,7 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
                 .map(|pref| (minimize_label(pref), InterfaceMsg::MinimizeTo(pref)))
                 .collect(),
                 &minimize_label(snap.minimize_pref),
+                true,
             ),
         ));
         bands = bands.push(kit::check_row(

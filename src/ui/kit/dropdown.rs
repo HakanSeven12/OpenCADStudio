@@ -78,6 +78,60 @@ pub fn dropdown_head<'a>(
     mouse_area(head).on_press(toggle).into()
 }
 
+/// A dropdown head that always looks like a choice, as a combo on the
+/// selected Properties row does: the `surface_raised` field with its edge
+/// and the caret. Without `toggle` it is disabled: the text in hint colour,
+/// the caret still there, nothing to press.
+pub fn dropdown_field<'a>(
+    shown: impl Into<String>,
+    open: bool,
+    toggle: Option<Message>,
+) -> Element<'a, Message> {
+    let enabled = toggle.is_some();
+    let caret = if open {
+        crate::ui::icons::themed_arrow_up(9.0)
+    } else {
+        crate::ui::icons::themed_arrow_down(9.0)
+    };
+    let label = super::one_line(text(shown.into()))
+        .size(ui_text::UI)
+        .line_height(ui_text::line())
+        .width(Length::Fill)
+        .style(move |theme: &Theme| text::Style {
+            color: Some(if enabled {
+                chrome::text(theme)
+            } else {
+                crate::ui::style::readable::hint_text(theme)
+            }),
+        });
+    let head = container(row![label, caret].align_y(iced::Center))
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::surface_raised(theme))),
+            text_color: Some(chrome::text(theme)),
+            border: iced::Border {
+                color: if open {
+                    chrome::accent(theme)
+                } else {
+                    chrome::hover_border(theme)
+                },
+                width: km::line(),
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding([0.0, km::CELL_PAD_X])
+        .height(Length::Fill)
+        .center_y(Length::Fill)
+        .width(Length::Fill);
+    let mut area = mouse_area(head);
+    if let Some(toggle) = toggle {
+        area = area
+            .on_press(toggle)
+            .interaction(iced::mouse::Interaction::Pointer);
+    }
+    area.into()
+}
+
 /// One option of the list: `label` on one line; picking it, by a click or
 /// by Enter on the highlighted row, sends `message`. `key` is the text
 /// type-ahead matches.

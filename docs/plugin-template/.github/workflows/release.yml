@@ -9,10 +9,12 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -28,28 +30,33 @@ jobs:
             asset: opencad.my_plugin-macos-aarch64.dylib
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      # NOTE: @stable floats to whatever's current when this job runs, which
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # NOTE: `stable` floats to whatever's current when this job runs, which
       # is NOT the same thing as "matches the host's rustc exactly" — the API
-      # v4+ load check compares plugin.toml's rustc_version to the host's
+      # v14+ load check compares plugin.toml's rustc_version to the host's
       # build-time compiler byte-for-byte (see plugin-architecture.md's
       # "Build-time ABI metadata"). Pin this to the host's actual toolchain
       # version (check crates/ocs_plugin_api/src/version_info.rs's embedded
       # value, or the host's own CI config) before a real release, or your
       # binary may be refused at load with a version-mismatch error.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
       - run: cargo build --release
       - name: Stage release asset
         shell: bash
+        env:
+          EXT: ${{ matrix.ext }}
+          ASSET: ${{ matrix.asset }}
         run: |
           mkdir -p dist
-          cp target/release/*.${{ matrix.ext }} "dist/${{ matrix.asset }}"
-          acadrust_source=$(grep -A3 '^name = "opencadcodec"' Cargo.lock | grep '^source' | head -1 | sed 's/^source = "//;s/"$//')
+          cp target/release/*."$EXT" "dist/$ASSET"
+          acadrust_source=$(grep -E -A3 '^name = "(acadrust|opencadcodec)"' Cargo.lock | grep '^source' | head -1 | sed 's/^source = "//;s/"$//')
           sed \
             -e "s|__RUSTC_VERSION__|$(rustc --version)|" \
             -e "s|__ACADRUST_SOURCE__|$acadrust_source|" \
             plugin.toml > dist/plugin.toml
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/${{ matrix.asset }}

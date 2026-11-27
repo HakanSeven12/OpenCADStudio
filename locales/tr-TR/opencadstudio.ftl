@@ -402,7 +402,7 @@ modal =
 
     .missing-fonts-downloading = Downloading...
     .missing-fonts-download-available = Download available
-    .missing-fonts-skip = Skip
+    .missing-fonts-skip = Atla
     .missing-fonts-title = Missing fonts
     .missing-fonts-description = This drawing uses fonts that are not installed on this machine. OpenCADStudio can download any redistributable fonts that exist in the selected repository; unavailable fonts will keep using a substitute.
     .missing-fonts-source = Font source — leave empty for the community repository, or point at any folder (e.g. your company's font server):
@@ -11097,7 +11097,7 @@ civil-cmd =
     .points-blocks-new = Yeni blok yap
     .points-blocks-layer = Blok katmanı
     .points-blocks-groups = Seçili nokta grupları:
-    .points-blocks-pick-rows = Nokta gruplarını seçmek için satırlara tıklayın.
+    .points-blocks-pick-rows = Nokta gruplarını seçmek için satırlara tıklayın; oklar çizim sırasını belirler.
     .points-blocks-dup-title = Yinelenen Nokta Numaralı Nokta Blokları Bulundu
     .points-blocks-dup = COGO noktaları dönüştürülürken aynı nokta numaralı (__ocs_fmt_0__) bir blok bulundu. Şu seçeneklerden birini seçebilirsiniz:
     .points-blocks-dup-skip = Atla - var olan bloğu tutar, yenisini yok sayar

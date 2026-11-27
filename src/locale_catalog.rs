@@ -641,7 +641,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Make new block" => Some(("civil-cmd", "points-blocks-new")),
         "Block layer" => Some(("civil-cmd", "points-blocks-layer")),
         "Selected point groups:" => Some(("civil-cmd", "points-blocks-groups")),
-        "Click rows to select the point groups." => Some(("civil-cmd", "points-blocks-pick-rows")),
+        "Click rows to select the point groups; the arrows set their draw order." => Some(("civil-cmd", "points-blocks-pick-rows")),
         "Point Blocks with Duplicate Point Numbers Found" => Some(("civil-cmd", "points-blocks-dup-title")),
         "While converting COGO Points, a block with the same Point Number ({}) was found. You can choose one of the following options:" => Some(("civil-cmd", "points-blocks-dup")),
         "Skip - keeps the existing block and ignores the new one" => Some(("civil-cmd", "points-blocks-dup-skip")),

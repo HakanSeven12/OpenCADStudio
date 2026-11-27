@@ -1494,6 +1494,7 @@ impl OpenCADStudio {
             "grip_drag" => self.control_grip_drag(req)?,
             "click" => self.control_click(req)?,
             "pointer" => self.control_pointer(req)?,
+            "key" => self.control_key(req)?,
             "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
             "panel_input" => self.control_panel_input(req)?,

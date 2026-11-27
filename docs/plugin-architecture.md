@@ -906,7 +906,7 @@ Which surface carries what:
 | NOD XRecords | — | `create/read/update/delete/list_xrecord` + the v13 batches |
 | Bulk data | `batch` (batched **ops**) | `entities_batch`, record batches (batched **data**) |
 | Notifications | `events` (the session journal) | `on_notification` (`DocumentChanged`, `DocumentChangedRegions`, v27 upgrades it to `DocumentChangedDelta`, …) |
-| Viewport automation | `click`, `pointer`, `getpoint`, `user_select`, `view_focus`, `capture` | — (a plugin's grip events are its gestures) |
+| Viewport automation | `click`, `pointer`, `key`, `getpoint`, `user_select`, `view_focus`, `capture` | — (a plugin's grip events are its gestures) |
 | Reference-only designation | — | `set_reference_only` |
 | Parametric chain staging / sampling (v14) | — (`query` reads the staged entities) | `stage_parametric_chain` / `sample_parametric` |
 | Plugin class objects | — (future: a class/instance browser view) | `register_plugin_class` / `stage_plugin_class_instance`; the instance's declared rows read across the wire (`plugin_class_instance_properties`, the python `ocs` surface names it too) |

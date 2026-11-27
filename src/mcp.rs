@@ -132,6 +132,7 @@ const EXECUTE_OPS: &[&str] = &[
     "grip_drag",
     "click",
     "pointer",
+    "key",
     "set_properties",
     "panel_input",
     "panel_button",

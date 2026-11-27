@@ -322,6 +322,12 @@
         "responses": {"200": {"description": "Command status"}, "400": {"description": "Command failed"}}
       }
     },
+    "/api/v1/key": {
+      "post": {
+        "summary": "Press a key or key combination as the keyboard would ({\"key\": \"ACCEL+PAGEDOWN\"}); it runs the key's binding. ACCEL is CTRL, or CMD on macOS",
+        "responses": {"200": {"description": "The normalized key that was pressed"}, "400": {"description": "Unknown key name"}}
+      }
+    },
     "/api/v1/undo": {"post": {"summary": "Undo one step in the active document, or the one named by {document_id}", "responses": {"200": {"description": "Undone"}}}},
     "/api/v1/redo": {"post": {"summary": "Redo one step in the active document, or the one named by {document_id}", "responses": {"200": {"description": "Redone"}}}},
     "/api/v1/save": {"post": {"summary": "Save the active document, or the one named by {document_id} ({path} optional once opened); a *.dwt path writes DWG bytes through a scratch file renamed into place", "responses": {"200": {"description": "Saved"}, "400": {"description": "Save failed"}}}},

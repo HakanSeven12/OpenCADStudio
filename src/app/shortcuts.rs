@@ -28,9 +28,9 @@ pub(crate) fn space_rebound_off_commandspace(bindings: &FxHashMap<String, String
 }
 
 #[cfg(target_os = "macos")]
-const ACCEL: &str = "CMD";
+pub(super) const ACCEL: &str = "CMD";
 #[cfg(not(target_os = "macos"))]
-const ACCEL: &str = "CTRL";
+pub(super) const ACCEL: &str = "CTRL";
 
 /// Every active binding shipped with a fresh configuration. Values are command
 /// names where possible; the small set of input actions is resolved below.
@@ -326,7 +326,7 @@ pub(super) fn is_global_key(key: &str) -> bool {
             && !matches!(key.rsplit('+').next(), Some("A" | "C" | "V" | "X")))
 }
 
-fn is_named_key(key: &str) -> bool {
+pub(super) fn is_named_key(key: &str) -> bool {
     matches!(
         key,
         "ENTER"

@@ -5268,6 +5268,43 @@ mod tests {
             "picture text {picture:?}, drawn from the cells {cells:?}"
         );
     }
+    /// A cell taller text than its row, top-centred, with no margin of its
+    /// own: the cell editor puts its text at the table's margin below the
+    /// cell's top edge, as the table draws it, not half the text height down
+    /// (which is near the middle of the row and runs the caret into the next).
+    #[test]
+    fn the_cell_editor_text_sits_at_the_table_margin_below_the_top_edge() {
+        use document::entities::table::CellStylePropertyFlags as P;
+        use document::types::Vector3;
+        let mut document = document::Document::new();
+        let style = document.allocate_handle();
+        let standard = document::objects::TableStyle::standard();
+        let margin = standard.vertical_margin;
+        document
+            .objects
+            .insert(style, document::objects::ObjectType::TableStyle(standard));
+        let mut table = Table::new(Vector3::ZERO, 1, 1);
+        table.table_style_handle = Some(style);
+        table.columns[0].width = 12.27;
+        table.rows[0].height = 4.10;
+        table.set_cell_text(0, 0, "Text");
+        let cell = table.cell_mut(0, 0).unwrap();
+        let own = cell.style.get_or_insert_with(Default::default);
+        own.text_height = 4.572;
+        own.alignment = 2;
+        own.property_flags.insert(P::TEXT_HEIGHT | P::ALIGNMENT);
+        table.block_record_handle = None;
+        let picture = cell_picture(&document, &table, 0, 0).expect("the cell has a picture");
+        assert!(
+            margin > 1e-6 && margin < 4.572 * 0.5,
+            "a small table margin"
+        );
+        assert!(
+            (picture.text.insertion_point.y.abs() - margin).abs() < 1e-9,
+            "the text starts {} below the top, not {margin}",
+            picture.text.insertion_point.y.abs()
+        );
+    }
 
     /// Text wraps between the margins it is placed against: a long
     /// left-aligned line ends inside the cell, not past the

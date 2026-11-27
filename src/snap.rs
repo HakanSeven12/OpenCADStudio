@@ -2173,19 +2173,38 @@ impl Snapper {
         );
 
         // ── Nearest — closest point on any segment (clamped) ──────────────
+        // A curved wire's point comes from its exact geometry, not from the
+        // chord under the cursor, which sits inside a wide arc (#3700).
         if self.is_on(SnapType::Nearest) {
             if let Some(segments) = &local_segments {
+                let mut exact: HashMap<u32, bool> = HashMap::default();
                 for seg in segments {
+                    let wire = wires.source_wire(seg.wire);
+                    let handled = *exact.entry(seg.wire).or_insert_with(|| {
+                        let Some(point) = wire.and_then(|w| exact_nearest(w, cursor_world))
+                        else {
+                            return false;
+                        };
+                        try_pt(point, SnapType::Nearest, wire.and_then(wire_source), None);
+                        true
+                    });
+                    if handled {
+                        continue;
+                    }
                     try_pt(
                         nearest_on_segment(cursor_world, seg.a, seg.b),
                         SnapType::Nearest,
-                        wires.source_wire(seg.wire).and_then(wire_source),
+                        wire.and_then(wire_source),
                         None,
                     );
                 }
             } else {
                 for wire in in_range_wires.iter() {
                     let src = wire_source(wire);
+                    if let Some(point) = exact_nearest(wire, cursor_world) {
+                        try_pt(point, SnapType::Nearest, src, None);
+                        continue;
+                    }
                     for i in 0..wire.points.len().saturating_sub(1) {
                         let p =
                             nearest_on_segment(cursor_world, wp_f64(wire, i), wp_f64(wire, i + 1));
@@ -4127,6 +4146,26 @@ fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Vec<
 
 /// Perpendicular feet from `from` onto a wire's exact curves, or `None` when
 /// the wire has no curved geometry and its segments are already exact.
+/// The point on a curved wire's exact geometry nearest `to`, or `None` when
+/// the wire has no curved geometry and its segments are already exact.
+fn exact_nearest(wire: &WireModel, to: DVec3) -> Option<DVec3> {
+    if wire.tangent_geoms.is_empty() {
+        return None;
+    }
+    let frame = wire_plane(wire)?;
+    let curves = curves_in_frame(wire, &frame, 1e-7)?;
+    let to2 = frame.to_2d(to);
+    let best = curves
+        .iter()
+        .map(|curve| ocs_geom::geom2d::nearest_to(curve, to2).point)
+        .min_by(|a, b| {
+            let da = (a[0] - to2[0]).powi(2) + (a[1] - to2[1]).powi(2);
+            let db = (b[0] - to2[0]).powi(2) + (b[1] - to2[1]).powi(2);
+            da.total_cmp(&db)
+        })?;
+    Some(frame.to_3d(best))
+}
+
 fn exact_perpendicular_feet(wire: &WireModel, from: DVec3) -> Option<Vec<DVec3>> {
     let frame = wire_plane(wire)?;
     let curves = curves_in_frame(wire, &frame, 1e-7)?;

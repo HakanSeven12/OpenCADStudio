@@ -189,6 +189,9 @@ impl OpenCADStudio {
             "run" => self.graph_run(i),
             #[cfg(not(target_arch = "wasm32"))]
             "save" => {
+                if let Some(refusal) = self.read_only_save_refusal() {
+                    return Err(refusal);
+                }
                 let path = req["path"]
                     .as_str()
                     .ok_or_else(|| failure("path_required", "Supply path: where to write the .ocg file"))?;

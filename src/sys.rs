@@ -45,14 +45,35 @@ pub fn open_url<Message: Send + 'static>(
     url: &str,
     parent: Option<iced::window::Id>,
 ) -> iced::Task<Message> {
-    let url = url.to_string();
+    let Some(url) = web_hyperlink(url) else {
+        return iced::Task::none();
+    };
     match parent {
         Some(parent) => iced::window::run(parent, move |window| {
             open_url_linux(&url, linux_activation_token(window));
         })
         .discard(),
         None => {
-            let _ = open::that_detached(url);
+            let _ = open::that_detached(&url);
+            iced::Task::none()
+        }
+    }
+}
+
+/// Open a local filesystem path in the desktop file manager or associated application.
+#[cfg(target_os = "linux")]
+pub fn open_local_path<Message: Send + 'static>(
+    path: &std::path::Path,
+    parent: Option<iced::window::Id>,
+) -> iced::Task<Message> {
+    let path = path.to_path_buf();
+    match parent {
+        Some(parent) => iced::window::run(parent, move |window| {
+            open_url_linux(&path.to_string_lossy(), linux_activation_token(window));
+        })
+        .discard(),
+        None => {
+            let _ = open::that_detached(&path);
             iced::Task::none()
         }
     }
@@ -106,7 +127,20 @@ fn open_url_linux(url: &str, activation_token: Option<String>) {
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "linux")))]
 pub fn open_url<Message>(url: &str, _parent: Option<iced::window::Id>) -> iced::Task<Message> {
-    let _ = open::that_detached(url);
+    let Some(url) = web_hyperlink(url) else {
+        return iced::Task::none();
+    };
+    let _ = open::that_detached(&url);
+    iced::Task::none()
+}
+
+/// Open a local filesystem path in the desktop file manager or associated application.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "linux")))]
+pub fn open_local_path<Message>(
+    path: &std::path::Path,
+    _parent: Option<iced::window::Id>,
+) -> iced::Task<Message> {
+    let _ = open::that_detached(path);
     iced::Task::none()
 }
 
@@ -114,10 +148,52 @@ pub fn open_url<Message>(url: &str, _parent: Option<iced::window::Id>) -> iced::
 /// user gesture and does not block it as a pop-up.
 #[cfg(target_arch = "wasm32")]
 pub fn open_url<Message>(url: &str, _parent: Option<iced::window::Id>) -> iced::Task<Message> {
+    let Some(url) = web_hyperlink(url) else {
+        return iced::Task::none();
+    };
     if let Some(window) = web_sys::window() {
-        let _ = window.open_with_url_and_target_and_features(url, "_blank", "noopener,noreferrer");
+        let _ = window.open_with_url_and_target_and_features(&url, "_blank", "noopener,noreferrer");
     }
     iced::Task::none()
+}
+
+/// Write plain text to the system clipboard across native and web builds.
+pub fn clipboard_write<Message: Send + 'static>(text: String) -> iced::Task<Message> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        write_clipboard_text(&text);
+        iced::Task::none()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        iced::clipboard::write(text).discard()
+    }
+}
+
+/// Read plain text from the system clipboard across native and web builds.
+pub fn clipboard_read_text() -> iced::Task<Option<String>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        iced::Task::perform(read_clipboard_text(), std::convert::identity)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        iced::clipboard::read_text().map(|result| result.ok().map(|text| (*text).clone()))
+    }
+}
+
+#[test]
+fn open_url_ignores_non_web_schemes() {
+    for bad in [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "data:text/html,hi",
+        "mailto:test@example.com",
+        "custom:cmd",
+        "",
+    ] {
+        assert_eq!(open_url::<()>(bad, None).units(), 0, "{bad}");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1577,4 +1653,15 @@ pub fn terminate_requests() -> impl iced::futures::Stream<Item = ()> + Send + 's
             let _ = output.send(()).await;
         }
     })
+}
+
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (&x, &y) in a.iter().zip(b) {
+        difference |= x ^ y;
+    }
+    std::hint::black_box(difference) == 0
 }

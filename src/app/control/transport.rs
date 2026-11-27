@@ -1,11 +1,12 @@
 //! Private local discovery and a bounded GUI message queue.
 use super::{session_id, Envelope, Reply};
+use crate::io::line_read::{read_line_capped, DeadlineStream};
 use iced::futures::{channel::mpsc, Stream};
 use serde_json::{json, Value};
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufReader, Write},
     net::TcpListener,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(in crate::app) fn subscribe() -> iced::Subscription<Envelope> {
@@ -62,17 +63,23 @@ fn listen(sender: mpsc::Sender<Envelope>) -> std::io::Result<()> {
         workers.try_execute(move || {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
-            if let Ok(write_half) = stream.try_clone() {
-                let mut reader = BufReader::new(stream);
-                let mut writer = write_half;
+            if let Ok(mut writer) = stream.try_clone() {
+                let mut reader = BufReader::new(DeadlineStream::new(
+                    stream,
+                    Instant::now() + Duration::from_secs(15),
+                ));
                 // One bounded request per connection; operation polling reconnects.
                 let mut line = String::new();
-                if reader.by_ref().take(1_048_577).read_line(&mut line).is_ok()
-                    && line.len() <= 1_048_576
-                    && line.ends_with('\n')
+                if read_line_capped(&mut reader, &mut line, 1_048_576)
+                    .is_ok_and(|n| n > 0 && line.ends_with('\n'))
                 {
                     if let Ok(mut request) = serde_json::from_str::<Value>(&line) {
-                        if request["token"].as_str() == Some(token.as_str()) {
+                        if request["token"]
+                            .as_str()
+                            .is_some_and(|presented| {
+                                crate::rest::constant_time_eq(presented.as_bytes(), token.as_bytes())
+                            })
+                        {
                             if let Some(object) = request.as_object_mut() {
                                 object.remove("token");
                             }

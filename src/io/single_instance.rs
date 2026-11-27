@@ -27,13 +27,14 @@
 //! answers with the other, and `open` is refused on a connection that has not
 //! proved the first half.
 
-use std::io::{BufRead, BufReader, Write};
+use crate::io::line_read::{read_line_capped, DeadlineStream};
+use std::io::{BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 #[cfg(target_os = "macos")]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -46,6 +47,9 @@ const MAGIC: &str = "OpenCADStudio/si/3";
 /// backlog, short enough that a wedged peer costs a visible pause and not a
 /// hang.
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
+const SINGLE_INSTANCE_MAX_LINE: usize = 64 * 1024;
+const MAX_FRAMES: usize = 2;
+const MAX_HANDOFF_PATHS: usize = 256;
 
 /// The bound listener, parked between [`claim`] (which runs in `main`, before
 /// iced exists) and [`subscribe`] (which runs inside the iced runtime).
@@ -227,21 +231,27 @@ pub fn handoff(stream: TcpStream, paths: &[PathBuf]) -> bool {
         return false;
     };
     let mut w = write_half;
-    let mut r = BufReader::new(stream);
+    let mut r = BufReader::new(DeadlineStream::new(stream, Instant::now() + IO_TIMEOUT));
 
     let ping = json!({ "op": "ping", "proof": client_proof });
     if writeln!(w, "{ping}").is_err() || w.flush().is_err() {
         return false;
     }
     let mut line = String::new();
-    if r.read_line(&mut line).is_err() {
+    if read_line_capped(&mut r, &mut line, SINGLE_INSTANCE_MAX_LINE)
+        .map_or(true, |n| n == 0)
+    {
         return false;
     }
     let ack: Value = match serde_json::from_str(&line) {
         Ok(v) => v,
         Err(_) => return false,
     };
-    if ack["app"].as_str() != Some(MAGIC) || ack["proof"].as_str() != Some(editor_proof.as_str()) {
+    if ack["app"].as_str() != Some(MAGIC)
+        || !ack["proof"].as_str().is_some_and(|proof| {
+            crate::sys::constant_time_eq(proof.as_bytes(), editor_proof.as_bytes())
+        })
+    {
         return false;
     }
 
@@ -264,7 +274,9 @@ pub fn handoff(stream: TcpStream, paths: &[PathBuf]) -> bool {
         return false;
     }
     line.clear();
-    if r.read_line(&mut line).is_err() {
+    if read_line_capped(&mut r, &mut line, SINGLE_INSTANCE_MAX_LINE)
+        .map_or(true, |n| n == 0)
+    {
         return false;
     }
     let done: Value = match serde_json::from_str(&line) {
@@ -319,12 +331,21 @@ async fn serve_claimed_port(out: PathSender) {
         std::future::pending::<()>().await;
         return;
     };
-    // `accept` blocks, so it lives on its own OS thread and only ever reaches
-    // the iced runtime through the non-blocking `try_send`.
+    // `accept` blocks, so it lives on its own OS thread and dispatches
+    // peers onto a bounded worker pool so a stalled client cannot block
+    // subsequent double-click handoffs.
     std::thread::spawn(move || {
-        let mut out = out;
+        let Ok(workers) = crate::io::connection_workers::ConnectionWorkers::new(
+            "ocs-single-inst",
+            4,
+        ) else {
+            return;
+        };
         for stream in listener.incoming().flatten() {
-            serve_one(&mut out, stream);
+            let mut peer_out = out.clone();
+            workers.try_execute(move || {
+                serve_one(&mut peer_out, stream);
+            });
         }
     });
     std::future::pending::<()>().await;
@@ -403,11 +424,14 @@ fn serve_one(out: &mut PathSender, stream: TcpStream) {
         return;
     };
     let mut w = write_half;
-    let mut r = BufReader::new(stream);
+    let mut r = BufReader::new(DeadlineStream::new(stream, Instant::now() + IO_TIMEOUT));
     let mut line = String::new();
-    loop {
+    for _ in 0..MAX_FRAMES {
         line.clear();
-        if !r.read_line(&mut line).map(|n| n > 0).unwrap_or(false) {
+        if !read_line_capped(&mut r, &mut line, SINGLE_INSTANCE_MAX_LINE)
+            .map(|n| n > 0)
+            .unwrap_or(false)
+        {
             return;
         }
         let Ok(req) = serde_json::from_str::<Value>(&line) else {
@@ -415,7 +439,9 @@ fn serve_one(out: &mut PathSender, stream: TcpStream) {
         };
         match req["op"].as_str() {
             Some("ping") => {
-                if req["proof"].as_str() != Some(client_proof) {
+                if !req["proof"].as_str().is_some_and(|proof| {
+                    crate::sys::constant_time_eq(proof.as_bytes(), client_proof.as_bytes())
+                }) {
                     return;
                 }
                 proved = true;
@@ -434,11 +460,16 @@ fn serve_one(out: &mut PathSender, stream: TcpStream) {
                 // the user selected, which is the failure this whole path
                 // exists to avoid.
                 let ok = match req["paths"].as_array() {
-                    Some(a) => a
-                        .iter()
-                        .filter_map(|p| p.as_str())
-                        .all(|p| out.try_send(PathBuf::from(p)).is_ok()),
-                    None => false,
+                    Some(a)
+                        if !a.is_empty()
+                            && a.len() <= MAX_HANDOFF_PATHS
+                            && a.iter().all(|p| p.as_str().is_some()) =>
+                    {
+                        a.iter()
+                            .filter_map(|p| p.as_str())
+                            .all(|p| out.try_send(PathBuf::from(p)).is_ok())
+                    }
+                    _ => false,
                 };
                 let _ = writeln!(w, "{}", json!({ "ok": ok }));
                 let _ = w.flush();
@@ -452,6 +483,7 @@ fn serve_one(out: &mut PathSender, stream: TcpStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::BufRead;
 
     #[test]
     fn port_is_deterministic_and_in_the_reserved_window() {
@@ -629,5 +661,63 @@ mod tests {
             start.elapsed()
         );
         drop(t);
+    }
+
+    #[test]
+    fn oversize_line_is_dropped_without_oom() {
+        let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        let port = listener.local_addr().unwrap().port();
+        let (tx, mut rx) = iced::futures::channel::mpsc::channel::<PathBuf>(8);
+        assert!(secret().is_some());
+        std::thread::spawn(move || {
+            let mut out = tx;
+            if let Ok((stream, _)) = listener.accept() {
+                serve_one(&mut out, stream);
+            }
+        });
+
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+        let chunk = vec![b'A'; 16 * 1024];
+        for _ in 0..8 {
+            if s.write_all(&chunk).is_err() {
+                break;
+            }
+        }
+        let _ = s.write_all(b"\n");
+        let _ = s.flush();
+        let mut reply = String::new();
+        let n = BufReader::new(s).read_line(&mut reply).unwrap_or(0);
+        assert_eq!(n, 0, "oversize line must close without reply, got {reply:?}");
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn stalled_peer_does_not_block_concurrent_handoff() {
+        let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        let port = listener.local_addr().unwrap().port();
+        let (tx, mut rx) = iced::futures::channel::mpsc::channel::<PathBuf>(8);
+        assert!(secret().is_some());
+        std::thread::spawn(move || {
+            let workers =
+                crate::io::connection_workers::ConnectionWorkers::new("ocs-single-inst-test", 4)
+                    .unwrap();
+            for stream in listener.incoming().flatten() {
+                let mut out = tx.clone();
+                workers.try_execute(move || serve_one(&mut out, stream));
+            }
+        });
+
+        let _stalled = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        let good = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        assert!(handoff(good, &[PathBuf::from("/tmp/ocs_concurrent_ok.dwg")]));
+        let received = rx.try_recv().unwrap();
+        assert!(received.ends_with("ocs_concurrent_ok.dwg"));
     }
 }

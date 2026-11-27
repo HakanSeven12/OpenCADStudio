@@ -344,7 +344,7 @@ impl OpenCADStudio {
                 if action == "CUT" {
                     self.raw_delete(false);
                 }
-                return Some(iced::clipboard::write(text).discard());
+                return Some(crate::sys::clipboard_write(text));
             }
             // Paste, or Paste Special: as plain text, or without the
             // character or the paragraph formatting it was copied with.
@@ -352,8 +352,8 @@ impl OpenCADStudio {
             "PASTE" => {
                 let mode = arg.to_string();
                 return Some(
-                    iced::clipboard::read_text()
-                        .map(move |text| Message::MTextPasteAs(mode.clone(), text.ok().map(|t| (*t).clone()))),
+                    crate::sys::clipboard_read_text()
+                        .map(move |text| Message::MTextPasteAs(mode.clone(), text)),
                 );
             }
             // A code page puts it in force; none opens the window.

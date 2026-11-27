@@ -115,6 +115,19 @@ pub fn enqueue_restore(name: String, bytes: Vec<u8>, restore_key: String) -> boo
 /// forward drops themselves.
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn ocs_web_drop_file(name: String, bytes: js_sys::Uint8Array) {
+    if super::host_bridge::is_embed_mode() {
+        warn("ocs: ignoring JS drop in embed mode");
+        return;
+    }
+    let name = super::host_bridge::sanitize_host_filename(&name);
+    if !is_drawing_name(&name) {
+        warn(&format!("ocs: ignoring non-drawing dropped file \"{name}\""));
+        return;
+    }
+    if (bytes.byte_length() as usize) > super::host_bridge::MAX_HOST_OPEN_BYTES {
+        warn(&format!("ocs: ignoring oversized dropped file \"{name}\""));
+        return;
+    }
     let _ = enqueue_open(name, bytes.to_vec());
 }
 

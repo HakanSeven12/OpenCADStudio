@@ -1,61 +1,119 @@
 //! Offline validation of application-owned JSON Schema contracts.
+use lru::LruCache;
 use serde_json::Value;
+use std::{
+    collections::HashMap,
+    num::NonZeroUsize,
+    sync::{Arc, Mutex, OnceLock},
+};
+
+const VALIDATOR_CACHE_CAP: usize = 128;
+
+fn format_validation_error(error: jsonschema::ValidationError<'_>, path: &str) -> String {
+    let field = match error.kind() {
+        jsonschema::error::ValidationErrorKind::Required { property } => property.as_str(),
+        jsonschema::error::ValidationErrorKind::AdditionalProperties { unexpected } => {
+            unexpected.first().map(String::as_str)
+        }
+        _ => None,
+    };
+    let suffix = field
+        .map(|key| format!("/{}", key.replace('~', "~0").replace('/', "~1")))
+        .unwrap_or_default();
+    format!("{path}{}{suffix}: {error}", error.instance_path())
+}
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn compile_validator(schema: &Value) -> Result<jsonschema::Validator, String> {
+    jsonschema::validator_for(schema).map_err(|e| format!("invalid JSON schema: {e}"))
+}
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn validate_with_validator(
+    validator: &jsonschema::Validator,
+    value: &Value,
+    path: &str,
+) -> Result<(), String> {
+    validator
+        .validate(value)
+        .map_err(|error| format_validation_error(error, path))
+}
+
+/// Cache validators by a static schema identifier so fixed inline and entity
+/// contracts never re-serialize their JSON schema on every validation call.
+pub fn validate_static_schema(
+    key: &'static str,
+    build: impl FnOnce() -> Result<Value, String>,
+    value: &Value,
+    path: &str,
+) -> Result<(), String> {
+    static STATIC_VALIDATORS: OnceLock<Mutex<HashMap<&'static str, Arc<jsonschema::Validator>>>> =
+        OnceLock::new();
+    let cache_mutex = STATIC_VALIDATORS.get_or_init(Default::default);
+    let cached = {
+        let cache = cache_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        cache.get(key).map(Arc::clone)
+    };
+    let validator = match cached {
+        Some(validator) => validator,
+        None => {
+            let schema = build()?;
+            let compiled = Arc::new(compile_validator(&schema)?);
+            let mut cache = cache_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            Arc::clone(cache.entry(key).or_insert_with(|| Arc::clone(&compiled)))
+        }
+    };
+    validate_with_validator(&validator, value, path)
+}
 
 /// Only application-owned schemas enter this cache; client payloads are instances,
 /// never schemas. Disable JSON Schema HTTP/file resolution at the dependency level.
 pub fn validate_shape(schema: &Value, value: &Value, path: &str) -> Result<(), String> {
-    use std::{
-        collections::HashMap,
-        sync::{Arc, Mutex, OnceLock},
-    };
-    static VALIDATORS: OnceLock<Mutex<HashMap<String, Arc<jsonschema::Validator>>>> =
+    static VALIDATORS: OnceLock<Mutex<LruCache<String, Arc<jsonschema::Validator>>>> =
         OnceLock::new();
     let key = schema.to_string();
-    let validator = {
-        // A schema that does not compile panics below with the lock held. The
-        // map is not changed then, so the cache stays good.
-        let mut cache = VALIDATORS
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some(validator) = cache.get(&key) {
-            Arc::clone(validator)
-        } else {
-            let validator = Arc::new(
-                jsonschema::validator_for(schema).expect("application-owned schema must compile"),
-            );
-            cache.insert(key, Arc::clone(&validator));
-            validator
+    let cache_mutex = VALIDATORS.get_or_init(|| {
+        let cap = NonZeroUsize::new(VALIDATOR_CACHE_CAP).expect("non-zero capacity");
+        Mutex::new(LruCache::new(cap))
+    });
+    let cached = {
+        let mut cache = cache_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        cache.get(&key).map(Arc::clone)
+    };
+    let validator = match cached {
+        Some(validator) => validator,
+        None => {
+            let compiled = Arc::new(compile_validator(schema)?);
+            let mut cache = cache_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            cache.put(key, Arc::clone(&compiled));
+            compiled
         }
     };
-    validator.validate(value).map_err(|error| {
-        let field = match error.kind() {
-            jsonschema::error::ValidationErrorKind::Required { property } => property.as_str(),
-            jsonschema::error::ValidationErrorKind::AdditionalProperties { unexpected } => {
-                unexpected.first().map(String::as_str)
-            }
-            _ => None,
-        };
-        let suffix = field
-            .map(|key| format!("/{}", key.replace('~', "~0").replace('/', "~1")))
-            .unwrap_or_default();
-        format!("{path}{}{suffix}: {error}", error.instance_path())
-    })
+    validate_with_validator(&validator, value, path)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_shape;
+    use super::{validate_shape, validate_static_schema};
     use serde_json::json;
 
     #[test]
     fn a_schema_that_does_not_compile_does_not_stop_later_validations() {
         let bad = json!({"type": "no-such-type"});
-        let failed = std::panic::catch_unwind(|| validate_shape(&bad, &json!(1), ""));
-        assert!(failed.is_err(), "the bad schema must panic");
+        assert!(
+            validate_shape(&bad, &json!(1), "").is_err(),
+            "the bad schema must return Err instead of panicking"
+        );
 
         let good = json!({"type": "integer"});
         assert_eq!(validate_shape(&good, &json!(1), ""), Ok(()));
         assert!(validate_shape(&good, &json!("text"), "").is_err());
+
+        assert!(
+            validate_static_schema("test-good-int", || Ok(json!({"type": "integer"})), &json!(42), "").is_ok()
+        );
+        assert!(
+            validate_static_schema("test-good-int", || Ok(json!({"type": "integer"})), &json!("no"), "").is_err()
+        );
     }
 }

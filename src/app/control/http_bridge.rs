@@ -66,10 +66,12 @@ fn listen(
     bound_port.store(listener.local_addr()?.port(), Ordering::SeqCst);
     eprintln!("OpenCADStudio GUI REST listening on http://127.0.0.1:{port}/api/v1");
     rest::announce_token();
-    // Independent workers: a `getpoint` or `user_select` request stays
-    // open until the person answers, and must not block the other reads
-    // (get_selection…).
-    let workers = crate::io::connection_workers::ConnectionWorkers::new("ocs-http", 8)?;
+    // Isolate fast read/cancel/control requests from long-running or parked interactive
+    // operations so four simultaneous `getpoint`/`plot` calls cannot starve `/state` or `/cancel`.
+    let fast_workers = crate::io::connection_workers::ConnectionWorkers::new("ocs-http-fast", 16)?;
+    let parked_workers = std::sync::Arc::new(
+        crate::io::connection_workers::ConnectionWorkers::new("ocs-http-parked", 4)?,
+    );
     // One document-id cache for the whole listener: a state read primes it,
     // later mutations address the live drawing without the caller repeating
     // the id — the same ergonomics as the headless server.
@@ -80,17 +82,46 @@ fn listen(
         let _ = stream.set_nodelay(true);
         let sender = sender.clone();
         let document_cache = document_cache.clone();
-        workers.try_execute(move || {
+        let parked = Arc::clone(&parked_workers);
+        fast_workers.try_execute(move || {
             let mut stream = stream;
             let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
-            if let Ok(Some(request)) = rest::read_request(&mut stream) {
-                if !request.authorized() {
-                    let _ = rest::write_response(&mut stream, 401, &rest::unauthorized());
-                } else {
-                    let (status, body) = forward(&request, &sender, &document_cache, &stream);
+            let Ok(Some(request)) = rest::read_request(&mut stream) else {
+                return;
+            };
+            if !request.authorized() {
+                let _ = rest::write_response(&mut stream, 401, &rest::unauthorized());
+                return;
+            }
+            let plan = match resolve_plan(&request) {
+                Ok(plan) => plan,
+                Err((status, body)) => {
                     let _ = rest::write_response(&mut stream, status, &body);
+                    return;
                 }
+            };
+            if is_long_running_plan(&plan) {
+                let fallback = stream.try_clone().ok();
+                if !parked.try_execute(move || {
+                    let (status, body) = forward_plan(plan, &sender, &document_cache, &stream);
+                    let _ = rest::write_response(&mut stream, status, &body);
+                }) {
+                    if let Some(mut stream) = fallback {
+                        let _ = rest::write_response(
+                            &mut stream,
+                            503,
+                            &json!({
+                                "ok": false,
+                                "code": "busy",
+                                "error": "Too many long-running or interactive HTTP requests in flight",
+                            }),
+                        );
+                    }
+                }
+            } else {
+                let (status, body) = forward_plan(plan, &sender, &document_cache, &stream);
+                let _ = rest::write_response(&mut stream, status, &body);
             }
         });
     }
@@ -103,22 +134,32 @@ fn listen(
 const DEFAULT_WAIT_SECS: u64 = 300;
 const PICK_WAIT_SECS: u64 = 30 * 60;
 
-fn forward(
-    request: &HttpRequest,
-    sender: &mpsc::Sender<Envelope>,
-    document_cache: &Mutex<Option<u64>>,
-    stream: &TcpStream,
-) -> (u16, Value) {
+fn is_long_running_plan(plan: &Plan) -> bool {
+    matches!(
+        plan.op(),
+        Some("getpoint" | "user_select" | "plot" | "open" | "save" | "capture" | "dgn_import" | "wblock")
+    )
+}
+
+fn resolve_plan(request: &HttpRequest) -> Result<Plan, (u16, Value)> {
     let path = request.path.trim_end_matches('/');
     let path = if path.is_empty() { "/" } else { path };
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     if segments.first() != Some(&"api") || segments.get(1) != Some(&"v1") {
-        return (
+        return Err((
             404,
             json!({"ok": false, "code": "unknown_route", "error": "Use /api/v1/…"}),
-        );
+        ));
     }
-    let plan = rest::plan(&request.method, &segments[2..], request);
+    Ok(rest::plan(&request.method, &segments[2..], request))
+}
+
+fn forward_plan(
+    plan: Plan,
+    sender: &mpsc::Sender<Envelope>,
+    document_cache: &Mutex<Option<u64>>,
+    stream: &TcpStream,
+) -> (u16, Value) {
     // The picks park until the person answers; an `operation` call is itself
     // a poll and must come straight back.
     let wait = match plan.op() {
@@ -821,5 +862,62 @@ mod tests {
         harvest(&cache, &json!({"document_id": 7}));
 
         assert_eq!(*cache.lock().unwrap_or_else(|e| e.into_inner()), Some(7));
+    }
+
+    #[test]
+    fn parked_pick_saturation_returns_503_without_starving_fast_reads_and_cancels() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.main_window = Some(iced::window::Id::unique());
+        let _ = app.control_request(json!({"protocol":1,"op":"new","request_id":"n1"}));
+
+        let (sender, mut receiver) = mpsc::channel::<Envelope>(16);
+        let bound = Arc::new(AtomicU16::new(0));
+        let listen_bound = bound.clone();
+        std::thread::spawn(move || listen(sender, 0, listen_bound).unwrap());
+        let port = wait_for_bridge(&bound);
+
+        // Occupy all 4 parked worker slots by holding the 4 forwarded envelopes
+        // before replying to them.
+        let mut parked_conns = Vec::new();
+        let mut held_envelopes = Vec::new();
+        for idx in 0..4 {
+            parked_conns.push(post(
+                port,
+                "/api/v1/getpoint",
+                &format!(r#"{{"request_id":"gp-sat-{idx}"}}"#),
+            ));
+            let env = iced::futures::executor::block_on(receiver.next()).unwrap();
+            assert_eq!(env.request["op"], "getpoint");
+            held_envelopes.push(env);
+        }
+
+        // Fast read `/api/v1/state` must still be answered immediately via the fast pool.
+        let mut state_conn = get(port, "/api/v1/state");
+        let env = iced::futures::executor::block_on(receiver.next()).unwrap();
+        assert_eq!(env.request["op"], "state");
+        let reply = app.control_request(env.request).0;
+        let _ = env.reply.send(reply);
+        let (status, body) = read_response(&mut state_conn);
+        assert_eq!(status, 200, "{body}");
+
+        // A 5th `getpoint` exceeds the parked pool capacity and receives 503 busy.
+        let mut overflow = post(port, "/api/v1/getpoint", r#"{"request_id":"gp-over"}"#);
+        let (status, body) = read_response(&mut overflow);
+        assert_eq!(status, 503, "{body}");
+        assert_eq!(body["code"], "busy", "{body}");
+
+        // Release the 4 parked slots cleanly.
+        for env in held_envelopes {
+            let _ = env.reply.send(json!({
+                "ok": false,
+                "status": "cancelled",
+                "code": "cancelled",
+                "result": {"cancelled": true}
+            }));
+        }
+        for mut conn in parked_conns {
+            let (status, _) = read_response(&mut conn);
+            assert_eq!(status, 400);
+        }
     }
 }

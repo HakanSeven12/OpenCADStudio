@@ -23,7 +23,7 @@
 //!                                             (read)
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::io::line_read::{MAX_LINE_BYTES, lines_capped};
+use crate::io::line_read::{MAX_LINE_BYTES, DeadlineStream, lines_capped, read_line_capped};
 use std::collections::{BTreeMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
@@ -143,6 +143,16 @@ fn ready() -> Value {
     })
 }
 
+/// Loopback `--serve --port` greeting omits `session_id` before authentication.
+#[cfg(not(target_arch = "wasm32"))]
+fn ready_socket() -> Value {
+    json!({
+        "ok": true,
+        "ready": true,
+        "version": env!("OCS_APP_VERSION"),
+    })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn serve_stdio(app: &mut OpenCADStudio) {
     let stdin = std::io::stdin();
@@ -193,6 +203,14 @@ fn serve_socket_with_idle(
     bound_port: &std::sync::Arc<std::sync::atomic::AtomicU16>,
     idle: std::time::Duration,
 ) {
+    const SERVE_MAX_CONNECTIONS: usize = 8;
+    const PRE_AUTH_MAX_LINE_BYTES: usize = 64 * 1024;
+
+    struct ServeJob {
+        request: String,
+        reply: std::sync::mpsc::Sender<Value>,
+    }
+
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
@@ -204,37 +222,97 @@ fn serve_socket_with_idle(
     bound_port.store(bound, std::sync::atomic::Ordering::SeqCst);
     eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{bound}");
     crate::rest::announce_token();
-    for stream in listener.incoming().flatten() {
-        let _ = stream.set_read_timeout(Some(idle));
-        let Ok(read_half) = stream.try_clone() else {
-            continue;
-        };
-        let reader = std::io::BufReader::new(read_half);
-        let mut writer = stream;
-        let _ = writeln!(writer, "{}", ready());
-        let _ = writer.flush();
-        for line in lines_capped(reader, MAX_LINE_BYTES) {
-            let Ok(line) = line else { break };
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
+    let workers = match crate::io::connection_workers::ConnectionWorkers::new(
+        "ocs-serve",
+        SERVE_MAX_CONNECTIONS,
+    ) {
+        Ok(workers) => workers,
+        Err(error) => {
+            eprintln!("--serve: cannot start connection workers: {error}");
+            return;
+        }
+    };
+    let (jobs, incoming) = std::sync::mpsc::channel::<ServeJob>();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let jobs = jobs.clone();
+            workers.try_execute(move || {
+                let _ = stream.set_write_timeout(Some(idle));
+                let Ok(read_half) = stream.try_clone() else {
+                    return;
+                };
+                let mut writer = stream;
+                if writeln!(writer, "{}", ready_socket()).is_err() || writer.flush().is_err() {
+                    return;
+                }
+                let mut reader = std::io::BufReader::new(DeadlineStream::new(
+                    read_half,
+                    std::time::Instant::now() + idle,
+                ));
+                let mut authenticated = false;
+                let mut line = String::new();
+                loop {
+                    let cap = if authenticated {
+                        MAX_LINE_BYTES
+                    } else {
+                        PRE_AUTH_MAX_LINE_BYTES
+                    };
+                    match read_line_capped(&mut reader, &mut line, cap) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        if !authenticated {
+                            break;
+                        }
+                        continue;
+                    }
+                    // Loopback is shared by every process and user on the machine:
+                    // each request carries the session token, like the GUI's own
+                    // channel, and a connection that fails it is dropped.
+                    let mut request: Value = serde_json::from_str(trimmed).unwrap_or(Value::Null);
+                    if !crate::rest::token_matches(request["token"].as_str()) {
+                        let _ = writeln!(writer, "{}", crate::rest::unauthorized());
+                        let _ = writer.flush();
+                        break;
+                    }
+                    authenticated = true;
+                    if let Some(object) = request.as_object_mut() {
+                        object.remove("token");
+                    }
+                    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+                    if jobs
+                        .send(ServeJob {
+                            request: request.to_string(),
+                            reply: reply_tx,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                    let Ok(resp) = reply_rx.recv() else {
+                        break;
+                    };
+                    if writeln!(writer, "{resp}").is_err() || writer.flush().is_err() {
+                        break;
+                    }
+                    reader
+                        .get_mut()
+                        .set_deadline(std::time::Instant::now() + idle);
+                }
+            });
+        }
+    });
+
+    loop {
+        match incoming.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(job) => {
+                let resp = app.automation_op(&job.request);
+                let _ = job.reply.send(resp);
             }
-            // Loopback is shared by every process and user on the machine:
-            // each request carries the session token, like the GUI's own
-            // channel, and a connection that fails it is dropped.
-            let mut request: Value = serde_json::from_str(line).unwrap_or(Value::Null);
-            if !crate::rest::token_matches(request["token"].as_str()) {
-                let _ = writeln!(writer, "{}", crate::rest::unauthorized());
-                break;
-            }
-            if let Some(object) = request.as_object_mut() {
-                object.remove("token");
-            }
-            let resp = app.automation_op(&request.to_string());
-            if writeln!(writer, "{resp}").is_err() {
-                break;
-            }
-            let _ = writer.flush();
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => app.pump_plugin_requests(),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 }
@@ -935,6 +1013,7 @@ impl OpenCADStudio {
     pub(crate) fn new_headless(read_only: bool) -> Self {
         let mut app = Self::new();
         app.read_only = read_only;
+        app.control.enabled = true;
         app
     }
 
@@ -1018,7 +1097,54 @@ impl OpenCADStudio {
             Ok(v) => v,
             Err(e) => return err(format!("invalid JSON: {e}")),
         };
-        match req["op"].as_str().unwrap_or("") {
+        let op = req["op"].as_str().unwrap_or("");
+        let is_query = matches!(
+            op,
+            "state"
+                | "hello"
+                | "operation"
+                | "events"
+                | "commands"
+                | "properties"
+                | "measure"
+                | "snap"
+                | "grips"
+                | "query"
+                | "civil_station_offset"
+                | "civil_surface_stats"
+                | "records"
+                | "record_schema"
+                | "capabilities"
+                | "tools"
+                | "entities"
+                | "audit"
+                | "layers"
+                | "layouts"
+                | "xrefs"
+                | "page_setup_get"
+                | "header"
+                | "history"
+                | "xdata_get"
+                | "get_selection"
+                | "text_search"
+                | "text_audit"
+                | "blocks"
+                | "block_instances"
+                | "cad_get_blocks"
+                | "cad_extract_block_instances"
+                | "keytips"
+                | "plugins"
+                | "plugin_panels"
+        );
+        if !is_query && !self.control.enabled {
+            return json!({
+                "ok": false,
+                "status": "failed",
+                "code": "disabled",
+                "error": "Automation is stopped. Enable it in OCS.",
+            });
+        }
+        match op {
             "new" => {
                 if self.tabs[self.active_tab].block_test.is_some() {
                     return err("Close Test Block before replacing the drawing.");
@@ -7567,6 +7693,80 @@ DEAD
             .read_line(&mut banner2)
             .expect("second ready banner");
         assert!(banner2.contains("ready"), "{banner2}");
+        assert!(
+            !banner2.contains("session_id"),
+            "socket ready banner must omit session_id pre-auth: {banner2}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn serve_socket_drops_pre_auth_blank_and_trickle_without_blocking_auth_client() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpStream;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::time::Duration;
+
+        let bound = Arc::new(AtomicU16::new(0));
+        let listen_bound = bound.clone();
+        std::thread::spawn(move || {
+            let mut app = super::OpenCADStudio::new_for_test();
+            super::serve_socket_with_idle(&mut app, 0, &listen_bound, Duration::from_millis(250));
+        });
+        let mut port = 0;
+        for _ in 0..50 {
+            port = bound.load(Ordering::SeqCst);
+            if port != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_ne!(port, 0);
+
+        // Peer 1 sends a blank line pre-auth -> must be dropped immediately.
+        let mut blank_peer = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = blank_peer.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut blank_reader = BufReader::new(blank_peer.try_clone().unwrap());
+        let mut banner = String::new();
+        blank_reader.read_line(&mut banner).unwrap();
+        assert!(!banner.contains("session_id"), "{banner}");
+        blank_peer.write_all(b"\n").unwrap();
+        blank_peer.flush().unwrap();
+        let mut after_blank = String::new();
+        assert_eq!(blank_reader.read_line(&mut after_blank).unwrap_or(0), 0);
+
+        // Peer 2 trickles bytes slowly -> must not block Peer 3 and must time out at ~250ms.
+        let mut trickle = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = trickle.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut trickle_reader = BufReader::new(trickle.try_clone().unwrap());
+        banner.clear();
+        trickle_reader.read_line(&mut banner).unwrap();
+        let trickle_writer = std::thread::spawn(move || {
+            for _ in 0..10 {
+                if trickle.write_all(b"{").is_err() || trickle.flush().is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(60));
+            }
+        });
+
+        let mut authed = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = authed.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut authed_reader = BufReader::new(authed.try_clone().unwrap());
+        banner.clear();
+        authed_reader.read_line(&mut banner).unwrap();
+        let req = serde_json::json!({"protocol":1,"op":"state","token":crate::rest::api_token()});
+        writeln!(authed, "{req}").unwrap();
+        authed.flush().unwrap();
+        let mut reply = String::new();
+        authed_reader.read_line(&mut reply).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+
+        let mut trickle_tail = String::new();
+        assert_eq!(trickle_reader.read_line(&mut trickle_tail).unwrap_or(0), 0);
+        let _ = trickle_writer.join();
     }
 
     #[test]

@@ -179,7 +179,7 @@ const EXECUTE_OPS: &[&str] = &[
     "stop",
     "batch",
 ];
-const MAX_BATCH_STEPS: usize = 64;
+use crate::mcp_ops::MAX_BATCH_STEPS;
 const FACADE_TOOL_NAMES: &[&str] = &["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"];
 
 fn available_tool_names() -> Vec<&'static str> {
@@ -854,23 +854,235 @@ fn iso8601_now() -> String {
 }
 
 #[cfg(unix)]
+extern "C" {
+    fn geteuid() -> u32;
+}
+
+#[cfg(unix)]
 fn private_descriptor(path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    let Ok(file) = path.metadata() else {
+    let Ok(file) = std::fs::symlink_metadata(path) else {
         return false;
     };
+    if file.file_type().is_symlink() || !file.file_type().is_file() {
+        return false;
+    }
     let Some(parent) = path.parent() else {
         return false;
     };
-    let Ok(directory) = parent.metadata() else {
+    let Ok(directory) = std::fs::symlink_metadata(parent) else {
         return false;
     };
-    file.uid() == directory.uid() && file.mode() & 0o077 == 0
+    if directory.file_type().is_symlink() || !directory.file_type().is_dir() {
+        return false;
+    }
+    // SAFETY: geteuid() takes no arguments or pointers and returns the effective UID.
+    let my_uid = unsafe { geteuid() };
+    file.uid() == my_uid
+        && directory.uid() == my_uid
+        && (file.mode() & 0o077) == 0
+        && (directory.mode() & 0o077) == 0
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn private_descriptor(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{
+        EqualSid, GetFileSecurityW, GetSecurityDescriptorOwner, GetTokenInformation,
+        OWNER_SECURITY_INFORMATION, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let Ok(file_meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if file_meta.file_type().is_symlink() || !file_meta.file_type().is_file() {
+        return false;
+    }
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let Ok(dir_meta) = std::fs::symlink_metadata(parent) else {
+        return false;
+    };
+    if dir_meta.file_type().is_symlink() || !dir_meta.file_type().is_dir() {
+        return false;
+    }
+
+    struct TokenHandle(HANDLE);
+    impl Drop for TokenHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: self.0 is an open handle from OpenProcessToken.
+                unsafe {
+                    CloseHandle(self.0);
+                }
+            }
+        }
+    }
+
+    let mut raw_token: HANDLE = std::ptr::null_mut();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle; raw_token receives the opened token.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token) } == 0
+        || raw_token.is_null()
+    {
+        return false;
+    }
+    let token = TokenHandle(raw_token);
+
+    let mut token_len: u32 = 0;
+    // SAFETY: Querying required buffer length with null output buffer.
+    unsafe {
+        GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut token_len);
+    }
+    let min_token_len = std::mem::size_of::<TOKEN_USER>() as u32;
+    if token_len < min_token_len || token_len > 65_536 {
+        return false;
+    }
+    let mut token_buf = vec![0u64; (token_len as usize).div_ceil(8)];
+    // SAFETY: token_buf is 8-byte aligned and has at least token_len bytes.
+    if unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenUser,
+            token_buf.as_mut_ptr().cast(),
+            token_len,
+            &mut token_len,
+        )
+    } == 0
+    {
+        return false;
+    }
+    // SAFETY: GetTokenInformation populated a valid TOKEN_USER header at token_buf start.
+    let user_sid: PSID = unsafe { (*token_buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    if user_sid.is_null() {
+        return false;
+    }
+
+    let owner_matches = |target: &Path| -> bool {
+        let wide: Vec<u16> = target
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut needed: u32 = 0;
+        // SAFETY: Querying required security descriptor buffer size for a null-terminated path.
+        unsafe {
+            GetFileSecurityW(
+                wide.as_ptr(),
+                OWNER_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                0,
+                &mut needed,
+            );
+        }
+        if needed == 0 || needed > 65_536 {
+            return false;
+        }
+        let mut sd_buf = vec![0u64; (needed as usize).div_ceil(8)];
+        // SAFETY: sd_buf is 8-byte aligned and sized to `needed` bytes.
+        if unsafe {
+            GetFileSecurityW(
+                wide.as_ptr(),
+                OWNER_SECURITY_INFORMATION,
+                sd_buf.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        } == 0
+        {
+            return false;
+        }
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut defaulted: i32 = 0;
+        // SAFETY: sd_buf holds a valid self-relative security descriptor from GetFileSecurityW.
+        if unsafe {
+            GetSecurityDescriptorOwner(sd_buf.as_mut_ptr().cast(), &mut owner, &mut defaulted)
+        } == 0
+            || owner.is_null()
+        {
+            return false;
+        }
+        // SAFETY: Both owner and user_sid are valid non-null SIDs within live buffers.
+        unsafe { EqualSid(owner, user_sid) != 0 }
+    };
+
+    owner_matches(path) && owner_matches(parent)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn private_descriptor(_: &Path) -> bool {
-    true
+    false
+}
+
+struct TempCaptureFile(PathBuf);
+
+impl Drop for TempCaptureFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn private_capture_dir() -> Result<PathBuf, String> {
+    let base = match crate::config::config_dir() {
+        Some(dir) => dir.join("capture-tmp"),
+        None => std::env::temp_dir().join(format!("ocs-capture-{}", std::process::id())),
+    };
+    let dir = base.join(format!("pid-{}", std::process::id()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        if !base.exists() {
+            let _ = std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&base);
+        }
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|error| error.to_string())?;
+        let meta = std::fs::symlink_metadata(&dir).map_err(|error| error.to_string())?;
+        // SAFETY: geteuid() takes no pointers and always succeeds.
+        let my_uid = unsafe { geteuid() };
+        if meta.file_type().is_symlink() || !meta.file_type().is_dir() || meta.uid() != my_uid {
+            return Err("private capture directory failed ownership/symlink check".to_string());
+        }
+        if (meta.mode() & 0o077) != 0 {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            let verified = std::fs::symlink_metadata(&dir).map_err(|error| error.to_string())?;
+            if (verified.mode() & 0o077) != 0 {
+                return Err("private capture directory failed permission check".to_string());
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let meta = std::fs::symlink_metadata(&dir).map_err(|error| error.to_string())?;
+        if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
+            return Err("capture directory must not be a symlink".to_string());
+        }
+    }
+    Ok(dir)
+}
+
+fn read_private_capture(path: &Path) -> Result<Vec<u8>, String> {
+    let meta = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+        return Err("refusing to read symlinked or non-regular capture output".to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid() takes no pointers and always succeeds.
+        if meta.uid() != unsafe { geteuid() } {
+            return Err("capture output ownership mismatch".to_string());
+        }
+    }
+    std::fs::read(path).map_err(|error| error.to_string())
 }
 
 /// Tool-call failure split for error routing: Tool-domain failures carry
@@ -2071,12 +2283,8 @@ fn serve_tile_resource(
     };
 
     let tile_bounds = crate::app::control::vision::compute_tile_bounds(base_bounds, level, x, y)?;
-    let path = std::env::temp_dir().join(format!(
-        "ocs-tile-{session_id}-{}-{level}-{x}-{y}.png",
-        layout_opt
-            .map(encode_uri_segment)
-            .unwrap_or_else(|| "active".to_string())
-    ));
+    let path = private_capture_dir()?.join(format!("ocs-tile-{}.png", random_id()?));
+    let _capture_guard = TempCaptureFile(path.clone());
     let mut req = json!({
         "op": "capture",
         "path": path.to_string_lossy(),
@@ -2097,8 +2305,8 @@ fn serve_tile_resource(
     if result["ok"].as_bool() != Some(true) || result["status"].as_str() != Some("completed") {
         return Err(result.to_string());
     }
-    let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-    let _ = std::fs::remove_file(path);
+    let bytes = read_private_capture(&path)?;
+    drop(_capture_guard);
     let b64 = BASE64.encode(&bytes);
     let bytes_len = bytes.len();
     let manifest_uri = ResourceStore::manifest_uri_for(session_id, layout_opt);
@@ -2304,7 +2512,8 @@ fn read_resource(
                     );
                 }
             } else if subpath == "viewport.png" {
-                let path = std::env::temp_dir().join(format!("ocs-resource-{}.png", random_id()?));
+                let path = private_capture_dir()?.join(format!("ocs-resource-{}.png", random_id()?));
+                let _capture_guard = TempCaptureFile(path.clone());
                 let req = json!({
                     "op": "capture",
                     "path": path.to_string_lossy(),
@@ -2317,8 +2526,8 @@ fn read_resource(
                 {
                     return Err(result.to_string());
                 }
-                let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-                let _ = std::fs::remove_file(path);
+                let bytes = read_private_capture(&path)?;
+                drop(_capture_guard);
 
                 let mut hasher = Sha256::new();
                 hasher.update(&bytes);
@@ -2478,7 +2687,8 @@ fn call_tool(
         }
         "ocs_capture" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
-            let path = std::env::temp_dir().join(format!("ocs-capture-{}.png", random_id()?));
+            let path = private_capture_dir()?.join(format!("ocs-capture-{}.png", random_id()?));
+            let _capture_guard = TempCaptureFile(path.clone());
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
             let delivery = arguments["delivery"].as_str().unwrap_or("inline");
@@ -2580,8 +2790,8 @@ fn call_tool(
                     .and_then(|c| c.state["document_id"].as_u64())
                     .is_some_and(|active_id| active_id != doc_id)
             });
-            let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-            let _ = std::fs::remove_file(path);
+            let bytes = read_private_capture(&path).map_err(CallError::from)?;
+            drop(_capture_guard);
             let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
             if let Some(obj) = meta.as_object_mut() {
                 obj.remove("path");
@@ -2761,14 +2971,11 @@ fn call_tool(
                 return Err(CallError::Tool(format!("Unknown tool: {name}")));
             };
             let normalized = normalize_intent_arguments(name, arguments, clients)?;
-            let (facade, facade_arguments) = crate::mcp_intent::facade_arguments(
-                descriptor,
-                &normalized,
-                normalized["ocs_session_id"]
-                    .as_str()
-                    .expect("normalized session"),
-                None,
-            );
+            let session_id = normalized["ocs_session_id"]
+                .as_str()
+                .ok_or_else(|| CallError::Tool("missing normalized ocs_session_id".to_string()))?;
+            let (facade, facade_arguments) =
+                crate::mcp_intent::facade_arguments(descriptor, &normalized, session_id, None);
             call_tool(facade, &facade_arguments, clients, resources, pump, mcp_id)
         }
     }
@@ -2785,13 +2992,20 @@ fn execute_request_schema() -> Value {
 
 // Local references resolve from the tool input schema root, not from request.
 fn execute_input_schema() -> Value {
-    let mut schema = json!({"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","summary","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; summary also replaces batch step results and changes with counts, attention items and a read-only details request (non-batch operations use compact); changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["ocs_session_id","request"],"additionalProperties":false});
-    let request = schema["properties"]["request"].as_object_mut().unwrap();
-    let defs = request.remove("$defs").unwrap();
-    let dialect = request.remove("$schema").unwrap();
-    schema["$defs"] = defs;
-    schema["$schema"] = dialect;
-    schema
+    let (request_schema, defs, dialect) = crate::mcp_ops::execute_request_schema_parts();
+    json!({
+        "type": "object",
+        "properties": {
+            "ocs_session_id": {"type": "string", "minLength": 1, "description": "Value of session_id returned by ocs_sessions."},
+            "request": request_schema,
+            "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 30, "description": "Total time to wait for completion before returning."},
+            "response_detail": {"type": "string", "enum": ["compact", "summary", "changed_entities", "full"], "default": "compact", "description": "compact returns only state needed for the next edit; summary also replaces batch step results and changes with counts, attention items and a read-only details request (non-batch operations use compact); changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}
+        },
+        "required": ["ocs_session_id", "request"],
+        "additionalProperties": false,
+        "$defs": defs,
+        "$schema": dialect
+    })
 }
 
 pub(crate) fn read_output_schema() -> Value {
@@ -6014,5 +6228,53 @@ mod tests {
         release_startup_lock(&dir);
         assert!(!startup_lock_path_for(&dir).exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn private_capture_dir_and_input_schema_work_cleanly() {
+        let dir = private_capture_dir().expect("private capture dir");
+        assert!(dir.is_dir());
+        let file = dir.join(format!("test-{}.png", random_id().unwrap()));
+        std::fs::write(&file, b"png").unwrap();
+        assert_eq!(read_private_capture(&file).unwrap(), b"png");
+        let _ = std::fs::remove_file(&file);
+
+        let schema = execute_input_schema();
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
+        assert!(schema["$defs"].is_object());
+        assert!(schema["properties"]["request"].get("$defs").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_descriptor_rejects_symlinks_and_group_readable_modes() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "ocs-priv-desc-{}-{}",
+            std::process::id(),
+            random_id().unwrap()
+        ));
+        let dir = root.join("0700");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let good = dir.join("good.json");
+        std::fs::write(&good, b"{}").unwrap();
+        std::fs::set_permissions(&good, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(private_descriptor(&good));
+
+        let leaky = dir.join("leaky.json");
+        std::fs::write(&leaky, b"{}").unwrap();
+        std::fs::set_permissions(&leaky, std::fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(!private_descriptor(&leaky));
+
+        let sym = dir.join("sym.json");
+        std::os::unix::fs::symlink(&good, &sym).unwrap();
+        assert!(!private_descriptor(&sym));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

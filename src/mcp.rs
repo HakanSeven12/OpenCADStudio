@@ -68,7 +68,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// The surface list of the Create Points > Surface commands: `surface_list_dialog`.
 /// The windows of the Create Points tools: `points_tool_dialog`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "02593dcccfb498ba47910efa29f69b9a7e72cf428b3c15eedcd84bbeeb66c6f5";
+const TOOL_SCHEMA_DIGEST: &str = "63d3ca6c1bae6ddcaa308ab7b7cea618af84555079f5fb9fb4b0c6d1e7f40de5";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

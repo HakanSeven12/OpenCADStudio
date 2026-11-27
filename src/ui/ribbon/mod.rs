@@ -22,9 +22,8 @@ use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem, ToolDef};
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod draw_panel;
-pub(crate) mod extras;
 pub(crate) mod widgets;
-pub(crate) use draw_panel::tools as panel_tools;
+pub(crate) use crate::modules::panel_extras as extras;
 mod color_dropdown;
 mod context_tools;
 mod visibility_panel;

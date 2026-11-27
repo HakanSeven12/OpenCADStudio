@@ -14,7 +14,7 @@ pub(crate) fn panel_key(module_id: &str, title: &str) -> String {
 
 /// How a slide-out shows its tools.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Layout {
+pub(crate) enum Layout {
     /// Rows of icon buttons.
     Grid,
     /// The icon buttons, then the xref fading switch and amount.
@@ -63,14 +63,14 @@ pub(crate) struct PanelExtras {
     /// The command the panel's dialog launcher runs.
     pub dialog: Option<&'static str>,
     /// What the launcher's tooltip calls the dialog.
-    pub(super) dialog_label: &'static str,
+    pub(crate) dialog_label: &'static str,
     /// The key tip anchor of the dialog launcher.
-    pub(super) launcher: &'static str,
+    pub(crate) launcher: &'static str,
     /// The panel key.
-    pub(super) key: &'static str,
+    pub(crate) key: &'static str,
     /// The slide-out's dropdown id, which key tips and anchors are keyed on.
-    pub(super) id: &'static str,
-    pub(super) layout: Layout,
+    pub(crate) id: &'static str,
+    pub(crate) layout: Layout,
 }
 
 impl PanelExtras {
@@ -93,12 +93,27 @@ impl PanelExtras {
     }
 }
 
-pub(super) const DRAW_ID: &str = "draw_extension";
-pub(super) const MODIFY_ID: &str = "modify_extension";
-pub(super) const REFERENCE_ID: &str = "reference_extension";
-pub(super) const TEXT_ID: &str = "text_extension";
-pub(super) const DIMENSIONS_ID: &str = "dimensions_extension";
-pub(super) const CENTERLINES_ID: &str = "centerlines_extension";
+// The key tip anchors of the dialog launchers (`PanelExtras::launcher`).
+/// The Reference panel's corner arrow.
+pub(crate) const XREF_LAUNCHER: &str = "XREF_LAUNCHER";
+/// The Text panel's corner arrow (Text Style).
+pub(crate) const TEXT_LAUNCHER: &str = "TEXT_LAUNCHER";
+/// The Text Editor's Paragraph and Spell Check launchers.
+pub(crate) const MTED_PARAGRAPH_LAUNCHER: &str = "MTED_PARAGRAPH_LAUNCHER";
+pub(crate) const MTED_SPELL_LAUNCHER: &str = "MTED_SPELL_LAUNCHER";
+/// The Dimensions panel's corner arrow (Dimension Style).
+pub(crate) const DIMENSION_LAUNCHER: &str = "DIMENSION_LAUNCHER";
+/// The Leaders panel's corner arrow (Multileader Style).
+pub(crate) const LEADER_LAUNCHER: &str = "LEADER_LAUNCHER";
+/// Annotate > Tables: the corner arrow to the table styles.
+pub(crate) const TABLE_LAUNCHER: &str = "TABLE_LAUNCHER";
+
+pub(crate) const DRAW_ID: &str = "draw_extension";
+pub(crate) const MODIFY_ID: &str = "modify_extension";
+pub(crate) const REFERENCE_ID: &str = "reference_extension";
+pub(crate) const TEXT_ID: &str = "text_extension";
+pub(crate) const DIMENSIONS_ID: &str = "dimensions_extension";
+pub(crate) const CENTERLINES_ID: &str = "centerlines_extension";
 
 fn split(
     command: &'static str,
@@ -386,11 +401,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                 "Reference",
                 REFERENCE_ID,
                 Layout::Reference,
-                Some((
-                    "EXTERNALREFERENCES",
-                    "External References",
-                    super::keytips::XREF_LAUNCHER,
-                )),
+                Some(("EXTERNALREFERENCES", "External References", XREF_LAUNCHER)),
                 vec![tool(
                     "REFEDIT",
                     "Edit Reference",
@@ -419,7 +430,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                 "Text",
                 TEXT_ID,
                 Layout::TextLayer,
-                Some(("STYLE", "Text Style", super::keytips::TEXT_LAUNCHER)),
+                Some(("STYLE", "Text Style", TEXT_LAUNCHER)),
                 vec![tool(
                     "SCALETEXT",
                     "Scale",
@@ -433,11 +444,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                 "Dimensions",
                 DIMENSIONS_ID,
                 Layout::Grid,
-                Some((
-                    "DIMSTYLE",
-                    "Dimension Style",
-                    super::keytips::DIMENSION_LAUNCHER,
-                )),
+                Some(("DIMSTYLE", "Dimension Style", DIMENSION_LAUNCHER)),
                 dimension_tools(),
             ),
         ),
@@ -456,18 +463,14 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
             "annotate/Leaders",
             launcher_only(
                 "leaders_extension",
-                (
-                    "MLEADERSTYLE",
-                    "Multileader Style",
-                    super::keytips::LEADER_LAUNCHER,
-                ),
+                ("MLEADERSTYLE", "Multileader Style", LEADER_LAUNCHER),
             ),
         ),
         (
             "annotate/Tables",
             launcher_only(
                 "tables_extension",
-                ("TABLESTYLE", "Table Style", super::keytips::TABLE_LAUNCHER),
+                ("TABLESTYLE", "Table Style", TABLE_LAUNCHER),
             ),
         ),
         // Text Editor: oblique, tracking and width under Formatting; Combine
@@ -489,11 +492,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                 "Paragraph",
                 "mted_paragraph_extension",
                 Layout::Grid,
-                Some((
-                    "_MTED PARAGRAPH",
-                    "Paragraph",
-                    super::keytips::MTED_PARAGRAPH_LAUNCHER,
-                )),
+                Some(("_MTED PARAGRAPH", "Paragraph", MTED_PARAGRAPH_LAUNCHER)),
                 vec![tool(
                     "_MTED COMBINE",
                     "Combine Paragraphs",
@@ -508,7 +507,7 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
                 (
                     "_MTED SPELLSETTINGS",
                     "Check Spelling Settings",
-                    super::keytips::MTED_SPELL_LAUNCHER,
+                    MTED_SPELL_LAUNCHER,
                 ),
             ),
         ),
@@ -577,8 +576,25 @@ pub(crate) fn for_panel(key: &str) -> Option<&'static PanelExtras> {
 }
 
 /// Every panel's extras.
-pub(super) fn all() -> impl Iterator<Item = &'static PanelExtras> {
+pub(crate) fn all() -> impl Iterator<Item = &'static PanelExtras> {
     registry().iter().map(|(_, extras)| extras)
+}
+
+/// Command, label and icon of every slide-out tool and its submenu options.
+pub(crate) fn tools() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
+    all().flat_map(PanelExtras::tools).flat_map(|tool| {
+        let icon = match tool.tool.icon {
+            IconKind::Svg(icon) => Some(icon),
+            IconKind::Glyph(_) => None,
+        };
+        icon.into_iter().flat_map(move |icon| {
+            std::iter::once((tool.command(), tool.tool.label, icon)).chain(
+                tool.options
+                    .iter()
+                    .map(move |(cmd, label)| (*cmd, *label, icon)),
+            )
+        })
+    })
 }
 
 #[cfg(test)]
@@ -666,5 +682,27 @@ mod tests {
                 .iter()
                 .all(|tool| !tool.options.is_empty()));
         }
+    }
+
+    /// `tools()` lists each split tool's submenu options too, with the
+    /// tool's icon, so command search and the QAT show them with it.
+    #[test]
+    fn tools_lists_submenu_options_with_the_icon_of_their_tool() {
+        let listed: Vec<_> = tools().collect();
+        let mut options = 0;
+        for tool in all().flat_map(PanelExtras::tools) {
+            let IconKind::Svg(icon) = tool.tool.icon else {
+                continue;
+            };
+            for (command, label) in tool.options {
+                options += 1;
+                assert!(
+                    listed.contains(&(*command, *label, icon)),
+                    "{command} is not listed with the icon of {}",
+                    tool.command()
+                );
+            }
+        }
+        assert!(options > 0, "no split tool has submenu options");
     }
 }

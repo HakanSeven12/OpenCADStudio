@@ -692,6 +692,8 @@ impl OpenCADStudio {
                     }
                     _ => (words.join(" "), None),
                 };
+                // A name with spaces may come quoted, as in a script.
+                let name = name.trim_matches('"').to_string();
                 match self.ribbon.find_toolbar(&name) {
                     Some((module, title)) => {
                         let shown = self

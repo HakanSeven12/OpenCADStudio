@@ -174,6 +174,7 @@ fn bmp24_dib(img: &RgbImage) -> Option<Vec<u8>> {
 /// [`dwg_thumbnailer`] core (also used by the Windows/macOS handlers).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn extract_to_png(input: &std::path::Path, output: &std::path::Path, size: u32) -> bool {
+    let size = size.clamp(1, dwg_thumbnailer::MAX_THUMBNAIL_DIM);
     match dwg_thumbnailer::extract(input, size) {
         Some(mut img) => {
             // Bottom-left "DWG" ribbon so the format reads at a glance in the

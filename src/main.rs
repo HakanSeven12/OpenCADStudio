@@ -75,7 +75,15 @@ fn main() -> iced::Result {
         // `--dwg-thumbnail <in> <out> <size>`. Extract the DWG's embedded
         // preview to a PNG and exit — never touch the GUI.
         if let Some(a) = &args.dwg_thumbnail {
-            let size = a.get(2).and_then(|s| s.parse().ok()).unwrap_or(256);
+            if a.len() < 2 {
+                eprintln!("--dwg-thumbnail expects <in> <out> [size]");
+                std::process::exit(1);
+            }
+            let size = a
+                .get(2)
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(256)
+                .clamp(1, dwg_thumbnailer::MAX_THUMBNAIL_DIM);
             let ok = io::thumbnail::extract_to_png(
                 std::path::Path::new(&a[0]),
                 std::path::Path::new(&a[1]),

@@ -16,11 +16,8 @@ use super::external;
 use super::external::{RegistryEntry, ReleaseInfo};
 
 /// The curated registry, read from the OpenCADStudio repo's `main` branch.
-pub(crate) const REGISTRY_URL: &str = concat!(
-    "https://raw.githubusercontent.com/HakanSeven12/OpenCADStudio/v",
-    env!("OCS_APP_VERSION"),
-    "/plugins/registry.json"
-);
+pub(crate) const REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/HakanSeven12/OpenCADStudio/main/plugins/registry.json";
 
 const MAX_METADATA_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_PACKAGE_BYTES: u64 = 128 * 1024 * 1024;
@@ -74,8 +71,12 @@ fn is_allowed_github_url(url: &str, expected_repo: Option<&str>) -> bool {
     }
     if let Some(repo) = expected_repo {
         if authority == "github.com" {
-            let expected_prefix = format!("{repo}/releases/download/");
-            return path_and_query.starts_with(&expected_prefix);
+            // GitHub owner and repository names are case-insensitive, and the
+            // registry may spell them differently from the asset links.
+            let expected_prefix = format!("{repo}/releases/download/").to_ascii_lowercase();
+            return path_and_query
+                .get(..expected_prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(&expected_prefix));
         }
     }
     matches!(
@@ -928,12 +929,6 @@ mod tests {
             ocs_plugin_api::version_info::host_acadrust_source(),
             ocs_plugin_api::version_info::host_rustc_version(),
         )
-    }
-
-    #[test]
-    fn registry_url_is_pinned_to_app_version_tag() {
-        assert!(!REGISTRY_URL.contains("/main/"));
-        assert!(REGISTRY_URL.contains(concat!("/v", env!("OCS_APP_VERSION"), "/plugins/registry.json")));
     }
 
     #[test]

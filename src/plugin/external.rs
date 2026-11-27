@@ -119,8 +119,9 @@ pub fn bundled_plugins_dir() -> Option<PathBuf> {
     }
 }
 
-/// Delete an installed package's folder. It stays loaded for the current
-/// session (the library is resident); the removal takes effect on next start.
+/// A plugin id that is safe as one folder name under `plugins/` on every
+/// platform: ASCII letters, digits, `.`, `_` and `-`, no `..`, not a Windows
+/// device name.
 pub(crate) fn is_valid_plugin_id(id: &str) -> bool {
     if id.is_empty()
         || id.len() > 64
@@ -169,6 +170,8 @@ pub(crate) fn is_valid_plugin_id(id: &str) -> bool {
     )
 }
 
+/// Delete an installed package's folder. It stays loaded for the current
+/// session (the library is resident); the removal takes effect on next start.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn uninstall(id: &str) -> Result<(), String> {
     if !is_valid_plugin_id(id) {

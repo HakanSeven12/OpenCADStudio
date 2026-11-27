@@ -821,6 +821,7 @@ impl OpenCADStudio {
         let Some(w) = self.point_tools.corridor.as_mut() else { return };
         let parts: Vec<&str> = args.split_whitespace().collect();
         match parts[..] {
+            ["cancel"] => self.command_line.push_output(&crate::t!("*Cancel*")),
             [hex] => {
                 let picked = u64::from_str_radix(hex, 16).ok();
                 match w.baselines.iter().position(|b| Some(b.3) == picked) {
@@ -832,7 +833,6 @@ impl OpenCADStudio {
                     None => w.error = Some(crate::t!("The alignment picked is not a baseline of this corridor.").into_owned()),
                 }
             }
-            ["cancel"] => self.command_line.push_output(&crate::t!("*Cancel*")),
             [which, s] => {
                 if let Ok(s) = s.parse::<f64>() {
                     let text = w.station_text(s);

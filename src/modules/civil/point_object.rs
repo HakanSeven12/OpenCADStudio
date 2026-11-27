@@ -531,7 +531,7 @@ impl CadCommand for ObjectPointCommand {
             Step::Object if self.kind == Kind::Resection => return Some(CmdResult::ReportError(t("Point or option keyword required."))),
             Step::Second(_) | Step::Third(..) => return Some(CmdResult::ReportError(t("2D point or option keyword required."))),
             // A typed coordinate picks the object there.
-            Step::Object if self.kind != Kind::Automatic && crate::entities::coord_parse::parse_coord(typed).is_none() => {
+            Step::Object if self.kind != Kind::Automatic && !typed.is_empty() && crate::entities::coord_parse::parse_coord(typed).is_none() => {
                 return Some(CmdResult::ReportError(format!("{}\n{}", t("*Invalid selection*"), t("Expects a single object."))));
             }
             Step::Object => return None,

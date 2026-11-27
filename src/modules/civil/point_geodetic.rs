@@ -89,13 +89,13 @@ fn number(text: &str) -> Option<f64> {
     text.trim().parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
-/// `deg° mm' ss.ss"` with `places` decimals on the seconds; the sign leads
-/// even when the degrees are zero.
 /// `N40° 39' 27.90"`: the hemisphere letter and the angle's size.
 pub(crate) fn hemisphere(v: f64, pos: char, neg: char) -> String {
     format!("{}{}", if v < 0.0 { neg } else { pos }, dms(v.abs(), 2))
 }
 
+/// `deg° mm' ss.ss"` with `places` decimals on the seconds; the sign leads
+/// even when the degrees are zero.
 pub(crate) fn dms(value: f64, places: usize) -> String {
     let scale = 10f64.powi(places as i32);
     let total = (value.abs() * 3600.0 * scale).round() / scale;

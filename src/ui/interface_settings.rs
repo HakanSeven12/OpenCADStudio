@@ -9,7 +9,7 @@
 //! mockup B draws it: no grid lines or cell backgrounds, label and control
 //! each half a row.
 
-use iced::widget::{column, Column};
+use iced::widget::Column;
 use iced::Element;
 
 use crate::app::settings::MenuBarPosition;
@@ -196,7 +196,7 @@ fn choice<'a>(
 
 /// The popover.
 pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
-    let mut bands: Column<'a, Message> = column![];
+    let mut bands: Column<'a, Message> = form::rows(Vec::new());
 
     // ── Layout ────────────────────────────────────────────────────────────
     bands = bands.push(form::section(crate::tr!("interface-settings", "layout")));

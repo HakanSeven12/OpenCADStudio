@@ -200,6 +200,8 @@ pub const FORM_W: f32 = 290.0;
 pub const FORM_ROW_H: f32 = 18.0;
 /// Room above a section bar.
 pub const FORM_SECTION_GAP: f32 = 3.0;
+/// Room between two rows, so stacked choice fields do not touch.
+pub const FORM_ROW_GAP: f32 = 1.0;
 /// Room under a section bar, so its first row (a choice field) does not
 /// touch it.
 pub const FORM_SECTION_GAP_BELOW: f32 = 3.0;

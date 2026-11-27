@@ -68,9 +68,11 @@ pub fn popover<'a>(
         bottom: km::FORM_BODY_PAD_BOTTOM,
         left: km::FORM_BODY_PAD_LEFT,
     });
+    // The dark hairline runs round the outside, under the head and over
+    // the footer; nothing else inside is outlined.
     let mut content = column![head, hline(), body];
     if let Some(footer) = footer {
-        content = content.push(footer);
+        content = content.push(hline()).push(footer);
     }
     let framed = container(content)
         .width(Length::Fixed(km::FORM_W))
@@ -101,6 +103,12 @@ fn hline<'a>() -> Element<'a, Message> {
             ..Default::default()
         })
         .into()
+}
+
+/// The body of a window: `children` one under another, `km::FORM_ROW_GAP`
+/// apart, so stacked choice fields do not touch.
+pub fn rows<'a>(children: Vec<Element<'a, Message>>) -> iced::widget::Column<'a, Message> {
+    iced::widget::Column::with_children(children).spacing(km::FORM_ROW_GAP)
 }
 
 /// A group's head: a bar without a caret, `label` in semibold, with

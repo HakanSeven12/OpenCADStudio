@@ -342,10 +342,10 @@ impl OpenCADStudio {
                             quad_hover_delay_ms: self.quad_hover_delay_ms,
                         },
                         crate::ui::window::options::spacemouse::view(
-                            self.spacemouse_preferences,
+                            self.spacemouse_ui.preferences,
                             self.spacemouse.status(),
-                            self.spacemouse_paused,
-                            self.spacemouse_details,
+                            self.spacemouse_ui.paused,
+                            self.spacemouse_ui.details,
                         ),
                         {
                             #[cfg(not(target_arch = "wasm32"))]
@@ -1069,7 +1069,7 @@ impl OpenCADStudio {
                     })
                     .collect();
                 let current = tab.scene.document.header.current_annotation_scale.clone();
-                let selected = &self.scale_manager_selected;
+                let selected = &self.scale_ui.selected;
                 let at = scales
                     .iter()
                     .position(|(name, _)| name.eq_ignore_ascii_case(selected));
@@ -1090,7 +1090,7 @@ impl OpenCADStudio {
                 };
                 // The picked rows still in the list.
                 let picked: Vec<String> = self
-                    .scale_manager_multi
+                    .scale_ui.multi
                     .iter()
                     .filter(|name| scales.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)))
                     .cloned()
@@ -1110,29 +1110,29 @@ impl OpenCADStudio {
                     can_edit: single,
                     can_delete: picked.iter().any(|name| !self.anno_scale_referenced(i, name)),
                     units,
-                    reset_asking: self.scale_reset_asking,
-                    delete_asking: self.scale_delete_asking,
+                    reset_asking: self.scale_ui.reset_asking,
+                    delete_asking: self.scale_ui.delete_asking,
                 };
                 let preview = {
-                    let paper = self.scale_manager_paper_buf.trim().parse::<f64>().ok();
-                    let drawing = self.scale_manager_drawing_buf.trim().parse::<f64>().ok();
+                    let paper = self.scale_ui.paper_buf.trim().parse::<f64>().ok();
+                    let drawing = self.scale_ui.drawing_buf.trim().parse::<f64>().ok();
                     match (paper, drawing) {
                         (Some(p), Some(d)) if p > 0.0 && d > 0.0 => units_of(p, d),
                         _ => crate::t!("Paper and drawing units must be positive numbers.")
                             .into_owned(),
                     }
                 };
-                let edit = self.scale_rename.as_ref().map(|old| {
+                let edit = self.scale_ui.rename.as_ref().map(|old| {
                     crate::ui::style::scale_manager::EditCard {
-                        adding: self.scale_edit_adding,
-                        name: &self.scale_rename_buf,
-                        paper: &self.scale_manager_paper_buf,
-                        drawing: &self.scale_manager_drawing_buf,
+                        adding: self.scale_ui.edit_adding,
+                        name: &self.scale_ui.rename_buf,
+                        paper: &self.scale_ui.paper_buf,
+                        drawing: &self.scale_ui.drawing_buf,
                         preview: preview.clone(),
-                        units_locked: !self.scale_edit_adding && self.scale_units_locked(i, old),
+                        units_locked: !self.scale_ui.edit_adding && self.scale_units_locked(i, old),
                         paper_unit,
                         drawing_unit: header.insertion_units,
-                        error: self.scale_edit_error.as_deref(),
+                        error: self.scale_ui.edit_error.as_deref(),
                     }
                 });
                 sized_flow(ex, 660, 400, |flow| {
@@ -1531,7 +1531,7 @@ impl OpenCADStudio {
                     self.style_in_use(crate::app::StyleKind::Table, &self.tablestyle_selected);
                 // The edited cell style's data format with a sample.
                 let format_sample = selected_style
-                    .and_then(|style| style.cell_style(&self.ts_cell))
+                    .and_then(|style| style.cell_style(&self.table_style_ui.cell))
                     .map(|cell| {
                         let format = &cell.cell_style.content_format;
                         let state =
@@ -1557,7 +1557,7 @@ impl OpenCADStudio {
                         )
                     })
                     .unwrap_or_default();
-                let manage_in_use = self.ts_cards.manage.as_ref().is_some_and(|manage| {
+                let manage_in_use = self.table_style_ui.cards.manage.as_ref().is_some_and(|manage| {
                     self.table_cell_style_in_use(self.active_tab, &manage.selected)
                 });
                 sized_flow(ex, 1240, 760, |flow| {
@@ -1573,14 +1573,14 @@ impl OpenCADStudio {
                             comparison_sections: comparison_sections.clone(),
                             in_use,
                             in_use_only: self.tablestyle_in_use_only,
-                            description: &self.ts_description,
-                            cell: &self.ts_cell,
-                            cell_height: &self.ts_cell_height,
-                            cell_angle: &self.ts_cell_angle,
-                            cell_hmargin: &self.ts_cell_hmargin,
-                            cell_vmargin: &self.ts_cell_vmargin,
-                            border: &self.ts_border,
-                            cards: &self.ts_cards,
+                            description: &self.table_style_ui.description,
+                            cell: &self.table_style_ui.cell,
+                            cell_height: &self.table_style_ui.cell_height,
+                            cell_angle: &self.table_style_ui.cell_angle,
+                            cell_hmargin: &self.table_style_ui.cell_hmargin,
+                            cell_vmargin: &self.table_style_ui.cell_vmargin,
+                            border: &self.table_style_ui.border,
+                            cards: &self.table_style_ui.cards,
                             linetype_rows: table_style_linetype_rows(&tab.scene.document),
                             linetype_names: tab
                                 .scene
@@ -1612,7 +1612,7 @@ impl OpenCADStudio {
                                 }),
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
-                            color_open: self.ts_color_open,
+                            color_open: self.table_style_ui.color_open,
                             format_sample: format_sample.clone(),
                             manage_in_use,
                         },
@@ -1731,19 +1731,19 @@ impl OpenCADStudio {
                             selected: &self.mleaderstyle_selected,
                             current: &tab.active_mleader_style,
                             style,
-                            landing_distance: &self.mls_landing_distance,
-                            landing_gap: &self.mls_landing_gap,
-                            arrowhead_size: &self.mls_arrowhead_size,
-                            text_height: &self.mls_text_height,
-                            scale_factor: &self.mls_scale_factor,
-                            break_gap: &self.mls_break_gap,
-                            max_points: &self.mls_max_points,
-                            default_text: &self.mls_default_text,
-                            line_color: &self.mls_line_color,
-                            text_color: &self.mls_text_color,
-                            block_color: &self.mls_block_color,
-                            block_scale: &self.mls_block_scale,
-                            color_open: self.mls_color_open,
+                            landing_distance: &self.mls_dialog.landing_distance,
+                            landing_gap: &self.mls_dialog.landing_gap,
+                            arrowhead_size: &self.mls_dialog.arrowhead_size,
+                            text_height: &self.mls_dialog.text_height,
+                            scale_factor: &self.mls_dialog.scale_factor,
+                            break_gap: &self.mls_dialog.break_gap,
+                            max_points: &self.mls_dialog.max_points,
+                            default_text: &self.mls_dialog.default_text,
+                            line_color: &self.mls_dialog.line_color,
+                            text_color: &self.mls_dialog.text_color,
+                            block_color: &self.mls_dialog.block_color,
+                            block_scale: &self.mls_dialog.block_scale,
+                            color_open: self.mls_dialog.color_open,
                             line_type_name: line_type_name.clone(),
                             linetype_opts: linetype_opts.clone(),
                             linetypes: linetype_rows(),
@@ -1922,17 +1922,17 @@ impl OpenCADStudio {
                 sized_flow(ex, 640, 560, |flow| {
                     crate::ui::window::attribute_editor::view_window(
                         crate::ui::window::attribute_editor::AttrEditorView {
-                            block: &self.attr_editor_block,
-                            rows: &self.attr_editor_rows,
-                            selected: self.attr_editor_selected,
-                            tab: self.attr_editor_tab,
+                            block: &self.attr_editor_ui.block,
+                            rows: &self.attr_editor_ui.rows,
+                            selected: self.attr_editor_ui.selected,
+                            tab: self.attr_editor_ui.tab,
                             layers: layers.clone(),
                             linetypes: linetypes.clone(),
                             styles: styles.clone(),
                             plot_style: plot_style.clone(),
                             pending,
-                            error: self.attr_editor_error.as_deref(),
-                            asking: self.attr_editor_asking,
+                            error: self.attr_editor_ui.error.as_deref(),
+                            asking: self.attr_editor_ui.asking,
                         },
                         flow,
                     )
@@ -1974,11 +1974,11 @@ impl OpenCADStudio {
             #[cfg(target_arch = "wasm32")]
             super::super::ModalKind::AutosaveRestore => {
                 let name = self
-                    .web_autosave_pending
+                    .web_autosave.pending
                     .first()
                     .map(|entry| entry.name.clone())
                     .unwrap_or_default();
-                let pending = self.web_autosave_pending.len();
+                let pending = self.web_autosave.pending.len();
                 // What the crashed session had open, when it remembered.
                 let session_drawings = self
                     .web_session

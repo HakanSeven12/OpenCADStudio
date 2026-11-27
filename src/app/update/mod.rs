@@ -279,11 +279,11 @@ impl OpenCADStudio {
         }
         // The Cell Data Format window and the Text Style manager opened from
         // the table style window return to it.
-        if self.active_modal == Some(TableCellFormat) && self.ts_format_return {
+        if self.active_modal == Some(TableCellFormat) && self.table_style_ui.format_return {
             self.table_style_format_back(None);
             return;
         }
-        if self.active_modal == Some(TextStyle) && self.ts_text_return {
+        if self.active_modal == Some(TextStyle) && self.table_style_ui.text_return {
             self.table_style_back_from_text_styles();
             return;
         }
@@ -1621,15 +1621,15 @@ impl OpenCADStudio {
     /// paper / drawing units); blank ratios when the scale isn't found.
     fn load_scale_editor(&mut self, name: &str) {
         let i = self.active_tab;
-        self.scale_manager_selected = name.to_string();
+        self.scale_ui.selected = name.to_string();
         match self.tabs[i].scene.scale_paper_drawing(name) {
             Some((p, d)) => {
-                self.scale_manager_paper_buf = format!("{p}");
-                self.scale_manager_drawing_buf = format!("{d}");
+                self.scale_ui.paper_buf = format!("{p}");
+                self.scale_ui.drawing_buf = format!("{d}");
             }
             None => {
-                self.scale_manager_paper_buf.clear();
-                self.scale_manager_drawing_buf.clear();
+                self.scale_ui.paper_buf.clear();
+                self.scale_ui.drawing_buf.clear();
             }
         }
     }
@@ -1640,9 +1640,9 @@ impl OpenCADStudio {
     /// built-in fallback scale materialises it as a real one.
     /// The open edit card shows a scale whose units are locked.
     fn scale_card_units_locked(&self) -> bool {
-        !self.scale_edit_adding
+        !self.scale_ui.edit_adding
             && self
-                .scale_rename
+                .scale_ui.rename
                 .as_deref()
                 .is_some_and(|old| self.scale_units_locked(self.active_tab, old))
     }
@@ -1661,12 +1661,12 @@ impl OpenCADStudio {
 
     fn scale_apply_current(&mut self) {
         let i = self.active_tab;
-        let sel = self.scale_manager_selected.clone();
+        let sel = self.scale_ui.selected.clone();
         if sel.is_empty() {
             return;
         }
-        let paper = self.scale_manager_paper_buf.trim().parse::<f64>().ok();
-        let drawing = self.scale_manager_drawing_buf.trim().parse::<f64>().ok();
+        let paper = self.scale_ui.paper_buf.trim().parse::<f64>().ok();
+        let drawing = self.scale_ui.drawing_buf.trim().parse::<f64>().ok();
         if let (Some(paper), Some(drawing)) = (paper, drawing) {
             if paper > 0.0 && drawing > 0.0 {
                 // Skip when the editor still holds the stored ratio, so merely
@@ -1693,7 +1693,7 @@ impl OpenCADStudio {
         use document::objects::ObjectType;
         let i = self.active_tab;
         let name = self.tablestyle_selected.clone();
-        let desc = self.ts_description.clone();
+        let desc = self.table_style_ui.description.clone();
         for obj in self.tabs[i].scene.document.objects.values_mut() {
             if let ObjectType::TableStyle(s) = obj {
                 if s.name == name && s.description != desc {

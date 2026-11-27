@@ -96,8 +96,8 @@ impl OpenCADStudio {
             crate::io::fs_access::drop_handle(closing_id);
             if remove_web_autosave && !crate::io::host_bridge::is_embed_mode() {
                 let key = Self::web_autosave_key(&self.tabs[idx]);
-                if self.web_autosave_in_flight {
-                    self.web_autosave_clear_after.push(key);
+                if self.web_autosave.in_flight {
+                    self.web_autosave.clear_after.push(key);
                 } else {
                     wasm_bindgen_futures::spawn_local(async move {
                         let _ = crate::io::web_autosave::remove(&key).await;

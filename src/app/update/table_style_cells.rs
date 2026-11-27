@@ -72,26 +72,26 @@ impl OpenCADStudio {
 
     pub(super) fn on_table_style_cells(&mut self, message: TsCellMsg) -> Task<Message> {
         let i = self.active_tab;
-        self.ts_color_open = None;
+        self.table_style_ui.color_open = None;
         match message {
             TsCellMsg::CreateOpen => return self.ts_create_open(false),
             TsCellMsg::ManageNew => return self.ts_create_open(true),
             TsCellMsg::CreateName(name) => {
-                if let Some(create) = self.ts_cards.create.as_mut() {
+                if let Some(create) = self.table_style_ui.cards.create.as_mut() {
                     create.name = name;
                 }
             }
             TsCellMsg::CreateStart(start) => {
-                if let Some(create) = self.ts_cards.create.as_mut() {
+                if let Some(create) = self.table_style_ui.cards.create.as_mut() {
                     create.start = start;
                 }
             }
-            TsCellMsg::CreateCancel => self.ts_cards.create = None,
+            TsCellMsg::CreateCancel => self.table_style_ui.cards.create = None,
             TsCellMsg::CreateOk => return self.ts_create_ok(),
             TsCellMsg::NoticeClose => {
-                if let Some(create) = self.ts_cards.create.as_mut() {
+                if let Some(create) = self.table_style_ui.cards.create.as_mut() {
                     create.notice = None;
-                } else if let Some(manage) = self.ts_cards.manage.as_mut() {
+                } else if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                     manage.notice = None;
                 }
             }
@@ -99,9 +99,9 @@ impl OpenCADStudio {
                 let Some(style) = self.ts_style() else {
                     return Task::none();
                 };
-                self.ts_cards.manage = Some(ManageCells {
+                self.table_style_ui.cards.manage = Some(ManageCells {
                     before: style.modern_overrides.clone(),
-                    selected: self.ts_cell.clone(),
+                    selected: self.table_style_ui.cell.clone(),
                     rename: None,
                     notice: None,
                     delete_ask: false,
@@ -109,13 +109,13 @@ impl OpenCADStudio {
                 });
             }
             TsCellMsg::ManageSelect(name) => {
-                if let Some(manage) = self.ts_cards.manage.as_mut() {
+                if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                     manage.selected = name;
                     manage.rename = None;
                 }
             }
             TsCellMsg::RenameStart => {
-                if let Some(manage) = self.ts_cards.manage.as_mut() {
+                if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                     if !document::objects::is_row_cell_style(&manage.selected) {
                         manage.rename = Some(manage.selected.clone());
                         return iced::widget::operation::focus(iced::widget::Id::new(
@@ -126,7 +126,7 @@ impl OpenCADStudio {
             }
             TsCellMsg::RenameText(value) => {
                 // Typing in the name field renames in place.
-                if let Some(manage) = self.ts_cards.manage.as_mut() {
+                if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                     if !document::objects::is_row_cell_style(&manage.selected) {
                         manage.rename = Some(value);
                     }
@@ -134,7 +134,7 @@ impl OpenCADStudio {
             }
             TsCellMsg::RenameCommit => self.ts_rename_commit(),
             TsCellMsg::DeleteAsk => {
-                if let Some(manage) = self.ts_cards.manage.as_mut() {
+                if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                     if !document::objects::is_row_cell_style(&manage.selected) {
                         manage.delete_ask = true;
                     }
@@ -146,24 +146,24 @@ impl OpenCADStudio {
                 // keeps the card open with its notice.
                 self.ts_rename_commit();
                 if self
-                    .ts_cards
+                    .table_style_ui.cards
                     .manage
                     .as_ref()
                     .is_some_and(|manage| manage.notice.is_some())
                 {
                     return Task::none();
                 }
-                self.ts_cards.manage = None;
+                self.table_style_ui.cards.manage = None;
                 let exists = self
                     .ts_style()
-                    .is_some_and(|style| style.cell_style(&self.ts_cell).is_some());
+                    .is_some_and(|style| style.cell_style(&self.table_style_ui.cell).is_some());
                 if !exists {
-                    self.ts_cell = document::objects::DATA_CELL_STYLE.to_string();
+                    self.table_style_ui.cell = document::objects::DATA_CELL_STYLE.to_string();
                 }
                 self.load_tablestyle_bufs(i);
             }
             TsCellMsg::ManageCancel => {
-                if let Some(manage) = self.ts_cards.manage.take() {
+                if let Some(manage) = self.table_style_ui.cards.manage.take() {
                     if let Some(style) = self.tablestyle_mut(i) {
                         style.modern_overrides = manage.before;
                         style.sync_rows_from_cell_styles();
@@ -175,7 +175,7 @@ impl OpenCADStudio {
                 .command_line
                 .push_info(crate::tr!("table-style-cells", "manage-help").as_str()),
             TsCellMsg::QuickRename | TsCellMsg::QuickDelete => {
-                if document::objects::is_row_cell_style(&self.ts_cell) {
+                if document::objects::is_row_cell_style(&self.table_style_ui.cell) {
                     return Task::none();
                 }
                 let rename = matches!(message, TsCellMsg::QuickRename);
@@ -190,31 +190,31 @@ impl OpenCADStudio {
             TsCellMsg::TextStyles => return self.ts_open_text_styles(),
             TsCellMsg::BorderLineweight(value) => {
                 if let Ok(weight) = value.parse() {
-                    self.ts_border.line_weight = weight;
+                    self.table_style_ui.border.line_weight = weight;
                 }
             }
             TsCellMsg::BorderLinetype(code) => {
                 if code == OTHER_LINETYPE {
                     let name = self.ts_border_linetype_name();
-                    self.ts_cards.linetype = Some(name);
+                    self.table_style_ui.cards.linetype = Some(name);
                 } else {
-                    self.ts_border.linetype = code;
+                    self.table_style_ui.border.linetype = code;
                 }
             }
-            TsCellMsg::BorderColor(color) => self.ts_border.color = color,
-            TsCellMsg::BorderDouble(on) => self.ts_border.double = on,
-            TsCellMsg::BorderSpacing(value) => self.ts_border.spacing = value,
+            TsCellMsg::BorderColor(color) => self.table_style_ui.border.color = color,
+            TsCellMsg::BorderDouble(on) => self.table_style_ui.border.double = on,
+            TsCellMsg::BorderSpacing(value) => self.table_style_ui.border.spacing = value,
             TsCellMsg::BorderApply(index) => self.ts_border_apply(index as usize),
             TsCellMsg::LinetypePick(name) => {
-                if let Some(selected) = self.ts_cards.linetype.as_mut() {
+                if let Some(selected) = self.table_style_ui.cards.linetype.as_mut() {
                     *selected = name;
                 }
             }
-            TsCellMsg::LinetypeCancel => self.ts_cards.linetype = None,
+            TsCellMsg::LinetypeCancel => self.table_style_ui.cards.linetype = None,
             TsCellMsg::LinetypeOk => {
-                if let Some(name) = self.ts_cards.linetype.take() {
+                if let Some(name) = self.table_style_ui.cards.linetype.take() {
                     if let Some(code) = self.ts_linetype_code(&name) {
-                        self.ts_border.linetype = code;
+                        self.table_style_ui.border.linetype = code;
                     }
                 }
             }
@@ -222,7 +222,7 @@ impl OpenCADStudio {
             // `.lin` file instead.
             TsCellMsg::LinetypeLoad => {
                 let source = crate::io::linetypes::catalog_source();
-                self.ts_cards.load = Some(LoadDraft {
+                self.table_style_ui.cards.load = Some(LoadDraft {
                     file: String::new(),
                     dir: None,
                     entries: crate::io::linetypes::source_entries(&source),
@@ -236,7 +236,7 @@ impl OpenCADStudio {
                 });
             }
             TsCellMsg::LoadFileChosen(Some(file)) => {
-                if let Some(load) = self.ts_cards.load.as_mut() {
+                if let Some(load) = self.table_style_ui.cards.load.as_mut() {
                     load.entries = crate::io::linetypes::source_entries(&file.source);
                     load.file = file.name;
                     load.source = file.source;
@@ -246,7 +246,7 @@ impl OpenCADStudio {
             }
             TsCellMsg::LoadFileChosen(None) => {}
             TsCellMsg::LoadToggle(name) => {
-                if let Some(load) = self.ts_cards.load.as_mut() {
+                if let Some(load) = self.table_style_ui.cards.load.as_mut() {
                     if let Some(at) = load.picked.iter().position(|p| p.eq_ignore_ascii_case(&name))
                     {
                         load.picked.remove(at);
@@ -255,23 +255,23 @@ impl OpenCADStudio {
                     }
                 }
             }
-            TsCellMsg::LoadCancel => self.ts_cards.load = None,
+            TsCellMsg::LoadCancel => self.table_style_ui.cards.load = None,
             // OK asks about the ticked linetypes the drawing already has,
             // one by one, before loading anything.
             TsCellMsg::LoadOk => {
-                if let Some(load) = self.ts_cards.load.as_ref() {
+                if let Some(load) = self.table_style_ui.cards.load.as_ref() {
                     match ReloadAsk::for_load(load, &self.tabs[i].scene.document) {
-                        Some(ask) => self.ts_cards.reload_ask = Some(ask),
+                        Some(ask) => self.table_style_ui.cards.reload_ask = Some(ask),
                         None => self.ts_finish_load(Vec::new()),
                     }
                 }
             }
             TsCellMsg::ReloadAnswer(answer) => {
-                if let Some(mut ask) = self.ts_cards.reload_ask.take() {
+                if let Some(mut ask) = self.table_style_ui.cards.reload_ask.take() {
                     match ask.answer(answer) {
                         Some(Ok(reload)) => self.ts_finish_load(reload),
-                        Some(Err(())) => self.ts_cards.load = None,
-                        None => self.ts_cards.reload_ask = Some(ask),
+                        Some(Err(())) => self.table_style_ui.cards.load = None,
+                        None => self.table_style_ui.cards.reload_ask = Some(ask),
                     }
                 }
             }
@@ -282,15 +282,15 @@ impl OpenCADStudio {
     /// New Cell Style: named a copy of the selected cell style (the edited
     /// one, or Manage's selection), which it starts with.
     fn ts_create_open(&mut self, from_manage: bool) -> Task<Message> {
-        let source = match (&self.ts_cards.manage, from_manage) {
+        let source = match (&self.table_style_ui.cards.manage, from_manage) {
             (Some(manage), true) => manage.selected.clone(),
-            _ => self.ts_cell.clone(),
+            _ => self.table_style_ui.cell.clone(),
         };
         let Some(style) = self.ts_style() else {
             return Task::none();
         };
         let name = copy_name(style, &source);
-        self.ts_cards.create = Some(CreateCell {
+        self.table_style_ui.cards.create = Some(CreateCell {
             name,
             start: source,
             notice: None,
@@ -304,14 +304,14 @@ impl OpenCADStudio {
     /// Continue: the cell style is made, or the name is refused.
     fn ts_create_ok(&mut self) -> Task<Message> {
         let i = self.active_tab;
-        let Some(create) = self.ts_cards.create.clone() else {
+        let Some(create) = self.table_style_ui.cards.create.clone() else {
             return Task::none();
         };
         let Some(style) = self.ts_style() else {
             return Task::none();
         };
         if let Some(notice) = cell_name_notice(style, &create.name, None) {
-            if let Some(card) = self.ts_cards.create.as_mut() {
+            if let Some(card) = self.table_style_ui.cards.create.as_mut() {
                 card.notice = Some(notice);
             }
             return Task::none();
@@ -321,12 +321,12 @@ impl OpenCADStudio {
             style.create_cell_style(&name, Some(&create.start));
             style.sync_rows_from_cell_styles();
         }
-        self.ts_cards.create = None;
-        match self.ts_cards.manage.as_mut().filter(|_| create.from_manage) {
+        self.table_style_ui.cards.create = None;
+        match self.table_style_ui.cards.manage.as_mut().filter(|_| create.from_manage) {
             // Manage selects it; the edited cell style stays until OK.
             Some(manage) => manage.selected = name,
             None => {
-                self.ts_cell = name;
+                self.table_style_ui.cell = name;
                 self.load_tablestyle_bufs(i);
             }
         }
@@ -338,7 +338,7 @@ impl OpenCADStudio {
     fn ts_rename_commit(&mut self) {
         let i = self.active_tab;
         let Some((old, typed)) = self
-            .ts_cards
+            .table_style_ui.cards
             .manage
             .as_mut()
             .and_then(|m| m.rename.take().map(|typed| (m.selected.clone(), typed)))
@@ -352,7 +352,7 @@ impl OpenCADStudio {
             .ts_style()
             .and_then(|style| cell_name_notice(style, &typed, Some(&old)));
         if let Some(notice) = notice {
-            if let Some(manage) = self.ts_cards.manage.as_mut() {
+            if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                 manage.notice = Some(notice);
             }
             return;
@@ -362,10 +362,10 @@ impl OpenCADStudio {
             .tablestyle_mut(i)
             .is_some_and(|style| style.rename_cell_style(&old, &new_name));
         if renamed {
-            if self.ts_cell.eq_ignore_ascii_case(&old) {
-                self.ts_cell = new_name.clone();
+            if self.table_style_ui.cell.eq_ignore_ascii_case(&old) {
+                self.table_style_ui.cell = new_name.clone();
             }
-            if let Some(manage) = self.ts_cards.manage.as_mut() {
+            if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                 manage.selected = new_name;
             }
         }
@@ -375,7 +375,7 @@ impl OpenCADStudio {
     /// stays; otherwise it goes and the one above it is selected.
     fn ts_delete_answer(&mut self, yes: bool) {
         let i = self.active_tab;
-        let Some(manage) = self.ts_cards.manage.as_mut() else {
+        let Some(manage) = self.table_style_ui.cards.manage.as_mut() else {
             return;
         };
         let was_asked = std::mem::take(&mut manage.delete_ask);
@@ -385,7 +385,7 @@ impl OpenCADStudio {
         }
         let name = manage.selected.clone();
         if self.table_cell_style_in_use(i, &name) {
-            if let Some(manage) = self.ts_cards.manage.as_mut() {
+            if let Some(manage) = self.table_style_ui.cards.manage.as_mut() {
                 manage.in_use = true;
             }
             return;
@@ -405,7 +405,7 @@ impl OpenCADStudio {
                 style.sync_rows_from_cell_styles();
             }
         }
-        if let (Some(manage), Some(above)) = (self.ts_cards.manage.as_mut(), above) {
+        if let (Some(manage), Some(above)) = (self.table_style_ui.cards.manage.as_mut(), above) {
             manage.selected = above;
         }
     }
@@ -417,8 +417,8 @@ impl OpenCADStudio {
             return;
         };
         let hide = index + 1 == BORDER_BUTTONS.len();
-        self.ts_border.last = Some(index as u8);
-        let border = self.ts_border.clone();
+        self.table_style_ui.border.last = Some(index as u8);
+        let border = self.table_style_ui.border.clone();
         let linetype = u64::from_str_radix(border.linetype.trim(), 16)
             .map(document::Handle::new)
             .unwrap_or(document::Handle::NULL);
@@ -449,7 +449,7 @@ impl OpenCADStudio {
 
     /// The border linetype's name, for Select Linetype.
     fn ts_border_linetype_name(&self) -> String {
-        let code = &self.ts_border.linetype;
+        let code = &self.table_style_ui.border.linetype;
         if code == "0" {
             return "ByBlock".into();
         }
@@ -480,7 +480,7 @@ impl OpenCADStudio {
     /// Load Linetypes ends: the ticked linetypes the drawing lacks are
     /// added, `reload` are read again; Select Linetype keeps its choice.
     fn ts_finish_load(&mut self, reload: Vec<String>) {
-        let Some(load) = self.ts_cards.load.take() else {
+        let Some(load) = self.table_style_ui.cards.load.take() else {
             return;
         };
         let doc = &mut self.tabs[self.active_tab].scene.document;
@@ -498,7 +498,7 @@ impl OpenCADStudio {
     fn ts_format_open(&mut self) {
         let Some(cell) = self
             .ts_style()
-            .and_then(|style| style.cell_style(&self.ts_cell))
+            .and_then(|style| style.cell_style(&self.table_style_ui.cell))
             .cloned()
         else {
             return;
@@ -510,7 +510,7 @@ impl OpenCADStudio {
             &state,
         );
         self.table_cell_format = Some(state);
-        self.ts_format_return = true;
+        self.table_style_ui.format_return = true;
         self.active_modal = Some(ModalKind::TableCellFormat);
         self.reset_modal_geometry();
     }
@@ -523,7 +523,7 @@ impl OpenCADStudio {
         state: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     ) {
         use crate::ui::window::table_cell_dialog::FORMAT_KINDS;
-        self.ts_format_return = false;
+        self.table_style_ui.format_return = false;
         self.table_cell_format = None;
         if let Some(state) = state {
             let picture = state.picture();
@@ -551,7 +551,7 @@ impl OpenCADStudio {
         let doc = &self.tabs[i].scene.document;
         let name = self
             .ts_style()
-            .and_then(|style| style.cell_style(&self.ts_cell))
+            .and_then(|style| style.cell_style(&self.table_style_ui.cell))
             .map(|cell| cell.cell_style.content_format.text_style)
             .and_then(|handle| doc.text_styles.iter().find(|t| t.handle == handle))
             .map(|t| t.name.clone());
@@ -562,7 +562,7 @@ impl OpenCADStudio {
         let parent = self.style_stage.take();
         let task = self.on_text_style_dialog_open();
         self.style_parent_stage = parent;
-        self.ts_text_return = true;
+        self.table_style_ui.text_return = true;
         task
     }
 
@@ -570,7 +570,7 @@ impl OpenCADStudio {
     /// style current when it closed.
     pub(in crate::app) fn table_style_back_from_text_styles(&mut self) {
         let i = self.active_tab;
-        self.ts_text_return = false;
+        self.table_style_ui.text_return = false;
         self.style_stage_child_close();
         let doc = &self.tabs[i].scene.document;
         let current = &doc.header.current_text_style_name;

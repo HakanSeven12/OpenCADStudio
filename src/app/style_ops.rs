@@ -1758,7 +1758,7 @@ impl OpenCADStudio {
     pub(super) fn scale_stage_begin(&mut self) {
         let dirty_at_open = self.tabs[self.active_tab].dirty;
         let baseline = self.capture_scale_state();
-        self.scale_stage = Some(ScaleStage {
+        self.scale_ui.stage = Some(ScaleStage {
             dirty_at_open,
             baseline,
             changed: false,
@@ -1769,7 +1769,7 @@ impl OpenCADStudio {
     /// Flag that the staged scale list has actually been mutated, so a later
     /// Apply commits (and a no-op Apply doesn't dirty the drawing).
     pub(super) fn scale_stage_mark(&mut self) {
-        if let Some(s) = self.scale_stage.as_mut() {
+        if let Some(s) = self.scale_ui.stage.as_mut() {
             s.changed = true;
         }
     }
@@ -1777,7 +1777,7 @@ impl OpenCADStudio {
     /// Flag that the manager materialised the fallback scale set on open, so
     /// the discard reverts it even when the user made no edit.
     pub(super) fn scale_stage_materialized(&mut self) {
-        if let Some(s) = self.scale_stage.as_mut() {
+        if let Some(s) = self.scale_ui.stage.as_mut() {
             s.materialized = true;
         }
     }
@@ -1787,11 +1787,11 @@ impl OpenCADStudio {
     /// (nothing staged) does nothing.
     pub(super) fn scale_stage_commit(&mut self) {
         let i = self.active_tab;
-        let Some(stage) = self.scale_stage.take() else {
+        let Some(stage) = self.scale_ui.stage.take() else {
             return;
         };
         if !stage.changed {
-            self.scale_stage = Some(stage);
+            self.scale_ui.stage = Some(stage);
             return;
         }
         let edited = self.capture_scale_state();
@@ -1799,7 +1799,7 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, "SCALELISTEDIT");
         self.restore_scale_state(&edited);
         self.tabs[i].dirty = true;
-        self.scale_stage = Some(ScaleStage {
+        self.scale_ui.stage = Some(ScaleStage {
             dirty_at_open: true,
             baseline: edited,
             changed: false,
@@ -1812,7 +1812,7 @@ impl OpenCADStudio {
     /// Discard staged scale changes (window closed without Apply): restore the
     /// snapshot taken when the manager opened. No-op when nothing was staged.
     pub(super) fn scale_stage_discard(&mut self) {
-        let Some(stage) = self.scale_stage.take() else {
+        let Some(stage) = self.scale_ui.stage.take() else {
             return;
         };
         // Revert on a real edit *or* when only the fallback set was materialised

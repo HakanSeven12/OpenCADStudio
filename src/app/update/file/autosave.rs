@@ -162,7 +162,7 @@ impl OpenCADStudio {
     /// not retain every drawing's baked geometry simultaneously.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn on_autosave(&mut self) -> Task<Message> {
-        if self.web_autosave_in_flight || self.pending_web_thumbnail_save.is_some() {
+        if self.web_autosave.in_flight || self.pending_web_thumbnail_save.is_some() {
             return Task::none();
         }
         let mut pending = Vec::new();
@@ -197,7 +197,7 @@ impl OpenCADStudio {
         if pending.is_empty() {
             return Task::none();
         }
-        self.web_autosave_in_flight = true;
+        self.web_autosave.in_flight = true;
         Task::perform(
             async move {
                 let mut failure = None;
@@ -229,8 +229,8 @@ impl OpenCADStudio {
     /// for real now (no late write can resurrect them).
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn on_web_autosave_finished(&mut self, result: Result<(), String>) -> Task<Message> {
-        self.web_autosave_in_flight = false;
-        let deferred = std::mem::take(&mut self.web_autosave_clear_after);
+        self.web_autosave.in_flight = false;
+        let deferred = std::mem::take(&mut self.web_autosave.clear_after);
         if !deferred.is_empty() {
             wasm_bindgen_futures::spawn_local(async move {
                 for key in &deferred {
@@ -239,10 +239,10 @@ impl OpenCADStudio {
             });
         }
         match result {
-            Ok(()) => self.web_autosave_warned = false,
+            Ok(()) => self.web_autosave.warned = false,
             Err(error) => {
-                if !self.web_autosave_warned {
-                    self.web_autosave_warned = true;
+                if !self.web_autosave.warned {
+                    self.web_autosave.warned = true;
                     self.command_line.push_warning(
                         crate::tf!("Autosave copy could not be stored: {error}").as_ref(),
                     );
@@ -271,7 +271,7 @@ impl OpenCADStudio {
             return Task::none();
         };
         entries.sort_by(|a, b| b.modified_ms.total_cmp(&a.modified_ms));
-        self.web_autosave_pending = entries;
+        self.web_autosave.pending = entries;
         self.queue_autosave_restore_prompt();
         Task::none()
     }
@@ -284,11 +284,11 @@ impl OpenCADStudio {
     /// it recoverable for the next boot.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn on_web_autosave_restore(&mut self) -> Task<Message> {
-        let Some(entry) = self.web_autosave_pending.first().cloned() else {
+        let Some(entry) = self.web_autosave.pending.first().cloned() else {
             self.close_active_modal();
             return Task::none();
         };
-        self.web_autosave_pending.remove(0);
+        self.web_autosave.pending.remove(0);
         self.close_active_modal();
         let open_name = crate::io::web_autosave::recovered_name(&entry.name);
         let key = entry.name;
@@ -316,11 +316,11 @@ impl OpenCADStudio {
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn on_web_autosave_restore_all(&mut self) -> Task<Message> {
         // Fewer than two pending: this is just Restore.
-        if self.web_autosave_pending.len() < 2 {
+        if self.web_autosave.pending.len() < 2 {
             return self.on_web_autosave_restore();
         }
-        let entries = std::mem::take(&mut self.web_autosave_pending);
-        self.web_autosave_restore_all_remaining = entries.len();
+        let entries = std::mem::take(&mut self.web_autosave.pending);
+        self.web_autosave.restore_all_remaining = entries.len();
         self.close_active_modal();
         self.command_line
             .push_info(crate::tf!("Restoring {} drawing(s)…", entries.len()).as_ref());
@@ -344,7 +344,7 @@ impl OpenCADStudio {
     /// offered. The caller already matched the marker to this open's id.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn web_autosave_opened(&mut self, open_name: &str) {
-        let Some((key, _)) = self.web_autosave_consumed.take() else {
+        let Some((key, _)) = self.web_autosave.consumed.take() else {
             return;
         };
         self.command_line
@@ -358,13 +358,13 @@ impl OpenCADStudio {
     /// Discard the offered snapshot; the prompt stays up for the next one.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn on_web_autosave_discard(&mut self) -> Task<Message> {
-        if let Some(entry) = self.web_autosave_pending.first().cloned() {
-            self.web_autosave_pending.remove(0);
+        if let Some(entry) = self.web_autosave.pending.first().cloned() {
+            self.web_autosave.pending.remove(0);
             wasm_bindgen_futures::spawn_local(async move {
                 let _ = crate::io::web_autosave::remove(&entry.name).await;
             });
         }
-        if self.web_autosave_pending.is_empty() {
+        if self.web_autosave.pending.is_empty() {
             self.close_active_modal();
         }
         Task::none()
@@ -376,10 +376,10 @@ impl OpenCADStudio {
     /// boot. The prompt moves on to the next queued snapshot, if any.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn on_web_autosave_defer(&mut self) -> Task<Message> {
-        if !self.web_autosave_pending.is_empty() {
-            self.web_autosave_pending.remove(0);
+        if !self.web_autosave.pending.is_empty() {
+            self.web_autosave.pending.remove(0);
         }
-        if self.web_autosave_pending.is_empty() {
+        if self.web_autosave.pending.is_empty() {
             self.close_active_modal();
         }
         Task::none()
@@ -439,16 +439,16 @@ impl OpenCADStudio {
     /// remembered session decides which tab ends up active.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn queue_next_web_autosave_prompt(&mut self) {
-        if self.web_autosave_restore_all_remaining > 0 {
-            self.web_autosave_restore_all_remaining -= 1;
-            if self.web_autosave_restore_all_remaining == 0 {
+        if self.web_autosave.restore_all_remaining > 0 {
+            self.web_autosave.restore_all_remaining -= 1;
+            if self.web_autosave.restore_all_remaining == 0 {
                 // Applied at the next message boundary: the last restore's
                 // settle (`web_autosave_opened`) runs BEFORE its own open
                 // inserts the tab, so focusing here could not see it yet.
                 self.web_session_focus_pending = true;
             }
         }
-        if !self.web_autosave_pending.is_empty() {
+        if !self.web_autosave.pending.is_empty() {
             self.queue_autosave_restore_prompt();
         }
     }
@@ -528,13 +528,13 @@ impl OpenCADStudio {
         // next boot scan.
         #[cfg(target_arch = "wasm32")]
         if !crate::io::host_bridge::is_embed_mode() {
-            let mut keys = std::mem::take(&mut self.web_autosave_clear_after);
+            let mut keys = std::mem::take(&mut self.web_autosave.clear_after);
             // An in-flight round may still be writing snapshots right now;
             // its late writes would land AFTER these removes and resurrect
             // exactly what was removed, so the per-tab sweep is pointless in
             // that race — skip it entirely (the boot scan bounds leftovers:
             // `SNAPSHOT_CAP` eviction discards the oldest overflow).
-            if !self.web_autosave_in_flight {
+            if !self.web_autosave.in_flight {
                 for tab in &self.tabs {
                     keys.push(Self::web_autosave_key(tab));
                 }

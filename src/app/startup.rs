@@ -46,7 +46,7 @@ impl OpenCADStudio {
             // meanwhile; resurfacing it would show an empty prompt.
             #[cfg(target_arch = "wasm32")]
             while self.pending_startup_modals.front() == Some(&ModalKind::AutosaveRestore)
-                && self.web_autosave_pending.is_empty()
+                && self.web_autosave.pending.is_empty()
             {
                 self.pending_startup_modals.pop_front();
             }
@@ -65,7 +65,7 @@ impl OpenCADStudio {
     /// "Recover Drawing" modal on every boot.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn queue_autosave_restore_prompt(&mut self) {
-        if self.web_autosave_pending.is_empty() {
+        if self.web_autosave.pending.is_empty() {
             return;
         }
         if !self

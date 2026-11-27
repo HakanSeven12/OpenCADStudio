@@ -2604,11 +2604,11 @@ impl OpenCADStudio {
             // `prompt=…`, `default=…`, `justify=MC`, `style=…`, `height=…`,
             // `rotation=…`, `width=…`, `on_screen=0|1`, `x=…` / `y=…` / `z=…`,
             // `mode=<bit>:0|1`, `annotative=0|1`, `align_below=0|1`, `edit_value`, `dismiss`.
-            "attr_editor" if self.attr_editor_session.is_some() => {
+            "attr_editor" if self.attr_editor_ui.session.is_some() => {
                 use crate::ui::window::attribute_editor::{AttrAnswer, AttrTab};
                 let value = string(req, "value")?;
                 let (key, v) = value.split_once('=').unwrap_or((value, ""));
-                let idx = self.attr_editor_selected;
+                let idx = self.attr_editor_ui.selected;
                 match key {
                     "tab" => Message::AttrEditorTab(match v {
                         "text" => AttrTab::TextOptions,

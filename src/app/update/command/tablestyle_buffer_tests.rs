@@ -8,10 +8,10 @@ use crate::app::{OpenCADStudio, StyleKind};
 fn table_new_reloads_cell_buffers() {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
-    app.ts_cell_height = "STALE_SENTINEL".to_string();
+    app.table_style_ui.cell_height = "STALE_SENTINEL".to_string();
     let _ = app.style_new(StyleKind::Table);
     assert_ne!(
-        app.ts_cell_height, "STALE_SENTINEL",
+        app.table_style_ui.cell_height, "STALE_SENTINEL",
         "buffers must reload from the fresh style"
     );
 }

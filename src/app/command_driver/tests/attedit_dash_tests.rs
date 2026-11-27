@@ -54,7 +54,7 @@ mod attedit_dash_tests {
         let _ = app.run_command_line("EATTEDIT");
 
         assert_eq!(
-            app.attr_editor_rows.len(),
+            app.attr_editor_ui.rows.len(),
             1,
             "the editor opens on the selected reference's one attribute"
         );

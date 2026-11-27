@@ -987,10 +987,10 @@ impl OpenCADStudio {
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if self.web_autosave_in_flight {
-                self.web_autosave_clear_after.push(autosave_key);
+            if self.web_autosave.in_flight {
+                self.web_autosave.clear_after.push(autosave_key);
                 if !new_key.is_empty() {
-                    self.web_autosave_clear_after.push(new_key);
+                    self.web_autosave.clear_after.push(new_key);
                 }
             } else {
                 recent_task = Task::batch([

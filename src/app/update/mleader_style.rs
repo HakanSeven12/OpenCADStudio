@@ -150,27 +150,27 @@ impl OpenCADStudio {
             return;
         };
         let color = |c: document::types::Color| c.index().map(|c| c.to_string()).unwrap_or_default();
-        self.mls_landing_distance = trim_number(s.landing_distance);
-        self.mls_landing_gap = trim_number(s.landing_gap);
-        self.mls_arrowhead_size = trim_number(s.arrowhead_size);
-        self.mls_text_height = trim_number(s.text_height);
+        self.mls_dialog.landing_distance = trim_number(s.landing_distance);
+        self.mls_dialog.landing_gap = trim_number(s.landing_gap);
+        self.mls_dialog.arrowhead_size = trim_number(s.arrowhead_size);
+        self.mls_dialog.text_height = trim_number(s.text_height);
         // Scale to layout stores 0; Specify scale comes back at 1.
-        self.mls_scale_factor = if s.scale_factor == 0.0 {
+        self.mls_dialog.scale_factor = if s.scale_factor == 0.0 {
             "1".to_string()
         } else {
             trim_number(s.scale_factor)
         };
-        self.mls_break_gap = trim_number(s.break_gap_size);
-        self.mls_max_points = if s.max_leader_points > 0 {
+        self.mls_dialog.break_gap = trim_number(s.break_gap_size);
+        self.mls_dialog.max_points = if s.max_leader_points > 0 {
             s.max_leader_points.to_string()
         } else {
             "2".to_string()
         };
-        self.mls_default_text = s.default_text.clone();
-        self.mls_line_color = color(s.line_color);
-        self.mls_text_color = color(s.text_color);
-        self.mls_block_color = color(s.block_content_color);
-        self.mls_block_scale = trim_number(s.block_content_scale_x);
+        self.mls_dialog.default_text = s.default_text.clone();
+        self.mls_dialog.line_color = color(s.line_color);
+        self.mls_dialog.text_color = color(s.text_color);
+        self.mls_dialog.block_color = color(s.block_content_color);
+        self.mls_dialog.block_scale = trim_number(s.block_content_scale_x);
     }
 
     pub(super) fn on_mleader_style_dialog_open(&mut self) -> Task<Message> {
@@ -193,7 +193,7 @@ impl OpenCADStudio {
             .cloned()
             .unwrap_or_else(|| "Standard".to_string());
         self.mls = Default::default();
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         self.load_mleaderstyle_bufs(i);
         self.active_modal = Some(ModalKind::MLeaderStyle);
         // Linetypes loaded from Select Linetype belong to the session too.
@@ -220,20 +220,20 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_mleader_style_edit(&mut self, field: &'static str, value: String) -> Task<Message> {
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         match field {
-            "landing_distance" => self.mls_landing_distance = value,
-            "landing_gap" => self.mls_landing_gap = value,
-            "arrowhead_size" => self.mls_arrowhead_size = value,
-            "text_height" => self.mls_text_height = value,
-            "scale_factor" => self.mls_scale_factor = value,
-            "break_gap" => self.mls_break_gap = value,
-            "max_points" => self.mls_max_points = value,
-            "default_text" => self.mls_default_text = value,
-            "line_color" => self.mls_line_color = value,
-            "text_color" => self.mls_text_color = value,
-            "block_color" => self.mls_block_color = value,
-            "block_scale" => self.mls_block_scale = value,
+            "landing_distance" => self.mls_dialog.landing_distance = value,
+            "landing_gap" => self.mls_dialog.landing_gap = value,
+            "arrowhead_size" => self.mls_dialog.arrowhead_size = value,
+            "text_height" => self.mls_dialog.text_height = value,
+            "scale_factor" => self.mls_dialog.scale_factor = value,
+            "break_gap" => self.mls_dialog.break_gap = value,
+            "max_points" => self.mls_dialog.max_points = value,
+            "default_text" => self.mls_dialog.default_text = value,
+            "line_color" => self.mls_dialog.line_color = value,
+            "text_color" => self.mls_dialog.text_color = value,
+            "block_color" => self.mls_dialog.block_color = value,
+            "block_scale" => self.mls_dialog.block_scale = value,
             _ => {}
         }
         Task::none()
@@ -315,7 +315,7 @@ impl OpenCADStudio {
     /// a list's last entry opens its chooser instead.
     pub(super) fn on_mleader_style_set_handle(&mut self, field: &'static str, value: String) -> Task<Message> {
         let i = self.active_tab;
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         if value == OTHER {
             let doc = &self.tabs[i].scene.document;
             let style = self.mleaderstyle_ref(i);
@@ -370,12 +370,12 @@ impl OpenCADStudio {
         };
         let annotative = self.mleaderstyle_ref(i).is_some_and(|s| s.is_annotative);
         let number = |value: &str, field: &'static str| non_negative(value).ok_or(field);
-        let arrow = number(&self.mls_arrowhead_size, "arrowhead_size")?;
-        let gap = number(&self.mls_break_gap, "break_gap")?;
+        let arrow = number(&self.mls_dialog.arrowhead_size, "arrowhead_size")?;
+        let gap = number(&self.mls_dialog.break_gap, "break_gap")?;
         let max_points = if m.max_points_on {
             // A whole number; fewer than two points is two.
             let points = self
-                .mls_max_points
+                .mls_dialog.max_points
                 .trim()
                 .parse::<i32>()
                 .map_err(|_| "max_points")?;
@@ -383,22 +383,22 @@ impl OpenCADStudio {
         } else {
             0
         };
-        let landing = number(&self.mls_landing_distance, "landing_distance")?;
+        let landing = number(&self.mls_dialog.landing_distance, "landing_distance")?;
         let scale = if annotative || m.scale_to_layout {
             None
         } else {
-            Some(number(&self.mls_scale_factor, "scale_factor")?)
+            Some(number(&self.mls_dialog.scale_factor, "scale_factor")?)
         };
-        let text_height = number(&self.mls_text_height, "text_height")?;
-        let landing_gap = number(&self.mls_landing_gap, "landing_gap")?;
-        let block_scale = number(&self.mls_block_scale, "block_scale")?;
+        let text_height = number(&self.mls_dialog.text_height, "text_height")?;
+        let landing_gap = number(&self.mls_dialog.landing_gap, "landing_gap")?;
+        let block_scale = number(&self.mls_dialog.block_scale, "block_scale")?;
         let color = |value: &str| value.parse::<i16>().ok().map(document::types::Color::from_index);
         let (line_color, text_color, block_color) = (
-            color(&self.mls_line_color),
-            color(&self.mls_text_color),
-            color(&self.mls_block_color),
+            color(&self.mls_dialog.line_color),
+            color(&self.mls_dialog.text_color),
+            color(&self.mls_dialog.block_color),
         );
-        let default_text = self.mls_default_text.clone();
+        let default_text = self.mls_dialog.default_text.clone();
         let Some(s) = self.mleaderstyle_mut(i) else {
             return Ok(());
         };
@@ -440,7 +440,7 @@ impl OpenCADStudio {
             return;
         };
         self.mls.pick = None;
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         let i = self.active_tab;
         let doc = &mut self.tabs[i].scene.document;
         match m.backup {
@@ -479,7 +479,7 @@ impl OpenCADStudio {
     pub(super) fn mleader_style_close(&mut self) {
         self.mleader_style_cancel_modify();
         self.mls = Default::default();
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         self.after_style_change(StyleKind::MLeader);
         self.style_stage_commit();
         self.style_stage = None;
@@ -496,7 +496,7 @@ impl OpenCADStudio {
     /// `_MLEADERSTYLE_TEXT`: the multi-line editor closed.
     pub(in crate::app) fn mleader_style_text_back(&mut self) -> Task<Message> {
         if let Some(value) = EDITOR_TEXT.lock().ok().and_then(|mut t| t.take()) {
-            self.mls_default_text = value;
+            self.mls_dialog.default_text = value;
         }
         if self.mls.modify.is_some() {
             self.active_modal = Some(ModalKind::MLeaderStyle);
@@ -687,7 +687,7 @@ impl OpenCADStudio {
                 self.command_line.push_info(&help);
             }
             MlsMsg::Tab(tab) => {
-                self.mls_color_open = None;
+                self.mls_dialog.color_open = None;
                 if let Some(m) = self.mls.modify.as_mut() {
                     m.tab = tab;
                 }
@@ -705,7 +705,7 @@ impl OpenCADStudio {
                 if let Some(m) = self.mls.modify.as_mut() {
                     // Back to a specified scale it starts again from 1.
                     if m.scale_to_layout && !on {
-                        self.mls_scale_factor = "1".to_string();
+                        self.mls_dialog.scale_factor = "1".to_string();
                     }
                     m.scale_to_layout = on;
                 }
@@ -788,11 +788,11 @@ impl OpenCADStudio {
             }
             MlsMsg::DefaultText => {
                 // The window waits while the multi-line editor collects the text.
-                let initial = self.mls_default_text.clone();
-                let height = non_negative(&self.mls_text_height)
+                let initial = self.mls_dialog.default_text.clone();
+                let height = non_negative(&self.mls_dialog.text_height)
                     .filter(|h| *h > 0.0)
                     .unwrap_or(2.5);
-                self.mls_color_open = None;
+                self.mls_dialog.color_open = None;
                 self.active_modal = None;
                 if let Ok(mut text) = EDITOR_TEXT.lock() {
                     *text = None;
@@ -932,7 +932,7 @@ impl OpenCADStudio {
             return Task::none();
         };
         self.mls.pick = None;
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         // A new style becomes the current one.
         if m.backup.is_none() {
             self.mleader_style_set_current();
@@ -948,7 +948,7 @@ impl OpenCADStudio {
         if self.mls.modify.is_none() {
             return Task::none();
         }
-        self.mls_color_open = None;
+        self.mls_dialog.color_open = None;
         // The Text Style manager opens on the style's text style, made the
         // drawing's current one (it stays current after the manager closes).
         let i = self.active_tab;

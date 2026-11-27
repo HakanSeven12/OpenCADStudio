@@ -62,10 +62,10 @@ impl OpenCADStudio {
         scene.current_layout != "Model" && scene.active_viewport.is_none()
     }
     pub(super) fn spacemouse_label(&self) -> String {
-        if !self.spacemouse_preferences.enabled {
+        if !self.spacemouse_ui.preferences.enabled {
             return crate::t!("Disabled").into_owned();
         }
-        if self.spacemouse_paused {
+        if self.spacemouse_ui.paused {
             return crate::t!("Paused").into_owned();
         }
         if self.tabs[self.active_tab].scene.navigation_locked() {
@@ -74,7 +74,7 @@ impl OpenCADStudio {
         if self.spacemouse.status() != crate::input::spacemouse::Status::Ready {
             return crate::t!(self.spacemouse.status().label()).into_owned();
         }
-        let mode = self.spacemouse_preferences.mode;
+        let mode = self.spacemouse_ui.preferences.mode;
         let effective = if self.spacemouse_sheet() && mode.allows_zoom() {
             NavigationMode::PanZoom
         } else if mode == NavigationMode::Auto {
@@ -87,7 +87,7 @@ impl OpenCADStudio {
     pub(super) fn sync_spacemouse(&self) {
         let tab = &self.tabs[self.active_tab];
         let scene = &tab.scene;
-        let available = self.spacemouse_preferences.enabled
+        let available = self.spacemouse_ui.preferences.enabled
             && !tab.is_start
             && self.opening.is_none()
             && self.spacemouse.status() == crate::input::spacemouse::Status::Ready;
@@ -97,7 +97,7 @@ impl OpenCADStudio {
         }
         // The driver's settings dialog must still be able to query this view
         // after it takes keyboard focus. Gate input separately from its metadata.
-        let allowed = self.spacemouse_focused && self.active_modal.is_none();
+        let allowed = self.spacemouse_ui.focused && self.active_modal.is_none();
         let camera = scene.navigation_camera();
         let (w, h) = scene.selection.borrow().view.vp_size;
         let bounds = scene.active_model_tile_bounds(w, h);
@@ -119,11 +119,11 @@ impl OpenCADStudio {
             })
             .unwrap_or((center - span, center + span));
         let target = self.navigation_target();
-        let selected = self.spacemouse_selection.bounds(scene, &target);
+        let selected = self.spacemouse_ui.selection.bounds(scene, &target);
         let pivot = selected
             .map(|(min, max)| (min + max) * 0.5)
             .or_else(|| {
-                self.spacemouse_pivot
+                self.spacemouse_ui.pivot
                     .as_ref()
                     .filter(|(stamp, _)| stamp.same_context(&target))
                     .map(|(_, point)| *point)
@@ -144,20 +144,20 @@ impl OpenCADStudio {
                 selection_bounds,
                 pointer: tab.last_cursor_world,
                 pivot,
-                pivot_visible: self.spacemouse_pivot.is_some(),
+                pivot_visible: self.spacemouse_ui.pivot.is_some(),
                 rotate: self
-                    .spacemouse_preferences
+                    .spacemouse_ui.preferences
                     .mode
                     .allows_rotation(self.spacemouse_sheet()),
-                zoom: self.spacemouse_preferences.mode.allows_zoom(),
-                motion_enabled: !self.spacemouse_paused && !scene.navigation_locked(),
+                zoom: self.spacemouse_ui.preferences.mode.allows_zoom(),
+                motion_enabled: !self.spacemouse_ui.paused && !scene.navigation_locked(),
                 units_to_meters: super::properties::insunits_to_mm(
                     scene.document.header.insertion_units,
                 )
                 .unwrap_or(1000.)
                     / 1000.,
-                pan_speed: self.spacemouse_preferences.pan_speed.clamp(10, 300) as f64 / 100.
-                    * if self.spacemouse_preferences.pan_reversed {
+                pan_speed: self.spacemouse_ui.preferences.pan_speed.clamp(10, 300) as f64 / 100.
+                    * if self.spacemouse_ui.preferences.pan_reversed {
                         -1.
                     } else {
                         1.
@@ -168,30 +168,30 @@ impl OpenCADStudio {
     }
     pub(super) fn on_spacemouse_wake(&mut self) -> Task<Message> {
         let (view, commands) = self.spacemouse.drain();
-        if !self.spacemouse_focused
+        if !self.spacemouse_ui.focused
             || self.active_modal.is_some()
-            || !self.spacemouse_preferences.enabled
+            || !self.spacemouse_ui.preferences.enabled
             || self.tabs[self.active_tab].is_start
         {
-            self.spacemouse_was_moving = false;
-            self.spacemouse_pivot = None;
+            self.spacemouse_ui.was_moving = false;
+            self.spacemouse_ui.pivot = None;
             return Task::none();
         }
         let target = self.navigation_target();
         let mut tasks = Vec::new();
-        let moving = self.spacemouse.moving() && !self.spacemouse_paused;
-        if moving && !self.spacemouse_was_moving {
+        let moving = self.spacemouse.moving() && !self.spacemouse_ui.paused;
+        if moving && !self.spacemouse_ui.was_moving {
             self.tabs[self.active_tab].scene.remember_current_view();
             self.clear_navigation_hover(self.active_tab);
         }
-        if !moving && self.spacemouse_was_moving {
+        if !moving && self.spacemouse_ui.was_moving {
             self.arm_hover_after_navigation(self.active_tab);
         }
-        self.spacemouse_was_moving = moving;
+        self.spacemouse_ui.was_moving = moving;
         if !moving {
-            self.spacemouse_pivot = None;
+            self.spacemouse_ui.pivot = None;
         }
-        if let Some(view) = view.filter(|view| view.target == target && !self.spacemouse_paused) {
+        if let Some(view) = view.filter(|view| view.target == target && !self.spacemouse_ui.paused) {
             let i = self.active_tab;
             let mut camera = self.tabs[i].scene.navigation_camera();
             if view.rotate {
@@ -209,7 +209,7 @@ impl OpenCADStudio {
             if self.tabs[i].scene.apply_navigation_camera(camera) {
                 self.spacemouse
                     .acknowledge(&view.target, &self.navigation_target());
-                self.spacemouse_pivot = (view.pivot_visible && moving)
+                self.spacemouse_ui.pivot = (view.pivot_visible && moving)
                     .then_some((self.navigation_target(), view.pivot));
                 let (w, h) = self.tabs[i].scene.selection.borrow().view.vp_size;
                 self.reproject_box_anchor(i, w, h);
@@ -241,7 +241,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn spacemouse_pivot_overlay(&self) -> Option<iced::Element<'_, Message>> {
-        let (target, point) = self.spacemouse_pivot.as_ref()?;
+        let (target, point) = self.spacemouse_ui.pivot.as_ref()?;
         if target != &self.navigation_target() || self.active_modal.is_some() {
             return None;
         }
@@ -374,7 +374,7 @@ mod tests {
             .borrow_mut()
             .view
             .vp_size = (800., 600.);
-        app.spacemouse_focused = true;
+        app.spacemouse_ui.focused = true;
         app.spacemouse.test_connect();
         app.sync_spacemouse();
         app
@@ -453,8 +453,8 @@ mod tests {
             match guard {
                 "camera" => app.tabs[app.active_tab].scene.camera_generation += 1,
                 "modal" => app.active_modal = Some(ModalKind::Options),
-                "pause" => app.spacemouse_paused = true,
-                _ => app.spacemouse_focused = false,
+                "pause" => app.spacemouse_ui.paused = true,
+                _ => app.spacemouse_ui.focused = false,
             }
             let _ = app.on_spacemouse_wake();
             assert_eq!(
@@ -469,13 +469,13 @@ mod tests {
     fn spacemouse_settings_dialog_retains_view_metadata_without_accepting_motion() {
         for modal in [false, true] {
             let mut app = app();
-            app.spacemouse_preferences.mode = NavigationMode::Full3D;
+            app.spacemouse_ui.preferences.mode = NavigationMode::Full3D;
             app.sync_spacemouse();
             let before = app.tabs[app.active_tab].scene.navigation_camera();
             if modal {
                 app.active_modal = Some(ModalKind::Options);
             } else {
-                app.spacemouse_focused = false;
+                app.spacemouse_ui.focused = false;
             }
             app.sync_spacemouse();
             let snapshot = app
@@ -539,8 +539,8 @@ mod tests {
                         ([0, 0, 0, 350, 0, 0], glam::Vec2::Y),
                     ] {
                         let mut app = app();
-                        app.spacemouse_preferences.mode = mode;
-                        app.spacemouse_preferences.pan_reversed = reversed;
+                        app.spacemouse_ui.preferences.mode = mode;
+                        app.spacemouse_ui.preferences.pan_reversed = reversed;
                         let i = app.active_tab;
                         {
                             let mut camera = app.tabs[i].scene.camera.borrow_mut();
@@ -587,7 +587,7 @@ mod tests {
             for mode in [NavigationMode::PanOnly, NavigationMode::PanZoom] {
                 for pressure in [-350, 350] {
                     let mut app = app();
-                    app.spacemouse_preferences.mode = mode;
+                    app.spacemouse_ui.preferences.mode = mode;
                     let i = app.active_tab;
                     {
                         let mut camera = app.tabs[i].scene.camera.borrow_mut();
@@ -631,17 +631,17 @@ mod tests {
             crate::input::spacemouse::Preferences::default()
         );
         let mut app = app();
-        app.spacemouse_preferences.mode = NavigationMode::PanOnly;
-        app.spacemouse_preferences.pan_speed = 170;
-        app.spacemouse_preferences.pan_reversed = true;
+        app.spacemouse_ui.preferences.mode = NavigationMode::PanOnly;
+        app.spacemouse_ui.preferences.pan_speed = 170;
+        app.spacemouse_ui.preferences.pan_reversed = true;
         let encoded = serde_json::to_string(&app.current_settings()).unwrap();
         let restored: super::super::settings::UserSettings =
             serde_json::from_str(&encoded).unwrap();
-        app.spacemouse_preferences.mode = NavigationMode::Auto;
+        app.spacemouse_ui.preferences.mode = NavigationMode::Auto;
         app.apply_settings(&restored);
-        assert_eq!(app.spacemouse_preferences.mode, NavigationMode::PanOnly);
-        assert_eq!(app.spacemouse_preferences.pan_speed, 170);
-        assert!(app.spacemouse_preferences.pan_reversed);
+        assert_eq!(app.spacemouse_ui.preferences.mode, NavigationMode::PanOnly);
+        assert_eq!(app.spacemouse_ui.preferences.pan_speed, 170);
+        assert!(app.spacemouse_ui.preferences.pan_reversed);
     }
 
     #[test]

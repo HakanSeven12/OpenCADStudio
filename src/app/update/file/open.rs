@@ -731,7 +731,7 @@ impl OpenCADStudio {
         // also fires here: the message-boundary hook alone could run
         // before this insertion and be overwritten by it.
         #[cfg(target_arch = "wasm32")]
-        if self.web_session_focus_pending && self.web_autosave_restore_all_remaining == 0 {
+        if self.web_session_focus_pending && self.web_autosave.restore_all_remaining == 0 {
             self.web_session_focus_pending = false;
             let _ = self.select_remembered_session_tab();
         }

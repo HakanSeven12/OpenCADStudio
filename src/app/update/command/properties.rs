@@ -2671,8 +2671,8 @@ impl OpenCADStudio {
     /// The currently-selected editor row, for the Text Options / Properties
     /// edit handlers (which all act on that one attribute).
     pub(in crate::app) fn attr_row_selected_mut(&mut self) -> Option<&mut AttrRow> {
-        let sel = self.attr_editor_selected;
-        self.attr_editor_rows.get_mut(sel)
+        let sel = self.attr_editor_ui.selected;
+        self.attr_editor_ui.rows.get_mut(sel)
     }
 }
 

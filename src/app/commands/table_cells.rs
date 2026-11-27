@@ -1255,7 +1255,7 @@ impl OpenCADStudio {
                     let state = self.table_cell_format.take().expect("open");
                     // Opened from the table style window: the cell style
                     // takes the format.
-                    if self.ts_format_return {
+                    if self.table_style_ui.format_return {
                         self.table_style_format_back(Some(state));
                         return Task::none();
                     }

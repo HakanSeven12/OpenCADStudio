@@ -102,7 +102,7 @@ impl OpenCADStudio {
         // One copy: the guard must not be held across the literal below.
         let block_defaults = *crate::modules::insert::block_cmdline::defaults();
         crate::app::settings::UserSettings {
-            spacemouse: self.spacemouse_preferences,
+            spacemouse: self.spacemouse_ui.preferences,
             dyn_input: self.dyn_input,
             dyn_mode: self.dyn_mode,
             dyn_pointer_cartesian: self.dyn_pointer_cartesian,
@@ -380,7 +380,7 @@ impl OpenCADStudio {
         self.ribbon_layers_follow_filter = s.ribbon_layers_follow_filter;
         self.node_graph_links = s.node_graph_links;
         self.options_tab = s.options_tab;
-        self.spacemouse_preferences = s.spacemouse;
+        self.spacemouse_ui.preferences = s.spacemouse;
         // These four drive real features with commands and status-bar pills,
         // but they lived only on the app struct: turning the ViewCube off and
         // restarting brought it straight back.

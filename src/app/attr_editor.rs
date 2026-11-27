@@ -308,13 +308,13 @@ impl OpenCADStudio {
         let Some(applied) = self.tabs[i].scene.document.get_entity_arc(handle) else {
             return;
         };
-        match self.attr_editor_session.as_mut() {
+        match self.attr_editor_ui.session.as_mut() {
             Some(session) if session.tab == i => {
                 session.applied = applied;
                 session.applied_rows = rows.clone();
             }
             _ => {
-                self.attr_editor_session = Some(AttrEditorSession {
+                self.attr_editor_ui.session = Some(AttrEditorSession {
                     tab: i,
                     applied,
                     applied_rows: rows.clone(),
@@ -323,14 +323,14 @@ impl OpenCADStudio {
                 });
             }
         }
-        self.attr_editor_block = block;
-        self.attr_editor_rows = rows;
-        self.attr_editor_selected = 0;
-        self.attr_editor_tab = AttrTab::Attribute;
-        self.attr_editor_handle = Some(handle);
-        self.attr_editor_error = None;
-        self.attr_editor_asking = false;
-        self.attr_editor_editing = None;
+        self.attr_editor_ui.block = block;
+        self.attr_editor_ui.rows = rows;
+        self.attr_editor_ui.selected = 0;
+        self.attr_editor_ui.tab = AttrTab::Attribute;
+        self.attr_editor_ui.handle = Some(handle);
+        self.attr_editor_ui.error = None;
+        self.attr_editor_ui.asking = false;
+        self.attr_editor_ui.editing = None;
         self.active_modal = Some(ModalKind::AttributeEditor);
         self.modal_offset = iced::Vector::ZERO;
         self.modal_resize = iced::Vector::ZERO;
@@ -338,18 +338,18 @@ impl OpenCADStudio {
 
     /// There are changes Apply would write.
     pub(in crate::app) fn attr_editor_pending(&self) -> bool {
-        self.attr_editor_session
+        self.attr_editor_ui.session
             .as_ref()
-            .is_some_and(|s| s.applied_rows != self.attr_editor_rows)
+            .is_some_and(|s| s.applied_rows != self.attr_editor_ui.rows)
     }
 
     /// Show the working copy in the drawing: the block as last applied, with
     /// the rows written over it. A value the window refuses is not shown.
     pub(in crate::app) fn attr_editor_preview(&mut self) {
-        let Some(handle) = self.attr_editor_handle else {
+        let Some(handle) = self.attr_editor_ui.handle else {
             return;
         };
-        let Some(session) = self.attr_editor_session.as_mut() else {
+        let Some(session) = self.attr_editor_ui.session.as_mut() else {
             return;
         };
         let i = session.tab;
@@ -358,15 +358,15 @@ impl OpenCADStudio {
             if let Some(pending) = self.tabs[i].history.pending.as_mut() {
                 pending.held = true;
             }
-            if let Some(session) = self.attr_editor_session.as_mut() {
+            if let Some(session) = self.attr_editor_ui.session.as_mut() {
                 session.recording = true;
             }
         }
-        let Some(session) = self.attr_editor_session.as_ref() else {
+        let Some(session) = self.attr_editor_ui.session.as_ref() else {
             return;
         };
         let applied = Arc::clone(&session.applied);
-        let rows = self.attr_editor_rows.clone();
+        let rows = self.attr_editor_ui.rows.clone();
         let doc = &mut self.tabs[i].scene.document;
         doc.replace_entity_arc(handle, applied);
         let mut annotative = Vec::new();
@@ -393,30 +393,30 @@ impl OpenCADStudio {
     /// it), otherwise keep what the drawing shows.
     pub(in crate::app) fn attr_editor_apply(&mut self) -> bool {
         if let Some((idx, (msg, field))) = self
-            .attr_editor_rows
+            .attr_editor_ui.rows
             .iter()
             .enumerate()
             .find_map(|(idx, r)| row_error(r).map(|e| (idx, e)))
         {
-            self.attr_editor_error = Some(crate::t!(msg).into_owned());
-            self.attr_editor_selected = idx;
-            self.attr_editor_tab = AttrTab::TextOptions;
-            self.attr_editor_editing = Some(field);
+            self.attr_editor_ui.error = Some(crate::t!(msg).into_owned());
+            self.attr_editor_ui.selected = idx;
+            self.attr_editor_ui.tab = AttrTab::TextOptions;
+            self.attr_editor_ui.editing = Some(field);
             return false;
         }
-        self.attr_editor_error = None;
+        self.attr_editor_ui.error = None;
         if !self.attr_editor_pending() {
             return true;
         }
         self.attr_editor_preview();
-        let Some(handle) = self.attr_editor_handle else {
+        let Some(handle) = self.attr_editor_ui.handle else {
             return true;
         };
-        let Some(i) = self.attr_editor_session.as_ref().map(|s| s.tab) else {
+        let Some(i) = self.attr_editor_ui.session.as_ref().map(|s| s.tab) else {
             return true;
         };
         let linetypes: Vec<String> = self
-            .attr_editor_rows
+            .attr_editor_ui.rows
             .iter()
             .filter(|r| !r.linetype.is_empty())
             .map(|r| r.linetype.clone())
@@ -434,7 +434,7 @@ impl OpenCADStudio {
         }
         // Fields picked in the Field dialog go onto their attributes.
         let fielded: Vec<(usize, Option<(String, Vec<Handle>)>, String)> = self
-            .attr_editor_rows
+            .attr_editor_ui.rows
             .iter()
             .filter(|r| r.field_changed)
             .map(|r| (r.index, r.field.clone(), r.value.clone()))
@@ -453,13 +453,13 @@ impl OpenCADStudio {
                 );
             }
         }
-        for row in &mut self.attr_editor_rows {
+        for row in &mut self.attr_editor_ui.rows {
             row.field_changed = false;
         }
         let applied = self.tabs[i].scene.document.get_entity_arc(handle);
-        if let (Some(session), Some(applied)) = (self.attr_editor_session.as_mut(), applied) {
+        if let (Some(session), Some(applied)) = (self.attr_editor_ui.session.as_mut(), applied) {
             session.applied = applied;
-            session.applied_rows = self.attr_editor_rows.clone();
+            session.applied_rows = self.attr_editor_ui.rows.clone();
         }
         self.refresh_properties();
         true
@@ -469,10 +469,10 @@ impl OpenCADStudio {
     /// block back as it was last applied. Either way the session's changes
     /// are one undo step.
     pub(in crate::app) fn attr_editor_end(&mut self, keep: bool) {
-        if let Some(session) = self.attr_editor_session.take() {
+        if let Some(session) = self.attr_editor_ui.session.take() {
             let i = session.tab;
             if !keep {
-                if let Some(handle) = self.attr_editor_handle {
+                if let Some(handle) = self.attr_editor_ui.handle {
                     if i < self.tabs.len() {
                         self.tabs[i]
                             .scene
@@ -489,7 +489,7 @@ impl OpenCADStudio {
                     pending.held = false;
                 }
                 let unchanged = self.tabs[i].history.pending.as_ref().is_some_and(|_| {
-                    self.attr_editor_handle.is_none_or(|h| {
+                    self.attr_editor_ui.handle.is_none_or(|h| {
                         let now = self.tabs[i].scene.document.get_entity_arc(h);
                         now.is_some_and(|now| Arc::ptr_eq(&now, &session.applied))
                     })
@@ -504,21 +504,21 @@ impl OpenCADStudio {
             self.active_modal = None;
             self.reset_modal_geometry();
         }
-        self.attr_editor_handle = None;
-        self.attr_editor_block.clear();
-        self.attr_editor_rows.clear();
-        self.attr_editor_selected = 0;
-        self.attr_editor_tab = AttrTab::Attribute;
-        self.attr_editor_error = None;
-        self.attr_editor_asking = false;
-        self.attr_editor_editing = None;
+        self.attr_editor_ui.handle = None;
+        self.attr_editor_ui.block.clear();
+        self.attr_editor_ui.rows.clear();
+        self.attr_editor_ui.selected = 0;
+        self.attr_editor_ui.tab = AttrTab::Attribute;
+        self.attr_editor_ui.error = None;
+        self.attr_editor_ui.asking = false;
+        self.attr_editor_ui.editing = None;
         self.refresh_properties();
     }
 
     /// The tab or the drawing the window works on goes away: what was not
     /// applied is taken back.
     pub(in crate::app) fn cancel_attr_editor(&mut self) {
-        if self.attr_editor_session.is_some() || self.attr_editor_handle.is_some() {
+        if self.attr_editor_ui.session.is_some() || self.attr_editor_ui.handle.is_some() {
             self.attr_editor_end(false);
         }
     }
@@ -527,23 +527,23 @@ impl OpenCADStudio {
     fn attr_editor_select_block(&mut self, answer: Option<AttrAnswer>) {
         match answer {
             None if self.attr_editor_pending() => {
-                self.attr_editor_asking = true;
+                self.attr_editor_ui.asking = true;
                 return;
             }
             Some(AttrAnswer::Stay) => {
-                self.attr_editor_asking = false;
+                self.attr_editor_ui.asking = false;
                 return;
             }
             Some(AttrAnswer::Save) => {
-                self.attr_editor_asking = false;
+                self.attr_editor_ui.asking = false;
                 if !self.attr_editor_apply() {
                     return;
                 }
             }
             Some(AttrAnswer::Discard) => {
-                self.attr_editor_asking = false;
-                if let Some(rows) = self.attr_editor_session.as_ref().map(|s| s.applied_rows.clone()) {
-                    self.attr_editor_rows = rows;
+                self.attr_editor_ui.asking = false;
+                if let Some(rows) = self.attr_editor_ui.session.as_ref().map(|s| s.applied_rows.clone()) {
+                    self.attr_editor_ui.rows = rows;
                     self.attr_editor_preview();
                 }
             }
@@ -552,21 +552,21 @@ impl OpenCADStudio {
         // The window steps aside while the block is picked; the session
         // stays.
         self.active_modal = None;
-        let current = self.attr_editor_handle;
+        let current = self.attr_editor_ui.handle;
         self.start_attedit_pick(AtteditKind::Enhanced, current);
     }
 
     /// `_EATTEDIT_VALUE`: the multi-line editor closed.
     pub(in crate::app) fn attr_editor_value_back(&mut self) {
         if let Some(value) = take_editor_text() {
-            if let Some(r) = self.attr_editor_rows.get_mut(self.attr_editor_selected) {
+            if let Some(r) = self.attr_editor_ui.rows.get_mut(self.attr_editor_ui.selected) {
                 r.value = value;
                 r.field = None;
                 r.field_changed = true;
             }
             self.attr_editor_preview();
         }
-        if self.attr_editor_session.is_some() {
+        if self.attr_editor_ui.session.is_some() {
             self.active_modal = Some(ModalKind::AttributeEditor);
         }
     }
@@ -577,7 +577,7 @@ impl OpenCADStudio {
         field: Option<(String, Vec<Handle>)>,
         value: String,
     ) {
-        if let Some(r) = self.attr_editor_rows.get_mut(self.attr_editor_selected) {
+        if let Some(r) = self.attr_editor_ui.rows.get_mut(self.attr_editor_ui.selected) {
             r.value = value;
             r.field = field;
             r.field_changed = true;
@@ -606,16 +606,16 @@ impl OpenCADStudio {
             ),
             Message::AttrEditorSelectBlock => self.attr_editor_select_block(None),
             Message::AttrEditorAnswer(answer) => self.attr_editor_select_block(Some(answer)),
-            Message::AttrEditorDismissError => self.attr_editor_error = None,
+            Message::AttrEditorDismissError => self.attr_editor_ui.error = None,
             Message::AttrEditorEditValue => {
                 let i = self.active_tab;
-                let Some(row) = self.attr_editor_rows.get(self.attr_editor_selected) else {
+                let Some(row) = self.attr_editor_ui.rows.get(self.attr_editor_ui.selected) else {
                     return Task::none();
                 };
                 let initial = row.value.clone();
                 let height = row.height.trim().parse::<f64>().ok().filter(|h| *h > 0.0).unwrap_or(2.5);
                 let pos = self
-                    .attr_editor_handle
+                    .attr_editor_ui.handle
                     .and_then(|h| match self.tabs[i].scene.document.get_entity(h) {
                         Some(EntityType::Insert(ins)) => ins.attributes.get(row.index).map(|a| {
                             glam::DVec3::new(a.insertion_point.x, a.insertion_point.y, a.insertion_point.z)
@@ -649,7 +649,7 @@ impl OpenCADStudio {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.boundary_width = s;
                 }
-                self.attr_editor_editing = Some(AttrField::Boundary);
+                self.attr_editor_ui.editing = Some(AttrField::Boundary);
                 self.attr_editor_preview();
             }
             Message::AttrEditorColorValue(color) => {
@@ -668,7 +668,7 @@ impl OpenCADStudio {
     /// value it cannot keep is reported, the action does not happen, and the
     /// field takes the cursor back with its text selected.
     pub(in crate::app) fn attr_editor_leave_check(&mut self, msg: &Message) -> Option<Task<Message>> {
-        let field = self.attr_editor_editing?;
+        let field = self.attr_editor_ui.editing?;
         // Only the window's own actions leave the field; ticks, automation
         // envelopes and the rest of the app pass through untouched.
         let window_action = matches!(
@@ -718,15 +718,15 @@ impl OpenCADStudio {
         {
             return None;
         }
-        let row = self.attr_editor_rows.get(self.attr_editor_selected)?;
+        let row = self.attr_editor_ui.rows.get(self.attr_editor_ui.selected)?;
         match field_error(row, field) {
             None => {
-                self.attr_editor_editing = None;
+                self.attr_editor_ui.editing = None;
                 None
             }
             Some(error) => {
-                self.attr_editor_error = Some(crate::t!(error).into_owned());
-                self.attr_editor_tab = AttrTab::TextOptions;
+                self.attr_editor_ui.error = Some(crate::t!(error).into_owned());
+                self.attr_editor_ui.tab = AttrTab::TextOptions;
                 let id = iced::widget::Id::new(crate::ui::window::attribute_editor::field_id(field));
                 Some(Task::batch([
                     iced::widget::operation::focus(id.clone()),

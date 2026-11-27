@@ -3861,13 +3861,13 @@ bg={bg_ms:.1}ms n={view_count}"
                             .unwrap_or(0),
                         &self.gpu_status,
                         (self.spacemouse.visible()
-                            || self.spacemouse_preferences.mode
+                            || self.spacemouse_ui.preferences.mode
                                 != crate::input::spacemouse::NavigationMode::Auto)
                             .then(|| {
                                 crate::ui::statusbar::spacemouse::view(
-                                    self.spacemouse_preferences,
+                                    self.spacemouse_ui.preferences,
                                     self.spacemouse.status(),
-                                    self.spacemouse_paused,
+                                    self.spacemouse_ui.paused,
                                     self.spacemouse_label(),
                                     self.spacemouse_sheet(),
                                 )
@@ -4549,7 +4549,7 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         let point_cloud_reads = Subscription::none();
         iced::Subscription::batch([
-            if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
+            if self.spacemouse.moving() && self.spacemouse_ui.focused && !self.spacemouse_ui.paused {
                 crate::app::tool_windows::main_window_frames().map(Message::SpaceMouseFrame)
             } else {
                 Subscription::none()

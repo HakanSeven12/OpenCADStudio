@@ -707,7 +707,7 @@ impl OpenCADStudio {
             Some(FieldTarget::AttdefEdit) if self.attdef_edit.is_some() => {
                 Some(crate::app::ModalKind::AttDefEdit)
             }
-            Some(FieldTarget::AttrEditor) if self.attr_editor_session.is_some() => {
+            Some(FieldTarget::AttrEditor) if self.attr_editor_ui.session.is_some() => {
                 Some(crate::app::ModalKind::AttributeEditor)
             }
             _ => None,

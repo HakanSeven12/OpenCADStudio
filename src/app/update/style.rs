@@ -132,7 +132,7 @@ impl OpenCADStudio {
             .iter()
             .map(|style| (style.name.clone(), style.handle))
             .collect();
-        let wanted = self.ts_cell.clone();
+        let wanted = self.table_style_ui.cell.clone();
         let Some(style) = self.tablestyle_mut(tab) else {
             return;
         };
@@ -158,22 +158,22 @@ impl OpenCADStudio {
             .cell_style(&wanted)
             .or_else(|| style.cell_style(document::objects::DATA_CELL_STYLE))
             .cloned();
-        self.ts_description = description;
+        self.table_style_ui.description = description;
         let Some(cell) = cell else {
             return;
         };
         let data = &cell.cell_style;
         let format = &data.content_format;
         use crate::ui::style::mleaderstyle::trim_number;
-        self.ts_cell = cell.name.clone();
-        self.ts_cell_height = trim_number(format.text_height);
-        self.ts_cell_angle = trim_number(format.rotation.to_degrees());
+        self.table_style_ui.cell = cell.name.clone();
+        self.table_style_ui.cell_height = trim_number(format.text_height);
+        self.table_style_ui.cell_angle = trim_number(format.rotation.to_degrees());
         let (horizontal, vertical) = data.margins().unwrap_or(margins);
-        self.ts_cell_hmargin = trim_number(horizontal);
-        self.ts_cell_vmargin = trim_number(vertical);
+        self.table_style_ui.cell_hmargin = trim_number(horizontal);
+        self.table_style_ui.cell_vmargin = trim_number(vertical);
         // The Borders page's line properties start over on every cell style,
         // their spacing a quarter of the data text height.
-        self.ts_border = crate::ui::style::tablestyle::BorderDraft::new(0.25 * data_height);
+        self.table_style_ui.border = crate::ui::style::tablestyle::BorderDraft::new(0.25 * data_height);
     }
 
     /// Edits the cell style the table style editor shows, then refreshes
@@ -183,7 +183,7 @@ impl OpenCADStudio {
         edit: impl FnOnce(&mut document::objects::NamedTableCellStyle),
     ) {
         let i = self.active_tab;
-        let name = self.ts_cell.clone();
+        let name = self.table_style_ui.cell.clone();
         if let Some(style) = self.tablestyle_mut(i) {
             if let Some(cell) = style.cell_style_mut(&name) {
                 edit(cell);
@@ -721,7 +721,7 @@ impl OpenCADStudio {
                         cell.cell_style.content_format.text_height = height;
                     });
                 }
-                self.ts_cell_height = value;
+                self.table_style_ui.cell_height = value;
             }
             "angle" => {
                 // Kept within a turn: 400 reads as 40.
@@ -731,16 +731,16 @@ impl OpenCADStudio {
                             angle.rem_euclid(360.0).to_radians();
                     });
                 }
-                self.ts_cell_angle = value;
+                self.table_style_ui.cell_angle = value;
             }
             "hmargin" | "vmargin" => {
                 if field == "hmargin" {
-                    self.ts_cell_hmargin = value;
+                    self.table_style_ui.cell_hmargin = value;
                 } else {
-                    self.ts_cell_vmargin = value;
+                    self.table_style_ui.cell_vmargin = value;
                 }
-                let horizontal = self.ts_cell_hmargin.trim().parse::<f64>().ok();
-                let vertical = self.ts_cell_vmargin.trim().parse::<f64>().ok();
+                let horizontal = self.table_style_ui.cell_hmargin.trim().parse::<f64>().ok();
+                let vertical = self.table_style_ui.cell_vmargin.trim().parse::<f64>().ok();
                 if let (Some(h), Some(v)) = (horizontal, vertical) {
                     if h >= 0.0 && v >= 0.0 {
                         self.edit_table_cell_style(|cell| cell.cell_style.set_margins(h, v));

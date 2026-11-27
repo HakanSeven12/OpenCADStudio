@@ -1108,11 +1108,11 @@ mod attedit_one_at_a_time_tests {
         let _ = app.feed_script_line("");
 
         assert_eq!(
-            app.attr_editor_handle,
+            app.attr_editor_ui.handle,
             Some(beta),
             "the editor must open on the reference the block name specification names"
         );
-        assert_eq!(app.attr_editor_rows.len(), 1);
+        assert_eq!(app.attr_editor_ui.rows.len(), 1);
     }
 }
 
@@ -2016,12 +2016,12 @@ mod attedit_editor_tests {
         let _ = app.run_command_line("EATTEDIT");
 
         assert_eq!(
-            app.attr_editor_rows.len(),
+            app.attr_editor_ui.rows.len(),
             1,
             "the editor opened on the reference's one attribute"
         );
         assert_eq!(
-            app.attr_editor_rows[0].value,
+            app.attr_editor_ui.rows[0].value,
             "old",
             "the row shows the attribute's current value"
         );

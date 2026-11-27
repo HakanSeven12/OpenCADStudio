@@ -157,9 +157,11 @@ pub fn radio_row<'a, T: Copy + PartialEq + 'a>(
             .spacing(km::CHOICE_GAP)
             .width(Length::Fill),
     )
+    // A section bar after the tiles brings its own CATEGORY_GAP, as after
+    // the last row of a group.
     .padding(Padding {
         top: km::TOOL_GAP,
-        bottom: km::TOOL_GAP,
+        bottom: 0.0,
         left: km::GRID_INSET_L,
         right: km::GRID_INSET_R,
     })

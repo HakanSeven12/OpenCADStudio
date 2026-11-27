@@ -28,9 +28,9 @@ pub(crate) fn space_rebound_off_commandspace(bindings: &FxHashMap<String, String
 }
 
 #[cfg(target_os = "macos")]
-const ACCEL: &str = "CMD";
+pub(super) const ACCEL: &str = "CMD";
 #[cfg(not(target_os = "macos"))]
-const ACCEL: &str = "CTRL";
+pub(super) const ACCEL: &str = "CTRL";
 
 /// Every active binding shipped with a fresh configuration. Values are command
 /// names where possible; the small set of input actions is resolved below.
@@ -326,7 +326,7 @@ pub(super) fn is_global_key(key: &str) -> bool {
             && !matches!(key.rsplit('+').next(), Some("A" | "C" | "V" | "X")))
 }
 
-fn is_named_key(key: &str) -> bool {
+pub(super) fn is_named_key(key: &str) -> bool {
     matches!(
         key,
         "ENTER"
@@ -794,8 +794,8 @@ mod suggestion_tests {
         assert_eq!(shown(&typed, "Apply"), Some(apply_before), "Apply moved");
     }
 
-    /// The lowest row the window shows has no room under it: its list still
-    /// shows whole, above the action bar.
+    /// The lowest row the table shows: its list still shows whole, and
+    /// never covers the Apply buttons.
     #[test]
     fn the_lowest_row_shows_its_whole_list() {
         let plain = editor_with_typed(0, "");
@@ -806,13 +806,23 @@ mod suggestion_tests {
             .expect("a row shows");
         assert!(lowest > 5 && lowest < ROWS - 1, "the table scrolls: {lowest}");
 
+        // The list floats over what lies under the table (it may reach the
+        // footer row), but shows whole, inside the window, and never covers
+        // the Apply buttons.
+        let apply_exit = shown(&plain, "Apply & Exit").expect("Apply & Exit shows");
         let typed = editor_with_typed(lowest, "lin");
         for name in &offered(&typed, "lin") {
             let row = shown(&typed, name).unwrap_or_else(|| panic!("{name} does not show"));
             assert!(
-                row.height > 10.0 && row.y + row.height <= apply.y,
-                "{name} {row:?} is cut off or over the action bar {apply:?}"
+                row.height > 10.0 && row.y + row.height <= 900.0,
+                "{name} {row:?} is cut off"
             );
+            for button in [apply, apply_exit] {
+                assert!(
+                    row.intersection(&button).is_none(),
+                    "{name} {row:?} covers an Apply button {button:?}"
+                );
+            }
         }
     }
 

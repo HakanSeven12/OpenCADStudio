@@ -953,6 +953,7 @@ impl OpenCADStudio {
                     .as_ref()
                     .and_then(|command| command.selection_hover_preview(&tab.scene, None))
                 {
+                    tab.scene.set_command_preview_hidden(&preview.hidden);
                     tab.scene.set_command_preview_hatches(preview.hatches);
                     tab.scene.set_preview_wires(preview.wires);
                 }

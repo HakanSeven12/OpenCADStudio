@@ -162,6 +162,11 @@ impl CadCommand for MatchPropCommand {
                     .wires
                     .extend(scene.matchprop_target_glow_wires(&wires));
                 preview.wires.append(&mut wires);
+                // The restyled fill replaces the target's own: hide the
+                // original so its old pattern does not show through.
+                if !hatches.is_empty() {
+                    preview.hidden.push(target);
+                }
                 preview.hatches = hatches;
             }
         }
@@ -189,3 +194,69 @@ impl CadCommand for MatchPropCommand {
 inventory::submit!(crate::command::CommandRegistration {
     names: &["MATCHPROP"]
 }); // MatchPropCommand
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+    use document::types::Vector2;
+    use document::EntityType;
+
+    fn square_hatch(x0: f64, name: &str, scale: f64) -> EntityType {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = false;
+        hatch.pattern.name = name.to_string();
+        hatch.pattern_scale = scale;
+        let mut path = BoundaryPath::new();
+        path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            [[x0, 0.0], [x0 + 10.0, 0.0], [x0 + 10.0, 10.0], [x0, 10.0]]
+                .into_iter()
+                .map(|p| Vector2::new(p[0], p[1]))
+                .collect(),
+            true,
+        )));
+        hatch.paths.push(path);
+        EntityType::Hatch(Box::new(hatch))
+    }
+
+    fn two_hatches() -> (Scene, Handle, Handle) {
+        let mut scene = Scene::new();
+        let left = scene.add_entity(square_hatch(0.0, "AR-CONC", 2.0));
+        let right = scene.add_entity(square_hatch(20.0, "ANSI31", 1.0));
+        (scene, left, right)
+    }
+
+    #[test]
+    fn source_phase_has_no_property_preview() {
+        let (scene, left, right) = two_hatches();
+        let cmd = MatchPropCommand::new(Handle::NULL);
+        assert!(!cmd.selection_hover_preview_enabled());
+        assert!(cmd.selection_hover_preview(&scene, Some(right)).is_none());
+        // Hover during the source pick only highlights the hovered object.
+        assert!(cmd.entity_pick_acquire_previews(&scene, right).len() > 0);
+        let _ = left;
+    }
+
+    #[test]
+    fn destination_hover_previews_target_with_source_pattern_and_hides_original() {
+        let (scene, left, right) = two_hatches();
+        let cmd = MatchPropCommand::new(left);
+        let preview = cmd
+            .selection_hover_preview(&scene, Some(right))
+            .expect("destination phase previews");
+        assert_eq!(preview.hatches.len(), 1, "only the destination is overlaid");
+        assert_eq!(preview.hatches[0].entity, Some(right));
+        assert_eq!(preview.hatches[0].name, "AR-CONC");
+        assert_eq!(preview.hidden, vec![right], "original fill must not show through");
+    }
+
+    #[test]
+    fn destination_phase_without_hover_or_over_source_overlays_nothing() {
+        let (scene, left, _) = two_hatches();
+        let cmd = MatchPropCommand::new(left);
+        let none = cmd.selection_hover_preview(&scene, None).unwrap();
+        assert!(none.hatches.is_empty() && none.hidden.is_empty());
+        let on_source = cmd.selection_hover_preview(&scene, Some(left)).unwrap();
+        assert!(on_source.hatches.is_empty() && on_source.hidden.is_empty());
+    }
+}

@@ -13,11 +13,35 @@ use std::time::UNIX_EPOCH;
 
 const SAMPLE_BYTES: usize = 64 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct FileFingerprint {
     len: u64,
     modified_ns: Option<u128>,
     sample_hash: u64,
+}
+
+/// Same length, same sampled content and the same modification time. A
+/// modification time cut to whole seconds counts as the same time: sync
+/// clients write it back that way after uploading an unchanged file, which
+/// otherwise stops the next save as "changed outside Open CAD Studio".
+impl PartialEq for FileFingerprint {
+    fn eq(&self, other: &Self) -> bool {
+        self.len == other.len
+            && self.sample_hash == other.sample_hash
+            && same_modified(self.modified_ns, other.modified_ns)
+    }
+}
+
+impl Eq for FileFingerprint {}
+
+fn same_modified(a: Option<u128>, b: Option<u128>) -> bool {
+    const SECOND_NS: u128 = 1_000_000_000;
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            a == b || ((a % SECOND_NS == 0 || b % SECOND_NS == 0) && a / SECOND_NS == b / SECOND_NS)
+        }
+        (a, b) => a == b,
+    }
 }
 
 impl FileFingerprint {
@@ -425,6 +449,30 @@ mod tests {
         drop(reader);
         drop(lease);
         let _ = std::fs::remove_file(sidecar_path(&path));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fingerprint_accepts_modification_time_cut_to_whole_seconds() {
+        use std::time::Duration;
+        let path = unique_path("fingerprint-seconds.dwg");
+        std::fs::write(&path, b"abcd").unwrap();
+        let file = OpenOptions::new().write(true).open(&path).unwrap();
+        let stamp = UNIX_EPOCH + Duration::new(1_795_727_405, 123_456_789);
+        file.set_modified(stamp).unwrap();
+        let saved = FileFingerprint::capture(&path).unwrap();
+        // What a sync client writes back after uploading the unchanged file.
+        file.set_modified(UNIX_EPOCH + Duration::from_secs(1_795_727_405))
+            .unwrap();
+        assert_eq!(saved, FileFingerprint::capture(&path).unwrap());
+        // Another second, or another sub-second time, is a change.
+        file.set_modified(UNIX_EPOCH + Duration::from_secs(1_795_727_406))
+            .unwrap();
+        assert_ne!(saved, FileFingerprint::capture(&path).unwrap());
+        file.set_modified(UNIX_EPOCH + Duration::new(1_795_727_405, 5))
+            .unwrap();
+        assert_ne!(saved, FileFingerprint::capture(&path).unwrap());
+        drop(file);
         let _ = std::fs::remove_file(path);
     }
 

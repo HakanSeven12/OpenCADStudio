@@ -543,7 +543,8 @@ impl OpenCADStudio {
                     &self.command_line.dynamic_commands,
                     &self.command_aliases,
                 );
-                sized_flow(ex, 640, 440, |flow| {
+                let width = crate::ui::window::ribbon_customize::DIALOG_WIDTH;
+                sized_flow_min(ex, width, 440, |flow| {
                     crate::ui::window::ribbon_customize::view_window(
                         state,
                         &suggestions,
@@ -2026,7 +2027,8 @@ impl OpenCADStudio {
                 &self.command_aliases,
             )
         });
-        sized_flow(ex, 720, 520, |flow| {
+        let width = crate::ui::window::shortcuts::SHORTCUTS_WIDTH;
+        sized_flow_min(ex, width, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
                 &self.shortcut_filter,
@@ -2119,6 +2121,24 @@ fn duplicate_rows(
         .collect();
     let duplicate_set = duplicates.iter().map(|(key, _)| key.clone()).collect();
     (duplicate_set, duplicates)
+}
+
+/// [`sized_flow`] at a fixed `width` that is also its minimum: the dialog
+/// never lays out narrower (capped by the window), so a footer row keeps
+/// its width.
+fn sized_flow_min<'a>(
+    extra: iced::Vector,
+    width: f32,
+    max_height: u16,
+    mut build: impl FnMut(crate::ui::modal::ModalSizing) -> Element<'a, Message>,
+) -> Element<'a, Message> {
+    crate::ui::modal::intrinsic_with_min(
+        build(crate::ui::modal::ModalSizing::INTRINSIC),
+        build(crate::ui::modal::ModalSizing::FILL),
+        iced::Size::new(width, max_height as f32),
+        extra,
+        iced::Size::new(width, 0.0),
+    )
 }
 
 /// Build a dialog with an explicit initial size cap. Use this for dense forms

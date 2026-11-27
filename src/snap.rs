@@ -622,6 +622,15 @@ impl Snapper {
             .push((hit.snap_type, hit.model_point.unwrap_or(hit.world)));
     }
 
+    /// Shift+Tab: offer the last snap stepped past again. Returns `false`
+    /// when no snap was stepped past.
+    pub(crate) fn unskip_last_in_cycle(&mut self) -> bool {
+        self.cycle
+            .as_mut()
+            .and_then(|cycle| cycle.skipped.pop())
+            .is_some()
+    }
+
     /// The number of snaps skipped in the current cycle.
     pub(crate) fn cycle_len(&self) -> usize {
         self.cycle.as_ref().map_or(0, |cycle| cycle.skipped.len())

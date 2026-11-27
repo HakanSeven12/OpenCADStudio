@@ -1731,6 +1731,27 @@ impl OpenCADStudio {
         Ok(Task::batch(tasks))
     }
 
+    /// A key press as the keyboard sends it: the name is normalized the way
+    /// Customize stores bindings, then runs as `ShortcutPressed`.
+    pub(super) fn control_key(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        use crate::app::shortcuts::{is_named_key, normalize_key, ACCEL};
+        let name = string(req, "key")?;
+        let name = name
+            .split('+')
+            .map(|part| if part.trim().eq_ignore_ascii_case("ACCEL") { ACCEL } else { part })
+            .collect::<Vec<_>>()
+            .join("+");
+        let key = normalize_key(&name);
+        let base = key.rsplit('+').next().unwrap_or("");
+        let modifier = matches!(base, "CTRL" | "CMD" | "ALT" | "SHIFT");
+        if modifier || !(is_named_key(base) || base.chars().count() == 1) {
+            return Err(failure("unknown_key", &format!("Unknown key name: {name}")));
+        }
+        let task = self.update(Message::ShortcutPressed(key.clone()));
+        self.set_control_result(json!({"key": key}));
+        Ok(task)
+    }
+
     pub(super) fn control_set_property(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         self.refresh_properties();
         let field = string(req, "field")?;

@@ -354,6 +354,25 @@ impl OpenCADStudio {
         let dyn_ref = self.tabs[i].dyn_ref;
         self.tabs[i].last_point_screen = anchor.map(&proj);
         self.tabs[i].dyn_ref_screen = dyn_ref.map(&proj);
+        // A command's selection window picked by points (STRETCH's crossing
+        // window): its first corner is a drawing point, so the marquee
+        // stays on it when the view pans or zooms, like a box selection.
+        let window_first = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|cmd| cmd.window_first_corner());
+        if let Some(first) = window_first {
+            if let Some(marquee) = self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .gesture
+                .preview_box
+                .as_mut()
+            {
+                marquee.0 = proj(first);
+            }
+        }
     }
 
     /// Re-pin an active box-selection anchor to its stored world point after the

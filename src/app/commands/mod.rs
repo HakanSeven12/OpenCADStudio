@@ -2279,6 +2279,45 @@ mod stretch_preselection_tests {
         assert!(!xs.contains(&4.0), "no corner left at x = 4: {xs:?}");
     }
 
+    /// STRETCH's crossing window keeps its first corner on the drawing when
+    /// the view pans before the second corner: the marquee was left at the
+    /// pixel the corner had, so it covered other objects than the window
+    /// that the second pick selects.
+    #[test]
+    fn the_crossing_window_marquee_follows_the_drawing_on_pan() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.dispatch_command("STRETCH");
+        let first = DVec3::new(3.0, 4.0, 0.0);
+        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(first);
+        let _ = app.apply_cmd_result(res);
+        assert_eq!(
+            app.tabs[i].active_cmd.as_ref().and_then(|cmd| cmd.window_first_corner()),
+            Some(first),
+            "STRETCH waits for the second corner"
+        );
+        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let on_screen = |app: &OpenCADStudio| {
+            let p = app.tabs[i].scene.camera.borrow().project(first, bounds).unwrap();
+            iced::Point::new(p.x, p.y)
+        };
+        let before = on_screen(&app);
+        // the marquee as the last cursor move drew it
+        app.tabs[i].scene.selection.borrow_mut().gesture.preview_box =
+            Some((before, iced::Point::new(700.0, 500.0), true));
+
+        app.pan_active_view(i, 120.0, -80.0, std::time::Instant::now());
+
+        let after = on_screen(&app);
+        assert!((after.x - before.x).abs() > 50.0, "the pan moved the drawing: {before:?} {after:?}");
+        let (anchor, _, _) = app.tabs[i].scene.selection.borrow().gesture.preview_box.unwrap();
+        assert!(
+            (anchor.x - after.x).abs() < 0.5 && (anchor.y - after.y).abs() < 0.5,
+            "marquee corner {anchor:?}, first corner now at {after:?}"
+        );
+    }
+
     #[test]
     fn preselected_without_crossing_window_moves_rigidly() {
         let mut app = fresh();

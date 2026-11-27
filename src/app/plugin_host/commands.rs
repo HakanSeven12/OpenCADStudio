@@ -36,6 +36,7 @@ impl<'a> HostSession<'a> {
         let mtext_before = self.app.mtext_editor.is_some();
         let modal_before = self.app.active_modal.is_some();
         self.app.command_line.unconsumed.clear();
+        self.app.script_command_rejected = None;
         let task = match request {
             // API v13: `RunQuiet` is `Run` with the command-line echo
             // suppressed for the whole request (see `run_command`); errors
@@ -49,7 +50,7 @@ impl<'a> HostSession<'a> {
                     return Err("a command is already active; cancel it first".to_owned());
                 }
                 self.app.suppress_plugin_dispatch = true;
-                let task = self.app.run_command_line(&line);
+                let task = self.app.run_script_command_line(&line, true, true);
                 self.app.suppress_plugin_dispatch = false;
                 task
             }
@@ -129,6 +130,9 @@ impl<'a> HostSession<'a> {
             }
         };
         self.app.drive_headless_task(task)?;
+        if let Some(err) = self.app.script_command_rejected.take() {
+            return Err(err);
+        }
         Ok(self.finish_command_step(
             before,
             error_revision,
@@ -302,6 +306,7 @@ impl<'a> HostSession<'a> {
         //    PAUSE included. Leaving that here rather than repeating it keeps a
         //    scripted line and a typed one on the same path.
         let tab = self.tab;
+        self.app.script_command_rejected = None;
         self.app.suppress_plugin_dispatch = true;
         let task = if self.app.tabs[tab].active_cmd.is_some() {
             // A running command owns these tokens: they answer its prompts.
@@ -312,14 +317,15 @@ impl<'a> HostSession<'a> {
             self.app.tabs[tab].pending_pause_tokens = Some(queue);
             self.app.drain_pending_pause_tokens(tab)
         } else {
-            self.app.run_command_line_streaming(trimmed, has_newline)
+            self.app.run_script_command_line(trimmed, has_newline, true)
         };
         let _ = self.app.drive_headless_task(task);
         self.app.suppress_plugin_dispatch = false;
+        let rejected = self.app.script_command_rejected.take().is_some();
 
         self.app.refresh_layer_panel();
         self.publish_document_view();
-        true
+        !rejected
     }
 
     // ── XRecord objects (API v8, additive) ────────────────────────────────────

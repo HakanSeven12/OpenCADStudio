@@ -1228,7 +1228,7 @@ impl OpenCADStudio {
     /// terminated as if Enter were pressed. Shared by the GUI command line and
     /// the headless automation feeder so both behave identically.
     pub(in crate::app) fn run_command_line(&mut self, cmd: &str) -> Task<Message> {
-        self.run_command_line_impl(cmd, true, true)
+        self.run_command_line_impl(cmd, true, true, false)
     }
 
     /// `run_command_line` for a caller that sends one command per call. A word
@@ -1237,7 +1237,7 @@ impl OpenCADStudio {
     /// sending `BEDIT CONSTTEST` means one command, and running `CONSTTEST` as
     /// its own command answers with a failure the caller never asked for.
     pub(in crate::app) fn run_one_command_line(&mut self, cmd: &str) -> Task<Message> {
-        self.run_command_line_impl(cmd, true, false)
+        self.run_command_line_impl(cmd, true, false, false)
     }
 
     /// `run_command_line`, with the trailing Enter left off when `finish` is
@@ -1249,7 +1249,91 @@ impl OpenCADStudio {
         cmd: &str,
         finish: bool,
     ) -> Task<Message> {
-        self.run_command_line_impl(cmd, finish, true)
+        self.run_command_line_impl(cmd, finish, true, false)
+    }
+
+    pub(in crate::app) fn check_script_command_allowed(&self, line: &str) -> Result<(), String> {
+        fn normalize_script_verb(token: &str) -> String {
+            let stripped = token.trim_start_matches(['\'', '_', '.']);
+            let base = stripped.split(':').next().unwrap_or(stripped);
+            base.to_ascii_uppercase()
+        }
+
+        fn check_denied_script_verb(verb: &str) -> Result<(), String> {
+            const DENIED: &[&str] = &[
+                "QUIT",
+                "EXIT",
+                "CLOSE",
+                "CLOSEALL",
+                "NEW",
+                "QNEW",
+                "OPEN",
+                "OPEN_RECENT",
+                "SAVE",
+                "QSAVE",
+                "SAVEAS",
+                "SAVEALL",
+                "RECOVER",
+                "SCRIPT",
+                "SCR",
+                "RUNSCRIPT",
+                "SCRIPTCOMMANDS",
+            ];
+            if DENIED.contains(&verb) || verb.starts_with("PY_") {
+                Err(format!("the command {verb} cannot be run from a script"))
+            } else {
+                Ok(())
+            }
+        }
+
+        let Some(raw_token) = line.split_whitespace().next() else {
+            return Ok(());
+        };
+        let raw_verb = normalize_script_verb(raw_token);
+        check_denied_script_verb(&raw_verb)?;
+
+        let stripped = raw_token.trim_start_matches(['\'', '_', '.']);
+        let base = stripped.split(':').next().unwrap_or(stripped);
+        let resolved = self
+            .resolve_alias(base)
+            .or_else(|| self.resolve_alias(stripped));
+        let resolved_verb = resolved
+            .as_deref()
+            .and_then(|res| res.split_whitespace().next())
+            .map(normalize_script_verb);
+        if let Some(ref verb) = resolved_verb {
+            check_denied_script_verb(verb)?;
+        }
+
+        let is_setvar = raw_verb.trim_start_matches('-') == "SETVAR"
+            || resolved_verb
+                .as_deref()
+                .is_some_and(|v| v.trim_start_matches('-') == "SETVAR");
+        if is_setvar {
+            let second = resolved
+                .as_deref()
+                .and_then(|res| res.split_whitespace().nth(1))
+                .or_else(|| line.split_whitespace().nth(1));
+            if second.is_some_and(|arg| {
+                arg.trim_start_matches(['\'', '_', '.'])
+                    .eq_ignore_ascii_case("SCRIPTCOMMANDS")
+            }) {
+                return Err(
+                    "the command SETVAR SCRIPTCOMMANDS cannot be run from a script".to_owned(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::app) fn run_script_command_line(
+        &mut self,
+        cmd: &str,
+        finish: bool,
+        chain: bool,
+    ) -> Task<Message> {
+        self.script_command_rejected = None;
+        self.run_command_line_impl(cmd, finish, chain, true)
     }
 
     /// `chain`: words a command that took none leaves behind start the next
@@ -1260,7 +1344,21 @@ impl OpenCADStudio {
         cmd: &str,
         finish: bool,
         chain: bool,
+        script_restricted: bool,
     ) -> Task<Message> {
+        if script_restricted {
+            if !self.script_commands {
+                let err = "running commands from a script is turned off (SCRIPTCOMMANDS = 0); turn it on at the command line with SCRIPTCOMMANDS 1".to_owned();
+                self.script_command_rejected = Some(err.clone());
+                self.command_line.push_error(&err);
+                return Task::none();
+            }
+            if let Err(err) = self.check_script_command_allowed(cmd) {
+                self.script_command_rejected = Some(err.clone());
+                self.command_line.push_error(&err);
+                return Task::none();
+            }
+        }
         let trimmed = cmd.trim_start();
         if trimmed
             .split_whitespace()
@@ -1271,6 +1369,7 @@ impl OpenCADStudio {
                 &format!("-TABLEDIT{}", &trimmed[8..]),
                 finish,
                 chain,
+                script_restricted,
             );
         }
         // A plugin command runs beside the window: nothing new until it ends.
@@ -1296,6 +1395,7 @@ impl OpenCADStudio {
                     line: cmd.to_string(),
                     finish,
                     chain,
+                    script_restricted,
                 })
             {
                 return task;
@@ -1436,6 +1536,13 @@ impl OpenCADStudio {
             if self.pending_setvar.is_some() && self.pending_setvar != pending_before {
                 self.drop_unchanged_pending_history(i);
                 let name = self.pending_setvar.take().unwrap_or_default();
+                if script_restricted && name.eq_ignore_ascii_case("SCRIPTCOMMANDS") {
+                    let err =
+                        "the command SETVAR SCRIPTCOMMANDS cannot be run from a script".to_owned();
+                    self.script_command_rejected = Some(err.clone());
+                    self.command_line.push_error(&err);
+                    return start_task;
+                }
                 self.command_line.restate_last_command(tokens[0]);
                 self.command_line.answer_last_prompt(tokens[1]);
                 let answer = self.dispatch_command(&format!("SETVAR {name} {}", tokens[1]));
@@ -1451,7 +1558,7 @@ impl OpenCADStudio {
                 return Task::batch([
                     start_task,
                     answer,
-                    self.run_command_line_impl(&rest, finish, chain),
+                    self.run_command_line_impl(&rest, finish, chain, script_restricted),
                 ]);
             }
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
@@ -1469,7 +1576,10 @@ impl OpenCADStudio {
                 return start_task;
             }
             let rest = tokens[1..].join(" ");
-            return Task::batch([start_task, self.run_command_line_impl(&rest, finish, chain)]);
+            return Task::batch([
+                start_task,
+                self.run_command_line_impl(&rest, finish, chain, script_restricted),
+            ]);
         }
         let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
         let finish_task = self.finish_active_command(&toks, finish);

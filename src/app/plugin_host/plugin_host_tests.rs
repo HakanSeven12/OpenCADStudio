@@ -5001,4 +5001,123 @@ fn undo_group_keeps_interactive_plugin_command_commit_in_one_step() {
     assert_eq!(app.tabs[0].scene.document.entities().count(), 2);
 }
 
+#[test]
+fn script_command_bypasses_are_blocked() {
+    use ocs_plugin_api::host::CommandRequest;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+
+    for blocked in [
+        "QUIT",
+        "OPEN_RECENT:/etc/passwd",
+        "'.QUIT",
+        "'_SAVEAS",
+        "..OPEN",
+        "SCR",
+        "SCRIPTCOMMANDS 0",
+        "SETVAR SCRIPTCOMMANDS 0",
+        "REGEN QUIT",
+        "REGEN _EXIT",
+        "REGEN OPEN_RECENT:/tmp/foo.dwg",
+        "REGEN PY_EVAL 1+1",
+    ] {
+        let outcome = {
+            let mut host = HostSession::new(&mut app, 0);
+            host.run_command(CommandRequest::Run {
+                line: blocked.to_owned(),
+            })
+        };
+        assert!(
+            outcome.is_err(),
+            "run_command must reject `{blocked}` (got {outcome:?})"
+        );
+        let executed = {
+            let mut host = HostSession::new(&mut app, 0);
+            host.execute_command(blocked)
+        };
+        assert!(!executed, "execute_command must reject `{blocked}`");
+    }
+
+    assert!(OpenCADStudio::is_valid_py_resume_script("PY_RESUME 7 /tmp/a.py"));
+    assert!(!OpenCADStudio::is_valid_py_resume_script(
+        "PY_RESUME 7 /tmp/a.py\nQUIT"
+    ));
+    assert!(!OpenCADStudio::is_valid_py_resume_script("QUIT"));
+
+    // CommandStep::Dispatch / CmdResult::Script coming from an active PLUGIN command
+    // must be blocked even on denied verbs or when SCRIPTCOMMANDS = 0.
+    struct DummyInteractive;
+    impl ocs_plugin_api::host::InteractiveCommand for DummyInteractive {
+        fn prompt(&self) -> String {
+            "Prompt:".to_owned()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
+            ocs_plugin_api::host::CommandStep::Dispatch("QUIT".to_owned())
+        }
+    }
+    {
+        use ocs_plugin_api::host::HostApi as _;
+        let mut host = HostSession::new(&mut app, 0);
+        host.start_interactive(Box::new(DummyInteractive));
+    }
+    let before_errors = app.command_line.error_revision;
+    let _ = app.handle_script("QUIT".to_owned());
+    assert!(
+        app.command_line.error_revision > before_errors,
+        "handle_script from PLUGIN must record error on QUIT"
+    );
+
+    // Non-denied multi-step dispatch must still be blocked when SCRIPTCOMMANDS = 0.
+    {
+        use ocs_plugin_api::host::HostApi as _;
+        let mut host = HostSession::new(&mut app, 0);
+        host.start_interactive(Box::new(DummyInteractive));
+    }
+    app.script_commands = false;
+    let before_errors = app.command_line.error_revision;
+    let _ = app.handle_script("REGEN".to_owned());
+    assert!(
+        app.command_line.error_revision > before_errors,
+        "handle_script from PLUGIN must respect SCRIPTCOMMANDS = 0"
+    );
+}
+
+#[test]
+fn embed_picture_rejects_paths_outside_allowed_roots_and_escaping_symlinks() {
+    use ocs_plugin_api::host::SolidOperation;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+
+    // 1x1 PNG bytes inside temp_dir should still be allowed by EmbedPicture checks
+    // (or fail in decoder cleanly inside temp_dir).
+    let mut host = HostSession::new(&mut app, 0);
+    let outside_res = host.solid_operation(SolidOperation::EmbedPicture {
+        path: "/etc/passwd".to_owned(),
+        origin: [0.0, 0.0, 0.0],
+        width: 10.0,
+        layer: None,
+    });
+    assert!(outside_res.is_err());
+
+    #[cfg(unix)]
+    {
+        let link_path = std::env::temp_dir().join(format!(
+            "ocs_embed_escape_{}.png",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&link_path);
+        std::os::unix::fs::symlink("/etc/passwd", &link_path).unwrap();
+        let sym_res = host.solid_operation(SolidOperation::EmbedPicture {
+            path: link_path.to_string_lossy().into_owned(),
+            origin: [0.0, 0.0, 0.0],
+            width: 10.0,
+            layer: None,
+        });
+        let _ = std::fs::remove_file(&link_path);
+        assert!(sym_res.is_err());
+    }
+}
+
 mod plugin_panels;

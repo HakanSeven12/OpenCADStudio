@@ -232,8 +232,9 @@ impl<'a> HostSession<'a> {
                 if layer.as_ref().is_some_and(|name| name.trim().is_empty()) {
                     return Err("layer name is empty".into());
                 }
+                let allowed_path = self.resolve_allowed_picture_path(&path)?;
                 let picture =
-                    crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
+                    crate::io::ole_embed::EmbeddedImage::from_file(&allowed_path)
                         .map_err(|error| format!("cannot read the picture {path:?}: {error}"))?;
                 let (upper_left, lower_right) = crate::io::ole_embed::corners_from_placement(
                     document::types::Vector3::new(origin[0], origin[1], origin[2]),
@@ -453,6 +454,60 @@ impl<'a> HostSession<'a> {
                 .ok_or("the source is not a planar profile")?;
         let layer = layer.unwrap_or_else(|| entity.common().layer.clone());
         Ok((entity, plane, loops, closed, layer))
+    }
+
+    fn resolve_allowed_picture_path(&self, raw_path: &str) -> Result<std::path::PathBuf, String> {
+        if raw_path.is_empty() || raw_path.contains('\0') {
+            return Err(format!("cannot read the picture {raw_path:?}: invalid path"));
+        }
+        let doc_dir = self
+            .document_path(self.tab_id())
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
+        let mut allowed_roots = Vec::new();
+        if let Some(ref dir) = doc_dir {
+            if let Ok(canon) = std::fs::canonicalize(dir) {
+                allowed_roots.push(canon);
+            }
+        }
+        if let Ok(temp_canon) = std::fs::canonicalize(std::env::temp_dir()) {
+            if !allowed_roots.contains(&temp_canon) {
+                allowed_roots.push(temp_canon);
+            }
+        }
+        if let Some(extra) = std::env::var_os("OCS_PYTHON_ASSET_DIR").filter(|v| !v.is_empty()) {
+            if let Ok(canon) = std::fs::canonicalize(extra) {
+                if !allowed_roots.contains(&canon) {
+                    allowed_roots.push(canon);
+                }
+            }
+        }
+
+        let input = std::path::Path::new(raw_path);
+        let candidate = if input.is_relative() {
+            let Some(ref dir) = doc_dir else {
+                return Err(format!(
+                    "cannot read the picture {raw_path:?}: relative paths require a saved drawing"
+                ));
+            };
+            dir.join(input)
+        } else {
+            input.to_path_buf()
+        };
+        if let Ok(meta) = std::fs::symlink_metadata(&candidate) {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "cannot read the picture {raw_path:?}: symlinks are not allowed"
+                ));
+            }
+        }
+        let canon = std::fs::canonicalize(&candidate)
+            .map_err(|error| format!("cannot read the picture {raw_path:?}: {error}"))?;
+        if !allowed_roots.iter().any(|root| canon.starts_with(root)) {
+            return Err(format!(
+                "cannot read the picture {raw_path:?}: path is outside allowed drawing/temp directories"
+            ));
+        }
+        Ok(canon)
     }
 
     /// Record one undo step, add `result` and optionally erase the profile.

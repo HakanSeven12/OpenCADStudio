@@ -444,7 +444,7 @@ impl Scene {
                     .set(self.original_prune_floor);
 
                 if self.restore_wire_cache {
-                    *self.scene.wire_cache.borrow_mut() = self.original_wire_cache.take();
+                    *self.scene.caches.wire_cache.borrow_mut() = self.original_wire_cache.take();
                 }
                 if self.crossing_space {
                     self.scene.recolor_meshes();
@@ -464,13 +464,13 @@ impl Scene {
         let original_camera = self.camera.borrow().clone();
         let original_camera_generation = self.camera_generation;
         let original_wire_cache = if restore_wire_cache {
-            self.wire_cache.borrow_mut().take()
+            self.caches.wire_cache.borrow_mut().take()
         } else {
             None
         };
         let original_last_model_wire_gen = self.last_model_wire_gen.get();
         let original_prune_floor = self.transient_prune_floor.get();
-        let protected_resident_len = self.resident_wire_sets.borrow().len();
+        let protected_resident_len = self.caches.resident_wire_sets.borrow().len();
         let (
             original_ps_linetype_scaling,
             original_ps_limit_check,
@@ -875,25 +875,25 @@ impl Scene {
         // The sheet bounds derive from the paper size, scale and units just
         // written; drop the layout's cached copy so the next draw or plot
         // reads the new sheet instead of the one from before this change.
-        self.paper_viewport_cache.borrow_mut().remove(name);
+        self.caches.paper_viewport_cache.borrow_mut().remove(name);
         // The white sheet is cached per layout too, and only a geometry bump
         // would drop it; a page setup that does not bump (a plugin's) would
         // keep drawing the old sheet.
-        self.paper_sheet_render_cache.borrow_mut().remove(name);
-        self.display_plot_style_cache
+        self.caches.paper_sheet_render_cache.borrow_mut().remove(name);
+        self.caches.display_plot_style_cache
             .borrow_mut()
             .retain(|(layout_name, _), _| layout_name != name);
-        self.styled_wire_cache.borrow_mut().clear();
-        self.styled_hatch_cache.borrow_mut().clear();
-        self.styled_wire_fill_cache.borrow_mut().clear();
+        self.caches.styled_wire_cache.borrow_mut().clear();
+        self.caches.styled_hatch_cache.borrow_mut().clear();
+        self.caches.styled_wire_fill_cache.borrow_mut().clear();
         true
     }
 
     pub fn invalidate_display_plot_style(&self) {
-        self.display_plot_style_cache.borrow_mut().clear();
-        self.styled_wire_cache.borrow_mut().clear();
-        self.styled_hatch_cache.borrow_mut().clear();
-        self.styled_wire_fill_cache.borrow_mut().clear();
+        self.caches.display_plot_style_cache.borrow_mut().clear();
+        self.caches.styled_wire_cache.borrow_mut().clear();
+        self.caches.styled_hatch_cache.borrow_mut().clear();
+        self.caches.styled_wire_fill_cache.borrow_mut().clear();
     }
 
     /// PlotSettings store the paper size and plot margins in millimetres, but a
@@ -1078,7 +1078,7 @@ impl Scene {
             return None;
         }
 
-        if let Some(cache) = self.paper_viewport_cache.borrow().get(&self.current_layout) {
+        if let Some(cache) = self.caches.paper_viewport_cache.borrow().get(&self.current_layout) {
             if cache.epoch == self.geometry_epoch && cache.layout == self.current_layout {
                 return cache.paper_limits;
             }

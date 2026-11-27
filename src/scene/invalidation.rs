@@ -11,7 +11,7 @@ impl Scene {
         changes: Vec<(Handle, ChangeKind)>,
         full: bool,
     ) {
-        let pending_categories = std::mem::take(&mut *self.pending_removed_categories.borrow_mut());
+        let pending_categories = std::mem::take(&mut *self.caches.pending_removed_categories.borrow_mut());
         let removed_categories = if full {
             HashMap::default()
         } else {
@@ -25,7 +25,7 @@ impl Scene {
             }
             removed
         };
-        let mut ring = self.geometry_deltas.borrow_mut();
+        let mut ring = self.caches.geometry_deltas.borrow_mut();
         ring.push_back(GeometryDelta {
             epoch,
             changes,
@@ -50,7 +50,7 @@ impl Scene {
         if last_epoch < self.geometry_journal_floor.get() {
             return None;
         }
-        let ring = self.geometry_deltas.borrow();
+        let ring = self.caches.geometry_deltas.borrow();
         let mut state: HashMap<Handle, ChangeKind> = HashMap::default();
         for d in ring.iter() {
             if d.epoch <= last_epoch {
@@ -166,7 +166,7 @@ impl Scene {
         if self.entity_affects_text_cache(entity) {
             bits |= CACHE_CATEGORY_TEXT;
         }
-        self.pending_removed_categories
+        self.caches.pending_removed_categories
             .borrow_mut()
             .insert(handle, bits);
     }
@@ -201,7 +201,7 @@ impl Scene {
         if cached_epoch < self.geometry_journal_floor.get() {
             return false;
         }
-        let ring = self.geometry_deltas.borrow();
+        let ring = self.caches.geometry_deltas.borrow();
         for delta in ring.iter().filter(|delta| delta.epoch > cached_epoch) {
             if delta.full {
                 return false;
@@ -388,7 +388,7 @@ impl Scene {
                     .as_deref()
                     .is_some_and(|entity| matches!(entity, EntityType::Light(_)))
         }) {
-            self.lighting_cache.borrow_mut().clear();
+            self.caches.lighting_cache.borrow_mut().clear();
         }
         let mut changes: Vec<(Handle, ChangeKind)> = Vec::with_capacity(entities.len());
         for (h, before, after) in entities {
@@ -637,8 +637,8 @@ impl Scene {
         if hosts.is_empty() {
             return;
         }
-        if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() =
+        if self.caches.dependency_index_cache.borrow().is_none() {
+            *self.caches.dependency_index_cache.borrow_mut() =
                 Some(Arc::new(self.rebuild_dependency_index()));
         }
         // One pass over the drawing for all hosts: which block definition
@@ -715,7 +715,7 @@ impl Scene {
             };
             // A host inside a block definition is drawn by every reference
             // to that block, and a table by its own block of cell texts.
-            if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
+            if let Some(index) = self.caches.dependency_index_cache.borrow().as_ref() {
                 if let Some(users) = index.block_roots.get(name) {
                     targets.render_handles.extend(users.iter().copied());
                 }
@@ -815,7 +815,7 @@ impl Scene {
         // edit starts there: carrying the older base along made every
         // later switch miss it and rebuild all the definitions.
         let rebuilt_at_from = self
-            .block_defn_cache
+            .caches.block_defn_cache
             .borrow()
             .values()
             .any(|(epoch, _)| *epoch == from);
@@ -932,7 +932,7 @@ impl Scene {
 
     #[cfg(test)]
     pub(crate) fn has_resident_tess_memo(&self, handle: Handle) -> bool {
-        self.resident_tess_memo.borrow().contains_key(&handle)
+        self.caches.resident_tess_memo.borrow().contains_key(&handle)
     }
 
     #[cfg(test)]
@@ -1072,7 +1072,7 @@ impl Scene {
                     .get_entity(*handle)
                     .is_some_and(|entity| matches!(entity, EntityType::Hatch(_)))
         }) {
-            self.associative_hatch_source_cache.borrow_mut().take();
+            self.caches.associative_hatch_source_cache.borrow_mut().take();
         }
         // A pasted, duplicated or restored carrier arrives with its
         // association xdata already attached, and an erased one takes its
@@ -1083,8 +1083,8 @@ impl Scene {
             .iter()
             .any(|(_, kind)| matches!(kind, ChangeKind::Added | ChangeKind::Removed))
         {
-            self.associative_centerline_source_cache.borrow_mut().take();
-            self.associative_centermark_source_cache.borrow_mut().take();
+            self.caches.associative_centerline_source_cache.borrow_mut().take();
+            self.caches.associative_centermark_source_cache.borrow_mut().take();
         }
         let bump_started = crate::perf::enabled().then(iced::time::Instant::now);
         let bump_mark = |stage: &str| {
@@ -1289,7 +1289,7 @@ impl Scene {
             self.refresh_dependency_index_for_changes(&changes);
         }
         bump_mark("dependency-index");
-        let cached_light_changed = self.lighting_cache.borrow().values().any(|lights| {
+        let cached_light_changed = self.caches.lighting_cache.borrow().values().any(|lights| {
             changes
                 .iter()
                 .any(|(handle, _)| lights.iter().any(|light| light.handle == *handle))
@@ -1311,7 +1311,7 @@ impl Scene {
                     exists,
                 );
             }
-            self.lighting_cache.borrow_mut().clear();
+            self.caches.lighting_cache.borrow_mut().clear();
         }
         if let Some(true) = self.has_face3d.get() {
             if changes
@@ -1386,8 +1386,8 @@ impl Scene {
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
         {
-            let mut tm = self.tess_memo.borrow_mut();
-            let mut rm = self.resident_tess_memo.borrow_mut();
+            let mut tm = self.caches.tess_memo.borrow_mut();
+            let mut rm = self.caches.resident_tess_memo.borrow_mut();
             for &(h, k) in &changes {
                 // A changed or removed entity must re-tessellate; a fresh Add has
                 // no memo entry yet, so there is nothing to drop.
@@ -1576,11 +1576,11 @@ impl Scene {
             return Vec::new();
         }
         let mut out = Vec::new();
-        if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() =
+        if self.caches.dependency_index_cache.borrow().is_none() {
+            *self.caches.dependency_index_cache.borrow_mut() =
                 Some(Arc::new(self.rebuild_dependency_index()));
         }
-        if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
+        if let Some(index) = self.caches.dependency_index_cache.borrow().as_ref() {
             for norm in &touched_norm {
                 if let Some(roots) = index.block_roots.get(norm) {
                     out.extend(roots.iter().copied());
@@ -1683,9 +1683,9 @@ impl Scene {
         self.invalidate_projection_bounds();
         // A full structural change may move lights between blocks or alter
         // layer visibility without naming the affected handles.
-        self.lighting_cache.borrow_mut().clear();
-        *self.document_render_env_cache.borrow_mut() = None;
-        self.background_image_cache.borrow_mut().clear();
+        self.caches.lighting_cache.borrow_mut().clear();
+        *self.caches.document_render_env_cache.borrow_mut() = None;
+        self.caches.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
         self.has_ole_frames.set(None);
         self.has_face3d.set(None);
@@ -1699,9 +1699,9 @@ impl Scene {
         self.has_associative_centers.set(None);
         self.has_dimension_associations.set(None);
         // Structural change — drop both per-entity tessellation memos.
-        self.tess_memo.borrow_mut().clear();
-        self.resident_tess_memo.borrow_mut().clear();
-        *self.resident_memo_backing.borrow_mut() = MemoBacking::default();
+        self.caches.tess_memo.borrow_mut().clear();
+        self.caches.resident_tess_memo.borrow_mut().clear();
+        *self.caches.resident_memo_backing.borrow_mut() = MemoBacking::default();
         self.invalidate_dependency_index();
         // Can't name the changed handles → force every journal consumer to rebuild.
         self.push_geometry_delta(epoch, Vec::new(), true);
@@ -1743,7 +1743,7 @@ impl Scene {
     /// and add them to the pending force set. `All` unions over `Active` so the
     /// superset always wins (never shrinks a prior `All`). No DB / undo touch.
     pub fn request_refresh(&self, scope: ViewportRefreshScope) {
-        let mut set = self.pending_refresh.borrow_mut();
+        let mut set = self.caches.pending_refresh.borrow_mut();
         if let ViewportRefreshScope::All = scope {
             set.clear();
             // All: every current tile in Model, else sheet + every paper content vp.
@@ -1781,21 +1781,21 @@ impl Scene {
     /// True while any force is still pending (never cleared falsely).
     #[cfg(test)]
     pub fn refresh_pending_any(&self) -> bool {
-        !self.pending_refresh.borrow().is_empty()
+        !self.caches.pending_refresh.borrow().is_empty()
     }
 
     /// Builder hook: if `instance_id` has a pending force, mark it forced and
     /// remove it (one-shot per id). Returns whether to set force_rasterize.
     pub(crate) fn refresh_consume(&self, instance_id: u64) -> bool {
-        self.pending_refresh.borrow_mut().remove(&instance_id)
+        self.caches.pending_refresh.borrow_mut().remove(&instance_id)
     }
 
     /// Drop a single entity from the tessellation memo so the next render
     /// re-tessellates just that entity while reusing every other. Pair with
     /// [`bump_geometry_no_blocks`] for an incremental single-entity edit.
     pub fn mark_entity_dirty(&mut self, handle: Handle) {
-        self.tess_memo.borrow_mut().remove(&handle);
-        self.resident_tess_memo.borrow_mut().remove(&handle);
+        self.caches.tess_memo.borrow_mut().remove(&handle);
+        self.caches.resident_tess_memo.borrow_mut().remove(&handle);
     }
 
     /// Invalidate the visible-wire tessellation but KEEP the cached block
@@ -1815,7 +1815,7 @@ impl Scene {
     /// (`block_edit_block`) without invalidating cached block definitions or
     /// poisoning other spaces' resident wire sets with a full journal delta.
     pub fn bump_active_space(&mut self) {
-        *self.entity_index_cache.borrow_mut() = None;
+        *self.caches.entity_index_cache.borrow_mut() = None;
         self.bump_geometry_no_blocks_with(false);
     }
 
@@ -1823,9 +1823,9 @@ impl Scene {
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
-        self.lighting_cache.borrow_mut().clear();
-        *self.document_render_env_cache.borrow_mut() = None;
-        self.background_image_cache.borrow_mut().clear();
+        self.caches.lighting_cache.borrow_mut().clear();
+        *self.caches.document_render_env_cache.borrow_mut() = None;
+        self.caches.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
         self.has_ole_frames.set(None);
         self.has_face3d.set(None);
@@ -1837,8 +1837,8 @@ impl Scene {
 
     /// Invalidate the cached document render environment (fog parameters and image).
     pub fn invalidate_render_environment_cache(&self) {
-        *self.document_render_env_cache.borrow_mut() = None;
-        self.background_image_cache.borrow_mut().clear();
+        *self.caches.document_render_env_cache.borrow_mut() = None;
+        self.caches.background_image_cache.borrow_mut().clear();
     }
 
     /// Mark the selection / hover-highlight set dirty without invalidating the

@@ -176,7 +176,7 @@ fn the_results_made_from_replaced_sets_are_let_go() {
         assert_eq!(layers_seen(&scene, near), ["REF"]);
         assert_eq!(layers_seen(&scene, far), ["REF"]);
     }
-    let kept = scene.viewport_frozen_member_cache.borrow().len();
+    let kept = scene.caches.viewport_frozen_member_cache.borrow().len();
     assert!(
         kept <= 2,
         "{kept} results kept for the two sets the viewports draw from now"

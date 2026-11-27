@@ -377,7 +377,7 @@ impl Scene {
         &self,
         changed: &rustc_hash::FxHashSet<Handle>,
     ) -> Vec<Handle> {
-        if self.associative_centerline_source_cache.borrow().is_none() {
+        if self.caches.associative_centerline_source_cache.borrow().is_none() {
             let mut by_source: HashMap<Handle, Vec<Handle>> = HashMap::default();
             let mut order: HashMap<Handle, usize> = HashMap::default();
             for (position, entity) in self.document.entities().enumerate() {
@@ -399,10 +399,10 @@ impl Scene {
                     }
                 }
             }
-            *self.associative_centerline_source_cache.borrow_mut() =
+            *self.caches.associative_centerline_source_cache.borrow_mut() =
                 Some(CenterLineSourceIndex { by_source, order });
         }
-        let cache = self.associative_centerline_source_cache.borrow();
+        let cache = self.caches.associative_centerline_source_cache.borrow();
         let index = cache.as_ref().expect("associative centre line index");
         let mut seen = rustc_hash::FxHashSet::default();
         let mut handles = Vec::new();
@@ -509,7 +509,7 @@ impl Scene {
             association.write(&mut rebuilt.common.extended_data);
             *line = rebuilt;
         }
-        self.associative_centerline_source_cache.borrow_mut().take();
+        self.caches.associative_centerline_source_cache.borrow_mut().take();
         self.bump_entities(&[(target, ChangeKind::Modified)]);
         true
     }
@@ -626,7 +626,7 @@ impl Scene {
             // The association flags just changed. Drop the index; the bump
             // below re-indexes from the new xdata (an all-disassociated bump
             // rebuilds an empty index and refreshes nothing).
-            self.associative_centerline_source_cache.borrow_mut().take();
+            self.caches.associative_centerline_source_cache.borrow_mut().take();
             let changes: Vec<_> = candidates
                 .iter()
                 .map(|(handle, _, _)| (*handle, ChangeKind::Modified))

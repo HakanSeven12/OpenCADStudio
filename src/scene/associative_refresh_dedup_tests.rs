@@ -44,7 +44,7 @@ fn associated(first: Handle, second: Handle) -> EntityType {
 
 fn last_changes(scene: &Scene) -> Vec<(Handle, ChangeKind)> {
     scene
-        .geometry_deltas
+        .caches.geometry_deltas
         .borrow()
         .back()
         .expect("a geometry delta")

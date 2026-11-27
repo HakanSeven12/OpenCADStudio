@@ -4,7 +4,7 @@ use super::*;
 impl Scene {
     pub(crate) fn paper_viewport_handles(&self) -> (Handle, Handle, Arc<Vec<Handle>>) {
         {
-            let cache = self.paper_viewport_cache.borrow();
+            let cache = self.caches.paper_viewport_cache.borrow();
             if let Some(cache) = cache.get(&self.current_layout) {
                 if cache.epoch == self.geometry_epoch && cache.layout == self.current_layout {
                     return (cache.layout_block, cache.sheet, Arc::clone(&cache.content));
@@ -57,7 +57,7 @@ impl Scene {
             }
         }
         let content = Arc::new(content);
-        self.paper_viewport_cache.borrow_mut().insert(
+        self.caches.paper_viewport_cache.borrow_mut().insert(
             self.current_layout.clone(),
             PaperViewportCache {
                 epoch: self.geometry_epoch,
@@ -249,14 +249,14 @@ impl Scene {
             .filter(|_| instances.iter().any(|i| !i.paper_sheet))
             .filter(|_| self.paper_sheet_split(tint_selected).is_some())
             .map(|sheet| ViewportInstance { sheet_over: true, grid_on: false, ..sheet.clone() });
-        self.paper_sheet_split_cache.borrow_mut().frame_split = over.is_some();
+        self.caches.paper_sheet_split_cache.borrow_mut().frame_split = over.is_some();
         instances.extend(over);
     }
 
     /// The split a sheet pass of this frame draws with (see
     /// [`Self::push_sheet_over`]); `None` for every other view.
     pub(super) fn sheet_split_for(&self, inst: &ViewportInstance, tint_selected: bool) -> Option<SheetSplit> {
-        (inst.paper_sheet && self.paper_sheet_split_cache.borrow().frame_split)
+        (inst.paper_sheet && self.caches.paper_sheet_split_cache.borrow().frame_split)
             .then(|| self.paper_sheet_split(tint_selected))
             .flatten()
     }
@@ -288,14 +288,14 @@ impl Scene {
             ^ (Arc::as_ptr(&hatches) as usize as u64).rotate_left(23)
             ^ (Arc::as_ptr(&wipeouts) as usize as u64).rotate_left(37)
             ^ (Arc::as_ptr(&images) as usize as u64).rotate_left(51);
-        let known = self.paper_sheet_split_cache.borrow().any_over.filter(|(k, _)| *k == sources);
+        let known = self.caches.paper_sheet_split_cache.borrow().any_over.filter(|(k, _)| *k == sources);
         let any_over = known.map(|(_, any)| any).unwrap_or_else(|| {
             let entity_over = |e: &Option<Handle>| e.is_some_and(|h| split.is_over(h.value()));
             let any = wires.iter().any(|w| split.is_over_name(&w.name))
                 || hatches.iter().any(|h| entity_over(&h.entity))
                 || wipeouts.iter().any(|h| entity_over(&h.entity))
                 || images.iter().any(|i| entity_over(&i.entity));
-            self.paper_sheet_split_cache.borrow_mut().any_over = Some((sources, any));
+            self.caches.paper_sheet_split_cache.borrow_mut().any_over = Some((sources, any));
             any
         });
         any_over.then_some(split)
@@ -325,7 +325,7 @@ impl Scene {
             0
         };
         let reuse = {
-            let cache = self.paper_sheet_render_cache.borrow();
+            let cache = self.caches.paper_sheet_render_cache.borrow();
             if let Some(cache) = cache.get(&self.current_layout) {
                 if cache.layout == self.current_layout
                     && cache.selected == selected
@@ -365,7 +365,7 @@ impl Scene {
         };
         if let Some(models) = reuse {
             if let Some(cache) = self
-                .paper_sheet_render_cache
+                .caches.paper_sheet_render_cache
                 .borrow_mut()
                 .get_mut(&self.current_layout)
             {
@@ -382,7 +382,7 @@ impl Scene {
         let hatches = Arc::new(hatches);
         let wipeouts = self.paper_canvas_wipeouts();
         let images = self.paper_sheet_images();
-        self.paper_sheet_render_cache.borrow_mut().insert(
+        self.caches.paper_sheet_render_cache.borrow_mut().insert(
             self.current_layout.clone(),
             PaperSheetRenderCache {
                 epoch: self.geometry_epoch,
@@ -1124,7 +1124,7 @@ impl Scene {
             Arc::as_ptr(&wires) as usize,
             Self::frozen_layers_sig(frozen),
         );
-        if let Some((source, kept)) = self.viewport_frozen_member_cache.borrow().get(&key) {
+        if let Some((source, kept)) = self.caches.viewport_frozen_member_cache.borrow().get(&key) {
             if source
                 .upgrade()
                 .is_some_and(|source| Arc::ptr_eq(&source, &wires))
@@ -1174,7 +1174,7 @@ impl Scene {
             None => crate::scene::model::instance_model::without_layers(&wires, layer_frozen)
                 .map(Arc::new),
         };
-        let mut cache = self.viewport_frozen_member_cache.borrow_mut();
+        let mut cache = self.caches.viewport_frozen_member_cache.borrow_mut();
         // A set that was replaced takes its result along.
         cache.retain(|_, (source, _)| source.strong_count() > 0);
         cache.insert(key, (Arc::downgrade(&wires), kept.clone()));
@@ -1208,7 +1208,7 @@ impl Scene {
             return None;
         }
         let current = self.viewport_psltscale_factor(vp_handle)?;
-        let mut baked = self.viewport_complex_lt_baked.borrow_mut();
+        let mut baked = self.caches.viewport_complex_lt_baked.borrow_mut();
         match baked.get(&vp_handle) {
             Some(&factor) if factor == current || (!settle && self.navigating_lod()) => {
                 Some(factor)
@@ -1216,7 +1216,7 @@ impl Scene {
             _ => {
                 baked.insert(vp_handle, current);
                 // Hit-testing reads the projected copy of the old set.
-                self.paper_projected_cache.borrow_mut().remove(&vp_handle);
+                self.caches.paper_projected_cache.borrow_mut().remove(&vp_handle);
                 Some(current)
             }
         }

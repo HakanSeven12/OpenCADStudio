@@ -3707,7 +3707,7 @@ impl super::Scene {
             // miss rather than alias).
             annotation_scale: self.annotation_scale.to_bits(),
         };
-        if let Some((cached_key, cached_arc)) = self.glyph_cache.borrow().as_ref() {
+        if let Some((cached_key, cached_arc)) = self.caches.glyph_cache.borrow().as_ref() {
             if *cached_key == key {
                 return std::sync::Arc::clone(cached_arc);
             }
@@ -3747,7 +3747,7 @@ impl super::Scene {
             )
             .collect();
         let arc: Arc<[GlyphEntry]> = Arc::from(entries);
-        *self.glyph_cache.borrow_mut() = Some((key, Arc::clone(&arc)));
+        *self.caches.glyph_cache.borrow_mut() = Some((key, Arc::clone(&arc)));
         arc
     }
 

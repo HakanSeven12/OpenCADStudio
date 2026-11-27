@@ -38,7 +38,7 @@ fn edited_line(scene: &Scene, handle: Handle) -> EntityType {
 }
 
 fn delta_count(scene: &Scene) -> usize {
-    scene.geometry_deltas.borrow().len()
+    scene.caches.geometry_deltas.borrow().len()
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn update_entities_batch_of_block_sentinels_collapses_to_one_delta() {
     let moved = batched.update_entities(updates);
     assert_eq!(moved, 2);
     {
-        let ring = batched.geometry_deltas.borrow();
+        let ring = batched.caches.geometry_deltas.borrow();
         assert_eq!(
             ring.len() - before,
             1,
@@ -98,7 +98,7 @@ fn update_entities_mixed_batch_matches_legacy_states_with_one_delta() {
     let moved = batched.update_entities(updates);
     assert_eq!(moved, 2);
     {
-        let ring = batched.geometry_deltas.borrow();
+        let ring = batched.caches.geometry_deltas.borrow();
         assert_eq!(
             ring.len() - before,
             1,

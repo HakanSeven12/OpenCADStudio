@@ -55,9 +55,9 @@ fn bump_entities_with_block_deps_preserves_unrelated_caches() {
     let parent_insert = scene.add_entity(EntityType::Insert(ins_parent));
 
     let _ = scene.entity_wires();
-    assert!(scene.resident_tess_memo.borrow().contains_key(&bg_line));
+    assert!(scene.caches.resident_tess_memo.borrow().contains_key(&bg_line));
     assert!(scene
-        .resident_tess_memo
+        .caches.resident_tess_memo
         .borrow()
         .contains_key(&unrelated_insert));
 

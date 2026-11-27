@@ -248,7 +248,7 @@ fn adding_an_entity_leaves_existing_draw_depths_alone() {
     }
 
     // A rebuild from scratch reassigns labels, so it has to say so.
-    scene.draw_depth_cache.borrow_mut().take();
+    scene.caches.draw_depth_cache.borrow_mut().take();
     let _ = scene.draw_depth_map();
     assert_ne!(
         scene.draw_depth_generation(),
@@ -288,7 +288,7 @@ fn folding_one_addition_matches_the_full_scan() {
         .cloned()
         .unwrap_or_default();
 
-    scene.block_members_cache.borrow_mut().take();
+    scene.caches.block_members_cache.borrow_mut().take();
     let rebuilt = scene
         .block_members()
         .1
@@ -528,7 +528,7 @@ fn the_handed_over_draw_depth_map_matches_a_recompute() {
     // Capture the map the loader would hand over.
     let expected = scene.draw_depth_map();
     let handed_over = scene
-        .draw_depth_cache
+        .caches.draw_depth_cache
         .borrow_mut()
         .take()
         .expect("the map was just computed, so it is cached");
@@ -557,7 +557,7 @@ fn the_handed_over_draw_depth_map_matches_a_recompute() {
     );
 
     // A local rebuild must agree.
-    *scene.draw_depth_cache.borrow_mut() = None;
+    *scene.caches.draw_depth_cache.borrow_mut() = None;
     assert_eq!(
         *scene.draw_depth_map(),
         *expected,
@@ -595,7 +595,7 @@ fn prepared_open_geometry_keeps_layout_for_the_first_edit_patch() {
     scene.install_prepared_open_geometry(prepared);
     assert_eq!(
         scene
-            .entity_index_cache
+            .caches.entity_index_cache
             .borrow()
             .as_ref()
             .map(|(epoch, _)| *epoch),
@@ -632,7 +632,7 @@ fn a_second_resident_set_still_patches_after_the_first_one_does() {
     drop(scene.resident_wires_for(block, None, None, None, None));
     drop(scene.resident_wires_for(block, None, None, Some(&unfrozen), None));
     assert_eq!(
-        scene.resident_wire_sets.borrow().len(),
+        scene.caches.resident_wire_sets.borrow().len(),
         2,
         "the two keys must hold separate sets, or this proves nothing"
     );
@@ -676,7 +676,7 @@ fn entity_index_incremental_matches_full_rebuild() {
         set
     }
     fn full_rebuild(s: &Scene) -> HashSet<Handle> {
-        *s.entity_index_cache.borrow_mut() = None;
+        *s.caches.entity_index_cache.borrow_mut() = None;
         indexed(s)
     }
 
@@ -734,7 +734,7 @@ fn resident_set_incremental_matches_full_rebuild() {
         names
     }
     fn from_scratch(s: &Scene) -> Vec<String> {
-        s.resident_wire_sets.borrow_mut().clear();
+        s.caches.resident_wire_sets.borrow_mut().clear();
         resident_names(s)
     }
 
@@ -761,7 +761,7 @@ fn resident_set_incremental_matches_full_rebuild() {
     );
 
     let original_h2_start = s
-        .resident_wire_sets
+        .caches.resident_wire_sets
         .borrow()
         .values()
         .find_map(|set| {
@@ -785,7 +785,7 @@ fn resident_set_incremental_matches_full_rebuild() {
         "removing a plain line must keep the unrelated text pass warm"
     );
     assert!(
-        s.resident_wire_sets.borrow().values().any(|set| {
+        s.caches.resident_wire_sets.borrow().values().any(|set| {
             set.layout
                 .as_ref()
                 .is_some_and(|layout| layout.vacant.contains_key(&h2))
@@ -808,7 +808,7 @@ fn resident_set_incremental_matches_full_rebuild() {
     s.bump_entities(&restored);
     let restored_names = resident_names(&s);
     assert_eq!(restored_names, before_erase_names);
-    assert!(s.resident_wire_sets.borrow().values().any(|set| {
+    assert!(s.caches.resident_wire_sets.borrow().values().any(|set| {
         set.layout.as_ref().is_some_and(|layout| {
             layout.ranges.get(&h2).map(|range| range.0) == Some(original_h2_start)
                 && !layout.vacant.contains_key(&h2)
@@ -1107,7 +1107,7 @@ fn patched_mesh_models_match_a_full_rebuild() {
     assert_eq!(before.len(), 2, "one mesh placement per insert");
     // Mark the first insert's cached placement; a rebuild would lose the mark.
     {
-        let mut cache = s.mesh_cache.borrow_mut();
+        let mut cache = s.caches.mesh_cache.borrow_mut();
         let (_, list) = cache.values_mut().next().expect("a cached list");
         let mut marked: Vec<MeshLodSet> = list.as_ref().clone();
         for set in marked
@@ -1137,7 +1137,7 @@ fn patched_mesh_models_match_a_full_rebuild() {
     );
 
     // Reference: the same scene rebuilt from nothing.
-    s.mesh_cache.borrow_mut().clear();
+    s.caches.mesh_cache.borrow_mut().clear();
     let full = s.meshes_arc();
     let signature = |sets: &[MeshLodSet]| {
         let mut sig: Vec<_> = sets
@@ -1203,8 +1203,8 @@ fn patched_hatch_models_match_a_full_rebuild() {
     );
 
     // Reference: the same scene rebuilt from nothing.
-    s.hatch_cache.borrow_mut().clear();
-    s.hatch_hosts.borrow_mut().clear();
+    s.caches.hatch_cache.borrow_mut().clear();
+    s.caches.hatch_hosts.borrow_mut().clear();
     let full = s.hatch_models_arc();
 
     let signature = |models: &[HatchModel]| {

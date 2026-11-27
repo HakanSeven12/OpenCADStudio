@@ -3078,11 +3078,11 @@ impl Scene {
         viewport: &ViewportInstance,
     ) {
         let key = (target_block, Self::frozen_layers_sig(frozen));
-        if !self.lighting_cache.borrow().contains_key(&key) {
+        if !self.caches.lighting_cache.borrow().contains_key(&key) {
             let lights = self.build_lighting_cache(target_block, frozen);
-            self.lighting_cache.borrow_mut().insert(key, lights);
+            self.caches.lighting_cache.borrow_mut().insert(key, lights);
         }
-        let cache = self.lighting_cache.borrow();
+        let cache = self.caches.lighting_cache.borrow();
         let lights = cache.get(&key).map(Vec::as_slice).unwrap_or_default();
         let settings = self.viewport_lighting_settings(viewport);
         let visible_lights: Vec<&SceneLight> =
@@ -3377,11 +3377,11 @@ impl Scene {
         if reference.is_empty() {
             return None;
         }
-        if let Some(cached) = self.background_image_cache.borrow().get(reference) {
+        if let Some(cached) = self.caches.background_image_cache.borrow().get(reference) {
             return cached.clone();
         }
         let image = self.resolve_background_image_uncached(reference);
-        self.background_image_cache
+        self.caches.background_image_cache
             .borrow_mut()
             .insert(reference.to_string(), image.clone());
         image
@@ -3693,16 +3693,16 @@ impl Scene {
 
     fn apply_document_render_environment(&self, background: &mut ViewportBackgroundSettings) {
         let key = (self.geometry_epoch, self.document.objects.len());
-        let needs_build = match self.document_render_env_cache.borrow().as_ref() {
+        let needs_build = match self.caches.document_render_env_cache.borrow().as_ref() {
             Some((epoch, len, _)) => *epoch != key.0 || *len != key.1,
             None => true,
         };
         if needs_build {
             let env = self.resolve_document_render_environment();
-            *self.document_render_env_cache.borrow_mut() = Some((key.0, key.1, env));
+            *self.caches.document_render_env_cache.borrow_mut() = Some((key.0, key.1, env));
         }
 
-        let cache = self.document_render_env_cache.borrow();
+        let cache = self.caches.document_render_env_cache.borrow();
         let (_, _, env) = cache.as_ref().unwrap();
 
         if let Some((color, params, distances)) = env.fog {
@@ -3938,7 +3938,7 @@ impl Scene {
             self.current_layout.clone(),
             settings.current_style_sheet.to_ascii_lowercase(),
         );
-        if let Some(style) = self.display_plot_style_cache.borrow().get(&key) {
+        if let Some(style) = self.caches.display_plot_style_cache.borrow().get(&key) {
             return style.clone();
         }
         let base = crate::entities::common::drawing_dir(&self.document);
@@ -3948,7 +3948,7 @@ impl Scene {
         )
         .ok()
         .map(Arc::new);
-        self.display_plot_style_cache
+        self.caches.display_plot_style_cache
             .borrow_mut()
             .insert(key, style.clone());
         style
@@ -3981,7 +3981,7 @@ impl Scene {
             return (source, source_gen);
         };
         let key = (source_gen, style.name.to_ascii_lowercase());
-        if let Some((gen, wires)) = self.styled_wire_cache.borrow().get(&key) {
+        if let Some((gen, wires)) = self.caches.styled_wire_cache.borrow().get(&key) {
             return (Arc::clone(wires), *gen);
         }
         // A repeated block's further copies are stubs drawn in their
@@ -4011,7 +4011,7 @@ impl Scene {
         let wires = Arc::new(wires);
         let gen = crate::scene::WIRE_CONTENT_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let limit = self.display_style_cache_limit();
-        let mut cache = self.styled_wire_cache.borrow_mut();
+        let mut cache = self.caches.styled_wire_cache.borrow_mut();
         if cache.len() >= limit {
             cache.clear();
         }
@@ -4035,7 +4035,7 @@ impl Scene {
             style.name.to_ascii_lowercase(),
             pattern_scale.to_bits(),
         );
-        if let Some(hatches) = self.styled_hatch_cache.borrow().get(&key) {
+        if let Some(hatches) = self.caches.styled_hatch_cache.borrow().get(&key) {
             return Arc::clone(hatches);
         }
         let mut hatches = source.as_ref().clone();
@@ -4072,7 +4072,7 @@ impl Scene {
         }
         let hatches = Arc::new(hatches);
         let limit = self.display_style_cache_limit() * 2;
-        let mut cache = self.styled_hatch_cache.borrow_mut();
+        let mut cache = self.caches.styled_hatch_cache.borrow_mut();
         cache.retain(|(epoch, _, _, _, _), _| *epoch == self.geometry_epoch);
         if cache.len() >= limit {
             cache.clear();
@@ -4099,7 +4099,7 @@ impl Scene {
             pattern_scale.to_bits(),
             self.draw_depth_generation(),
         );
-        if let Some(hatches) = self.styled_wire_fill_cache.borrow().get(&key) {
+        if let Some(hatches) = self.caches.styled_wire_fill_cache.borrow().get(&key) {
             return Some(Arc::clone(hatches));
         }
         let depths = self.draw_depth_map();
@@ -4164,7 +4164,7 @@ impl Scene {
         }
         let hatches = Arc::new(hatches);
         let limit = self.display_style_cache_limit();
-        let mut cache = self.styled_wire_fill_cache.borrow_mut();
+        let mut cache = self.caches.styled_wire_fill_cache.borrow_mut();
         if cache.len() >= limit {
             cache.clear();
         }
@@ -4772,7 +4772,7 @@ impl Scene {
     ) -> std::sync::Arc<Vec<crate::scene::pipeline::text_gpu::TextVertex>> {
         use std::sync::Arc;
         {
-            let cache = self.sdf_text_cache.borrow();
+            let cache = self.caches.sdf_text_cache.borrow();
             if let Some(verts) = cache.get(&wire_content_id) {
                 return verts.clone();
             }
@@ -4787,7 +4787,7 @@ impl Scene {
         // edits.
         {
             let reuse = {
-                let last = self.last_sdf_text.borrow();
+                let last = self.caches.last_sdf_text.borrow();
                 match last.get(&source_key) {
                     Some((epoch, arc))
                         if self.text_unchanged(*epoch) && self.draw_ranks_stable(*epoch) =>
@@ -4798,10 +4798,10 @@ impl Scene {
                 }
             };
             if let Some(arc) = reuse {
-                self.sdf_text_cache
+                self.caches.sdf_text_cache
                     .borrow_mut()
                     .insert(wire_content_id, arc.clone());
-                self.last_sdf_text
+                self.caches.last_sdf_text
                     .borrow_mut()
                     .insert(source_key, (self.geometry_epoch, arc.clone()));
                 return arc;
@@ -4838,7 +4838,7 @@ impl Scene {
         };
         let verts = Arc::new(out);
         {
-            let mut cache = self.sdf_text_cache.borrow_mut();
+            let mut cache = self.caches.sdf_text_cache.borrow_mut();
             // Ids change on rebuild, so old keys die naturally; cap bounds churn.
             if cache.len() > 8 {
                 cache.clear();
@@ -4846,7 +4846,7 @@ impl Scene {
             cache.insert(wire_content_id, verts.clone());
         }
         {
-            let mut last = self.last_sdf_text.borrow_mut();
+            let mut last = self.caches.last_sdf_text.borrow_mut();
             if last.len() > 8 {
                 last.clear();
             }
@@ -4925,7 +4925,7 @@ impl Scene {
         // While the view is being zoomed the outlines stay the ones it had:
         // they are built again once it rests, not at every step it crosses.
         let outline_step = {
-            let mut steps = self.outline_steps.borrow_mut();
+            let mut steps = self.caches.outline_steps.borrow_mut();
             let view = (inst.handle, inst.tile_idx);
             match (outline_step, steps.get(&view)) {
                 (Some(_), Some(kept)) if self.navigating_lod() => *kept,
@@ -4966,13 +4966,13 @@ impl Scene {
 
         if selected_part {
             if let Some((selected, segments, wires)) =
-                self.annotation_selected_cache.borrow().get(&key)
+                self.caches.annotation_selected_cache.borrow().get(&key)
             {
                 if selected == &self.selected && segments == &self.sub_segments {
                     return Arc::clone(wires);
                 }
             }
-        } else if let Some(wires) = self.annotation_highlight_cache.borrow().get(&key) {
+        } else if let Some(wires) = self.caches.annotation_highlight_cache.borrow().get(&key) {
             return Arc::clone(wires);
         }
 
@@ -5158,7 +5158,7 @@ impl Scene {
 
         let wires = Arc::new(wires);
         if selected_part {
-            let mut cache = self.annotation_selected_cache.borrow_mut();
+            let mut cache = self.caches.annotation_selected_cache.borrow_mut();
             if cache.len() > 16 {
                 cache.clear();
             }
@@ -5171,7 +5171,7 @@ impl Scene {
                 ),
             );
         } else {
-            let mut cache = self.annotation_highlight_cache.borrow_mut();
+            let mut cache = self.caches.annotation_highlight_cache.borrow_mut();
             if cache.len() > 16 {
                 cache.clear();
             }
@@ -5681,7 +5681,7 @@ impl Scene {
             return None;
         }
         let base_arc = match &sheet_split {
-            Some(split) => self.paper_sheet_split_cache.borrow_mut().wires.part(
+            Some(split) => self.caches.paper_sheet_split_cache.borrow_mut().wires.part(
                 &base_arc,
                 split.key,
                 inst.sheet_over,
@@ -5710,7 +5710,7 @@ impl Scene {
         // each frame — for every source, since all ids are stable now.
         let (face3d_wires, other_arc) = {
             let cached = {
-                self.split_cache
+                self.caches.split_cache
                     .borrow()
                     .get(&base_wire_content_id)
                     .cloned()
@@ -5719,7 +5719,7 @@ impl Scene {
                 if patch.face_pass_changed {
                     None
                 } else {
-                    self.split_cache
+                    self.caches.split_cache
                         .borrow()
                         .get(base)
                         .filter(|(_, others)| others.is_none())
@@ -5766,14 +5766,14 @@ impl Scene {
                 // that: other layouts' splits held memory until it ran out
                 // (#3260).
                 let cap = self.frame_wire_set_count() + 1;
-                let mut c = self.split_cache.borrow_mut();
+                let mut c = self.caches.split_cache.borrow_mut();
                 if c.len() > cap {
                     c.clear();
                 }
                 c.insert(base_wire_content_id, (fa.clone(), oa.clone()));
                 (fa, oa)
             });
-            self.split_cache
+            self.caches.split_cache
                 .borrow_mut()
                 .entry(base_wire_content_id)
                 .or_insert_with(|| (fa.clone(), oa.clone()));
@@ -6020,7 +6020,7 @@ impl Scene {
             let mut wipeouts = wipeouts;
             if let Some(split) = &sheet_split {
                 let over = |e: &Option<Handle>| e.is_some_and(|h| split.is_over(h.value()));
-                let mut cache = self.paper_sheet_split_cache.borrow_mut();
+                let mut cache = self.caches.paper_sheet_split_cache.borrow_mut();
                 wipeouts = cache.wipeouts.part(&wipeouts, split.key, inst.sheet_over, |h| over(&h.entity));
                 images = cache.images.part(&images, split.key, inst.sheet_over, |i| over(&i.entity));
             }
@@ -6057,7 +6057,7 @@ impl Scene {
             pattern_scale,
         );
         if let Some(split) = &sheet_split {
-            hatches = self.paper_sheet_split_cache.borrow_mut().hatches.part(
+            hatches = self.caches.paper_sheet_split_cache.borrow_mut().hatches.part(
                 &hatches,
                 split.key,
                 inst.sheet_over,
@@ -6709,9 +6709,9 @@ mod layer0_inherit_tests {
 
         let mut bg = ViewportBackgroundSettings::canvas([0.1, 0.1, 0.1, 1.0]);
         scene.apply_document_render_environment(&mut bg);
-        assert!(scene.document_render_env_cache.borrow().is_some());
+        assert!(scene.caches.document_render_env_cache.borrow().is_some());
 
-        let (epoch, len, _) = scene.document_render_env_cache.borrow().clone().unwrap();
+        let (epoch, len, _) = scene.caches.document_render_env_cache.borrow().clone().unwrap();
         assert_eq!(epoch, scene.geometry_epoch);
         assert_eq!(len, scene.document.objects.len());
 
@@ -6834,14 +6834,14 @@ mod layer0_inherit_tests {
         // Empty reference returns None immediately without caching
         assert!(scene.background_image("").is_none());
         assert!(scene.background_image("   ").is_none());
-        assert!(scene.background_image_cache.borrow().is_empty());
+        assert!(scene.caches.background_image_cache.borrow().is_empty());
 
         // Non-existent file returns None and is cached to avoid repeated disk checks
         let missing = "non_existent_background_image_test_file.png";
         assert!(scene.background_image(missing).is_none());
-        assert!(scene.background_image_cache.borrow().contains_key(missing));
+        assert!(scene.caches.background_image_cache.borrow().contains_key(missing));
         assert!(scene
-            .background_image_cache
+            .caches.background_image_cache
             .borrow()
             .get(missing)
             .unwrap()
@@ -6852,7 +6852,7 @@ mod layer0_inherit_tests {
 
         // Invalidation clears background image cache
         scene.invalidate_render_environment_cache();
-        assert!(scene.background_image_cache.borrow().is_empty());
+        assert!(scene.caches.background_image_cache.borrow().is_empty());
     }
 
     #[test]
@@ -6901,7 +6901,7 @@ mod layer0_inherit_tests {
         assert_eq!(bg.fog_distances[1], 100.0);
 
         // Cache must be populated
-        assert!(scene.document_render_env_cache.borrow().is_some());
+        assert!(scene.caches.document_render_env_cache.borrow().is_some());
     }
 }
 

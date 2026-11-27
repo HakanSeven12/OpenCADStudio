@@ -4204,7 +4204,7 @@ impl Scene {
         self.preview_text = vec![];
         self.current_layout = "Model".to_string();
         self.hatches = HashMap::default();
-        self.associative_hatch_source_cache.borrow_mut().take();
+        self.caches.associative_hatch_source_cache.borrow_mut().take();
         self.images = HashMap::default();
         self.meshes = HashMap::default();
         self.block_meshes = HashMap::default();

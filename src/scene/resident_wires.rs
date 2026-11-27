@@ -57,7 +57,7 @@ impl Scene {
     /// scene may hold (see [`Self::try_resident_patch`]), and not a copy made
     /// from one.
     pub(in crate::scene) fn is_resident_wire_set(&self, wires: &Arc<Vec<WireModel>>) -> bool {
-        self.resident_wire_sets
+        self.caches.resident_wire_sets
             .borrow()
             .values()
             .any(|set| Arc::ptr_eq(&set.wires, wires))
@@ -103,7 +103,7 @@ impl Scene {
             0
         };
         {
-            let sets = self.resident_wire_sets.borrow();
+            let sets = self.caches.resident_wire_sets.borrow();
             if let Some(set) = sets.get(&key) {
                 if set.epoch == self.geometry_epoch {
                     set.used.set(resident_touch());
@@ -175,7 +175,7 @@ impl Scene {
             // Block definitions tessellated earlier in this pass hold the
             // stale quads too, and their cache is keyed by block epoch (which
             // has not moved), so drop them or the rebuild would reuse them.
-            self.block_defn_cache.borrow_mut().clear();
+            self.caches.block_defn_cache.borrow_mut().clear();
             // The pass just built backs the memo meanwhile, so only its text
             // (dropped as stale) is tessellated again, not the drawing.
             let previous = Arc::new(std::mem::take(&mut wires));
@@ -254,7 +254,7 @@ impl Scene {
         // generations, and clearing it here is what left every viewport
         // patchless on a two-viewport layout.
         if block == self.model_space_block_handle() {
-            self.model_wire_gpu_patch
+            self.caches.model_wire_gpu_patch
                 .borrow_mut()
                 .remove(&style_viewport);
         }
@@ -268,7 +268,7 @@ impl Scene {
         }
         .max(self.transient_prune_floor.get());
         let cur_epoch = self.geometry_epoch;
-        let mut sets = self.resident_wire_sets.borrow_mut();
+        let mut sets = self.caches.resident_wire_sets.borrow_mut();
         let evicted = sets.insert(
             key,
             ResidentWireSet {
@@ -324,7 +324,7 @@ impl Scene {
             if let Some(evicted) = sets.remove(&key) {
                 bytes = bytes.saturating_sub(evicted.estimated_bytes);
                 let source = Arc::as_ptr(&evicted.wires) as usize;
-                self.interaction_index_cache.borrow_mut().retain(|(_, ptr, _, _)| *ptr != source);
+                self.caches.interaction_index_cache.borrow_mut().retain(|(_, ptr, _, _)| *ptr != source);
                 reaper::reap(evicted);
             }
         }
@@ -407,7 +407,7 @@ impl Scene {
     /// Model tile applies the same patch; gen-matching keeps it from applying to
     /// a viewport that rebuilt independently.
     pub(crate) fn model_wire_patch_for(&self, gen: u64) -> Option<(u64, Arc<WireGpuPatch>)> {
-        let mut pending = self.model_wire_gpu_patch.borrow_mut();
+        let mut pending = self.caches.model_wire_gpu_patch.borrow_mut();
         // The caller knows only the content generation it is rendering, not
         // which viewport produced it, so the entry is found by generation.
         // Generations come from one global counter, so at most one entry can
@@ -432,7 +432,7 @@ impl Scene {
         match run {
             MemoRun::Owned(wires) => Some(MemoHit::Owned(Arc::clone(wires))),
             MemoRun::InSet => {
-                let backing = self.resident_memo_backing.borrow();
+                let backing = self.caches.resident_memo_backing.borrow();
                 let set = backing.set.upgrade()?;
                 let &(start, len) = backing.ranges.get(&handle)?;
                 (start + len <= set.len()).then_some(MemoHit::Slice(set, start, len))
@@ -467,9 +467,9 @@ impl Scene {
         set: &Arc<Vec<WireModel>>,
         ranges: &HashMap<Handle, (usize, usize)>,
     ) {
-        let old = std::mem::take(&mut *self.resident_memo_backing.borrow_mut());
+        let old = std::mem::take(&mut *self.caches.resident_memo_backing.borrow_mut());
         let old_set = old.set.upgrade();
-        self.resident_tess_memo.borrow_mut().retain(|handle, run| {
+        self.caches.resident_tess_memo.borrow_mut().retain(|handle, run| {
             if ranges.contains_key(handle) {
                 *run = MemoRun::InSet;
             } else if let MemoRun::Pending = run {
@@ -484,7 +484,7 @@ impl Scene {
             }
             true
         });
-        *self.resident_memo_backing.borrow_mut() = MemoBacking {
+        *self.caches.resident_memo_backing.borrow_mut() = MemoBacking {
             set: Arc::downgrade(set),
             ranges: ranges.clone(),
             keep: None,
@@ -494,9 +494,9 @@ impl Scene {
     /// Give every `InSet` run a copy of its own and drop the backing, before
     /// a build whose set will not match the memo.
     pub(crate) fn detach_memo_backing(&self) {
-        let old = std::mem::take(&mut *self.resident_memo_backing.borrow_mut());
+        let old = std::mem::take(&mut *self.caches.resident_memo_backing.borrow_mut());
         let set = old.set.upgrade();
-        self.resident_tess_memo.borrow_mut().retain(|handle, run| {
+        self.caches.resident_tess_memo.borrow_mut().retain(|handle, run| {
             if let MemoRun::Pending = run {
                 return false;
             }
@@ -517,7 +517,7 @@ impl Scene {
     /// the runs it blanked were copied out or dropped from the memo first.
     pub(crate) fn keep_memo_backing(&self, wires: Vec<WireModel>) {
         let keep = Arc::new(wires);
-        let mut backing = self.resident_memo_backing.borrow_mut();
+        let mut backing = self.caches.resident_memo_backing.borrow_mut();
         backing.set = Arc::downgrade(&keep);
         backing.keep = Some(keep);
     }
@@ -616,7 +616,7 @@ impl Scene {
         // The entry must exist, be stale, and be uniquely held so we can move
         // its wires out rather than deep-clone them.
         let (cached_epoch, backed_here) = {
-            let sets = self.resident_wire_sets.borrow();
+            let sets = self.caches.resident_wire_sets.borrow();
             let Some(entry) = sets.get(&key) else {
                 drop(sets);
                 return declined("no-entry");
@@ -637,7 +637,7 @@ impl Scene {
             }
             let backed_here = shareable
                 && self
-                    .resident_memo_backing
+                    .caches.resident_memo_backing
                     .borrow()
                     .set
                     .ptr_eq(&Arc::downgrade(&entry.wires));
@@ -651,7 +651,7 @@ impl Scene {
         // `prev_gen` is the content id the GPU currently holds for this set — the
         // base the wire-arena patch replays from.
         let (prev_gen, mut estimated_bytes, owned, mut layout) = {
-            let removed = self.resident_wire_sets.borrow_mut().remove(&key)?;
+            let removed = self.caches.resident_wire_sets.borrow_mut().remove(&key)?;
             (
                 removed.gen,
                 removed.estimated_bytes,
@@ -736,7 +736,7 @@ impl Scene {
             };
             if deltas.iter().any(is_new) {
                 let changed: HashSet<Handle> = deltas.iter().map(|&(handle, _)| handle).collect();
-                let cache = self.sort_cache.borrow();
+                let cache = self.caches.sort_cache.borrow();
                 let sort_map = cache.as_ref().and_then(|(_, index)| index.get(&block));
                 let effective = |handle: Handle| {
                     sort_map
@@ -834,7 +834,7 @@ impl Scene {
             visible_changed.insert(*h);
             let memoized = memo_ok
                 .then(|| {
-                    let memo = self.resident_tess_memo.borrow();
+                    let memo = self.caches.resident_tess_memo.borrow();
                     match memo.get(h)? {
                         MemoRun::Owned(wires) => Some(wires.as_ref().clone()),
                         MemoRun::InSet if backed_here => {
@@ -903,7 +903,7 @@ impl Scene {
         self.resident_patch_tessellated
             .set(self.resident_patch_tessellated.get() + tessellated as u64);
         {
-            let mut memo = self.resident_tess_memo.borrow_mut();
+            let mut memo = self.caches.resident_tess_memo.borrow_mut();
             for (h, run) in memo_updates {
                 memo.insert(h, run);
             }
@@ -945,7 +945,7 @@ impl Scene {
         // hidden Modified entities retain a zero-length placeholder so grip
         // commit restores them at their original position.
         {
-            let cache = self.sort_cache.borrow();
+            let cache = self.caches.sort_cache.borrow();
             let sort_map = cache.as_ref().and_then(|(_, index)| index.get(&block));
             let effective = |handle: Handle| {
                 sort_map
@@ -1103,7 +1103,7 @@ impl Scene {
                     // again.
                     let mut moved_out = false;
                     if backed_here && !matches!(kind, ChangeKind::Removed) {
-                        let mut memo = self.resident_tess_memo.borrow_mut();
+                        let mut memo = self.caches.resident_tess_memo.borrow_mut();
                         if let Some(run) = memo.get_mut(&handle) {
                             if matches!(run, MemoRun::InSet) {
                                 *run = MemoRun::Owned(Arc::new(
@@ -1279,7 +1279,7 @@ impl Scene {
                 face_pass_changed,
                 text_pass_changed,
             };
-            let mut pending = self.model_wire_gpu_patch.borrow_mut();
+            let mut pending = self.caches.model_wire_gpu_patch.borrow_mut();
             let combined = match pending.remove(&style_viewport) {
                 Some((base, pending_gen, previous, false)) if pending_gen == prev_gen => (
                     base,
@@ -1323,7 +1323,7 @@ impl Scene {
             self.paper_viewport_handles().2.len()
         }
         .max(self.transient_prune_floor.get());
-        let mut sets = self.resident_wire_sets.borrow_mut();
+        let mut sets = self.caches.resident_wire_sets.borrow_mut();
         sets.insert(
             key,
             ResidentWireSet {

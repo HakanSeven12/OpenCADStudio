@@ -28,13 +28,13 @@ impl Scene {
     /// `geometry_epoch` rather than by walking the document per handle.
     fn leaders_by_annotation(&self) -> std::cell::Ref<'_, (u64, HashMap<Handle, Vec<Handle>>)> {
         {
-            let cache = self.leaders_by_annotation_cache.borrow();
+            let cache = self.caches.leaders_by_annotation_cache.borrow();
             if cache
                 .as_ref()
                 .is_some_and(|(epoch, _)| *epoch == self.geometry_epoch)
             {
                 drop(cache);
-                return std::cell::Ref::map(self.leaders_by_annotation_cache.borrow(), |c| {
+                return std::cell::Ref::map(self.caches.leaders_by_annotation_cache.borrow(), |c| {
                     c.as_ref().unwrap()
                 });
             }
@@ -50,8 +50,8 @@ impl Scene {
                 }
             }
         }
-        *self.leaders_by_annotation_cache.borrow_mut() = Some((self.geometry_epoch, by_annotation));
-        std::cell::Ref::map(self.leaders_by_annotation_cache.borrow(), |c| {
+        *self.caches.leaders_by_annotation_cache.borrow_mut() = Some((self.geometry_epoch, by_annotation));
+        std::cell::Ref::map(self.caches.leaders_by_annotation_cache.borrow(), |c| {
             c.as_ref().unwrap()
         })
     }
@@ -629,7 +629,7 @@ impl Scene {
         let block = self.current_layout_block_handle();
         let mut cached_epoch = None;
         {
-            let cache = self.layout_type_names_cache.borrow();
+            let cache = self.caches.layout_type_names_cache.borrow();
             if let Some((epoch, cached_block, _, names)) = cache.as_ref() {
                 if *cached_block == block {
                     if *epoch == self.geometry_epoch {
@@ -644,7 +644,7 @@ impl Scene {
         if let Some(since) = cached_epoch {
             if let Some(deltas) = self.replay_since(since) {
                 if deltas.iter().all(|(_, kind)| *kind == ChangeKind::Added) {
-                    let mut cache = self.layout_type_names_cache.borrow_mut();
+                    let mut cache = self.caches.layout_type_names_cache.borrow_mut();
                     if let Some((epoch, _, present, names)) = cache.as_mut() {
                         let mut added = false;
                         for (handle, _) in &deltas {
@@ -712,7 +712,7 @@ impl Scene {
         }
         let names: std::sync::Arc<Vec<String>> =
             std::sync::Arc::new(present.iter().cloned().collect());
-        *self.layout_type_names_cache.borrow_mut() = Some((
+        *self.caches.layout_type_names_cache.borrow_mut() = Some((
             self.geometry_epoch,
             block,
             present,
@@ -1946,7 +1946,7 @@ mod tests {
         );
 
         // The incremental answer has to be the answer a full walk gives.
-        scene.layout_type_names_cache.borrow_mut().take();
+        scene.caches.layout_type_names_cache.borrow_mut().take();
         assert_eq!(
             scene.entity_type_names_in_layout().as_slice(),
             third.as_slice(),

@@ -29,7 +29,7 @@ fn viewport_fixture(sheet_id: i16, content_id: i16, listed: bool) -> (Scene, Han
 fn assert_sheet_order(scene: &Scene, sheet: Handle, content: Handle) {
     // The fixture mutates the layout's list directly after adding entities;
     // invalidate the derived cache just as the document mutation APIs do.
-    scene.paper_viewport_cache.borrow_mut().clear();
+    scene.caches.paper_viewport_cache.borrow_mut().clear();
     let layout = scene
         .document
         .objects
@@ -194,7 +194,7 @@ fn select_all_erase_then_new_viewport_keeps_its_view_on_save() {
     viewport.view_center = document::types::Vector3::new(123.0, 45.0, 0.0);
     viewport.view_height = 77.0;
     let added = scene.add_entity(EntityType::Viewport(Box::new(viewport)));
-    scene.paper_viewport_cache.borrow_mut().clear();
+    scene.caches.paper_viewport_cache.borrow_mut().clear();
 
     assert_eq!(scene.current_layout_sheet_viewport_handle(), sheet);
     scene.sync_camera_to_document();

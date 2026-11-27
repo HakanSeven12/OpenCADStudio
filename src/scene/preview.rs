@@ -97,7 +97,7 @@ impl Scene {
         if selection_sig == 0 {
             return std::sync::Arc::new(Vec::new());
         }
-        if let Some((epoch, sig, models)) = self.selected_hatch_overlay_cache.borrow().as_ref() {
+        if let Some((epoch, sig, models)) = self.caches.selected_hatch_overlay_cache.borrow().as_ref() {
             if *epoch == self.geometry_epoch && *sig == selection_sig {
                 return std::sync::Arc::clone(models);
             }
@@ -155,7 +155,7 @@ impl Scene {
                 models.len(),
             );
         }
-        *self.selected_hatch_overlay_cache.borrow_mut() = Some((
+        *self.caches.selected_hatch_overlay_cache.borrow_mut() = Some((
             self.geometry_epoch,
             selection_sig,
             std::sync::Arc::clone(&models),
@@ -171,7 +171,7 @@ impl Scene {
             return std::sync::Arc::clone(&self.preview_hatches);
         }
         if let Some((preview, overlay, combined)) =
-            self.combined_preview_hatch_cache.borrow().as_ref()
+            self.caches.combined_preview_hatch_cache.borrow().as_ref()
         {
             if std::sync::Arc::ptr_eq(preview, &self.preview_hatches)
                 && std::sync::Arc::ptr_eq(overlay, &selected)
@@ -183,7 +183,7 @@ impl Scene {
         models.extend(self.preview_hatches.iter().cloned());
         models.extend(selected.iter().cloned());
         let combined = std::sync::Arc::new(models);
-        *self.combined_preview_hatch_cache.borrow_mut() = Some((
+        *self.caches.combined_preview_hatch_cache.borrow_mut() = Some((
             std::sync::Arc::clone(&self.preview_hatches),
             selected,
             std::sync::Arc::clone(&combined),

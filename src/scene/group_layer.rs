@@ -320,7 +320,7 @@ impl Scene {
     ) -> std::sync::Arc<Vec<(Handle, std::sync::Arc<Vec<Handle>>)>> {
         let epoch = self.groups_epoch;
         let group_select = self.document.header.pick_style & 1 != 0;
-        let mut snapshot = self.groups_snapshot.borrow_mut();
+        let mut snapshot = self.caches.groups_snapshot.borrow_mut();
         if let Some((cached_epoch, cached_group_select, groups)) = snapshot.as_ref() {
             if *cached_epoch == epoch && *cached_group_select == group_select {
                 return std::sync::Arc::clone(groups);

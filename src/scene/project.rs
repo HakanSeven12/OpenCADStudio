@@ -43,7 +43,7 @@ impl Scene {
 
             // ── Fast path: return cached projected wires ──────────────────
             if !plot {
-                let cache = self.paper_projected_cache.borrow();
+                let cache = self.caches.paper_projected_cache.borrow();
                 if let Some((cached_epoch, ref wires)) = cache.get(&vp_handle) {
                     if *cached_epoch == self.geometry_epoch {
                         result.extend_from_slice(wires);
@@ -525,7 +525,7 @@ impl Scene {
 
             // Store in cache, then extend result.
             if !plot {
-                self.paper_projected_cache
+                self.caches.paper_projected_cache
                     .borrow_mut()
                     .insert(vp_handle, (self.geometry_epoch, projected.clone()));
             }

@@ -245,7 +245,7 @@ fn a_frame_built_after_an_edit_keeps_its_wires_and_old_copies_are_let_go() {
                 "{extra:?}, edit {round}"
             );
         }
-        let kept = scene.split_cache.borrow().len();
+        let kept = scene.caches.split_cache.borrow().len();
         assert!(
             kept <= 2 * 14,
             "{extra:?}: {kept} splits kept for the 14 sets the layout draws"

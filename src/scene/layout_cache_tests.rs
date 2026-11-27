@@ -136,12 +136,12 @@ fn memoized_plain_line_matches_fresh_background() {
         .unwrap()
     };
     let original = build(&s);
-    assert!(s.resident_tess_memo.borrow().contains_key(&handle));
+    assert!(s.caches.resident_tess_memo.borrow().contains_key(&handle));
     s.paper_bg_color = [1.0; 4];
     s.document.add_layout("Review").unwrap();
     s.set_current_layout("Review".to_string());
     let cached = build(&s);
-    s.resident_tess_memo.borrow_mut().clear();
+    s.caches.resident_tess_memo.borrow_mut().clear();
     let fresh = build(&s);
     assert_ne!(
         original.color, fresh.color,
@@ -163,7 +163,7 @@ fn model_extents_reuse_resident_geometry_in_every_layout() {
     s.document.add_layout("Review").unwrap();
     for layout in ["Model", "Review"] {
         s.set_current_layout(layout.to_string());
-        *s.model_extents_cache.borrow_mut() = None;
+        *s.caches.model_extents_cache.borrow_mut() = None;
         let scale = crate::scene::annotative::scale_handle_by_name(
             &s.document,
             &s.document.header.current_annotation_scale,

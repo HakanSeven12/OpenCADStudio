@@ -1471,7 +1471,7 @@ impl Scene {
         }
         if scene_objects_changed {
             self.object_data_cache = crate::entities::object_data::build_cache(&self.document);
-            self.lighting_cache.borrow_mut().clear();
+            self.caches.lighting_cache.borrow_mut().clear();
         }
     }
 

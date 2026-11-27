@@ -1353,7 +1353,7 @@ impl Scene {
                 && hatch.paths[0].boundary_handles.is_empty()
             {
                 hatch.paths[0].boundary_handles = vec![pair[0]];
-                self.associative_hatch_source_cache.borrow_mut().take();
+                self.caches.associative_hatch_source_cache.borrow_mut().take();
             }
         }
     }
@@ -1368,7 +1368,7 @@ impl Scene {
         };
         hatch.paths = paths;
         hatch.is_associative = true;
-        self.associative_hatch_source_cache.borrow_mut().take();
+        self.caches.associative_hatch_source_cache.borrow_mut().take();
         self.refresh_fill_model(handle);
     }
 
@@ -1378,7 +1378,7 @@ impl Scene {
         handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
     ) {
         if remap_hatch_associations(&mut self.document, handle_map) {
-            self.associative_hatch_source_cache.borrow_mut().take();
+            self.caches.associative_hatch_source_cache.borrow_mut().take();
         }
     }
 
@@ -1413,7 +1413,7 @@ impl Scene {
             .paths
             .iter()
             .any(|candidate| !candidate.boundary_handles.is_empty());
-        self.associative_hatch_source_cache.borrow_mut().take();
+        self.caches.associative_hatch_source_cache.borrow_mut().take();
         if add && !handles.is_empty() {
             let changes: Vec<_> = handles
                 .iter()
@@ -1458,7 +1458,7 @@ impl Scene {
                 }
             }
         }
-        self.associative_hatch_source_cache.borrow_mut().take();
+        self.caches.associative_hatch_source_cache.borrow_mut().take();
         let changes: Vec<_> = pieces
             .iter()
             .map(|&piece| (piece, ChangeKind::Modified))
@@ -1470,7 +1470,7 @@ impl Scene {
     }
 
     fn associative_hatch_dependents(&self, changed: &rustc_hash::FxHashSet<Handle>) -> Vec<Handle> {
-        if self.associative_hatch_source_cache.borrow().is_none() {
+        if self.caches.associative_hatch_source_cache.borrow().is_none() {
             let mut index: HashMap<Handle, Vec<Handle>> = HashMap::default();
             for entity in self.document.entities() {
                 let EntityType::Hatch(hatch) = entity else {
@@ -1490,9 +1490,9 @@ impl Scene {
                     }
                 }
             }
-            *self.associative_hatch_source_cache.borrow_mut() = Some(index);
+            *self.caches.associative_hatch_source_cache.borrow_mut() = Some(index);
         }
-        let cache = self.associative_hatch_source_cache.borrow();
+        let cache = self.caches.associative_hatch_source_cache.borrow();
         let index = cache.as_ref().expect("associative hatch index");
         let mut handles = rustc_hash::FxHashSet::default();
         for source in changed {
@@ -1686,7 +1686,7 @@ impl Scene {
                     continue;
                 }
                 if association_changed {
-                    self.associative_hatch_source_cache.borrow_mut().take();
+                    self.caches.associative_hatch_source_cache.borrow_mut().take();
                 }
                 if self.is_recording_undo() {
                     let before = self.document.get_entity_arc(handle);

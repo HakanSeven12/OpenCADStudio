@@ -66,14 +66,14 @@ impl Scene {
     }
 
     fn invalidate_constraint_display(&self) {
-        self.resident_wire_sets.borrow_mut().clear();
-        self.tess_memo.borrow_mut().clear();
-        self.resident_tess_memo.borrow_mut().clear();
-        self.block_defn_cache.borrow_mut().clear();
-        self.hatch_cache.borrow_mut().clear();
-        self.frozen_hatch_cache.borrow_mut().clear();
-        self.mesh_cache.borrow_mut().clear();
-        self.frozen_mesh_cache.borrow_mut().clear();
+        self.caches.resident_wire_sets.borrow_mut().clear();
+        self.caches.tess_memo.borrow_mut().clear();
+        self.caches.resident_tess_memo.borrow_mut().clear();
+        self.caches.block_defn_cache.borrow_mut().clear();
+        self.caches.hatch_cache.borrow_mut().clear();
+        self.caches.frozen_hatch_cache.borrow_mut().clear();
+        self.caches.mesh_cache.borrow_mut().clear();
+        self.caches.frozen_mesh_cache.borrow_mut().clear();
     }
 
     pub(crate) fn set_block_constraint_display(&mut self, enabled: bool, colors: [String; 4]) {
@@ -98,7 +98,7 @@ impl Scene {
             .find(|set| set.scope == scope)
             .unwrap_or(&empty);
         {
-            let cache = self.constraint_status_cache.borrow();
+            let cache = self.caches.constraint_status_cache.borrow();
             if let Some(entry) = &cache.entry {
                 if entry.definition == definition
                     && entry.epoch == self.geometry_epoch
@@ -112,7 +112,7 @@ impl Scene {
         }
         let report = std::sync::Arc::new(analyze(&self.document, &self.named_parameters, set));
         let changed = self
-            .constraint_status_cache
+            .caches.constraint_status_cache
             .borrow()
             .entry
             .as_ref()
@@ -122,7 +122,7 @@ impl Scene {
         if changed && self.constraint_shading_active() {
             self.invalidate_constraint_display();
         }
-        self.constraint_status_cache.borrow_mut().entry = Some(CacheEntry {
+        self.caches.constraint_status_cache.borrow_mut().entry = Some(CacheEntry {
             definition,
             epoch: self.geometry_epoch,
             constraints: set.constraints.clone(),

@@ -205,7 +205,7 @@ impl Scene {
         // A plan view's stored twist is the frame's twist.
         vp.twist_angle = twist;
         self.notify_viewport_changed(vp_handle);
-        self.resident_wire_sets.borrow_mut().clear();
+        self.caches.resident_wire_sets.borrow_mut().clear();
         self.bump_geometry();
         true
     }

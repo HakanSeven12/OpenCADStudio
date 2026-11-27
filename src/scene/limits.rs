@@ -119,7 +119,7 @@ impl Scene {
                 }
             }
         }
-        self.paper_viewport_cache
+        self.caches.paper_viewport_cache
             .borrow_mut()
             .remove(&self.current_layout);
     }

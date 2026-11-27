@@ -1138,29 +1138,27 @@ mod tests {
         assert_eq!(bytes(paste::ICON), icons[0], "the face is plain Paste");
         for (command, icon) in commands.iter().zip(&icons) {
             assert_eq!(command_icon(command), Some(*icon), "{command}");
-            assert!(crate::ui::menu_bar::implemented(command), "{command} runs");
+            assert!(
+                crate::command::all_registered_command_names().contains(command),
+                "{command} runs"
+            );
         }
     }
 
     /// Authoring Palettes shows its own icon wherever the command appears
-    /// (ribbon, command search, QAT and its dock tab); Tool Palettes and
-    /// Editor Settings keep the plain tool palette.
+    /// (ribbon, command search, QAT; the dock tab is tested in `ui::dock`);
+    /// Tool Palettes and Editor Settings keep the plain tool palette.
     #[test]
     fn authoring_palettes_have_their_own_icon() {
         let authoring = crate::icon_assets::AUTHORING_PALETTES;
         for command in ["BAUTHORPALETTE", "BAUTHORPALETTECLOSE"] {
             assert_eq!(command_icon(command), Some(authoring), "{command}");
         }
-        assert_eq!(
-            crate::ui::dock::PanelId::AuthoringPalettes.icon(),
-            authoring
-        );
         let tool_palettes: &[u8] = include_bytes!("../../assets/icons/tool_palettes.svg");
         assert_ne!(authoring, tool_palettes);
         for command in ["TOOLPALETTES", "BESETTINGS"] {
             assert_eq!(command_icon(command), Some(tool_palettes), "{command}");
         }
-        assert_eq!(crate::ui::dock::PanelId::ToolPalettes.icon(), tool_palettes);
     }
 
     /// The three revision cloud types each show their own icon, in the

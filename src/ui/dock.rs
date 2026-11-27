@@ -1736,6 +1736,21 @@ impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
 mod tests {
     use super::*;
 
+    /// The dock tabs of the two palettes show the icon of the command that
+    /// opens them (`modules::registry` tests those icons).
+    #[test]
+    fn palette_tabs_show_the_icon_of_their_command() {
+        use crate::modules::registry::command_icon;
+        assert_eq!(
+            Some(PanelId::AuthoringPalettes.icon()),
+            command_icon("BAUTHORPALETTE")
+        );
+        assert_eq!(
+            Some(PanelId::ToolPalettes.icon()),
+            command_icon("TOOLPALETTES")
+        );
+    }
+
     #[test]
     fn external_references_allows_double_max_width() {
         let mut state = DockState::default();

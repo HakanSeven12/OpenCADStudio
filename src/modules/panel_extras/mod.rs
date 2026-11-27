@@ -683,4 +683,26 @@ mod tests {
                 .all(|tool| !tool.options.is_empty()));
         }
     }
+
+    /// `tools()` lists each split tool's submenu options too, with the
+    /// tool's icon, so command search and the QAT show them with it.
+    #[test]
+    fn tools_lists_submenu_options_with_the_icon_of_their_tool() {
+        let listed: Vec<_> = tools().collect();
+        let mut options = 0;
+        for tool in all().flat_map(PanelExtras::tools) {
+            let IconKind::Svg(icon) = tool.tool.icon else {
+                continue;
+            };
+            for (command, label) in tool.options {
+                options += 1;
+                assert!(
+                    listed.contains(&(*command, *label, icon)),
+                    "{command} is not listed with the icon of {}",
+                    tool.command()
+                );
+            }
+        }
+        assert!(options > 0, "no split tool has submenu options");
+    }
 }

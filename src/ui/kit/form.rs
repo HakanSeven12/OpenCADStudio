@@ -53,7 +53,7 @@ pub fn popover<'a>(
     .padding(
         Padding::ZERO
             .left(km::FORM_TITLE_X)
-            .right(km::FORM_TITLE_X / 4.0),
+            .right(km::FORM_HEAD_PAD_RIGHT),
     )
     .align_y(iced::Center)
     // Head and footer: the darker grey of the ribbon's panel-title strip.

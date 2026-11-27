@@ -829,10 +829,9 @@ impl Ribbon {
         let layout = &mut self.layout;
         std::mem::swap(&mut layout.floating, &mut layout.floating_other_layout);
         std::mem::swap(&mut layout.docked, &mut layout.docked_other_layout);
-        if toolbar && !std::mem::replace(&mut layout.toolbar_layout_seeded, true) {
-            if self.layout.floating.is_empty() && self.layout.docked.is_empty() {
-                self.show_default_toolbars(origin);
-            }
+        let first_toolbar = toolbar && !std::mem::replace(&mut layout.toolbar_layout_seeded, true);
+        if first_toolbar && self.layout.floating.is_empty() && self.layout.docked.is_empty() {
+            self.show_default_toolbars(origin);
         }
         self.layout
             .clamp_floating((self.win_w, self.win_h), Self::floating_size);

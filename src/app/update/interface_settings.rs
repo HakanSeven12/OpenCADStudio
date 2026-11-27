@@ -8,6 +8,19 @@ use crate::app::{Message, OpenCADStudio};
 use crate::ui::interface_settings::{InterfaceMsg, Snapshot, INTERFACE_SETTINGS_ID};
 use crate::ui::ribbon::RibbonLayout;
 
+/// The theme names the popover offers: every built-in theme, then Custom.
+/// Built once; the list does not change while the app runs.
+fn theme_names() -> &'static [String] {
+    static NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        crate::app::config::all_themes()
+            .iter()
+            .map(ToString::to_string)
+            .chain(std::iter::once("Custom".to_string()))
+            .collect()
+    })
+}
+
 impl OpenCADStudio {
     pub(in crate::app) fn on_interface(&mut self, message: InterfaceMsg) -> Task<Message> {
         // A pick from one of its lists closes that list; the popover stays.
@@ -155,11 +168,7 @@ impl OpenCADStudio {
         let floating = &layout.floating;
         Snapshot {
             toolbar_layout,
-            themes: crate::app::config::all_themes()
-                .iter()
-                .map(ToString::to_string)
-                .chain(std::iter::once("Custom".to_string()))
-                .collect(),
+            themes: theme_names().to_vec(),
             theme: self.ui_theme.name.clone(),
             qat_shown: !layout.qat_hidden,
             qat_position: layout.qat_position,
@@ -275,6 +284,35 @@ mod tests {
             .floating
             .iter()
             .all(|panel| !panel.extras_right));
+    }
+
+    #[test]
+    fn interfacesettings_opens_the_popover_on_the_start_tab_too() {
+        let mut app = app();
+        assert!(app.tabs[app.active_tab].is_start);
+        let _ = app.update(Message::MenuCommand("INTERFACESETTINGS".into()));
+        assert!(app.interface_settings_open());
+    }
+
+    #[test]
+    fn docked_toolbars_stay_with_their_layout_and_reset_undocks_them() {
+        use crate::ui::ribbon::ToolbarEdge;
+        let mut app = app();
+        app.ribbon.set_window_size((1600.0, 1000.0));
+        let _ = app.update(Message::Interface(M::Layout(true)));
+        assert!(app.ribbon.dock_toolbar("draw", "Draw", ToolbarEdge::Left));
+        assert_eq!(app.ribbon.layout().docked.len(), 1);
+
+        // The Ribbon layout has none docked; back on Toolbar it is there.
+        let _ = app.update(Message::Interface(M::Layout(false)));
+        assert!(app.ribbon.layout().docked.is_empty());
+        let _ = app.update(Message::Interface(M::Layout(true)));
+        assert_eq!(app.ribbon.layout().docked.len(), 1);
+
+        // Reset toolbars: the defaults float again, nothing docked.
+        let _ = app.update(Message::Interface(M::ResetToolbars));
+        assert!(app.ribbon.layout().docked.is_empty());
+        assert_eq!(app.ribbon.layout().floating.len(), 4);
     }
 
     #[test]

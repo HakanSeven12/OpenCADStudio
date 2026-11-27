@@ -92,6 +92,7 @@ pub enum TitleBarMsg {
 /// (`settings`) and the window buttons.
 /// `pressed`: its empty space is held down (see [`grab`]).
 /// `room`: the widths around the name, which keep it in place.
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     start: Element<'a, Message>,
     name: &str,

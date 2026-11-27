@@ -161,37 +161,6 @@ const _: () = {
     assert!(SCROLL_THUMB_W < SCROLLBAR_W);
 };
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_measurement_is_whole_pixels() {
-        for v in [
-            STRIP_BODY_W,
-            STRIP_W,
-            STRIP_CELL_H,
-            STRIP_ICON,
-            STRIP_GROUP_PAD,
-            TITLE_H,
-            SPLITTER_H,
-            ROW_H,
-            CATEGORY_H,
-            NAME_COL_W,
-            INDENT,
-            GRID_INSET_L,
-            GRID_INSET_R,
-            SCROLLBAR_W,
-            SCROLL_THUMB_W,
-            TAB_BAR_H,
-            TAB_H,
-            MENU_ITEM_H,
-        ] {
-            assert_eq!(v.fract(), 0.0, "{v}");
-        }
-    }
-}
-
 // ── Windows: popovers and dialogs (`kit::form`, mockup B) ─────────────────
 
 /// Width of a popover.
@@ -215,6 +184,8 @@ pub const FORM_CHECK_GAP: f32 = 5.0;
 pub const FORM_CHECK_LABEL_X: f32 = FORM_LABEL_X + FORM_CHECK + FORM_CHECK_GAP;
 /// A popover's title from its left edge.
 pub const FORM_TITLE_X: f32 = 8.0;
+/// Room after the close button in a popover's head.
+pub const FORM_HEAD_PAD_RIGHT: f32 = 2.0;
 /// Side of the close button in a popover's head.
 pub const FORM_CLOSE: f32 = 19.0;
 /// Padding of a popover's body: top, right, bottom, left.
@@ -252,3 +223,34 @@ pub const FORM_FOOTER_PAD_LEFT: f32 = 8.0;
 pub const FORM_BUTTON_H: f32 = 22.0;
 pub const FORM_BUTTON_PAD_X: f32 = 8.0;
 pub const FORM_BUTTON_RADIUS: f32 = 2.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_measurement_is_whole_pixels() {
+        for v in [
+            STRIP_BODY_W,
+            STRIP_W,
+            STRIP_CELL_H,
+            STRIP_ICON,
+            STRIP_GROUP_PAD,
+            TITLE_H,
+            SPLITTER_H,
+            ROW_H,
+            CATEGORY_H,
+            NAME_COL_W,
+            INDENT,
+            GRID_INSET_L,
+            GRID_INSET_R,
+            SCROLLBAR_W,
+            SCROLL_THUMB_W,
+            TAB_BAR_H,
+            TAB_H,
+            MENU_ITEM_H,
+        ] {
+            assert_eq!(v.fract(), 0.0, "{v}");
+        }
+    }
+}

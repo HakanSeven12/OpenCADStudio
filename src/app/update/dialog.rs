@@ -1959,6 +1959,69 @@ mod tests {
         );
     }
 
+    /// Removing a reference without the right-click menu: after a click in
+    /// the list, Delete detaches the selected references (one undo step) and
+    /// leaves the drawing's own selection alone; a click in the drawing gives
+    /// Delete back to the drawing. The toolbar's Detach is greyed until a
+    /// reference is selected.
+    #[test]
+    fn delete_in_the_reference_list_detaches_the_selected_references() {
+        use crate::app::Message;
+        use crate::ui::window::xref_manager::XrefRowId;
+        use document::tables::BlockRecord;
+        let mut app = fresh();
+        let i = app.active_tab;
+        for name in ["PLAN", "SITE"] {
+            let mut br = BlockRecord::new(name);
+            br.flags.is_xref = true;
+            br.xref_path = format!("old/{}.dwg", name.to_lowercase());
+            br.handle = app.tabs[i].scene.document.allocate_handle();
+            app.tabs[i].scene.document.block_records.add(br).unwrap();
+        }
+        app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_repro_host.dwg"));
+        app.show_external_references = true;
+        app.refresh_xref_manager();
+        let row = |app: &OpenCADStudio, name: &str| {
+            let e = app
+                .xref_manager
+                .entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{name} listed"));
+            XrefRowId::of(e.key, &e.saved_path)
+        };
+        let has = |app: &OpenCADStudio, name: &str| {
+            app.tabs[i].scene.document.block_records.get(name).is_some()
+        };
+        assert!(app.xref_manager.detach_gate().is_some(), "nothing selected");
+
+        // Delete without a click in the list stays the drawing's.
+        let _ = app.update(Message::ShortcutPressed("DELETE".into()));
+        assert!(has(&app, "PLAN") && has(&app, "SITE"));
+
+        let _ = app.update(Message::XrefManagerSelect(row(&app, "PLAN")));
+        assert!(app.xref_manager.keys_active);
+        assert!(app.xref_manager.detach_gate().is_none());
+        let _ = app.update(Message::ShortcutPressed("DELETE".into()));
+        assert!(!has(&app, "PLAN"), "Delete detached PLAN");
+        assert!(has(&app, "SITE"), "SITE was not selected");
+
+        let _ = app.update(Message::Undo);
+        assert!(has(&app, "PLAN"), "one undo step brings it back");
+
+        // A click in the drawing gives Delete back to the drawing.
+        let _ = app.update(Message::XrefManagerSelect(row(&app, "SITE")));
+        let _ = app.update(Message::ViewportLeftPress);
+        assert!(!app.xref_manager.keys_active);
+        let _ = app.update(Message::ShortcutPressed("DELETE".into()));
+        assert!(has(&app, "SITE"));
+
+        // Esc in the list gives the keys back as well.
+        let _ = app.update(Message::XrefManagerSelect(row(&app, "SITE")));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(!app.xref_manager.keys_active);
+    }
+
     #[test]
     fn palette_overlay_and_pathtype_rowop_gui_path() {
         // Row-menu Overlay + Change-Path row ops on a direct row via the

@@ -688,6 +688,7 @@ impl OpenCADStudio {
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 tab.layers.keys_active = false;
             }
+            self.xref_manager.keys_active = false;
         }
         // The attribute editor checks a field as the cursor leaves it.
         if let Some(task) = self.attr_editor_leave_check(&msg) {

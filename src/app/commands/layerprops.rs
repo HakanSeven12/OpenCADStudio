@@ -441,11 +441,22 @@ impl OpenCADStudio {
                                 self.tabs[i].active_cmd = Some(Box::new(picker));
                             }
                             Some(handle) => {
-                                let built = self.tabs[i]
-                                    .scene
-                                    .document
-                                    .get_entity(handle)
-                                    .and_then(
+                                let pick = parts
+                                    .get(3)
+                                    .and_then(|value| super::super::helpers::parse_coord(value))
+                                    .map(|(point, _)| point);
+                                let entity = self.tabs[i].scene.document.get_entity(handle);
+                                let by_rule = entity
+                                    .and_then(|e| object_ucs_axes(e, pick))
+                                    .map(|(origin, x, y)| {
+                                        let mut ucs = Ucs::new("*ACTIVE*");
+                                        ucs.origin = Vector3::new(origin.x, origin.y, origin.z);
+                                        ucs.x_axis = Vector3::new(x.x, x.y, x.z);
+                                        ucs.y_axis = Vector3::new(y.x, y.y, y.z);
+                                        ucs
+                                    });
+                                let built = by_rule.or_else(|| {
+                                    entity.and_then(
                                         crate::scene::model::sweep_model::extrusion_profile_of,
                                     )
                                     .and_then(|(profile, _)| {
@@ -472,7 +483,8 @@ impl OpenCADStudio {
                                         ucs.x_axis = Vector3::new(x.x, x.y, x.z);
                                         ucs.y_axis = Vector3::new(y.x, y.y, y.z);
                                         Some(ucs)
-                                    });
+                                    })
+                                });
                                 match built {
                                     Some(ucs) => {
                                         self.tabs[i].active_ucs = Some(ucs);
@@ -2281,6 +2293,121 @@ fn reapply_mleader_style(doc: &mut document::Document, style_handle: document::H
             crate::scene::annotative::apply_mleader_style_to_object(doc, *handle, &style)
         })
         .count()
+}
+
+/// UCS OBJECT for the objects with a defined origin and X axis: a line from
+/// its endpoint nearest the pick along the line, a circle from its centre
+/// towards the pick, an arc from its centre towards the nearer end, a
+/// polyline from its first vertex towards the second, text, blocks and
+/// points from their insertion point along their rotation. Returns the
+/// origin and the X and Y axes in WCS; `None` leaves other objects to their
+/// profile plane.
+fn object_ucs_axes(
+    entity: &document::EntityType,
+    pick: Option<glam::DVec3>,
+) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3)> {
+    use document::EntityType as E;
+    use glam::DVec3;
+    let v = |p: &document::types::Vector3| DVec3::new(p.x, p.y, p.z);
+    // OCS axes of a normal, and an OCS point taken to WCS.
+    let axes = |n: DVec3| {
+        let (ax, ay) = crate::scene::view::transform::ocs_axes((n.x, n.y, n.z));
+        (DVec3::new(ax.0, ax.1, ax.2), DVec3::new(ay.0, ay.1, ay.2))
+    };
+    let ocs = |p: DVec3, n: DVec3| {
+        let (ax, ay) = axes(n);
+        ax * p.x + ay * p.y + n * p.z
+    };
+    // An axis in the plane of normal `n` at `angle` from its OCS X.
+    let rotated = |angle: f64, n: DVec3| {
+        let (ax, ay) = axes(n);
+        (ax * angle.cos() + ay * angle.sin(), n)
+    };
+    let (origin, x, z) = match entity {
+        E::Line(l) => {
+            let (a, b) = (v(&l.start), v(&l.end));
+            let (from, to) = match pick {
+                Some(p) if p.distance_squared(b) < p.distance_squared(a) => (b, a),
+                _ => (a, b),
+            };
+            let x = to - from;
+            // The line lies in the new XZ plane; Z leans to the line's
+            // extrusion direction.
+            let n = v(&l.normal).normalize_or_zero();
+            let mut z = n - x * (n.dot(x) / x.length_squared().max(1e-300));
+            if z.length_squared() < 1e-18 {
+                z = axes(n).1;
+            }
+            (from, x, z)
+        }
+        E::Circle(c) => {
+            let n = v(&c.normal).normalize_or_zero();
+            let centre = ocs(v(&c.center), n);
+            let x = pick
+                .map(|p| {
+                    let d = p - centre;
+                    d - n * d.dot(n)
+                })
+                .filter(|d| d.length_squared() > 1e-18)
+                .unwrap_or(axes(n).0);
+            (centre, x, n)
+        }
+        E::Arc(a) => {
+            let n = v(&a.normal).normalize_or_zero();
+            let centre = ocs(v(&a.center), n);
+            let (s, _) = rotated(a.start_angle, n);
+            let (e, _) = rotated(a.end_angle, n);
+            let x = match pick {
+                Some(p) if p.distance_squared(centre + e * a.radius)
+                    < p.distance_squared(centre + s * a.radius) => e,
+                _ => s,
+            };
+            (centre, x, n)
+        }
+        E::LwPolyline(pl) => {
+            let n = v(&pl.normal).normalize_or_zero();
+            let at = |i: usize| {
+                pl.vertices.get(i).map(|vx| {
+                    ocs(DVec3::new(vx.location.x, vx.location.y, pl.elevation), n)
+                })
+            };
+            let first = at(0)?;
+            let x = (1..pl.vertices.len())
+                .filter_map(at)
+                .map(|p| p - first)
+                .find(|d| d.length_squared() > 1e-18)
+                .unwrap_or(axes(n).0);
+            (first, x, n)
+        }
+        E::Text(t) => {
+            let n = v(&t.normal).normalize_or_zero();
+            let (x, z) = rotated(t.rotation, n);
+            (ocs(v(&t.insertion_point), n), x, z)
+        }
+        E::AttributeDefinition(t) => {
+            let n = v(&t.normal).normalize_or_zero();
+            let (x, z) = rotated(t.rotation, n);
+            (ocs(v(&t.insertion_point), n), x, z)
+        }
+        E::MText(t) => {
+            let n = v(&t.normal).normalize_or_zero();
+            let (x, z) = rotated(t.rotation, n);
+            (v(&t.insertion_point), x, z)
+        }
+        E::Insert(b) => {
+            let n = v(&b.normal).normalize_or_zero();
+            let (x, z) = rotated(b.rotation, n);
+            (ocs(v(&b.insert_point), n), x, z)
+        }
+        E::Point(p) => {
+            let n = v(&p.normal).normalize_or_zero();
+            (v(&p.location), axes(n).0, n)
+        }
+        _ => return None,
+    };
+    let x = x.normalize_or_zero();
+    let y = z.cross(x).normalize_or_zero();
+    (x.length_squared() > 0.5 && y.length_squared() > 0.5).then_some((origin, x, y))
 }
 
 #[cfg(test)]

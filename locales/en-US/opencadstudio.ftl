@@ -4656,6 +4656,7 @@ insert =
     .date = Date
     .details = Details
     .xref-detach = Detach
+    .xref-detach-tip = Detach the selected references from the drawing (Delete)
     .failed = Failed
     .xref-file-attach-is-not-available-on-web = File attach is not available on web — the reference list below is read-only.
     .xref-file-name = File name

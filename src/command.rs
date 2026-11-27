@@ -265,7 +265,8 @@ impl CadCommand for FreeTextValuePromptCommand {
 /// construction lives in one place whether the user clicked or typed the
 /// arguments. For a face the click lands *on the solid's surface*
 /// (`entity_pick_uses_surface_point`) and that point becomes the plane
-/// origin; for an object only the handle matters.
+/// origin; for an object it picks the nearer end of a line
+/// or arc and a circle's X direction.
 pub struct UcsPickCommand {
     /// `true` picks a solid face; `false` picks a planar entity.
     pub face: bool,
@@ -307,7 +308,15 @@ impl CadCommand for UcsPickCommand {
             return CmdResult::NeedPoint;
         }
         if !self.face {
-            return CmdResult::Dispatch(format!("UCS OBJECT {:X}", handle.value()));
+            // The pick picks the line's end, the arc's end or the circle's
+            // X direction.
+            return CmdResult::Dispatch(format!(
+                "UCS OBJECT {:X} {},{},{}",
+                handle.value(),
+                pt.x,
+                pt.y,
+                pt.z
+            ));
         }
         // Hex handle and comma-separated coordinates are what the inline
         // parser reads back. Full `{}` precision, not a rounded format: the

@@ -1,15 +1,15 @@
 ---
 summary: Pastes the copied objects into the current space at a point you pick.
-related: COPYCLIP, CUTCLIP, COPYBASE, PASTEORIG, PASTEBLOCK, PASTESPEC
+related: COPYCLIP, CUTCLIP, COPYBASE, CUTBASE, PASTEORIG, PASTEBLOCK, PASTESPEC
 ribbon: Draw tab › Clipboard panel
 ---
 
 ## Usage
-1. Copy or cut objects first with [`COPYCLIP`](COPYCLIP-Command), [`CUTCLIP`](CUTCLIP-Command) or [`COPYBASE`](COPYBASE-Command).
+1. Copy or cut objects first with [`COPYCLIP`](COPYCLIP-Command), [`CUTCLIP`](CUTCLIP-Command), [`COPYBASE`](COPYBASE-Command) or [`CUTBASE`](CUTBASE-Command).
 2. Start `PASTECLIP`. A preview of the objects follows the cursor.
 3. Specify the insertion point.
 
-The objects are placed relative to their base point: the lower-left corner of the copied objects, or the base point you picked with `COPYBASE`.
+The objects are placed relative to their base point: the lower-left corner of the copied objects, or the base point you picked with `COPYBASE` or `CUTBASE`.
 
 ## Notes
 - Press Enter or Esc at the prompt to cancel without pasting.

@@ -73,16 +73,8 @@ impl CursorType {
     }
 }
 
-/// Where the classic pull-down menus show (MENUBAR 1).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MenuBarPosition {
-    /// In the app's title bar, as long as the window holds them there;
-    /// otherwise in a row of their own.
-    TitleBar,
-    /// In a row of their own under the title bar.
-    #[default]
-    OwnRow,
-}
+/// Where the classic pull-down menus show; it lives with the menu bar.
+pub use crate::ui::menu_bar::MenuBarPosition;
 
 /// What a right-click in the drawing area does (SHORTCUTMENU in commercial solutions /
 /// "Right-click Customization").

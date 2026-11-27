@@ -12,11 +12,11 @@
 use iced::widget::Column;
 use iced::Element;
 
-use crate::app::settings::MenuBarPosition;
 use crate::app::Message;
 use crate::ui::dropdown_list::DropdownList;
 use crate::ui::kit;
 use crate::ui::kit::form;
+use crate::ui::menu_bar::MenuBarPosition;
 use crate::ui::ribbon::{MinimizePref, QatPosition};
 use crate::ui::style::kit_metrics as km;
 

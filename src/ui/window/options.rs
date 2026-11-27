@@ -65,7 +65,7 @@ pub struct AppPrefs {
     /// MENUBAR: the pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
     /// Where the pull-down menus show while MENUBAR is 1.
-    pub menu_bar_position: crate::app::settings::MenuBarPosition,
+    pub menu_bar_position: crate::ui::menu_bar::MenuBarPosition,
     /// The ribbon shows (RIBBON / RIBBONCLOSE).
     pub show_ribbon: bool,
     /// Where the Quick Access Toolbar shows while the ribbon is open.
@@ -740,7 +740,7 @@ pub fn view_window<'a>(
         });
 
     // Window Elements: the same choices as Interface Settings.
-    use crate::app::settings::MenuBarPosition;
+    use crate::ui::menu_bar::MenuBarPosition;
     use crate::ui::ribbon::QatPosition;
     let menu_bar_positions: Vec<Labelled<MenuBarPosition>> =
         [MenuBarPosition::TitleBar, MenuBarPosition::OwnRow]

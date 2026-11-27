@@ -7,7 +7,7 @@ to read the results.
 
   python3 scripts/health.py measure [--cargo] [--coverage] [--out FILE]
       Measure this checkout and write JSON (to stdout, or FILE). The source
-      measures take seconds. --cargo adds clippy, rustfmt, compiler warnings,
+      measures and the crate readiness (scripts/arch_check.py) take seconds. --cargo adds clippy, rustfmt, compiler warnings,
       the test count, dependencies and RustSec advisories (minutes);
       --coverage adds line coverage of the core layers with cargo-llvm-cov
       (production lines only; as long as the tests) and how often each file
@@ -534,8 +534,12 @@ def churn(root: Path, days: int = 28):
     return dict(out)
 
 
-def measure(root: Path, cargo=False, coverage=False):
+def measure(root: Path, cargo=False, coverage=False, crates=False):
+    """crates adds what blocks each planned crate (arch_check.readiness), for
+    the wiki page; pull requests do not need it."""
     values, details = measure_source(root)
+    if crates:
+        details["crate_readiness"] = arch_check.readiness(root)
     if cargo:
         v, d = measure_cargo(root, coverage)
         values.update(v)
@@ -819,7 +823,7 @@ def main(argv) -> int:
         i += 1
     if args[:1] == ["measure"]:
         out_file = options.get("--out")
-        data = measure(Path.cwd(), cargo="--cargo" in flags, coverage="--coverage" in flags)
+        data = measure(Path.cwd(), cargo="--cargo" in flags, coverage="--coverage" in flags, crates=True)
         text = json.dumps(data, indent=1) + "\n"
         if out_file:
             Path(out_file).write_text(text)

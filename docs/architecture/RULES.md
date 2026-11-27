@@ -36,16 +36,18 @@ The rule of thumb: code that many things depend on sits low and changes rarely; 
 - Test code is skipped: files named `tests.rs`, `test_support.rs` or `*_tests.rs`, files under a `tests/` or `*_tests/` folder, `#[cfg(test)] mod` blocks, and files declared with `#[cfg(test)] mod name;`.
 - Comments and the contents of strings are ignored.
 - Only `crate::` paths are read. A `super::` path that climbs out of a top-level module is not seen.
+- `readiness` (below) reads more: items in the crate root (`src/lib.rs`), `super::` paths that climb out of a top-level module, and the macros `src/` exports. It counts each use that keeps a planned crate from building alone, test code apart, and makes no exceptions such as `app::Message`. It never fails a change.
 
 ## Running it
 
 ```sh
 python3 scripts/arch_check.py report            # counts for this checkout
 python3 scripts/arch_check.py diff ../other     # added and removed, compared with another checkout
+python3 scripts/arch_check.py readiness         # what blocks each crate planned in TARGET.md
 python3 scripts/test_arch_check.py              # the tool's own tests
 ```
 
-Add `--markdown` to either command for a table or list ready to paste.
+Add `--markdown` to any command for a table or list ready to paste.
 
 ## When a pull request adds one
 

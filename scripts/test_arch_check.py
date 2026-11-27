@@ -228,6 +228,130 @@ class Report(unittest.TestCase):
         self.assertIn("Upward dependencies: 1 module pair, 2 files", out)
 
 
+def ready(files):
+    """{crate: (uses, test_uses)} for the crates with a finding."""
+    result = arch_check.readiness(tree(files))
+    return {c["crate"]: (c["uses"], c["test_uses"]) for c in result["crates"] if c["uses"] or c["test_uses"]}
+
+
+class Readiness(unittest.TestCase):
+    def test_a_crate_may_use_its_own_crate_and_the_crates_below(self):
+        self.assertEqual(ready({"entities/a.rs": "use crate::config::C;\nuse crate::text::T;\n",
+                                "scene/a.rs": "use crate::entities::E;\nuse crate::snap::S;\n"}), {})
+
+    def test_a_same_layer_crate_blocks_although_the_layer_rule_allows_it(self):
+        self.assertEqual(ready({"io/a.rs": "fn f() {}\nuse crate::scene::S;\n"}),
+                         {"ocs_io": ({"io -> scene": {"src/io/a.rs": 2}}, {})})
+
+    def test_the_message_exception_does_not_apply_to_a_crate(self):
+        self.assertEqual(edges({"ui/a.rs": "use crate::app::Message;\n"}), {})
+        self.assertEqual(ready({"ui/a.rs": "use crate::app::Message;\n"}),
+                         {"ocs_ui": ({"ui -> app": {"src/ui/a.rs": 1}}, {})})
+
+    def test_a_module_in_no_planned_crate_blocks_and_is_listed(self):
+        self.assertEqual(ready({"io/a.rs": "use crate::catalog::Linetype;\n"}),
+                         {"ocs_io": ({"io -> catalog": {"src/io/a.rs": 1}}, {})})
+        self.assertIn("catalog", arch_check.readiness(tree({}))["unplaced"])
+
+    def test_rendering_may_use_the_session_crate(self):
+        self.assertTrue(arch_check.may_use("ocs_render", "ocs_session"))
+        self.assertFalse(arch_check.may_use("ocs_session", "ocs_render"))
+        self.assertFalse(arch_check.may_use("ocs_io", "ocs_render"))
+        self.assertFalse(arch_check.may_use("ocs_base", None))
+
+    def test_test_code_is_counted_apart(self):
+        found = ready({"entities/a.rs": "fn f() {}\n#[cfg(test)]\nmod tests {\n    use crate::scene::S;\n}\n",
+                       "entities/b_tests.rs": "use crate::io::R;\n"})
+        self.assertEqual(found, {"ocs_model": ({}, {"entities -> scene": {"src/entities/a.rs": 4},
+                                                    "entities -> io": {"src/entities/b_tests.rs": 1}})})
+
+
+class ReadinessRootPaths(unittest.TestCase):
+    LIB = ("pub mod app;\npub mod ui;\npub(crate) use app::QuadOptionMsg;\n"
+           "#[cfg(test)]\npub(crate) fn with_headless_ui() {\n    let x = 1;\n}\n")
+
+    def test_a_re_export_in_the_crate_root_is_a_use_of_its_module(self):
+        found = ready({"lib.rs": self.LIB, "ui/a.rs": "use crate::{QuadOptionMsg, i18n};\n"})
+        self.assertEqual(found, {"ocs_ui": ({"ui -> app": {"src/ui/a.rs": 1}}, {})})
+
+    def test_an_item_of_the_crate_root_blocks(self):
+        found = ready({"lib.rs": self.LIB, "ui/a.rs": "#[cfg(test)]\nmod tests {\n    fn t() { crate::with_headless_ui(); }\n}\n"})
+        self.assertEqual(found, {"ocs_ui": ({}, {"ui -> crate root": {"src/ui/a.rs": 3}})})
+
+    def test_super_paths_that_leave_the_top_module(self):
+        found = ready({
+            "entities/mod.rs": "use super::scene::A;\nmod inner {\n    use super::super::io::B;\n    use super::C;\n}\n",
+            "entities/deep/x.rs": "use super::super::super::scene::D;\nuse super::super::shape::E;\n",
+            "entities/y.rs": "use super::{z::F, super::ui::G};\n",
+        })
+        self.assertEqual(found, {"ocs_model": ({
+            "entities -> scene": {"src/entities/deep/x.rs": 1, "src/entities/mod.rs": 1},
+            "entities -> io": {"src/entities/mod.rs": 3},
+        }, {})})
+
+    def test_super_inside_the_module_and_test_globs_are_not_uses(self):
+        self.assertEqual(ready({"entities.rs": "fn f() {}\n#[cfg(test)]\nmod tests {\n    use super::*;\n}\n",
+                                "scene/a.rs": "use super::b::X;\n"}), {})
+
+    def test_a_glob_of_the_crate_root_blocks(self):
+        self.assertEqual(ready({"entities.rs": "use super::*;\n"}),
+                         {"ocs_model": ({"entities -> crate root": {"src/entities.rs": 1}}, {})})
+
+
+class ReadinessMacros(unittest.TestCase):
+    def test_an_exported_macro_is_a_use_of_the_module_that_defines_it(self):
+        files = {"i18n.rs": "#[macro_export]\nmacro_rules! t {\n    ($s:expr) => { $crate::i18n::translate($s) };\n}\n",
+                 "scene/m.rs": "#[macro_export]\nmacro_rules! draw {\n    () => { $crate::scene::draw() };\n}\n",
+                 "entities/a.rs": "fn f() { crate::t!(\"x\"); }\nfn g() { crate::draw!(); }\n"}
+        self.assertEqual(ready(files), {"ocs_model": ({"entities -> scene": {"src/entities/a.rs": 2}}, {})})
+
+    def test_a_plain_crate_path_in_an_exported_macro_counts_at_each_caller(self):
+        # `$crate::io` in `n` names the crate of i18n: only i18n uses io.
+        files = {"i18n.rs": "#[macro_export]\nmacro_rules! m {\n    () => { crate::scene::draw() };\n}\n"
+                            "#[macro_export]\nmacro_rules! n {\n    () => { $crate::io::read() };\n}\n",
+                 "entities/a.rs": "use crate::m;\nfn f() { m!(); }\n",
+                 "entities/b.rs": "fn g() { crate::n!(); }\n"}
+        self.assertEqual(ready(files), {
+            "ocs_base": ({"i18n -> io": {"src/i18n.rs": 7}, "i18n -> scene": {"src/i18n.rs": 3}}, {}),
+            "ocs_model": ({"entities -> scene": {"src/entities/a.rs": 2}}, {}),
+        })
+
+
+class ReadinessCommand(unittest.TestCase):
+    def test_text_and_markdown(self):
+        root = tree({"io/a.rs": "use crate::scene::S;\n"})
+        code, out = run(["readiness"], root)
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"ocs_base\s+production: ready\s+tests: ready")
+        self.assertRegex(out, r"ocs_io\s+production: 1 file\s+tests: ready")
+        self.assertRegex(out, r"io -> scene\s+1")
+        self.assertIn("Modules in no planned crate (see CRATES): catalog", out)
+        code, out = run(["readiness", "--markdown"], root)
+        self.assertIn("| `ocs_session` | — | no modules yet | no modules yet |", out)
+        self.assertIn("- `io -> scene`: 1 file, first `src/io/a.rs:1`", out)
+
+
+class TargetDocument(unittest.TestCase):
+    def test_crates_match_the_target_and_the_layers(self):
+        doc = (Path(__file__).resolve().parents[1] / "docs/architecture/TARGET.md").read_text(encoding="utf-8")
+        rows = dict(re.findall(r"^\| `(\w+)`[^|]*\| [^|]*\| (`[^|]*)\|", doc, re.M))
+        crates = {name: mods for name, _, mods in arch_check.CRATES}
+        for name, cell in rows.items():
+            if name in crates:
+                named = re.findall(r"`(\w+)`", cell.split(":")[0])
+                self.assertLessEqual(set(named), set(crates[name]), name)
+        self.assertIn("ocs_base", rows)
+        placed = [m for mods in crates.values() for m in mods]
+        self.assertEqual(len(placed), len(set(placed)), "a module in two crates")
+        self.assertLessEqual(set(placed), set(arch_check.LAYERS))
+        for name, layer, mods in arch_check.CRATES:
+            self.assertIn(f"`{name}`", doc)
+            layers = {3, 4} if name == "ocs_commands" else {layer}
+            for m in mods:
+                if m != "entity_creation":  # layer 4, but TARGET.md puts it in the model crate
+                    self.assertIn(arch_check.LAYERS[m], layers, m)
+
+
 class RulesDocument(unittest.TestCase):
     def test_layer_table_matches_the_script(self):
         doc = (Path(__file__).resolve().parents[1] / "docs/architecture/RULES.md").read_text(encoding="utf-8")

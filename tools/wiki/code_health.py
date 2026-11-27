@@ -164,6 +164,45 @@ def coverage_by_layer(cur, prev, history):
     return out + [""]
 
 
+def crate_readiness(cur, commit):
+    """What blocks each crate planned in docs/architecture/TARGET.md
+    (scripts/arch_check.py readiness). Nothing when the release has no data."""
+    r = cur["details"].get("crate_readiness")
+    if not r:
+        return []
+
+    def status(found, mods):
+        files = len({f for fs in found.values() for f in fs})
+        return "no modules yet" if not mods else "ready" if not files else f"{files:,} file{'' if files == 1 else 's'}"
+
+    out = ["## Crate readiness", "",
+           f"The crates planned in [TARGET.md]({BLOB}/main/docs/architecture/TARGET.md), lowest first. A crate can "
+           "move out of the root package when its modules use nothing that is neither in the crate nor in a crate "
+           "below it. Test code is counted apart: the tests move with their crate. Unlike the upward dependencies, "
+           "this also counts `ui` using `app::Message`, items in the crate root and the exported macros.", "",
+           "| Crate | Modules | Production code | Test code |", "| --- | --- | --- | --- |"]
+    for c in r["crates"]:
+        mods = ", ".join(f"`{m}`" for m in c["modules"]) or "—"
+        out.append(f"| `{c['crate']}` | {mods} | {status(c['uses'], c['modules'])} | {status(c['test_uses'], c['modules'])} |")
+    out.append("")
+    for c in r["crates"]:
+        rows = [(pair, fs, kind) for kind in ("uses", "test_uses")
+                for pair, fs in sorted(c[kind].items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+        if not rows:
+            continue
+        out += [f"**What blocks `{c['crate']}`**", ""]
+        for pair, fs, kind in rows:
+            (f, line), = list(fs.items())[:1]
+            where = "in test code, " if kind == "test_uses" else ""
+            out.append(f"- `{pair}`: {where}{len(fs):,} file{'' if len(fs) == 1 else 's'}, "
+                       f"for example {link(f, commit, line)}")
+        out.append("")
+    if r.get("unplaced"):
+        out += ["Not in a planned crate yet: " + ", ".join(f"`{m}`" for m in r["unplaced"])
+                + " (`CRATES` in `scripts/arch_check.py`).", ""]
+    return out
+
+
 def cleanup_tasks(cur, commit):
     d = cur["details"]
     out = []
@@ -289,6 +328,7 @@ def render(cur, goals, history, credits, release):
                          f"| {fmt(g['target']) if g['target'] is not None else ('lower' if g['direction'] == 'down' else 'higher')} |")
         lines.append("")
     lines += coverage_by_layer(cur, prev, history)
+    lines += crate_readiness(cur, commit)
     lines += ["## Thanks", "", "Contributors whose merged work improved a measure in this release, in alphabetical order:", ""] + thanks(credits)
     lines += ["## Pick up a cleanup", ""] + cleanup_tasks(cur, commit)
     recent = history[-6:][::-1]

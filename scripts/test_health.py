@@ -465,6 +465,30 @@ class Page(unittest.TestCase):
         self.assertIn("| Measure | v2 | v1 |", page)
         self.assertIn("| unwrap/expect/panic! in production code | 1 | 3 |", page)
 
+    def test_crate_readiness_section(self):
+        root = tree({"io/a.rs": "fn f() {}\nuse crate::scene::S;\n",
+                     "ui/b.rs": "#[cfg(test)]\nmod tests {\n    use crate::app::A;\n}\n"})
+        cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(root)))}
+        goals = json.loads(code_health.GOALS.read_text())
+        self.assertNotIn("## Crate readiness", code_health.render(cur, goals, [], [], "v1"))
+        cur["details"]["crate_readiness"] = health.arch_check.readiness(root)
+        page = code_health.render(cur, goals, [], [], "v1")
+        self.assertLess(page.index("## Crate readiness"), page.index("## Thanks"))
+        self.assertIn("| `ocs_base` | `par`, `perf`,", page)
+        self.assertIn("| `ocs_io` | `io`, `ifc_plan` | 1 file | ready |", page)
+        self.assertIn("| `ocs_session` | — | no modules yet | no modules yet |", page)
+        self.assertIn("| `ocs_ui` | `ui`, `input` | ready | 1 file |", page)
+        self.assertIn(f"- `io -> scene`: 1 file, for example [`src/io/a.rs:2`]({code_health.BLOB}/{'a' * 40}/src/io/a.rs#L2)", page)
+        self.assertIn("- `ui -> app`: in test code, 1 file, for example", page)
+        self.assertIn("Not in a planned crate yet: `catalog`", page)
+
+    def test_crate_readiness_only_when_asked(self):
+        root = tree({"io/a.rs": "use crate::scene::S;\n"})
+        self.assertNotIn("crate_readiness", health.measure(root)["details"])
+        found = health.measure(root, crates=True)["details"]["crate_readiness"]
+        self.assertEqual([c["uses"] for c in found["crates"] if c["crate"] == "ocs_io"],
+                         [{"io -> scene": {"src/io/a.rs": 1}}])
+
     def test_cleanup_tasks_are_small_and_io_only(self):
         root = tree({
             "command.rs": "fn f() { crate::ui::a::A; crate::ui::b::B; crate::ui::c::C; }\n",   # three items

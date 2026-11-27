@@ -742,9 +742,9 @@ impl OpenCADStudio {
             }
             // ── INTERFACESETTINGS — the Interface Settings popover ──────────────
             "INTERFACESETTINGS" => {
-                return Some(Task::done(Message::Interface(
+                return Some(self.on_interface(
                     crate::ui::interface_settings::InterfaceMsg::Open,
-                )));
+                ));
             }
             // ── RIBBON / RIBBONCLOSE — show or hide the ribbon ───────────────────
             "RIBBON" | "RIBBONCLOSE" => {

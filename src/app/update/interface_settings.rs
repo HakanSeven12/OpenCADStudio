@@ -213,7 +213,8 @@ mod tests {
         let _ = app.update(Message::CloseRibbonDropdown);
         assert!(!app.interface_settings_open());
         // INTERFACESETTINGS opens it.
-        let _ = app.update(Message::MenuCommand("INTERFACESETTINGS".into()));
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("INTERFACESETTINGS");
         assert!(app.interface_settings_open());
         let _ = app.update(Message::Interface(M::Close));
         assert!(!app.interface_settings_open());
@@ -322,9 +323,10 @@ mod tests {
             crate::ui::ribbon::MinimizePref::PanelTitles
         );
         // STATUSBAR reads and writes the same switch.
-        let _ = app.update(Message::MenuCommand("STATUSBAR 1".into()));
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("STATUSBAR 1");
         assert!(!app.status_bar_hidden);
-        let _ = app.update(Message::MenuCommand("STATUSBAR 0".into()));
+        let _ = app.run_command_line("STATUSBAR 0");
         assert!(app.status_bar_hidden);
         // The popover builds in both layouts, every list open.
         for toolbar in [false, true] {

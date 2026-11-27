@@ -5,8 +5,9 @@
 //! bar, the ribbon's options and the floating toolbars. Every change is
 //! made at once; there is nothing to apply.
 //!
-//! It is built from the UI kit only ([`crate::ui::kit::popover`] and its
-//! rows), so it looks like the palettes.
+//! It is built from the window kit only ([`crate::ui::kit::form`]), as
+//! mockup B draws it: no grid lines or cell backgrounds, label and control
+//! each half a row.
 
 use iced::widget::{column, Column};
 use iced::Element;
@@ -15,6 +16,7 @@ use crate::app::settings::MenuBarPosition;
 use crate::app::Message;
 use crate::ui::dropdown_list::DropdownList;
 use crate::ui::kit;
+use crate::ui::kit::form;
 use crate::ui::ribbon::{MinimizePref, QatPosition};
 use crate::ui::style::kit_metrics as km;
 
@@ -161,7 +163,7 @@ fn title_side_label(side: bool) -> String {
     }
 }
 
-/// A kit dropdown for `list`: `options` (label, message), the one shown
+/// A choice field for `list`: `options` (label, message), the one shown
 /// `current`. While not `enabled` it shows `current` greyed, with nothing
 /// to open.
 fn choice<'a>(
@@ -171,15 +173,11 @@ fn choice<'a>(
     current: &str,
     enabled: bool,
 ) -> Element<'a, Message> {
-    if !enabled {
-        return kit::dropdown_field(current.to_string(), false, None);
-    }
-    let open = state.open_list == Some(list);
+    let open = enabled && state.open_list == Some(list);
     let toggle = msg(InterfaceMsg::List(if open { None } else { Some(list) }));
-    let head = kit::dropdown_field(current.to_string(), open, Some(toggle));
     let width = kit::dropdown_width(
         options.iter().map(|(label, _)| label.as_str()),
-        km::POPOVER_W / 2.0,
+        km::FORM_W / 2.0,
     );
     let selected = options.iter().position(|(label, _)| label == current);
     let rows = options
@@ -189,39 +187,20 @@ fn choice<'a>(
             kit::dropdown_option(label.clone(), label, msg(message), on)
         })
         .collect();
-    let close = msg(InterfaceMsg::List(None));
     let list = DropdownList::new(rows)
         .selected(selected)
         .select_first_by_default(selected.is_some())
-        .on_escape(close.clone());
-    kit::dropdown(head, list, width, close, open)
-}
-
-/// A row with a name and a choice, each half the width.
-fn select_row<'a>(name: String, value: Element<'a, Message>) -> Element<'a, Message> {
-    kit::row_view_split(
-        kit::aligned_name(name),
-        value,
-        kit::NameWidth::Half,
-        false,
-        None,
-    )
+        .on_escape(msg(InterfaceMsg::List(None)));
+    form::select(current.to_string(), open, toggle, list, width, !enabled)
 }
 
 /// The popover.
 pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
-    let title_bar = crate::ui::dock::popover_title_bar(
-        crate::tr!("interface-settings", "title"),
-        msg(InterfaceMsg::Close),
-    );
     let mut bands: Column<'a, Message> = column![];
 
     // ── Layout ────────────────────────────────────────────────────────────
-    bands = bands.push(kit::section_bar(
-        crate::tr!("interface-settings", "layout"),
-        vec![],
-    ));
-    bands = bands.push(kit::radio_row(
+    bands = bands.push(form::section(crate::tr!("interface-settings", "layout")));
+    bands = bands.push(form::tiles(
         vec![
             (
                 false,
@@ -239,16 +218,16 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
     ));
 
     // ── Window elements ───────────────────────────────────────────────────
-    bands = bands.push(kit::section_bar(
-        crate::tr!("interface-settings", "window-elements"),
-        vec![],
-    ));
+    bands = bands.push(form::section(crate::tr!(
+        "interface-settings",
+        "window-elements"
+    )));
     let theme_options = snap
         .themes
         .iter()
         .map(|name| (theme_label(name), InterfaceMsg::Theme(name.clone())))
         .collect();
-    bands = bands.push(select_row(
+    bands = bands.push(form::row(
         crate::tr!("interface-settings", "color-theme"),
         choice(
             state,
@@ -285,7 +264,7 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         &qat_position_label(qat_shown_position),
         snap.qat_shown && !snap.toolbar_layout,
     );
-    let qat_row = kit::check_select_row(
+    let qat_row = form::check_row(
         crate::tr!("interface-settings", "quick-access"),
         snap.qat_shown,
         Some(msg(InterfaceMsg::QatShown(!snap.qat_shown))),
@@ -318,17 +297,17 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         &menu_bar_position_label(snap.menu_bar_position),
         snap.menu_bar_shown,
     );
-    bands = bands.push(kit::check_select_row(
+    bands = bands.push(form::check_row(
         crate::tr!("interface-settings", "menu-bar"),
         snap.menu_bar_shown,
         Some(msg(InterfaceMsg::MenuBarShown(!snap.menu_bar_shown))),
         menu_choice,
     ));
     if snap.menu_bar_shown && snap.menus_fall_back {
-        bands = bands.push(kit::note_row(crate::tr!(
-            "interface-settings",
-            "menus-own-row"
-        )));
+        bands = bands.push(form::hint(
+            crate::tr!("interface-settings", "menus-own-row"),
+            true,
+        ));
     }
 
     let tabs_choice = choice(
@@ -341,20 +320,20 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         &file_tabs_label(snap.file_tabs_above),
         snap.file_tabs_shown,
     );
-    bands = bands.push(kit::check_select_row(
+    bands = bands.push(form::check_row(
         crate::tr!("interface-settings", "file-tabs"),
         snap.file_tabs_shown,
         Some(msg(InterfaceMsg::FileTabsShown(!snap.file_tabs_shown))),
         tabs_choice,
     ));
-    bands = bands.push(kit::check_row(
+    bands = bands.push(form::check(
         crate::tr!("interface-settings", "command-line"),
         snap.command_line_shown,
         Some(msg(InterfaceMsg::CommandLineShown(
             !snap.command_line_shown,
         ))),
     ));
-    bands = bands.push(kit::check_row(
+    bands = bands.push(form::check(
         crate::tr!("interface-settings", "status-bar"),
         snap.status_bar_shown,
         Some(msg(InterfaceMsg::StatusBarShown(!snap.status_bar_shown))),
@@ -362,12 +341,9 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
 
     if snap.toolbar_layout {
         // ── Toolbars ──────────────────────────────────────────────────────
-        bands = bands.push(kit::section_bar(
-            crate::tr!("interface-settings", "toolbars"),
-            vec![],
-        ));
+        bands = bands.push(form::section(crate::tr!("interface-settings", "toolbars")));
         for &(module, title, shown) in &snap.toolbars {
-            bands = bands.push(kit::check_row(
+            bands = bands.push(form::check(
                 crate::t!(title).into_owned(),
                 shown,
                 Some(msg(InterfaceMsg::Toolbar {
@@ -377,7 +353,7 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
                 })),
             ));
         }
-        bands = bands.push(select_row(
+        bands = bands.push(form::row(
             crate::tr!("interface-settings", "toolbar-title"),
             choice(
                 state,
@@ -390,18 +366,21 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
                 true,
             ),
         ));
-        bands = bands.push(kit::band(kit::text_button(
-            crate::tr!("interface-settings", "reset-toolbars"),
-            Some(msg(InterfaceMsg::ResetToolbars)),
-            false,
-        )));
+        bands = bands.push(
+            iced::widget::container(form::button(
+                crate::tr!("interface-settings", "reset-toolbars"),
+                msg(InterfaceMsg::ResetToolbars),
+            ))
+            .padding(
+                iced::Padding::ZERO
+                    .top(km::FORM_TILES_TOP)
+                    .left(km::FORM_LABEL_X),
+            ),
+        );
     } else {
         // ── Ribbon ────────────────────────────────────────────────────────
-        bands = bands.push(kit::section_bar(
-            crate::tr!("interface-settings", "ribbon"),
-            vec![],
-        ));
-        bands = bands.push(select_row(
+        bands = bands.push(form::section(crate::tr!("interface-settings", "ribbon")));
+        bands = bands.push(form::row(
             crate::tr!("interface-settings", "minimize-to"),
             choice(
                 state,
@@ -419,32 +398,31 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
                 true,
             ),
         ));
-        bands = bands.push(kit::check_row(
+        bands = bands.push(form::check(
             crate::tr!("interface-settings", "panel-titles"),
             snap.panel_titles,
             Some(msg(InterfaceMsg::PanelTitles(!snap.panel_titles))),
         ));
-        bands = bands.push(kit::check_row(
+        bands = bands.push(form::check(
             crate::tr!("interface-settings", "center-tabs"),
             snap.centered,
             Some(msg(InterfaceMsg::Centered(!snap.centered))),
         ));
-        bands = bands.push(kit::check_row(
+        bands = bands.push(form::check(
             crate::tr!("interface-settings", "wheel-tabs"),
             snap.wheel_tabs,
             Some(msg(InterfaceMsg::WheelTabs(!snap.wheel_tabs))),
         ));
     }
-    bands = bands.push(kit::gap());
     // Options… ends the popover as a button at the right of its footer.
-    bands = bands.push(kit::footer(iced::widget::row![
-        iced::widget::Space::new().width(iced::Length::Fill),
-        kit::text_button(
-            crate::tr!("interface-settings", "options"),
-            Some(msg(InterfaceMsg::Options)),
-            false,
-        ),
-    ]));
-
-    kit::popover(title_bar, bands, km::POPOVER_W)
+    let footer = form::footer(vec![form::button(
+        crate::tr!("interface-settings", "options"),
+        msg(InterfaceMsg::Options),
+    )]);
+    form::popover(
+        crate::tr!("interface-settings", "title"),
+        msg(InterfaceMsg::Close),
+        bands,
+        Some(footer),
+    )
 }

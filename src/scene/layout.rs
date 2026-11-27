@@ -52,14 +52,10 @@ impl Scene {
     /// it does not get the first viewport a new layout gets. The paper-space
     /// objects are copied by the caller.
     pub fn copy_layout_page(&mut self, source: &str, name: &str) {
-        let find = |document: &document::Document, wanted: &str| {
-            document.objects.values().find_map(|object| match object {
-                ObjectType::Layout(layout) if layout.name == wanted => Some(layout.clone()),
-                _ => None,
-            })
-        };
-        let (Some(from), Some(to)) = (find(&self.document, source), find(&self.document, name))
-        else {
+        let (Some(from), Some(to)) = (
+            layout_named(&self.document, source),
+            layout_named(&self.document, name),
+        ) else {
             return;
         };
         if let Some(ObjectType::Layout(layout)) = self.document.objects.get_mut(&to.handle) {
@@ -109,39 +105,57 @@ impl Scene {
         self.bump_layout_epoch();
     }
 
+    /// [`Self::copy_layout_page`] from layout `source` of another drawing
+    /// (LAYOUT Template): the page setup, limits and sheet view. The UCS,
+    /// plot view and visual style it names are that drawing's objects, so
+    /// the layout keeps its own; extension dictionary records stay behind.
+    pub fn copy_layout_page_from(
+        &mut self,
+        from_doc: &document::Document,
+        source: &str,
+        name: &str,
+    ) {
+        let (Some(from), Some(to)) = (
+            layout_named(from_doc, source),
+            layout_named(&self.document, name),
+        ) else {
+            return;
+        };
+        if let Some(ObjectType::Layout(layout)) = self.document.objects.get_mut(&to.handle) {
+            *layout = document::objects::Layout {
+                handle: to.handle,
+                owner: to.owner,
+                name: to.name.clone(),
+                tab_order: to.tab_order,
+                block_record: to.block_record,
+                viewport: to.viewport,
+                viewports: to.viewports.clone(),
+                base_ucs: to.base_ucs,
+                named_ucs: to.named_ucs,
+                reactors: to.reactors.clone(),
+                xdictionary_handle: to.xdictionary_handle,
+                plot_view_handle: to.plot_view_handle,
+                visual_style_handle: to.visual_style_handle,
+                ..from
+            };
+        }
+        if let Some(EntityType::Viewport(sheet)) = from_doc.get_entity(from.viewport).cloned() {
+            let mut sheet = *sheet;
+            rebase_viewport(&mut sheet, from_doc, &self.document, &Default::default());
+            if let Some(EntityType::Viewport(target)) = self.document.get_entity_mut(to.viewport) {
+                **target = document::entities::Viewport {
+                    common: target.common.clone(),
+                    ..sheet
+                };
+            }
+        }
+        self.unopened_layouts.remove(name);
+        self.bump_layout_epoch();
+    }
+
     /// The paper-space objects of layout `name`, without its sheet viewport.
     pub fn layout_paper_entities(&self, name: &str) -> Vec<Handle> {
-        let Some((record, sheet)) =
-            self.document
-                .objects
-                .values()
-                .find_map(|object| match object {
-                    ObjectType::Layout(layout) if layout.name == name => {
-                        Some((layout.block_record, layout.viewport))
-                    }
-                    _ => None,
-                })
-        else {
-            return Vec::new();
-        };
-        self.document
-            .block_records
-            .iter()
-            .find(|br| br.handle == record)
-            .map(|br| {
-                br.entity_handles
-                    .iter()
-                    .copied()
-                    .filter(|handle| *handle != sheet)
-                    .filter(|handle| {
-                        !matches!(
-                            self.document.get_entity(*handle),
-                            None | Some(EntityType::Block(_) | EntityType::BlockEnd(_))
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        paper_entities_of(&self.document, name)
     }
 
     /// Rename a paper-space layout, including its ACAD_LAYOUT dictionary key.
@@ -835,4 +849,68 @@ mod copy_layout_page_tests {
         assert_eq!(rec.owner, xdict);
         assert_eq!(layout_xdict(&scene, "Sheet").1, Some(root_h));
     }
+}
+
+/// The paper-space objects of layout `name` of `document`, without its
+/// sheet viewport.
+pub(crate) fn paper_entities_of(document: &document::Document, name: &str) -> Vec<Handle> {
+    let Some(layout) = layout_named(document, name) else {
+        return Vec::new();
+    };
+    document
+        .block_records
+        .iter()
+        .find(|br| br.handle == layout.block_record)
+        .map(|br| {
+            br.entity_handles
+                .iter()
+                .copied()
+                .filter(|handle| *handle != layout.viewport)
+                .filter(|handle| {
+                    !matches!(
+                        document.get_entity(*handle),
+                        None | Some(EntityType::Block(_) | EntityType::BlockEnd(_))
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The layout object called `name`.
+fn layout_named(document: &document::Document, name: &str) -> Option<document::objects::Layout> {
+    document.objects.values().find_map(|object| match object {
+        ObjectType::Layout(layout) if layout.name == name => Some(layout.clone()),
+        _ => None,
+    })
+}
+
+/// Points viewport `vp`, read from drawing `from`, at the objects of drawing
+/// `to`: its frozen layers by name (a layer `to` lacks is dropped), its clip
+/// boundary through `entities` (old handle to new), and its UCS, background,
+/// shade plot, visual style and sun cleared, as `from` holds those.
+pub(crate) fn rebase_viewport(
+    vp: &mut document::entities::Viewport,
+    from: &document::Document,
+    to: &document::Document,
+    entities: &rustc_hash::FxHashMap<Handle, Handle>,
+) {
+    vp.frozen_layers = vp
+        .frozen_layers
+        .iter()
+        .filter_map(|handle| {
+            let name = &from.layers.iter().find(|layer| layer.handle == *handle)?.name;
+            to.layers.get(name).map(|layer| layer.handle)
+        })
+        .collect();
+    vp.clip_boundary_handle = entities
+        .get(&vp.clip_boundary_handle)
+        .copied()
+        .unwrap_or(Handle::NULL);
+    vp.ucs_handle = Handle::NULL;
+    vp.base_ucs_handle = Handle::NULL;
+    vp.background_handle = Handle::NULL;
+    vp.shade_plot_handle = Handle::NULL;
+    vp.visual_style_handle = Handle::NULL;
+    vp.sun_handle = Handle::NULL;
 }

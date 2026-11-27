@@ -115,7 +115,7 @@ pub(crate) use named_selections::NamedSelectionRecall;
 pub const GROUP_GRIP_ID: usize = usize::MAX - 2;
 #[cfg(test)]
 mod hatch_boundary;
-mod layout;
+pub(crate) mod layout;
 #[cfg(test)]
 mod layout_viewport_tests;
 mod limits;

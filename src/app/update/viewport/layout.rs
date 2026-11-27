@@ -362,6 +362,118 @@ impl OpenCADStudio {
         Task::batch([cancel_task, switch_task])
     }
 
+    /// LAYOUT Template: the layouts of drawing `path` whose names match
+    /// `pattern` (wildcards, `*` for all) are added with their page setup and
+    /// paper-space objects, and what those objects use (layers, blocks,
+    /// styles). A name already taken gets a ` (n)` suffix.
+    pub(in crate::app) fn insert_template_layouts(
+        &mut self,
+        path: &str,
+        pattern: &str,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        if self.tabs[i].is_start {
+            return Task::none();
+        }
+        // ponytail: the template is read on the UI thread; a worker read
+        // when large templates make the wait noticeable.
+        let template = match crate::io::load_file(std::path::Path::new(path)) {
+            Ok(document) => document,
+            Err(e) => {
+                self.command_line.push_error(&format!("{path}: {e}"));
+                return Task::none();
+            }
+        };
+        let pattern = if pattern.trim().is_empty() {
+            "*"
+        } else {
+            pattern.trim()
+        };
+        let mut wanted: Vec<(i16, String)> = template
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                document::objects::ObjectType::Layout(layout)
+                    if !layout.name.eq_ignore_ascii_case("Model")
+                        && pattern.split(',').any(|p| {
+                            crate::wildcard::wildcard_match(&layout.name, p.trim())
+                        }) =>
+                {
+                    Some((layout.tab_order, layout.name.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        wanted.sort();
+        if wanted.is_empty() {
+            self.command_line.push_error(
+                crate::tf!("No layout in {} matches \"{}\"", path, pattern).as_ref(),
+            );
+            return Task::none();
+        }
+        let cancel_task = self.cancel_active_command_for_space_change();
+        self.push_undo_snapshot(i, "LAYOUT");
+        let mut added = Vec::new();
+        for (_, source) in wanted {
+            let existing = self.tabs[i].scene.layout_names();
+            let name = std::iter::once(source.clone())
+                .chain((2..).map(|n| format!("{source} ({n})")))
+                .find(|candidate| {
+                    !existing
+                        .iter()
+                        .any(|layout| layout.eq_ignore_ascii_case(candidate))
+                })
+                .unwrap_or_default();
+            let scene = &mut self.tabs[i].scene;
+            if let Err(e) = scene.add_layout(&name) {
+                self.command_line
+                    .push_error(crate::tf!("Failed to create layout: {e}").as_ref());
+                continue;
+            }
+            scene.copy_layout_page_from(&template, &source, &name);
+            let handles = crate::scene::layout::paper_entities_of(&template, &source);
+            let (entities, deps) = crate::app::copy_to_clipboard_kernel(&template, &handles);
+            let (pasted, map) = crate::app::paste_entities_kernel(
+                &mut scene.document,
+                &entities,
+                &deps,
+                None,
+                crate::app::PasteSpace::Layout(&name),
+            );
+            for handle in pasted {
+                if let Some(document::EntityType::Viewport(vp)) =
+                    scene.document.get_entity(handle).cloned()
+                {
+                    let mut vp = *vp;
+                    crate::scene::layout::rebase_viewport(
+                        &mut vp,
+                        &template,
+                        &scene.document,
+                        &map,
+                    );
+                    if let Some(document::EntityType::Viewport(target)) =
+                        scene.document.get_entity_mut(handle)
+                    {
+                        **target = vp;
+                    }
+                }
+            }
+            added.push(name);
+        }
+        let scene = &mut self.tabs[i].scene;
+        scene.populate_meshes_from_document();
+        scene.bump_geometry();
+        self.tabs[i].dirty = true;
+        self.command_line.push_output(
+            crate::tf!("Layouts inserted: {}", added.join(", ")).as_ref(),
+        );
+        let switch_task = match added.first() {
+            Some(name) => self.on_layout_switch(name.clone()),
+            None => Task::none(),
+        };
+        Task::batch([cancel_task, switch_task])
+    }
+
     pub(in crate::app) fn on_layout_rename_commit(&mut self) -> Task<Message> {
         if let Some((orig, new_name)) = self.layout_rename_state.take() {
             let new_name = new_name.trim().to_string();

@@ -708,13 +708,16 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
 fn layout_flow(current: String, next: String) -> PromptFlow {
     flow(move |q| {
         let option = q.keyword(
-            crate::t!("-LAYOUT  Enter layout option [Copy/Delete/New/Rename/Set/?] <Set>:")
-                .into_owned(),
+            crate::t!(
+                "-LAYOUT  Enter layout option [Copy/Delete/New/Template/Rename/Set/?] <Set>:"
+            )
+            .into_owned(),
             Some("SET"),
             &[
                 ("Copy", "COPY"),
                 ("Delete", "DELETE"),
                 ("New", "NEW"),
+                ("Template", "TEMPLATE"),
                 ("Rename", "RENAME"),
                 ("Set", "SET"),
                 ("?", "?"),
@@ -751,6 +754,21 @@ fn layout_flow(current: String, next: String) -> PromptFlow {
                     Some(next.clone()),
                 )?;
                 run("-LAYOUT", &[option, &name])
+            }
+            "TEMPLATE" => {
+                // An empty name picks the drawing in a file dialog.
+                let file = q.text(
+                    crate::t!("-LAYOUT  Enter template file name <select a file>:").into_owned(),
+                    Some(String::new()),
+                )?;
+                if file.trim().is_empty() {
+                    return run("-LAYOUT", &[option]);
+                }
+                let layouts = q.text(
+                    crate::t!("-LAYOUT  Enter layout(s) to insert <*>:").into_owned(),
+                    Some("*".into()),
+                )?;
+                run("-LAYOUT", &[option, file.trim().trim_matches('"'), &layouts])
             }
             "RENAME" => {
                 let old = named(q, "-LAYOUT  Enter layout to rename <%{name}>:")?;
@@ -1153,7 +1171,7 @@ impl OpenCADStudio {
                     start(self, ScriptPromptCommand::new("-DIMSTYLE", flow));
                 }
             }
-            "-LAYOUT" if rest.is_empty() => {
+            "-LAYOUT" | "LAYOUT" if rest.is_empty() => {
                 let current = self.tabs[i].scene.current_layout.clone();
                 let next = Self::next_layout_name(&self.tabs[i].scene.layout_names());
                 start(
@@ -1161,7 +1179,13 @@ impl OpenCADStudio {
                     ScriptPromptCommand::new("-LAYOUT", layout_flow(current, next)),
                 );
             }
-            "-LAYOUT" => return Some(self.dash_layout(i, &args)),
+            "-LAYOUT" | "LAYOUT" => {
+                // A prompt run arrives as a JSON array, a typed line (the
+                // menu's LAYOUT T) as words.
+                let args: Vec<String> =
+                    serde_json::from_str(rest).unwrap_or_else(|_| split_quoted(rest));
+                return Some(self.dash_layout(i, &args));
+            }
             // The web plots through the PLOT dialog's download.
             #[cfg(target_arch = "wasm32")]
             "-PLOT" => return Some(Task::done(Message::PlotDialogOpen)),
@@ -2397,7 +2421,34 @@ impl OpenCADStudio {
                 .push_error(crate::tf!("Layout '{}' does not exist", name).as_ref());
             Task::none()
         };
-        match arg(0).as_str() {
+        let option = match arg(0).to_ascii_uppercase().as_str() {
+            "C" => "COPY".to_string(),
+            "D" => "DELETE".to_string(),
+            "N" => "NEW".to_string(),
+            "T" => "TEMPLATE".to_string(),
+            "R" => "RENAME".to_string(),
+            "S" => "SET".to_string(),
+            other => other.to_string(),
+        };
+        match option.as_str() {
+            "TEMPLATE" if arg(1).is_empty() => Task::perform(
+                async {
+                    let handle = crate::sys::file_dialog()
+                        .set_title(crate::t!("Select Template").as_ref())
+                        .add_filter(crate::t!("Drawing").as_ref(), &["dwt", "dwg", "dxf"])
+                        .pick_file()
+                        .await?;
+                    Some(crate::sys::handle_path(&handle))
+                },
+                |path| match path {
+                    Some(path) => Message::Command(format!(
+                        "-LAYOUT {}",
+                        serde_json::json!(["TEMPLATE", path.to_string_lossy(), "*"])
+                    )),
+                    None => Message::Noop,
+                },
+            ),
+            "TEMPLATE" => self.insert_template_layouts(&arg(1), &arg(2)),
             "COPY" => match find(&arg(1)) {
                 Some(source) => self.copy_layout_named(source, Some(arg(2))),
                 None => missing(self, &arg(1)),
@@ -2406,7 +2457,7 @@ impl OpenCADStudio {
                 Some(name) => self.update(Message::LayoutDelete(name)),
                 None => missing(self, &arg(1)),
             },
-            "NEW" => self.create_layout_named(Some(arg(1))),
+            "NEW" => self.create_layout_named(Some(arg(1)).filter(|name| !name.is_empty())),
             "RENAME" => match find(&arg(1)).filter(|name| name != "Model") {
                 Some(old) => {
                     self.layout_rename_state = Some((old, arg(2)));

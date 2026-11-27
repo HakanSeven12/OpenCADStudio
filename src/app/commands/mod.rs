@@ -1151,6 +1151,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "-RENAME",
         "-DIMSTYLE",
         "-LAYOUT",
+        "LAYOUT",
         "-PLOT",
         "CLEANSCREEN",
         "CUI",

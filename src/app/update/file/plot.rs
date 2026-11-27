@@ -2060,7 +2060,9 @@ impl OpenCADStudio {
                         .min((paper_h / MARGIN) / content_h)
                         .max(1e-9)
                 } else {
-                    (plot_dialog_scale_factor(&self.plot_dialog) * mm_per_unit).max(1e-9)
+                    // Millimetres per paper unit already, as in
+                    // `area_plot_job` (#3437, #3769).
+                    plot_dialog_scale_factor(&self.plot_dialog).max(1e-9)
                 };
                 let target_x = if centered {
                     (paper_w - content_w * scale) * 0.5

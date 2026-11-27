@@ -180,21 +180,7 @@ pub fn local_today() -> Day {
             now.get_date(),
         )
     }
-    #[cfg(all(unix, not(target_arch = "wasm32")))]
-    {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let now = secs as libc::time_t;
-        // SAFETY: `localtime_r` only writes the `tm` it is given.
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        if !unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
-            return (tm.tm_year + 1900, tm.tm_mon as u32 + 1, tm.tm_mday as u32);
-        }
-        civil_from_days((secs / 86_400) as i64)
-    }
-    #[cfg(not(any(unix, target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -325,8 +311,8 @@ pub fn calendar<'a>(
     let (year, month) = shown;
     let picked = parse_date(format, current);
     let today = local_today();
-    let nav = |label: &'static str, tip: String, target: (i32, u32)| -> Element<'a, Message> {
-        let b = button(container(text(label).size(14)).center(Length::Fill))
+    let nav = |icon: Element<'a, Message>, tip: String, target: (i32, u32)| -> Element<'a, Message> {
+        let b = button(container(icon).center(Length::Fill))
             .width(Length::Fixed(CELL_W))
             .height(Length::Fixed(CELL_H))
             .padding(0)
@@ -336,7 +322,7 @@ pub fn calendar<'a>(
     };
     let header = row![
         nav(
-            "‹",
+            crate::ui::icons::themed_arrow_left(10.0),
             crate::tr!("plugin-dialog", "previous-month"),
             shift_month(year, month, -1)
         ),
@@ -352,7 +338,7 @@ pub fn calendar<'a>(
         .center_x(Length::Fill)
         .center_y(Length::Fixed(CELL_H)),
         nav(
-            "›",
+            crate::ui::icons::themed_arrow_right(10.0),
             crate::tr!("plugin-dialog", "next-month"),
             shift_month(year, month, 1)
         ),

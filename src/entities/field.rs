@@ -583,7 +583,17 @@ pub fn utc_offset_days() -> f64 {
         }
         0.0
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
+    {
+        let now = epoch_secs() as libc::time_t;
+        // SAFETY: `localtime_r` only writes the `tm` it is given.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        if !unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+            return tm.tm_gmtoff as f64 / 86_400.0;
+        }
+        0.0
+    }
+    #[cfg(not(any(unix, target_os = "windows")))]
     0.0
 }
 

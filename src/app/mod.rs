@@ -3850,7 +3850,6 @@ impl OpenCADStudio {
         }
     }
 
-    /// Dispatch a reactive action event from an open plugin modal dialog to the owning command/plugin.
     /// Whether an Escape belongs to a date field's calendar that has just
     /// closed on it: the calendar closes on the key but passes it on.
     pub(crate) fn escape_closed_a_calendar(&mut self) -> bool {
@@ -3859,6 +3858,7 @@ impl OpenCADStudio {
             .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(300))
     }
 
+    /// Dispatch a reactive action event from an open plugin modal dialog to the owning command/plugin.
     pub(crate) fn dispatch_plugin_dialog_action(
         &mut self,
         control_id: String,

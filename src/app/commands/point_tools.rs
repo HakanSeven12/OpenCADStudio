@@ -1409,7 +1409,7 @@ impl OpenCADStudio {
                 let rows = self.point_tools.blocks.as_ref().map(|w| {
                     w.groups
                         .iter()
-                        .map(|(n, on)| (n.clone(), descriptions.iter().find(|d| d.0 == *n).map(|d| d.1.clone()).unwrap_or_default(), *on, group_handle(doc, n).unwrap_or(0)))
+                        .map(|(n, on)| (n.clone(), descriptions.iter().find(|d| d.0 == *n).map(|d| d.1.clone()).unwrap_or_default(), *on, group_handle(doc, n).map_or(0, |h| h.value())))
                         .collect()
                 });
                 if let Some(w) = self.point_tools.blocks.as_mut() {
@@ -1433,7 +1433,7 @@ impl OpenCADStudio {
                 self.write_group_order();
                 if let Some(w) = self.point_tools.blocks.as_mut() {
                     if let Some(rows) = w.picker.take() {
-                        w.groups = rows.into_iter().map(|(n, _, on)| (n, on)).collect();
+                        w.groups = rows.into_iter().map(|(n, _, on, _)| (n, on)).collect();
                     }
                 }
             }

@@ -113,10 +113,26 @@ impl OpenCADStudio {
                 use crate::modules::civil::point_geodetic::{GeodeticDirectCommand, LocalGrid};
                 let c = GeodeticDirectCommand::new(crs, crate::io::crs::model_space_geo_data(doc).and_then(LocalGrid::of));
                 for p in &mut points {
-                    let g = c.grid(glam::DVec3::new(p.position[0], p.position[1], 0.0));
-                    p.grid = Some([g.x, g.y]);
+                    p.geo = c.geodetic(glam::DVec3::new(p.position[0], p.position[1], 0.0)).map(|(g, latitude, longitude, scale, convergence)| pq::Geo {
+                        grid: [g.x, g.y],
+                        latitude,
+                        longitude,
+                        scale,
+                        convergence,
+                    });
                 }
             }
+        }
+        // The point's own styles by name and its layer.
+        let own = c3d::cogo_points(doc);
+        let layers: HashMap<u32, String> =
+            doc.entities().filter_map(|e| Some((arch_entity(e)?.cogo_point_number()?, e.common().layer.clone()))).collect();
+        for p in &mut points {
+            p.layer = layers.get(&p.number).cloned().unwrap_or_default();
+            let Some(cp) = own.iter().find(|c| c.number == p.number) else { continue };
+            let name = |h: u64| doc.objects.get(&Handle::new(h)).and_then(arch).map(style_name).filter(|_| h != 0).unwrap_or_default();
+            p.style = name(cp.style);
+            p.label = name(cp.label_style);
         }
         let unit = match doc.header.insertion_units {
             6 => "m",
@@ -391,6 +407,7 @@ impl OpenCADStudio {
                     ListSwitch::Full => &mut list.full,
                     ListSwitch::Name => &mut list.name,
                     ListSwitch::Raw => &mut list.raw,
+                    ListSwitch::Styles => &mut list.styles,
                     ListSwitch::Columns => &mut list.columns_open,
                 };
                 *flag = !*flag;

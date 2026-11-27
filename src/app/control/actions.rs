@@ -3683,7 +3683,7 @@ impl OpenCADStudio {
             // "row=<k>:<set operator>:<0|1 open>:<property 0-4>:<operator>:
             // <value>:<0|1 close>", "reset", "override=<k>:0|1",
             // "override_text=<k>:<text>", "list_filter=<text>",
-            // "list_sort=<column title>", "list_switch=grid|full|name|raw|
+            // "list_sort=<column title>", "list_switch=grid|full|name|raw|styles|
             // columns", "list_pick=<number>", "list_show[=<number>]",
             // "apply", "ok", "cancel".
             // Create COGO Points (corridor): "range=entire|user",
@@ -3753,6 +3753,7 @@ impl OpenCADStudio {
                                 "full" => S::Full,
                                 "name" => S::Name,
                                 "raw" => S::Raw,
+                                "styles" => S::Styles,
                                 "columns" => S::Columns,
                                 _ => return Err(bad()),
                             })

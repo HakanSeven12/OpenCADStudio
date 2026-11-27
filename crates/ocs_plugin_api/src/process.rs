@@ -1255,6 +1255,9 @@ impl PluginProcess {
         command_id: u64,
         event: crate::dialog::DialogEvent,
     ) -> Result<crate::dialog::DialogActionResponse, PluginError> {
+        if self.manifest.api_version < 17 {
+            return Ok(crate::dialog::DialogActionResponse::None);
+        }
         if let Some(v4) = &self.v4 {
             let resp = self.call_unhosted(
                 v4,
@@ -1940,11 +1943,6 @@ fn verify_runner_handshake(
                 return Err(PluginError::Runner(format!(
                     "unsupported V4 protocol version {protocol_version}"
                 )));
-            }
-            if crate::effective_max_api_version() < 4 {
-                return Err(PluginError::Runner(
-                    "V4 protocol is disabled by OCS_PLUGIN_MAX_API_VERSION".into(),
-                ));
             }
             vlog!("[plugin] runner authenticated (V4)");
             Ok(true)
@@ -2670,7 +2668,44 @@ mod timeout_tests {
     }
 
     #[test]
-    fn runner_handshake_tokenv4_rejected_when_v4_disabled() {
+    fn dialog_action_never_reaches_a_runner_older_than_v17() {
+        let (mut process, runner_stream) = fake_process();
+        process.manifest.api_version = 16;
+        let runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            let req = recv::<HostToPlugin>(&mut peer).expect("read first request");
+            assert!(
+                matches!(
+                    req,
+                    HostToPlugin::Request(HostRequest::GetPrompt { command_id: 5 })
+                ),
+                "the first frame must be the prompt query, got {req:?}"
+            );
+            send(
+                &mut peer,
+                &PluginToHost::Response(HostResponse::Text("Point 3".into())),
+            )
+            .expect("send prompt");
+        });
+        let resp = process
+            .dialog_action(
+                5,
+                crate::dialog::DialogEvent {
+                    control_id: "btn".into(),
+                    action: "click".into(),
+                    value: None,
+                    current_values: Default::default(),
+                },
+            )
+            .expect("pre-v17 dialog_action answers None");
+        assert!(matches!(resp, crate::dialog::DialogActionResponse::None));
+        assert_eq!(process.get_prompt(5).expect("prompt"), "Point 3");
+        kill_fake_runner(&process);
+        runner.join().expect("runner thread");
+    }
+
+    #[test]
+    fn runner_handshake_tokenv4_remains_enabled_at_min_api_v14() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("OCS_PLUGIN_MAX_API_VERSION", "3");
         let result = verify_runner_handshake(
@@ -2680,11 +2715,11 @@ mod timeout_tests {
             },
             "correct-token",
         );
-        assert!(
-            matches!(result, Err(PluginError::Runner(ref s)) if s.contains("disabled")),
-            "expected V4 disabled error, got {result:?}"
-        );
         std::env::remove_var("OCS_PLUGIN_MAX_API_VERSION");
+        assert!(
+            matches!(result, Ok(true)),
+            "min API v14 clamps OCS_PLUGIN_MAX_API_VERSION so V4 remains enabled, got {result:?}"
+        );
     }
 
     #[test]

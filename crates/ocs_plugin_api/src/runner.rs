@@ -46,8 +46,8 @@ const MAX_PANEL_ACTION_TARGETS: usize = 16;
 
 /// Entry point for the plugin runner child process.
 ///
-/// Connects back to the host on `socket_name`, loads the cdylib at
-/// `cdylib_path`, and runs the request loop until the host sends `Shutdown`.
+/// Connects back to the host on `socket_name`, hands control to the v14+
+/// cdylib's self-hosted `ocs_plugin_run` entry point, and exits with its code.
 /// This function never returns normally; it exits the process on shutdown or
 /// fatal error so the child does not fall through to the host's GUI main.
 pub fn run(socket_name: &str, cdylib_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -56,11 +56,8 @@ pub fn run(socket_name: &str, cdylib_path: &Path) -> Result<(), Box<dyn std::err
     // workspaces (e.g., as a Python extension). This is set only in the child
     // runner process, so it does not leak into the host environment.
     std::env::set_var("OCS_PLUGIN_CDYLIB_PATH", cdylib_path.as_os_str());
-    if let Some(code) = unsafe { run_self_hosted(socket_name, cdylib_path)? } {
-        std::process::exit(code);
-    }
-    let (version, plugin) = unsafe { load_plugin(cdylib_path)? };
-    run_with_plugin(socket_name, version, plugin)
+    let code = unsafe { run_self_hosted(socket_name, cdylib_path)? };
+    std::process::exit(code);
 }
 
 /// The runner loop for `plugin`. A plugin of API v14 and later calls it from
@@ -365,12 +362,16 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
 }
 
 /// `on_dialog_action` of the interactive command `command_id`; `None` when the
-/// command is gone or panics.
+/// plugin predates API v17, the command is gone, or it panics.
 fn run_dialog_action(
     interactive: &InteractiveRegistry,
     command_id: u64,
     event: crate::dialog::DialogEvent,
+    api_version: u32,
 ) -> crate::dialog::DialogActionResponse {
+    if api_version < 17 {
+        return crate::dialog::DialogActionResponse::None;
+    }
     let mut registry = interactive.borrow_mut();
     registry
         .get_mut(&command_id)
@@ -606,8 +607,8 @@ fn handle_host_request(
             };
             HostResponse::ModalDialog(result)
         }
-        HostRequest::DialogAction { command_id, event } => {
-            HostResponse::DialogAction(run_dialog_action(interactive, command_id, event))
+        HostRequest::DialogAction { .. } => {
+            HostResponse::DialogAction(crate::dialog::DialogActionResponse::None)
         }
         // The V3 path serves plugins far older than v24.
         HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
@@ -876,7 +877,7 @@ fn handle_host_request_v4(
             Some(HostResponse::ModalDialog(result))
         }
         HostRequest::DialogAction { command_id, event } => Some(HostResponse::DialogAction(
-            run_dialog_action(interactive, command_id, event),
+            run_dialog_action(interactive, command_id, event, api_version),
         )),
         HostRequest::UndoStep { command_id } => Some(HostResponse::UndoStep(run_undo_step(
             interactive,
@@ -1008,20 +1009,18 @@ fn handle_host_request_v4(
 }
 
 /// Hands a v14+ plugin the whole runner through its C entry point and returns
-/// its exit code, or `None` for an older plugin the runner drives itself.
+/// its exit code. Pre-v14 plugins are rejected before reading any Rust trait
+/// objects across cdylib boundaries.
 unsafe fn run_self_hosted(
     socket_name: &str,
     path: &Path,
-) -> Result<Option<i32>, Box<dyn std::error::Error>> {
+) -> Result<i32, Box<dyn std::error::Error>> {
     let lib = libloading::Library::new(path)?;
     let version: libloading::Symbol<extern "C" fn() -> u32> = lib
         .get(b"ocs_plugin_api_version")
         .map_err(|_| "missing ocs_plugin_api_version symbol")?;
     let v = version();
-    if v < crate::version_info::SELF_HOSTED_API_VERSION {
-        return Ok(None);
-    }
-    if !crate::host_accepts_plugin_version(v) {
+    if !crate::host_accepts_plugin_version(v) || v < crate::version_info::SELF_HOSTED_API_VERSION {
         return Err(format!(
             "API version {v} is incompatible (host supports {}-{})",
             crate::API_VERSION_MIN_SUPPORTED,
@@ -1036,41 +1035,7 @@ unsafe fn run_self_hosted(
     let code = run(socket.as_ptr());
     // The plugin's code may still run on its threads until the process exits.
     let _ = std::mem::ManuallyDrop::new(lib);
-    Ok(Some(code))
-}
-
-unsafe fn load_plugin(
-    path: &Path,
-) -> Result<(u32, Box<dyn BuiltinPlugin>), Box<dyn std::error::Error>> {
-    let lib = libloading::Library::new(path)?;
-
-    let version: libloading::Symbol<extern "C" fn() -> u32> = lib
-        .get(b"ocs_plugin_api_version")
-        .map_err(|_| "missing ocs_plugin_api_version symbol")?;
-    let v = version();
-    if !crate::host_accepts_plugin_version(v) {
-        return Err(format!(
-            "API version {v} is incompatible (host supports {}-{})",
-            crate::API_VERSION_MIN_SUPPORTED,
-            crate::effective_max_api_version()
-        )
-        .into());
-    }
-
-    let register: libloading::Symbol<extern "C" fn() -> *mut Box<dyn BuiltinPlugin>> = lib
-        .get(b"ocs_plugin_register")
-        .map_err(|_| "missing ocs_plugin_register symbol")?;
-    let raw = register();
-    if raw.is_null() {
-        return Err("ocs_plugin_register returned null".into());
-    }
-    let plugin = *Box::from_raw(raw);
-
-    // Intentionally leak the library so its vtables remain valid for the
-    // lifetime of the process. The runner exits when the host disconnects.
-    let _ = std::mem::ManuallyDrop::new(lib);
-
-    Ok((v, plugin))
+    Ok(code)
 }
 
 #[cfg(all(test, feature = "host"))]
@@ -1247,6 +1212,39 @@ mod tests {
             ))
         ));
         assert_eq!(*seen.lock().expect("seen"), ["next"]);
+        drop(host_stream);
+    }
+
+    #[test]
+    fn dialog_action_is_gated_below_api_v17() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        interactive.borrow_mut().insert(
+            7,
+            Box::new(DialogActionCommand { seen: seen.clone() }) as Box<dyn InteractiveCommand>,
+        );
+        let mut plugin = UnsupportedReplPlugin;
+        let req = HostRequest::DialogAction {
+            command_id: 7,
+            event: crate::dialog::DialogEvent {
+                control_id: "next".to_string(),
+                action: "click".to_string(),
+                value: None,
+                current_values: HashMap::new(),
+            },
+        };
+        assert!(matches!(
+            handle_host_request_v4(&mut plugin, &interactive, &client, 1, 16, req),
+            Some(HostResponse::DialogAction(
+                crate::dialog::DialogActionResponse::None
+            ))
+        ));
+        assert!(
+            seen.lock().expect("seen").is_empty(),
+            "v16 runner must not invoke on_dialog_action vtable slot"
+        );
         drop(host_stream);
     }
 

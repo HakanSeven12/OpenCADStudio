@@ -86,6 +86,7 @@ pub struct DocumentSnapshotStore<T: SnapshotData> {
     mmap: MmapMut,
     segment_size: usize,
     current_version: u64,
+    current_seq: u64,
     /// Host-private index of the currently published segment (0 or 1).
     shadow_active: usize,
     _phantom: std::marker::PhantomData<T>,
@@ -166,6 +167,7 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
         control.version.store(0, Ordering::Relaxed);
         control.active_segment.store(0, Ordering::Relaxed);
         control.active_len.store(0, Ordering::Relaxed);
+        control.seq.store(0, Ordering::Release);
         mmap.flush()?;
 
         Ok(Self {
@@ -173,6 +175,7 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
             mmap,
             segment_size,
             current_version: 0,
+            current_seq: 0,
             shadow_active: 0,
             _phantom: std::marker::PhantomData,
         })
@@ -231,9 +234,16 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
         let inactive = 1 - self.shadow_active;
         let offset = CONTROL_SIZE + inactive * self.segment_size;
 
+        // Begin seqlock critical section (odd sequence) before mutating payload.
+        self.current_seq = self.current_seq.wrapping_add(1);
+        ControlPage::from_bytes_mut(&mut self.mmap)
+            .seq
+            .store(self.current_seq, Ordering::SeqCst);
+        std::sync::atomic::fence(Ordering::SeqCst);
+
         self.mmap[offset..offset + bytes.len()].copy_from_slice(bytes);
         let control = ControlPage::from_bytes_mut(&mut self.mmap);
-        // Ensure the plugin sees the new length before it sees the new version.
+        // Ensure the plugin sees the new length and segment before the new version/even seq.
         control
             .active_len
             .store(bytes.len() as u64, Ordering::Release);
@@ -245,6 +255,8 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
         control
             .version
             .store(self.current_version, Ordering::Release);
+        self.current_seq = self.current_seq.wrapping_add(1);
+        control.seq.store(self.current_seq, Ordering::Release);
         Ok(())
     }
 
@@ -262,16 +274,21 @@ impl<T: SnapshotData> Drop for DocumentSnapshotStore<T> {
 }
 
 /// Plugin-side read-only mapping of the host's document view.
+///
+/// Reads copy a verified snapshot into a private aligned buffer via the
+/// control page's seqlock (`seq`), so an untrusted or concurrently-mutated
+/// shared mapping can never cause `rkyv` TOCTOU validation bypasses or aliasing.
 pub struct SharedDocumentReader<T: SnapshotData> {
     mmap: Mmap,
     segment_size: usize,
     cached_version: u64,
+    snapshot: rkyv::AlignedVec,
     _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T: SnapshotData> SharedDocumentReader<T> {
-    /// Open the file at `path` read-only and map it. The mapping may initially
-    /// contain no valid snapshot; the caller should `refresh()` before use.
+    /// Open the file at `path` read-only, map it, and latch any already-published
+    /// snapshot into the private buffer.
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = OpenOptions::new().read(true).open(path)?;
         let metadata = file.metadata()?;
@@ -308,12 +325,15 @@ impl<T: SnapshotData> SharedDocumentReader<T> {
         })?;
         let mmap = unsafe { MmapOptions::new().len(file_len).map(&file)? };
         let segment_size = (file_len - CONTROL_SIZE) / 2;
-        Ok(Self {
+        let mut reader = Self {
             mmap,
             segment_size,
             cached_version: 0,
+            snapshot: rkyv::AlignedVec::new(),
             _phantom: std::marker::PhantomData,
-        })
+        };
+        reader.refresh();
+        Ok(reader)
     }
 
     /// Check whether the host has published a newer snapshot.
@@ -325,50 +345,68 @@ impl<T: SnapshotData> SharedDocumentReader<T> {
         control.version.load(Ordering::Acquire) != self.cached_version
     }
 
-    /// Update the cached version after the caller has re-bound to a new snapshot.
-    pub fn refresh(&mut self) {
+    fn copy_consistent_snapshot(&self) -> Option<(u64, rkyv::AlignedVec)> {
         let control = ControlPage::from_bytes(&self.mmap);
-        self.cached_version = control.version.load(Ordering::Acquire);
+        for _ in 0..64 {
+            if control.magic.load(Ordering::Acquire) != CONTROL_MAGIC {
+                return None;
+            }
+            let seq1 = control.seq.load(Ordering::Acquire);
+            if seq1 & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+            let version = control.version.load(Ordering::Acquire);
+            let active = control.active_segment.load(Ordering::Acquire) as usize;
+            let len = usize::try_from(control.active_len.load(Ordering::Acquire)).ok()?;
+            if active > 1 || len == 0 || len > self.segment_size {
+                return None;
+            }
+            let offset = active
+                .checked_mul(self.segment_size)
+                .and_then(|o| CONTROL_SIZE.checked_add(o))?;
+            let end = offset.checked_add(len)?;
+            if end > self.mmap.len() {
+                return None;
+            }
+
+            let mut buf = rkyv::AlignedVec::with_capacity(len);
+            buf.extend_from_slice(&self.mmap[offset..end]);
+            std::sync::atomic::fence(Ordering::SeqCst);
+            let seq2 = control.seq.load(Ordering::Acquire);
+            if seq1 == seq2 {
+                if T::check_rkyv_bytes(&buf).is_some() {
+                    return Some((version, buf));
+                }
+                return None;
+            }
+            std::hint::spin_loop();
+        }
+        None
     }
 
-    fn active_segment_bytes(&self) -> &[u8] {
-        let control = ControlPage::from_bytes(&self.mmap);
-        let active = control.active_segment.load(Ordering::Acquire) as usize;
-        if active > 1 {
-            return &[];
+    /// Copy any newly published snapshot into the private buffer and update
+    /// the cached version.
+    pub fn refresh(&mut self) {
+        if let Some((version, buf)) = self.copy_consistent_snapshot() {
+            self.snapshot = buf;
+            self.cached_version = version;
+        } else {
+            let control = ControlPage::from_bytes(&self.mmap);
+            if control.magic.load(Ordering::Acquire) != CONTROL_MAGIC
+                || control.active_len.load(Ordering::Acquire) == 0
+            {
+                self.snapshot.clear();
+                self.cached_version = 0;
+            }
         }
-        let Ok(len) = usize::try_from(control.active_len.load(Ordering::Acquire)) else {
-            return &[];
-        };
-        // Re-latch the segment index: the host may have flipped segments
-        // between the two loads, which would splice one snapshot's length
-        // onto another segment's bytes.
-        let recheck = control.active_segment.load(Ordering::Acquire) as usize;
-        if recheck != active {
-            return &[];
-        }
-        // A torn or malicious length can never name more than one segment.
-        if len > self.segment_size {
-            return &[];
-        }
-        let Some(offset) = active
-            .checked_mul(self.segment_size)
-            .and_then(|offset| CONTROL_SIZE.checked_add(offset))
-        else {
-            return &[];
-        };
-        let Some(end) = offset.checked_add(len) else {
-            return &[];
-        };
-        if end > self.mmap.len() {
-            return &[];
-        }
-        &self.mmap[offset..end]
     }
 
     fn archived(&self) -> Option<&T::Archived> {
-        let bytes = self.active_segment_bytes();
-        T::check_rkyv_bytes(bytes)
+        if self.snapshot.is_empty() {
+            return None;
+        }
+        T::check_rkyv_bytes(&self.snapshot)
     }
 }
 
@@ -383,17 +421,40 @@ impl<T: SnapshotData> SharedDocumentReader<T> {
 impl SharedDocumentReader<DocumentViewData> {
     /// V3 convenience accessor for the entity count.
     pub fn entity_count(&self) -> usize {
+        if self.has_new_version() {
+            if let Some((_, fresh)) = self.copy_consistent_snapshot() {
+                return DocumentViewData::check_rkyv_bytes(&fresh)
+                    .map(|doc| doc.entities.len())
+                    .unwrap_or(0);
+            }
+        }
         self.archived().map(|doc| doc.entities.len()).unwrap_or(0)
     }
 }
 
 impl DocumentReader for SharedDocumentReader<DocumentViewData> {
     fn entity_count(&self) -> usize {
+        if self.has_new_version() {
+            if let Some((_, fresh)) = self.copy_consistent_snapshot() {
+                return DocumentViewData::check_rkyv_bytes(&fresh)
+                    .map(|doc| doc.entities.len())
+                    .unwrap_or(0);
+            }
+        }
         self.archived().map(|doc| doc.entities.len()).unwrap_or(0)
     }
 
     fn for_each_entity(&self, f: &mut dyn FnMut(ReaderEntity<'_>)) {
-        let Some(doc) = self.archived() else { return };
+        let fresh = self
+            .has_new_version()
+            .then(|| self.copy_consistent_snapshot())
+            .flatten()
+            .map(|(_, buf)| buf);
+        let doc = match fresh.as_deref() {
+            Some(bytes) => DocumentViewData::check_rkyv_bytes(bytes),
+            None => self.archived(),
+        };
+        let Some(doc) = doc else { return };
         for entity in doc.entities.iter() {
             let handle = Handle::new(entity.handle);
             let kind = ReaderEntityKind::from_u8(entity.kind);
@@ -446,6 +507,7 @@ struct ControlPage {
     active_len: AtomicU64,
     active_segment: AtomicU8,
     _pad1: [u8; 7],
+    seq: AtomicU64,
 }
 
 impl ControlPage {
@@ -812,5 +874,80 @@ mod tests {
         );
         let decoded: EntityType = bincode::deserialize(&entity.data).expect("bincode decode");
         assert!(matches!(decoded, EntityType::Point(_)));
+    }
+
+    #[test]
+    fn shared_document_reader_isolated_from_post_refresh_mmap_mutation() {
+        let doc = sample_doc();
+        let mut store = DocumentSnapshotStore::<DocumentViewData>::new(0, 1024 * 1024).unwrap();
+        store.publish(&(&doc).into()).unwrap();
+
+        let reader = SharedDocumentReader::<DocumentViewData>::open(store.path()).unwrap();
+        let first_count = reader.archived().unwrap().entities.len();
+        assert_eq!(first_count, 1);
+
+        // Corrupt the shared control page and both data segments directly in the
+        // backing mapping; the reader's private snapshot copy remains valid.
+        let path = store.path().to_path_buf();
+        {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            let mut writer_map = unsafe { MmapOptions::new().map_mut(&file).unwrap() };
+            for byte in writer_map.iter_mut() {
+                *byte = 0xAA;
+            }
+            writer_map.flush().unwrap();
+        }
+        assert_eq!(reader.archived().unwrap().entities.len(), 1);
+        assert_eq!(reader.entity_count(), 1);
+    }
+
+    #[test]
+    fn shared_document_reader_concurrent_publish_stress() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let mut store = DocumentSnapshotStore::<DocumentViewData>::new(1, 256 * 1024).unwrap();
+        let mut doc = sample_doc();
+        store.publish(&(&doc).into()).unwrap();
+
+        let path = store.path().to_path_buf();
+        let done = Arc::new(AtomicBool::new(false));
+        let done_reader = Arc::clone(&done);
+
+        let reader_thread = std::thread::spawn(move || {
+            let mut reader = SharedDocumentReader::<DocumentViewData>::open(&path).unwrap();
+            let mut max_seen = 0usize;
+            while !done_reader.load(Ordering::Relaxed) {
+                if reader.has_new_version() {
+                    reader.refresh();
+                }
+                if let Some(arch) = reader.archived() {
+                    let count = arch.entities.len();
+                    assert!(
+                        count >= max_seen,
+                        "entity count regressed: {count} < {max_seen}"
+                    );
+                    max_seen = count;
+                }
+                assert!(reader.entity_count() >= max_seen);
+            }
+            max_seen
+        });
+
+        for i in 0..80 {
+            let mut p = Point::from_coords(i as f64, 0.0, 0.0);
+            p.common.layer = "SURVEY".to_string();
+            doc.add_entity(EntityType::Point(p)).unwrap();
+            store.publish(&(&doc).into()).unwrap();
+        }
+        done.store(true, Ordering::Relaxed);
+        let max_seen = reader_thread.join().expect("reader thread panicked");
+        assert!(max_seen >= 1);
     }
 }

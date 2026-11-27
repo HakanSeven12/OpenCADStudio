@@ -649,7 +649,13 @@ fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
                 .view(),
         );
     }
-    let table = container(column![header, scrollable(list).height(Fill)]).height(Fill).width(Fill).style(well_style);
+    // Columns past the window's width scroll sideways; the header moves
+    // with them.
+    let total: f32 = cols.iter().map(|c| c.width()).sum::<f32>() + 16.0;
+    let wide = scrollable(column![header, scrollable(list).height(Fill)].width(Length::Fixed(total)).height(Fill))
+        .direction(iced::widget::scrollable::Direction::Horizontal(iced::widget::scrollable::Scrollbar::default()))
+        .height(Fill);
+    let table = container(wide).height(Fill).width(Fill).style(well_style);
     let note = small(t!("Click a title to sort; double-click a row to select its point in the drawing.")).style(muted_style);
     card(t!("Point List").into_owned(), body.push(table).push(note)).into()
 }

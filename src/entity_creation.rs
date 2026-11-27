@@ -6,6 +6,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn polyface_mesh_rejects_out_of_range_face_indices() {
+        let good = json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,2]]});
+        assert!(build_entity(&good, None).is_ok());
+        let bad = json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,5]]});
+        assert!(build_entity(&bad, None).is_err());
+    }
+
+    #[test]
     fn published_examples_build_with_the_real_factory() {
         let document = document::Document::new();
         for kind in TYPES {
@@ -207,6 +215,7 @@ pub const TYPES: &[&str] = &[
     "Hatch",
     "AttDef",
     "Region",
+    "PolyfaceMesh",
 ];
 
 /// Lineweights a drawing can store, in hundredths of a millimetre, with
@@ -388,6 +397,14 @@ fn build_schema(name: &str) -> Result<Value, String> {
             (
                 vec!["loops"],
                 json!({"type":"Region","loops":[[[0,0],[10,0],[10,10],[0,10]],[[3,3],[7,3],[7,7],[3,7]]]}),
+            )
+        }
+        "PolyfaceMesh" => {
+            properties["vertices"] = json!({"type":"array","minItems":3,"maxItems":32767,"items":point(3,3),"description":"Mesh vertices as [x, y, z]. At most 32767 per mesh (polyface vertex numbers are 16-bit); split larger surfaces across several meshes."});
+            properties["faces"] = json!({"type":"array","minItems":1,"items":{"type":"array","minItems":3,"maxItems":4,"items":{"type":"integer","minimum":0}},"description":"Faces as 0-based indices into vertices: three for a triangle, four for a quad."});
+            (
+                vec!["vertices", "faces"],
+                json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[10,0,0],[10,10,5],[0,10,5]],"faces":[[0,1,2],[0,2,3]]}),
             )
         }
         "Spline" => {
@@ -1105,11 +1122,12 @@ pub(crate) fn build_entity(
             )
         }
         "REGION" => region_from_loops(spec)?,
+        "POLYFACEMESH" => polyface_from_spec(spec)?,
         other => {
             return Err(failure(
                 "unknown_entity_type",
                 format!(
-                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region"
+                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region, PolyfaceMesh"
                 ),
             ))
         }
@@ -1120,6 +1138,59 @@ pub(crate) fn build_entity(
     crate::schema_validation::validate_shape(&contract, spec, "")
         .map_err(|error| failure("invalid_entity_definition", error))?;
     Ok(entity)
+}
+
+/// A polyface mesh from `vertices:[[x,y,z],…]` and `faces:[[i,j,k],…]` (0-based
+/// indices; three corners make a triangle, four a quad). Polyface vertex
+/// numbers are 16-bit, so one mesh holds at most 32767 vertices.
+fn polyface_from_spec(spec: &Value) -> Parsed<document::EntityType> {
+    use document::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
+    const MAX_VERTICES: usize = i16::MAX as usize;
+    let invalid = |path: &str, error: String| failure_at("invalid_polyface_mesh", path, error);
+    let points = point_list_field(spec, "vertices", 3).map_err(|_| {
+        invalid("/vertices", "polyface mesh needs at least 3 finite [x,y,z] vertices".to_owned())
+    })?;
+    if points.len() > MAX_VERTICES {
+        return Err(invalid(
+            "/vertices",
+            format!("a polyface mesh holds at most {MAX_VERTICES} vertices; split the surface across several meshes"),
+        ));
+    }
+    let faces = spec["faces"]
+        .as_array()
+        .filter(|faces| !faces.is_empty())
+        .ok_or_else(|| invalid("/faces", "polyface mesh needs faces:[[i,j,k],…]".to_owned()))?;
+    let mut mesh = PolyfaceMesh::new();
+    let ids: Vec<i16> = points
+        .iter()
+        .map(|p| mesh.add_vertex(PolyfaceVertex::new(document::types::Vector3::new(p.x, p.y, p.z))))
+        .collect();
+    for (n, face) in faces.iter().enumerate() {
+        let path = format!("/faces/{n}");
+        let corners = face
+            .as_array()
+            .ok_or_else(|| invalid(&path, format!("faces[{n}] must be a list of vertex indices")))?;
+        let mut corner_ids = Vec::with_capacity(4);
+        for corner in corners {
+            let index = corner
+                .as_u64()
+                .filter(|index| (*index as usize) < ids.len())
+                .ok_or_else(|| {
+                    invalid(&path, format!("faces[{n}] references a vertex outside 0..{}", ids.len()))
+                })?;
+            corner_ids.push(ids[index as usize]);
+        }
+        match corner_ids.len() {
+            3 => {
+                mesh.add_face(PolyfaceFace::triangle(corner_ids[0], corner_ids[1], corner_ids[2]));
+            }
+            4 => {
+                mesh.add_quad(corner_ids[0], corner_ids[1], corner_ids[2], corner_ids[3]);
+            }
+            _ => return Err(invalid(&path, format!("faces[{n}] needs 3 or 4 vertex indices"))),
+        }
+    }
+    Ok(document::EntityType::PolyfaceMesh(mesh))
 }
 
 /// A REGION bounded by closed vertex loops, built by the geometry kernel the

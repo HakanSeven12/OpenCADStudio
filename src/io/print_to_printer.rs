@@ -1263,9 +1263,25 @@ fn shell_print_to(path: &std::path::Path, printer: &str, copies: u32) -> Result<
     Ok(())
 }
 
-/// Render a page and show it the way each platform previews: the OS PDF
-/// viewer on desktop, an in-page rasterised overlay on the web. `stem` names
-/// the web download (`{stem}_preview.pdf`); the desktop temp file is unchanged.
+/// The desktop plot preview's picture, drawn by the plot worker and taken by
+/// the UI thread when the work reports back ([`take_preview_page`]).
+#[cfg(not(target_arch = "wasm32"))]
+static PREVIEW_PAGE: std::sync::Mutex<Option<std::sync::Arc<crate::scene::model::pdf_raster::PdfPage>>> =
+    std::sync::Mutex::new(None);
+
+/// Resolution of the plot preview picture (lowered for very large sheets).
+const PREVIEW_DPI: f32 = 150.0;
+
+/// The picture of the last desktop plot preview, once.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn take_preview_page() -> Option<std::sync::Arc<crate::scene::model::pdf_raster::PdfPage>> {
+    PREVIEW_PAGE.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Render a page and show it the way each platform previews: the Plot
+/// Preview window on desktop (drawn in memory, no file is written), an
+/// in-page rasterised overlay on the web. `stem` names the web download
+/// (`{stem}_preview.pdf`).
 pub fn preview_page_pdf(
     stem: &str,
     page: &crate::io::pdf_export::PdfPageInput,
@@ -1273,9 +1289,18 @@ pub fn preview_page_pdf(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = stem;
-        let tmp = temp_pdf_path("preview");
-        crate::io::pdf_export::export_pdf(page, &tmp)?;
-        open_in_viewer(&tmp)
+        let bytes = crate::io::pdf_export::render_pdf_bytes(std::slice::from_ref(page), None)?;
+        let (pages, _) = crate::scene::model::pdf_raster::rasterize_preview_pages(
+            std::sync::Arc::new(bytes),
+            PREVIEW_DPI,
+            1,
+        );
+        let page = pages
+            .into_iter()
+            .next()
+            .ok_or_else(|| "The plot preview could not be drawn.".to_string())?;
+        *PREVIEW_PAGE.lock().unwrap_or_else(|e| e.into_inner()) = Some(page);
+        Ok(())
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -1303,7 +1328,6 @@ pub fn preview_pages_pdf(
 #[cfg(target_arch = "wasm32")]
 fn web_preview_overlay(stem: &str, bytes: &[u8]) -> Result<(), String> {
     use crate::scene::model::pdf_raster;
-    const PREVIEW_DPI: f32 = 150.0;
     const MAX_PREVIEW_PAGES: usize = 12;
     let (pages, total_pages) = pdf_raster::rasterize_preview_pages(
         std::sync::Arc::new(bytes.to_vec()),

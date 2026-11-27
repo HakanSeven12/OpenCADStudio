@@ -8,7 +8,7 @@ web: The web app has no system printers; it always saves the plot as a PDF file,
 1. Start `PLOT`. The Plot dialog opens.
 2. Choose the printer or output: the system default printer, another printer, **PDF**, or **SVG**.
 3. Set the paper size, orientation, plot area, plot scale, plot offset, plot style table and other plot options.
-4. Click **Preview** to check the result, if you want.
+4. Click **Preview** to check the result, if you want. The sheet opens in the Plot Preview window; **Plot** plots it, **Close** goes back to the Plot dialog.
 5. Click **Print**, **Export PDF** or **Export SVG**.
 
 ## Options

@@ -267,6 +267,10 @@ pub enum PlotDlgMsg {
     Close,
     Commit,
     Preview,
+    /// Plot Preview: back to the Plot dialog.
+    PreviewClose,
+    /// Plot Preview: plot the sheet shown.
+    PreviewPlot,
     PrinterProperties,
     /// The driver options of a printer arrived (or failed to), for the
     /// in-line properties editor; carries the printer's name so a late
@@ -2220,4 +2224,46 @@ mod sidebar_layout_tests {
             "scrollbar must sit at the sidebar edge: {sidebar:?}"
         );
     }
+}
+
+/// The Plot Preview window: the sheet as it will plot, fitted to the window,
+/// with Plot and Close (back to the Plot dialog).
+pub fn view_preview<'a>(
+    page: &'a iced::widget::image::Handle,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let picture = container(
+        iced::widget::image(page.clone())
+            .content_fit(iced::ContentFit::Contain)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .padding(8)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.weak.color)),
+        ..Default::default()
+    });
+    let footer = row![
+        Space::new().width(Length::Fill),
+        form::dialog_button_styled_opt(
+            t!("Close"),
+            Some(Message::PlotDlg(PlotDlgMsg::PreviewClose)),
+            button::secondary
+        ),
+        form::dialog_button_styled_opt(
+            t!("Plot"),
+            Some(Message::PlotDlg(PlotDlgMsg::PreviewPlot)),
+            button::primary
+        ),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    column![picture, footer]
+        .spacing(8)
+        .padding([10, 12])
+        .width(sizing.width)
+        .height(sizing.height)
+        .into()
 }

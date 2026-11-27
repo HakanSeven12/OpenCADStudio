@@ -1503,6 +1503,17 @@ impl OpenCADStudio {
         }
         if reopen_plot {
             self.active_modal = Some(crate::app::ModalKind::Plot);
+            // A desktop preview drew its sheet: show it in the Plot Preview window.
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(page) = crate::io::print_to_printer::take_preview_page() {
+                self.plot_preview = Some(iced::widget::image::Handle::from_rgba(
+                    page.width,
+                    page.height,
+                    page.pixels.to_vec(),
+                ));
+                self.active_modal = Some(crate::app::ModalKind::PlotPreview);
+                self.reset_modal_geometry();
+            }
         }
     }
 
@@ -3266,6 +3277,16 @@ impl OpenCADStudio {
                 Task::none()
             }
             M::Preview => self.on_plot_dlg_commit(true),
+            M::PreviewClose => {
+                self.plot_preview = None;
+                self.active_modal = Some(crate::app::ModalKind::Plot);
+                Task::none()
+            }
+            M::PreviewPlot => {
+                self.plot_preview = None;
+                self.active_modal = Some(crate::app::ModalKind::Plot);
+                self.on_plot_dlg_commit(false)
+            }
             M::Commit if self.print_all_options => {
                 if self.plot_dialog.style_missing && self.plot_dialog.apply_plot_styles {
                     self.command_line.push_error(

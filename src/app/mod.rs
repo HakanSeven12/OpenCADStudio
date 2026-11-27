@@ -818,6 +818,8 @@ pub(super) struct OpenCADStudio {
     refedit_dialog: Option<crate::ui::window::refedit_dialog::RefEditDialogState>,
     /// The Password Protected PDF window.
     pdf_password: Option<crate::ui::window::pdf_password_dialog::PdfPasswordState>,
+    /// The picture the Plot Preview window shows.
+    plot_preview: Option<iced::widget::image::Handle>,
     /// The Inspection Dimension window.
     dim_inspect_dialog: Option<crate::ui::window::dim_inspect_dialog::DimInspectState>,
     /// The picked table cells' Cell Borders window.
@@ -2703,6 +2705,8 @@ pub enum ModalKind {
     AutoConstrainSettings,
     LayerStateEditor,
     Plot,
+    /// The Plot dialog's Preview: the sheet as it will plot.
+    PlotPreview,
     PrintAll,
     LayoutManager,
     Plotstyle,
@@ -2995,6 +2999,7 @@ impl OpenCADStudio {
             image_adjust: None,
             refedit_dialog: None,
             pdf_password: None,
+            plot_preview: None,
             dim_inspect_dialog: None,
             table_cell_borders: None,
             table_cell_contents: None,

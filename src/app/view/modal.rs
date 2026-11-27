@@ -132,6 +132,7 @@ impl OpenCADStudio {
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
             Some(K::LayerStateEditor) => crate::tr!("modal", "edit-layer-state"),
             Some(K::Plot) => crate::tr!("modal", "plot"),
+            Some(K::PlotPreview) => crate::t!("Plot Preview").into_owned(),
             Some(K::PrintAll) => t!("Print All").into_owned(),
             Some(K::LayoutManager) => crate::tr!("modal", "layout-manager"),
             Some(K::ScaleManager) => crate::tr!("modal", "scale-manager"),
@@ -1009,6 +1010,12 @@ impl OpenCADStudio {
                 }
             }
             super::super::ModalKind::Plot => self.plot_modal_content(ex),
+            super::super::ModalKind::PlotPreview => {
+                let page = self.plot_preview.as_ref()?;
+                sized_flow(ex, 900, 680, |flow| {
+                    crate::ui::window::plot::view_preview(page, flow)
+                })
+            }
             super::super::ModalKind::PrintAll => sized_flow(ex, 520, 420, |flow| {
                 crate::ui::window::print_all::view_window(
                     &self.print_all_layouts,

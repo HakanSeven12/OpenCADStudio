@@ -6,6 +6,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn face3d_builds_from_three_or_four_corners() {
+        let tri = json!({"type":"Face3D","corners":[[0,0,0],[10,0,0],[0,10,5]]});
+        assert!(build_entity(&tri, None).is_ok());
+        let quad = json!({"type":"Face3D","corners":[[0,0,0],[10,0,0],[10,10,5],[0,10,5]]});
+        assert!(build_entity(&quad, None).is_ok());
+        let bad = json!({"type":"Face3D","corners":[[0,0,0],[10,0,0]]});
+        assert!(build_entity(&bad, None).is_err());
+    }
+
+    #[test]
     fn polyface_mesh_rejects_out_of_range_face_indices() {
         let good = json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,2]]});
         assert!(build_entity(&good, None).is_ok());
@@ -216,6 +226,7 @@ pub const TYPES: &[&str] = &[
     "AttDef",
     "Region",
     "PolyfaceMesh",
+    "Face3D",
 ];
 
 /// Lineweights a drawing can store, in hundredths of a millimetre, with
@@ -361,6 +372,13 @@ fn build_schema(name: &str) -> Result<Value, String> {
             (
                 vec!["corners"],
                 json!({"type":"Solid","corners":[[0,0,0],[10,0,0],[0,10,0]]}),
+            )
+        }
+        "Face3D" => {
+            properties["corners"] = json!({"type":"array","minItems":3,"maxItems":4,"items":point(3,3),"description":"Three or four [x,y,z] corners; with three, the fourth repeats the third (a triangle)."});
+            (
+                vec!["corners"],
+                json!({"type":"Face3D","corners":[[0,0,0],[10,0,0],[0,10,5]]}),
             )
         }
         "Hatch" => {
@@ -1123,17 +1141,57 @@ pub(crate) fn build_entity(
         }
         "REGION" => region_from_loops(spec)?,
         "POLYFACEMESH" => polyface_from_spec(spec)?,
+        "FACE3D" => {
+            let raw_corners = spec["corners"]
+                .as_array()
+                .filter(|v| (3..=4).contains(&v.len()))
+                .ok_or_else(|| failure("invalid_corners", "3D face needs 3 or 4 corners"))?;
+            let corners: Vec<Vector3> = raw_corners
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    if value.as_array().is_none_or(|values| values.len() != 3) {
+                        return Err(failure(
+                            "invalid_corners",
+                            format!("corners[{index}] must be [x,y,z]"),
+                        ));
+                    }
+                    point_value(Some(value), &format!("corners[{index}]"), "invalid_corners")
+                })
+                .collect::<Parsed<_>>()?;
+            let face = match corners.as_slice() {
+                [first, second, third] => document::entities::Face3D::new(*first, *second, *third, *third),
+                [first, second, third, fourth] => document::entities::Face3D::new(*first, *second, *third, *fourth),
+                _ => unreachable!("corner count was validated above"),
+            };
+            EntityType::Face3D(face)
+        }
         other => {
             return Err(failure(
                 "unknown_entity_type",
                 format!(
-                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region, PolyfaceMesh"
+                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region, PolyfaceMesh, Face3D"
                 ),
             ))
         }
     };
     let mut entity = entity;
     apply_common_properties(spec, &mut entity, document)?;
+    // A polyface's vertices and faces carry their own layer, color and lineweight:
+    // give them the mesh's so the whole entity lands on the requested layer.
+    if let document::EntityType::PolyfaceMesh(mesh) = &mut entity {
+        let (layer, color, weight) = (mesh.common.layer.clone(), mesh.common.color, mesh.common.line_weight);
+        for vertex in &mut mesh.vertices {
+            vertex.common.layer = layer.clone();
+            vertex.common.color = color;
+            vertex.common.line_weight = weight;
+        }
+        for face in &mut mesh.faces {
+            face.common.layer = layer.clone();
+            face.common.color = color;
+            face.common.line_weight = weight;
+        }
+    }
     let contract = schema(&kind).expect("supported factory type");
     crate::schema_validation::validate_shape(&contract, spec, "")
         .map_err(|error| failure("invalid_entity_definition", error))?;

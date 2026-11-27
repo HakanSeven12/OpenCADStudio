@@ -109,6 +109,7 @@ const MENUS: &[(&str, &[Entry])] = &[
             Cmd("Cut", "CUTCLIP", "Ctrl+X"),
             Cmd("Copy", "COPYCLIP", "Ctrl+C"),
             Cmd("Copy with Base Point", "COPYBASE", "Ctrl+Shift+C"),
+            Cmd("Cut with Base Point", "CUTBASE", "Ctrl+Shift+X"),
             Cmd("Copy Link", "COPYLINK", ""),
             Cmd("Paste", "PASTECLIP", "Ctrl+V"),
             Cmd("Paste as Block", "PASTEBLOCK", "Ctrl+Shift+V"),

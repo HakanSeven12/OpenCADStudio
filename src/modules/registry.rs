@@ -243,6 +243,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("ADDSELECTED", "SELECTALL"),
     ("FI", "FILTER"),
     ("COPYBASE", "COPYCLIP"),
+    ("CUTBASE", "CUTCLIP"),
     ("NCOPYALL", "NCOPY"),
     ("OOPS", "UNDO"),
     ("CLR", "CLEAR"),

@@ -4657,6 +4657,7 @@ insert =
     .date = ວັນທີ
     .details = ລາຍລະອຽດ
     .xref-detach = ຖອດອອກ
+    .xref-detach-tip = ແຍກການອ້າງອີງທີ່ເລືອກອອກຈາກແບບແຕ້ມ (Delete)
     .failed = ຫຼົ້ມເຫຼວ
     .xref-file-attach-is-not-available-on-web = ການແນບໄຟລ໌ບໍ່ຮອງຮັບເທິງເວັບ — ລາຍການອ້າງອີງດ້ານລຸ່ມນີ້ແມ່ນອ່ານໄດ້ຢ່າງດຽວ.
     .xref-file-name = ຊື່ໄຟລ໌
@@ -9376,7 +9377,7 @@ block-flip-frame-feedback =
 
 tool-windows =
     .detach = Open in its own window
-    .back = Back to the main window
+    .back = ກັບໄປໜ້າຕ່າງຫຼັກ
     .command-history = Command History
 
 ifccad-ui =

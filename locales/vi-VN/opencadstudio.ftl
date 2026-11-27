@@ -4662,6 +4662,7 @@ insert =
     .date = Ngày
     .details = Chi tiết
     .xref-detach = Tách ra
+    .xref-detach-tip = Tách các tham chiếu đã chọn khỏi bản vẽ (Delete)
     .failed = Thất bại
     .xref-file-attach-is-not-available-on-web = Không thể đính kèm tệp trên web — danh sách tham chiếu bên dưới chỉ đọc.
     .xref-file-name = Tên tập tin
@@ -9382,7 +9383,7 @@ block-flip-frame-feedback =
 
 tool-windows =
     .detach = Open in its own window
-    .back = Back to the main window
+    .back = Quay lại cửa sổ chính
     .command-history = Command History
 
 ifccad-ui =

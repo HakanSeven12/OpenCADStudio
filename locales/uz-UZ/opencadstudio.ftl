@@ -4656,6 +4656,7 @@ insert =
     .date = Sana
     .details = Tafsilotlar
     .xref-detach = Ajratiş
+    .xref-detach-tip = Tanlangan havolalarni chizmadan ajratish (Delete)
     .failed = Muvaffaqiyatsiz
     .xref-file-attach-is-not-available-on-web = Veb-versiyada fayl biriktiriş mavjud emas — quyidagi havolalar röyxati faqat öqiş uçun.
     .xref-file-name = Fayl nomi

@@ -4649,6 +4649,7 @@ insert =
     .date = Datum
     .details = Podrobnosti
     .xref-detach = Odpojit
+    .xref-detach-tip = Odpojit vybrané reference od výkresu (Delete)
     .failed = Selhalo
     .xref-file-attach-is-not-available-on-web = Připojení souboru není na webu dostupné — seznam referencí níže je pouze pro čtení.
     .xref-file-name = Název souboru
@@ -9391,7 +9392,7 @@ block-flip-frame-feedback =
 
 tool-windows =
     .detach = Open in its own window
-    .back = Back to the main window
+    .back = Zpět do hlavního okna
     .command-history = Command History
 
 ifccad-ui =

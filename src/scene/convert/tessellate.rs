@@ -2247,17 +2247,30 @@ fn tessellate_wires(
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
                                 text_verts: Vec::new(),
+                                // Two strokes: the break keeps the strip from
+                                // joining the end of one to the start of the
+                                // other, a diagonal that shows on block points,
+                                // which are sized in world units.
                                 points: vec![
                                     [x - s, y, z],
                                     [x + s, y, z],
+                                    [f32::NAN; 3],
                                     [x, y - s, z],
                                     [x, y + s, z],
                                 ],
                                 // All four cross points share the Point's residual
                                 // (the cross arms are tiny, < 0.1 m, so the low
                                 // component of the centre is also the right one
-                                // for the arm tips at f32 precision).
-                                points_low: vec![[xl, yl, zl]; 4].into(),
+                                // for the arm tips at f32 precision); the break
+                                // takes a zero, as in `points_to_ds`.
+                                points_low: vec![
+                                    [xl, yl, zl],
+                                    [xl, yl, zl],
+                                    [0.0; 3],
+                                    [xl, yl, zl],
+                                    [xl, yl, zl],
+                                ]
+                                .into(),
                                 snap_pts,
                                 tangent_geoms: te.tangent_geoms,
                                 key_vertices,
@@ -4169,6 +4182,42 @@ mod tests {
         assert_eq!(inst.start_width, 25.0);
         // params.w (end_width) is at end_angle (physical start, 5.0)
         assert_eq!(inst.params[3], 5.0);
+    }
+
+    #[test]
+    fn a_dot_point_draws_two_strokes_without_a_diagonal() {
+        // Inside a block a dot point is sized in world units (no
+        // world-per-pixel), so a strip joining its strokes shows a diagonal.
+        let mut point = document::entities::Point::default();
+        point.location = document::types::Vector3::new(10.0, 20.0, 0.0);
+        let wires = tessellate(
+            &document::Document::new(),
+            Handle::new(123),
+            &EntityType::Point(point),
+            false,
+            [1.0; 4],
+            0.0,
+            [0.0; 8],
+            1.0,
+            1.0,
+            None,
+            None,
+            [0.0; 4],
+            false,
+        );
+        let [wire] = &wires[..] else {
+            panic!("a dot point is one wire");
+        };
+        let runs: Vec<&[[f32; 3]]> = wire
+            .points
+            .split(|p| p[0].is_nan())
+            .filter(|run| !run.is_empty())
+            .collect();
+        assert_eq!(runs.len(), 2, "two strokes: {:?}", wire.points);
+        assert!(runs.iter().all(|run| run.len() == 2));
+        assert_eq!(runs[0][0][1], runs[0][1][1], "the first stroke is level");
+        assert_eq!(runs[1][0][0], runs[1][1][0], "the second stroke is upright");
+        assert_eq!(wire.points_low.len(), wire.points.len());
     }
 
     #[test]

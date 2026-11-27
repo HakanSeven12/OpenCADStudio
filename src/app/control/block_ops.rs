@@ -351,42 +351,6 @@ pub(crate) fn detach_representation(doc: &mut Document, insert: Handle) {
     }
 }
 
-/// Case-insensitive wildcard glob matcher supporting `*` and `?`.
-pub(crate) fn glob_match_ci(pattern: &str, text: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    let pat: Vec<char> = pattern.chars().flat_map(|c| c.to_lowercase()).collect();
-    let txt: Vec<char> = text.chars().flat_map(|c| c.to_lowercase()).collect();
-
-    let (mut p_idx, mut t_idx) = (0, 0);
-    let mut star_idx: Option<usize> = None;
-    let mut match_idx = 0;
-
-    while t_idx < txt.len() {
-        if p_idx < pat.len() && (pat[p_idx] == '?' || pat[p_idx] == txt[t_idx]) {
-            p_idx += 1;
-            t_idx += 1;
-        } else if p_idx < pat.len() && pat[p_idx] == '*' {
-            star_idx = Some(p_idx);
-            match_idx = t_idx;
-            p_idx += 1;
-        } else if let Some(s_idx) = star_idx {
-            p_idx = s_idx + 1;
-            match_idx += 1;
-            t_idx = match_idx;
-        } else {
-            return false;
-        }
-    }
-
-    while p_idx < pat.len() && pat[p_idx] == '*' {
-        p_idx += 1;
-    }
-
-    p_idx == pat.len()
-}
-
 fn clean_text(raw: &str, is_mtext: bool) -> String {
     let base = if is_mtext {
         document::entities::mtext_format::parse_mtext(raw, true).to_plain_text()
@@ -1028,8 +992,8 @@ impl OpenCADStudio {
 
             // Match against `names` glob patterns
             if !patterns.iter().any(|pat| {
-                glob_match_ci(pat, &effective_name)
-                    || (include_anonymous && glob_match_ci(pat, &ins.block_name))
+                crate::wildcard::wildcard_match(&effective_name, pat)
+                    || (include_anonymous && crate::wildcard::wildcard_match(&ins.block_name, pat))
             }) {
                 continue;
             }

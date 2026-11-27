@@ -1,5 +1,10 @@
 use crate::t;
 use document::entities::{Polyline, Polyline2D, Polyline3D};
+use document::types::Vector3;
+use document::EntityType;
+use ocs_geom::geom2d::nurbs::clamped_uniform_knots;
+use ocs_geom::geom2d::NurbsCurve;
+use std::f64::consts::TAU;
 
 use crate::entities::common::{
     edit_prop as edit, format_area, format_length, parse_f64, ro_prop as ro, square_grip,
@@ -7,9 +12,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::TangentGeom;
+use crate::display::render_entity::{extrusion_wall_tris, RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::TangentGeom;
 use ocs_geom::space::{NurbsCurve3, Vec3};
 
 // ── Polyline (old-style 3D heavy polyline) ────────────────────────────────────
@@ -74,8 +79,8 @@ impl Grippable for Polyline {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -95,9 +100,9 @@ impl Grippable for Polyline {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::AddVertex if grip_id < n => {
@@ -162,12 +167,12 @@ impl PropertyEditable for Polyline {
 
 impl Transformable for Polyline {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
                 for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut v.location.x,
                         &mut v.location.y,
                         p1,
@@ -223,7 +228,7 @@ fn polyline2d_focused_vertex(pl: &Polyline2D) -> (usize, usize) {
     let Some(last) = frame.len().checked_sub(1) else {
         return (0, 0);
     };
-    let step = crate::scene::view::dispatch::prop_current_vertex().min(last);
+    let step = crate::entities::dispatch::prop_current_vertex().min(last);
     (step, frame[step])
 }
 
@@ -238,7 +243,7 @@ fn refit_spline_polyline2d(pl: &mut Polyline2D) {
         _ => 3,
     };
     let segments = SPLINE_SEGMENTS.with(|c| c.get()).unsigned_abs().max(1);
-    crate::modules::draw::modify::pedit::spline_fit_polyline2d(pl, degree, segments as usize);
+    spline_fit_polyline2d(pl, degree, segments as usize);
 }
 
 /// The Fit/Smooth choice a 2D polyline shows.
@@ -302,7 +307,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
     let mut key_verts: Vec<[f64; 3]> = Vec::new();
 
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
-        crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
+        crate::entities::transform::ocs_point_to_wcs((x, y, elev), normal)
     };
     let to_pt = |v: &document::entities::Vertex2D| -> [f64; 3] {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
@@ -686,8 +691,8 @@ impl Grippable for Polyline2D {
         refit_spline_polyline2d(self);
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -707,9 +712,9 @@ impl Grippable for Polyline2D {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let n = self.vertices.len();
         let elev = self.elevation;
         match action {
@@ -925,15 +930,14 @@ impl PropertyEditable for Polyline2D {
         let (_, vi) = polyline2d_focused_vertex(self);
         match field {
             "pl2_fit_smooth" => {
-                use crate::modules::draw::modify::pedit;
                 let Some(value) = fit_smooth_key(value) else {
                     return;
                 };
                 match value {
-                    "None" => pedit::unfit_polyline2d(self),
+                    "None" => unfit_polyline2d(self),
                     "Curve fit" => {
                         if let Some(document::EntityType::Polyline2D(mut fitted)) =
-                            pedit::fit_entity(&document::EntityType::Polyline2D(self.clone()), &[])
+                            fit_entity(&document::EntityType::Polyline2D(self.clone()), &[])
                         {
                             fitted.smooth_surface =
                                 document::entities::polyline::SmoothSurfaceType::None;
@@ -943,7 +947,7 @@ impl PropertyEditable for Polyline2D {
                     "Quadratic" | "Cubic" => {
                         let degree = if value == "Quadratic" { 2 } else { 3 };
                         let segments = SPLINE_SEGMENTS.with(|c| c.get()).unsigned_abs().max(1);
-                        pedit::spline_fit_polyline2d(self, degree, segments as usize);
+                        spline_fit_polyline2d(self, degree, segments as usize);
                     }
                     _ => {}
                 }
@@ -1049,12 +1053,12 @@ impl PropertyEditable for Polyline2D {
 
 impl Transformable for Polyline2D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
                 for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut v.location.x,
                         &mut v.location.y,
                         p1,
@@ -1324,8 +1328,8 @@ impl Grippable for Polyline3D {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         use document::entities::polyline3d::SmoothSurfaceType as SST;
 
         let mut items = vec![
@@ -1356,9 +1360,9 @@ impl Grippable for Polyline3D {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         use document::entities::polyline3d::SmoothSurfaceType as SST;
 
         let mut controls = polyline3d_controls(self);
@@ -1420,7 +1424,7 @@ impl PropertyEditable for Polyline3D {
         let vi = if n == 0 {
             0
         } else {
-            crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
+            crate::entities::dispatch::prop_current_vertex().min(n - 1)
         };
         let vertex = control_indices
             .get(vi)
@@ -1525,7 +1529,7 @@ impl PropertyEditable for Polyline3D {
                 }
             }
             "pl3_vertex_x" => {
-                let vi = crate::scene::view::dispatch::prop_current_vertex();
+                let vi = crate::entities::dispatch::prop_current_vertex();
                 let raw_index = polyline3d_control_indices(self).get(vi).copied();
                 if let (Some(v), Some(vert)) = (
                     parse_f64(value).filter(|value| value.is_finite()),
@@ -1536,7 +1540,7 @@ impl PropertyEditable for Polyline3D {
                 }
             }
             "pl3_vertex_y" => {
-                let vi = crate::scene::view::dispatch::prop_current_vertex();
+                let vi = crate::entities::dispatch::prop_current_vertex();
                 let raw_index = polyline3d_control_indices(self).get(vi).copied();
                 if let (Some(v), Some(vert)) = (
                     parse_f64(value).filter(|value| value.is_finite()),
@@ -1547,7 +1551,7 @@ impl PropertyEditable for Polyline3D {
                 }
             }
             "pl3_vertex_z" => {
-                let vi = crate::scene::view::dispatch::prop_current_vertex();
+                let vi = crate::entities::dispatch::prop_current_vertex();
                 let raw_index = polyline3d_control_indices(self).get(vi).copied();
                 if let (Some(v), Some(vert)) = (
                     parse_f64(value).filter(|value| value.is_finite()),
@@ -1564,12 +1568,12 @@ impl PropertyEditable for Polyline3D {
 
 impl Transformable for Polyline3D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
                 for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut v.position.x,
                         &mut v.position.y,
                         p1,
@@ -1637,6 +1641,199 @@ pub(crate) fn wide_fills(pl: &document::entities::Polyline2D) -> ([f64; 2], Vec<
         pl.is_closed() && segments.len() == seg_count,
     );
     (origin, out)
+}
+
+pub(crate) fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityType> {
+    use document::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
+    let mut polyline = match entity {
+        EntityType::Polyline2D(p) => p.clone(),
+        EntityType::LwPolyline(p) => {
+            let mut result = Polyline2D::new();
+            result.common = p.common.clone();
+            result.normal = p.normal;
+            result.elevation = p.elevation;
+            result.thickness = p.thickness;
+            result.flags =
+                PolylineFlags::from_bits((p.is_closed as u16) | if p.plinegen { 128 } else { 0 });
+            result.vertices = p
+                .vertices
+                .iter()
+                .map(|v| {
+                    let mut vertex =
+                        Vertex2D::new(Vector3::new(v.location.x, v.location.y, p.elevation));
+                    vertex.start_width = if p.constant_width != 0.0 {
+                        p.constant_width
+                    } else {
+                        v.start_width
+                    };
+                    vertex.end_width = if p.constant_width != 0.0 {
+                        p.constant_width
+                    } else {
+                        v.end_width
+                    };
+                    vertex.id = v.vertex_id;
+                    vertex
+                })
+                .collect();
+            result
+        }
+        _ => return None,
+    };
+    // Refit the defining vertices, never the previously inserted fit knees.
+    let mut originals = defining_vertices(&polyline);
+    for vertex in &mut originals {
+        if vertex.start_width == 0.0 {
+            vertex.start_width = polyline.start_width;
+        }
+        if vertex.end_width == 0.0 {
+            vertex.end_width = polyline.end_width;
+        }
+    }
+    if originals.iter().any(|vertex| {
+        !vertex.start_width.is_finite()
+            || !vertex.end_width.is_finite()
+            || vertex.start_width < 0.0
+            || vertex.end_width < 0.0
+    }) {
+        return None;
+    }
+    for &(index, angle) in overrides {
+        let vertex = originals.get_mut(index)?;
+        if !angle.is_finite() {
+            return None;
+        }
+        vertex.curve_tangent = angle.rem_euclid(TAU);
+        vertex.flags = VertexFlags::from_bits(vertex.flags.bits() | 2);
+    }
+    let points: Vec<_> = originals
+        .iter()
+        .map(|v| [v.location.x, v.location.y])
+        .collect();
+    let directions: Vec<_> = originals
+        .iter()
+        .map(|v| (v.flags.bits() & 2 != 0).then(|| [v.curve_tangent.cos(), v.curve_tangent.sin()]))
+        .collect();
+    let fitted = ocs_geom::geom2d::fit_arc_chain(&points, polyline.flags.is_closed(), &directions)?;
+    let mut vertices = Vec::with_capacity(fitted.len());
+    for (i, fitted_vertex) in fitted.iter().enumerate() {
+        let original = &originals[fitted_vertex.source];
+        let mut vertex = original.clone();
+        vertex.location = Vector3::new(
+            fitted_vertex.point[0],
+            fitted_vertex.point[1],
+            polyline.elevation,
+        );
+        vertex.bulge = fitted_vertex.bulge;
+        let end_fraction = fitted
+            .get(i + 1)
+            .filter(|next| next.source == fitted_vertex.source)
+            .map_or(1.0, |next| next.fraction);
+        vertex.start_width = original.start_width
+            + (original.end_width - original.start_width) * fitted_vertex.fraction;
+        vertex.end_width =
+            original.start_width + (original.end_width - original.start_width) * end_fraction;
+        if fitted_vertex.inserted {
+            vertex.flags = VertexFlags::EXTRA_VERTEX;
+            vertex.id = 0;
+        }
+        vertices.push(vertex);
+    }
+    polyline.start_width = originals.first()?.start_width;
+    polyline.end_width = originals.first()?.end_width;
+    polyline.vertices = vertices;
+    polyline.flags = PolylineFlags::from_bits((polyline.flags.bits() & !4) | 2);
+    Some(EntityType::Polyline2D(polyline))
+}
+
+/// Fit/Smooth "None": back to the defining vertices, keeping the bulges they
+/// carry.
+pub(crate) fn unfit_polyline2d(polyline: &mut document::entities::Polyline2D) {
+    use document::entities::PolylineFlags;
+    polyline.vertices = defining_vertices(polyline);
+    polyline.flags = PolylineFlags::from_bits(polyline.flags.bits() & !(2 | 4));
+    polyline.smooth_surface = document::entities::polyline::SmoothSurfaceType::None;
+}
+
+/// Fit/Smooth "Quadratic" / "Cubic": the defining vertices become the spline
+/// frame (flag 16) and `segments` evenly spaced parameter samples per span of
+/// the B-spline they control (flag 8) follow the first of them. An open frame
+/// is clamped to its ends; a closed one wraps periodically.
+pub(crate) fn spline_fit_polyline2d(
+    polyline: &mut document::entities::Polyline2D,
+    degree: usize,
+    segments: usize,
+) -> bool {
+    use document::entities::polyline::SmoothSurfaceType;
+    use document::entities::{PolylineFlags, Vertex2D, VertexFlags};
+    let frame = defining_vertices(polyline);
+    let n = frame.len();
+    if n <= degree {
+        return false;
+    }
+    let closed = polyline.flags.is_closed();
+    let control: Vec<[f64; 2]> = frame.iter().map(|v| [v.location.x, v.location.y]).collect();
+    let (curve, spans) = if closed {
+        let mut wrapped = control.clone();
+        wrapped.extend(control.iter().take(degree).copied());
+        let knots = (0..wrapped.len() + degree + 1).map(|i| i as f64).collect();
+        (NurbsCurve::new(degree, wrapped, knots, None), n)
+    } else {
+        let knots = clamped_uniform_knots(degree, n);
+        (NurbsCurve::new(degree, control, knots, None), n - degree)
+    };
+    let Some(curve) = curve else {
+        return false;
+    };
+    let steps = segments.max(1) * spans;
+    let count = if closed { steps } else { steps + 1 };
+    let mut frame = frame.into_iter().map(|mut vertex| {
+        vertex.flags = VertexFlags::SPLINE_CONTROL;
+        vertex
+    });
+    let mut vertices = Vec::with_capacity(n + count);
+    vertices.extend(frame.next());
+    for step in 0..count {
+        let q = curve.point_at(step as f64 / steps as f64);
+        let mut vertex = Vertex2D::new(Vector3::new(q[0], q[1], polyline.elevation));
+        vertex.flags = VertexFlags::SPLINE_VERTEX;
+        vertices.push(vertex);
+    }
+    vertices.extend(frame);
+    polyline.vertices = vertices;
+    polyline.flags = PolylineFlags::from_bits((polyline.flags.bits() & !2) | 4);
+    polyline.smooth_surface = if degree == 2 {
+        SmoothSurfaceType::QuadraticBSpline
+    } else {
+        SmoothSurfaceType::CubicBSpline
+    };
+    true
+}
+
+/// The vertices the user placed: curve-fit knees (flag 1) and spline samples
+/// (flag 8) are generated, and a spline frame vertex (flag 16) is a defining
+/// vertex once the fit is taken off.
+pub(crate) fn defining_vertices(
+    polyline: &document::entities::Polyline2D,
+) -> Vec<document::entities::Vertex2D> {
+    use document::entities::VertexFlags;
+    polyline
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(_, vertex)| vertex.flags.bits() & (1 | 8) == 0)
+        .map(|(index, vertex)| {
+            let mut original = vertex.clone();
+            original.flags = VertexFlags::from_bits(original.flags.bits() & !16);
+            if let Some(knee) = polyline.vertices[index + 1..]
+                .iter()
+                .take_while(|next| next.flags.bits() & 1 != 0)
+                .last()
+            {
+                original.end_width = knee.end_width;
+            }
+            original
+        })
+        .collect()
 }
 
 #[cfg(test)]

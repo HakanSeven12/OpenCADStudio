@@ -125,7 +125,8 @@ pub fn resolve(document: &Document, host: Handle) -> Option<String> {
 /// the events that update fields — 1 open, 2 save, 4 plot, 8 eTransmit,
 /// 16 regen.
 pub fn fieldeval(document: &Document) -> i32 {
-    crate::io::drawing_variable(document, "FIELDEVAL")
+    document
+        .drawing_variable("FIELDEVAL")
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(31)
 }
@@ -583,7 +584,17 @@ pub fn utc_offset_days() -> f64 {
         }
         0.0
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
+    {
+        let now = epoch_secs() as libc::time_t;
+        // SAFETY: `localtime_r` only writes the `tm` it is given.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        if !unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+            return tm.tm_gmtoff as f64 / 86_400.0;
+        }
+        0.0
+    }
+    #[cfg(not(any(unix, target_os = "windows")))]
     0.0
 }
 

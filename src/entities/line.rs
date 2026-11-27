@@ -7,9 +7,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
-use crate::scene::model::wire_model::TangentGeom;
+use crate::display::render_entity::{extrusion_wall_tris, RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
+use crate::display::wire_model::TangentGeom;
 
 fn to_render(line: &Line) -> RenderEntity {
     if let Some(association) =
@@ -19,9 +19,9 @@ fn to_render(line: &Line) -> RenderEntity {
         // Continuous, and each extension is a line of its own in the object's
         // linetype, running along the mark's axes and aligned at its ends as
         // a single line is.
-        let axes = crate::scene::centermark::dvec(association.plane_x)
-            + crate::scene::centermark::dvec(association.plane_y);
-        let segments: Vec<_> = crate::scene::centermark::render_segments(&association)
+        let axes = crate::entities::centermark::dvec(association.plane_x)
+            + crate::entities::centermark::dvec(association.plane_y);
+        let segments: Vec<_> = crate::entities::centermark::render_segments(&association)
             .into_iter()
             .map(|[a, b]| {
                 if (b - a).dot(axes) < 0.0 {
@@ -31,7 +31,7 @@ fn to_render(line: &Line) -> RenderEntity {
                 }
             })
             .collect();
-        let extensions = 2..crate::scene::centermark::mark_segments(&association).len();
+        let extensions = 2..crate::entities::centermark::mark_segments(&association).len();
         let mut points = Vec::with_capacity(segments.len() * 3);
         let mut solid = Vec::with_capacity(segments.len() * 3);
         let mut key_vertices = Vec::with_capacity(segments.len() * 2 + 1);
@@ -62,7 +62,7 @@ fn to_render(line: &Line) -> RenderEntity {
                 ],
             });
         }
-        let center = crate::scene::centermark::dvec(association.center);
+        let center = crate::entities::centermark::dvec(association.center);
         key_vertices.push([center.x, center.y, center.z]);
         return RenderEntity {
             pick_tris: Vec::new(),
@@ -138,8 +138,8 @@ fn grips(line: &Line) -> Vec<GripDef> {
     if let Some(association) =
         document::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
-        let center = crate::scene::centermark::dvec(association.center);
-        let directions = crate::scene::centermark::mark_directions(&association);
+        let center = crate::entities::centermark::dvec(association.center);
+        let directions = crate::entities::centermark::mark_directions(&association);
         let mut result = vec![center_grip(0, center)];
         let extension_start = association.cross_size * 0.5 + association.cross_gap;
         if !association.show_extensions || association.radius <= extension_start {
@@ -205,7 +205,7 @@ const MARK_EXTENSIONS: [(&str, &str, usize); 4] = [
 ];
 
 fn properties(line: &Line) -> Vec<PropSection> {
-    use crate::scene::model::object::{PropValue, Property};
+    use crate::entities::object::{PropValue, Property};
     if let Some(association) =
         document::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
@@ -249,7 +249,7 @@ fn properties(line: &Line) -> Vec<PropSection> {
                 options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
             },
         });
-        let x = crate::scene::centermark::dvec(association.plane_x);
+        let x = crate::entities::centermark::dvec(association.plane_x);
         return vec![
             PropSection {
                 title: t!("Geometry").into_owned(),
@@ -396,9 +396,9 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
                 let Some(degrees) = parse_f64(value) else {
                     return;
                 };
-                let x = crate::scene::centermark::dvec(association.plane_x)
+                let x = crate::entities::centermark::dvec(association.plane_x)
                     .normalize_or(glam::DVec3::X);
-                let y = crate::scene::centermark::dvec(association.plane_y)
+                let y = crate::entities::centermark::dvec(association.plane_y)
                     .normalize_or(glam::DVec3::Y);
                 let normal = x.cross(y).normalize_or(glam::DVec3::Z);
                 let turn = degrees.to_radians() - x.y.atan2(x.x);
@@ -421,7 +421,7 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
                 association.overshoots[index] = number - association.extension_length;
             }
         }
-        crate::scene::centermark::update_carrier(line, &association);
+        crate::entities::centermark::update_carrier(line, &association);
         return;
     }
     let Some(v) = parse_f64(value) else {
@@ -469,13 +469,13 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
     if let Some(mut association) =
         document::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
-        let center = crate::scene::centermark::dvec(association.center);
-        let directions = crate::scene::centermark::mark_directions(&association);
+        let center = crate::entities::centermark::dvec(association.center);
+        let directions = crate::entities::centermark::mark_directions(&association);
         match (grip_id, apply) {
             (0, GripApply::Translate(delta)) => {
                 let moved = center + delta;
                 association.center = document::types::Vector3::new(moved.x, moved.y, moved.z);
-                let origin = crate::scene::centermark::dvec(association.plane_origin) + delta;
+                let origin = crate::entities::centermark::dvec(association.plane_origin) + delta;
                 association.plane_origin =
                     document::types::Vector3::new(origin.x, origin.y, origin.z);
                 association.associated = false;
@@ -495,7 +495,7 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
             }
             _ => return,
         }
-        crate::scene::centermark::update_carrier(line, &association);
+        crate::entities::centermark::update_carrier(line, &association);
         return;
     }
     if let Some(mut association) =
@@ -578,12 +578,12 @@ fn apply_plain_transform(line: &mut Line, t: &EntityTransform) {
             axis,
             angle_rad,
         } => {
-            crate::scene::view::transform::apply_standard_transform(
+            crate::entities::transform::apply_standard_transform(
                 line, *center, *axis, *angle_rad,
             );
         }
         EntityTransform::Scale { center, factor } => {
-            crate::scene::view::transform::apply_standard_scale(line, *center, *factor);
+            crate::entities::transform::apply_standard_scale(line, *center, *factor);
         }
         EntityTransform::Mirror {
             p1,
@@ -592,7 +592,7 @@ fn apply_plain_transform(line: &mut Line, t: &EntityTransform) {
         } => {
             document::Entity::apply_transform(
                 line,
-                &crate::scene::view::transform::reflection_about_working_line(
+                &crate::entities::transform::reflection_about_working_line(
                     *p1,
                     *p2,
                     *working_normal,
@@ -610,17 +610,17 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
         document::entities::CenterMarkAssociation::read(&line.common.extended_data)
     {
         if let EntityTransform::Translate(delta) = t {
-            let center = crate::scene::centermark::dvec(association.center) + *delta;
+            let center = crate::entities::centermark::dvec(association.center) + *delta;
             association.center = document::types::Vector3::new(center.x, center.y, center.z);
-            let origin = crate::scene::centermark::dvec(association.plane_origin) + *delta;
+            let origin = crate::entities::centermark::dvec(association.plane_origin) + *delta;
             association.plane_origin = document::types::Vector3::new(origin.x, origin.y, origin.z);
             association.associated = false;
-            crate::scene::centermark::update_carrier(line, &association);
+            crate::entities::centermark::update_carrier(line, &association);
             return;
         }
-        let center = crate::scene::centermark::dvec(association.center);
-        let x = crate::scene::centermark::dvec(association.plane_x).normalize_or(glam::DVec3::X);
-        let y = crate::scene::centermark::dvec(association.plane_y).normalize_or(glam::DVec3::Y);
+        let center = crate::entities::centermark::dvec(association.center);
+        let x = crate::entities::centermark::dvec(association.plane_x).normalize_or(glam::DVec3::X);
+        let y = crate::entities::centermark::dvec(association.plane_y).normalize_or(glam::DVec3::Y);
         let mut x_basis = Line::from_points(
             document::types::Vector3::new(center.x, center.y, center.z),
             document::types::Vector3::new(center.x + x.x, center.y + x.y, center.z + x.z),
@@ -659,7 +659,7 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
             *value *= scale;
         }
         association.associated = false;
-        crate::scene::centermark::update_carrier(line, &association);
+        crate::entities::centermark::update_carrier(line, &association);
         return;
     }
     if let Some(mut association) =
@@ -684,8 +684,8 @@ impl crate::entities::traits::Grippable for Line {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         if document::entities::CenterMarkAssociation::read(&self.common.extended_data).is_some()
             || document::entities::CenterLineAssociation::read(&self.common.extended_data).is_some()
         {
@@ -715,7 +715,7 @@ impl crate::entities::traits::Grippable for Line {
     fn apply_grip_menu(
         &mut self,
         _grip_id: usize,
-        _action: crate::scene::model::object::GripMenuAction,
+        _action: crate::entities::object::GripMenuAction,
     ) {
         // Lengthen needs a follow-up distance — handled by
         // `apply_grip_menu_value`.
@@ -724,9 +724,9 @@ impl crate::entities::traits::Grippable for Line {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::Lengthen => Some("Distance"),
             _ => None,
@@ -736,10 +736,10 @@ impl crate::entities::traits::Grippable for Line {
     fn grip_menu_point_value(
         &self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if !matches!(action, A::Lengthen) {
             return None;
         }
@@ -764,10 +764,10 @@ impl crate::entities::traits::Grippable for Line {
     fn apply_grip_menu_value(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if !matches!(action, A::Lengthen) {
             return;
         }

@@ -10,9 +10,9 @@ use crate::entities::text_support::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 use crate::t;
 
 /// The entity's `column_data` as the layout's column description.
@@ -404,28 +404,38 @@ fn grips(t: &MText) -> Vec<GripDef> {
     result
 }
 
-/// Text without a defined width or height still shows its width and height
-/// grips, on the box the text is drawn in, instead of on the insertion grip.
-/// `None` when the stored box already places them.
+/// Text without a defined width or height, or whose drawn text runs past the
+/// defined box (an unbreakable word, a large inline height), shows its width
+/// and height grips on the box the text is drawn in. `None` when the stored
+/// box already places them.
 pub(crate) fn grips_on_drawn_box(t: &MText, document: &document::Document) -> Option<Vec<GripDef>> {
-    let no_width = t.rectangle_width <= 0.0 && t.column_data.column_type == 0;
-    let no_height = t
+    let plain = t.column_data.column_type == 0;
+    let defined_width = t.rectangle_width.max(0.0);
+    let defined_height = t
         .rectangle_height
         .or_else(|| t.column_data.heights.first().copied())
-        .is_none_or(|h| h <= 0.0);
-    if !no_width && !no_height {
-        return None;
-    }
+        .unwrap_or(0.0)
+        .max(0.0);
+    let no_width = defined_width <= 0.0 && plain;
+    let no_height = defined_height <= 0.0;
     let [min_x, min_y, max_x, max_y] = layout_of(t, document, false).local_bounds;
     if min_x > max_x || min_y > max_y {
         return None;
     }
-    let mut drawn = t.clone();
-    if no_width {
-        drawn.rectangle_width = (max_x - min_x) as f64;
+    let drawn_width = f64::from(max_x - min_x);
+    let drawn_height = f64::from(max_y - min_y);
+    const SLACK: f64 = 1e-6;
+    let grow_width = no_width || (plain && drawn_width > defined_width + SLACK);
+    let grow_height = no_height || (plain && drawn_height > defined_height + SLACK);
+    if !grow_width && !grow_height {
+        return None;
     }
-    if no_height {
-        drawn.rectangle_height = Some((max_y - min_y) as f64);
+    let mut drawn = t.clone();
+    if grow_width {
+        drawn.rectangle_width = drawn_width;
+    }
+    if grow_height {
+        drawn.rectangle_height = Some(drawn_height);
     }
     Some(grips(&drawn))
 }
@@ -801,8 +811,8 @@ fn apply_grip(t: &mut MText, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(t: &mut MText, tr: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
+    crate::entities::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
+        crate::entities::transform::reflect_xy_point(
             &mut entity.insertion_point.x,
             &mut entity.insertion_point.y,
             p1,
@@ -830,8 +840,8 @@ impl Grippable for MText {
         apply_grip(self, grip_id, apply);
     }
 
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         if grip_id == 0 {
             // Insertion point
             vec![
@@ -860,7 +870,7 @@ impl Grippable for MText {
     fn apply_grip_menu(
         &mut self,
         _grip_id: usize,
-        _action: crate::scene::model::object::GripMenuAction,
+        _action: crate::entities::object::GripMenuAction,
     ) {
         // Rotate needs a follow-up angle handled by
         // `apply_grip_menu_value`; Move-with-Text is the default drag.
@@ -869,9 +879,9 @@ impl Grippable for MText {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::RotateText => Some("Rotation (deg)"),
             _ => None,
@@ -881,10 +891,10 @@ impl Grippable for MText {
     fn apply_grip_menu_value(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if matches!(action, A::RotateText) {
             self.rotation = value.to_radians();
         }
@@ -959,5 +969,47 @@ mod inline_bylayer_tests {
                 .any(|(text, c)| text.contains("TITLE") && c.is_none()),
             "{runs:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod drawn_box_grip_tests {
+    use super::*;
+
+    fn word(width: f64, height: Option<f64>) -> MText {
+        let mut t = MText::with_value(
+            r"{\H3;asdaasdasdasd\P}",
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+        );
+        t.height = 0.4;
+        t.attachment_point = AttachmentPoint::TopLeft;
+        t.rectangle_width = width;
+        t.rectangle_height = height;
+        t
+    }
+
+    #[test]
+    fn grips_follow_an_unbreakable_word_wider_than_the_defined_box() {
+        let document = document::Document::new();
+        let t = word(2.0, Some(1.0));
+        let bounds = layout_of(&t, &document, false).local_bounds;
+        let drawn_width = f64::from(bounds[2] - bounds[0]);
+        assert!(
+            drawn_width > 4.0,
+            "the word is wider than the box: {drawn_width}"
+        );
+        let grips = grips_on_drawn_box(&t, &document).expect("grips move to the drawn box");
+        let width_grip = grips.iter().find(|g| g.id == 1).unwrap();
+        assert!(
+            (width_grip.world.x - drawn_width).abs() < 1e-3,
+            "width grip {} sits on the drawn right edge {drawn_width}",
+            width_grip.world.x
+        );
+    }
+
+    #[test]
+    fn a_box_that_contains_the_text_keeps_its_defined_grips() {
+        let document = document::Document::new();
+        assert!(grips_on_drawn_box(&word(500.0, Some(500.0)), &document).is_none());
     }
 }

@@ -380,6 +380,19 @@ pub static POINTER: OpDef = OpDef {
     example: r#"{"op":"pointer","events":[{"move_world":[10,0,0]},{"press":"left"},{"release":"left"},{"move_world":[12,3,0]},{"press":"left"},{"release":"left"}]}"#,
 };
 
+pub static KEY: OpDef = OpDef {
+    name: "key",
+    doc: "Press a key or key combination, as the keyboard would: it runs what the key is bound to (Customize > Keyboard shortcuts), e.g. CTRL+PAGEDOWN for the next layout, TAB in the object snap cycle, F3 for object snaps. ACCEL stands for CTRL, or CMD on macOS.",
+    batchable: true,
+    params: &[req(
+        "key",
+        Ty::Str,
+        "Key name with optional CTRL, CMD, ALT, SHIFT or ACCEL modifiers joined by +: a letter or digit, ENTER, SPACE, ESCAPE, DELETE, BACKSPACE, TAB, the arrows, HOME, END, PAGEUP, PAGEDOWN, INSERT, F1-F12.",
+    )],
+    rules: &[],
+    example: r#"{"op":"key","key":"ACCEL+PAGEDOWN"}"#,
+};
+
 pub static SET_PROPERTIES: OpDef = OpDef {
     name: "set_properties",
     doc: "Atomically update record properties by RFC 6901 JSON pointer paths.",
@@ -1044,7 +1057,7 @@ pub static GROUP_CREATE: OpDef = OpDef {
 
 pub static SELECTION_SET_SAVE: OpDef = OpDef {
     name: "selection_set_save",
-    doc: "Save an entity handle set under a name for later recall.",
+    doc: "Save an entity handle set under a name in the drawing, as NAMEDSEL does (one undo step).",
     batchable: true,
     params: &[
         req("name", Ty::Str, "Selection set name."),
@@ -1056,7 +1069,7 @@ pub static SELECTION_SET_SAVE: OpDef = OpDef {
 
 pub static SELECTION_SET_LOAD: OpDef = OpDef {
     name: "selection_set_load",
-    doc: "Recall a previously saved selection set by name.",
+    doc: "Recall a selection set saved in the drawing, by name without case.",
     batchable: true,
     params: &[
         req("name", Ty::Str, "Selection set name."),
@@ -1668,6 +1681,7 @@ pub static OPS: &[&OpDef] = &[
     &GRIP_DRAG,
     &CLICK,
     &POINTER,
+    &KEY,
     &SET_PROPERTIES,
     &PANEL_INPUT,
     &PANEL_BUTTON,

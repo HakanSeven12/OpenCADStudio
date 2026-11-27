@@ -601,6 +601,8 @@ pub enum Message {
     PluginDialogFilePicked(String, Option<std::path::PathBuf>),
     /// Live text edit in a file picker text input in a plugin modal dialog.
     PluginDialogFileTextChange(String, String),
+    /// The calendar of a date field in a plugin modal dialog (API v33).
+    PluginDialogDate(String, crate::ui::window::date_field::DateMsg),
     /// Table cell text change in a plugin modal dialog.
     PluginDialogTableCellChange(String, usize, usize, String),
     /// Add empty row to a table in a plugin modal dialog.
@@ -623,6 +625,9 @@ pub enum Message {
     PluginPanelFilePick(String, String),
     PluginPanelFilePicked(String, String, Option<std::path::PathBuf>),
     PluginPanelFileTextChange(String, String, String),
+    /// The calendar of a date field in a plugin dock panel (API v33): panel,
+    /// control.
+    PluginPanelDate(String, String, crate::ui::window::date_field::DateMsg),
     PluginPanelTableCellChange(String, String, usize, usize, String),
     PluginPanelTableAddRow(String, String),
     PluginPanelTableRemoveRow(String, String, usize),
@@ -1240,6 +1245,16 @@ pub enum Message {
     GripDwellTick,
     /// The notice redraw allows the next frame to build the scene.
     LayoutSettled,
+    /// The window drew while a plugin command waited for it (or the wait
+    /// timed out): the command may run (#3650).
+    PluginFrameDrawn,
+    /// Run the plugin command that waited for a frame.
+    PluginFrameResume,
+    /// The plugin of the command running beside the window sent something,
+    /// or the check interval passed: serve it (#3650).
+    PluginRunWake,
+    /// Ask the plugin command running beside the window to stop.
+    PluginRunCancel,
     /// Timer pulse while a rollover hit-test is queued; fires when the
     /// cursor has been still long enough to safely run the pick.
     HoverDwellTick,
@@ -2728,6 +2743,8 @@ pub enum Message {
     GeometryCleanup(crate::ui::window::geometry_cleanup::GeometryCleanupMsg),
     /// The Visibility States palette of a BricsCAD parametric block.
     BricscadVisibility(crate::ui::window::bricscad_visibility::VisMsg),
+    /// The Files palette.
+    FilesPalette(crate::ui::window::files_palette::FilesMsg),
     /// The LayerWalk pallet (LAYWALK).
     Laywalk(crate::ui::window::layer_walk::LayerWalkMsg),
     /// The QuickCalc pallet.

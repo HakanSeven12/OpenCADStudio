@@ -3,7 +3,7 @@ use super::*;
 use crate::t;
 
 use super::*;
-use crate::scene::model::object::{GripMenuAction, GripShape};
+use crate::entities::object::{GripMenuAction, GripShape};
 
 fn rotated() -> Dimension {
     let mut d =

@@ -6,7 +6,7 @@ use document::{Document, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
-use crate::ui::window::block_definition::{invalid_block_name_char, BlockObjectMode};
+use crate::scene::BlockObjectMode;
 
 // ── Remembered dialog choices ─────────────────────────────────────────────
 
@@ -1151,6 +1151,16 @@ impl CadCommand for BlockReplaceCommand {
     fn on_enter(&mut self) -> CmdResult {
         self.on_text_input("").unwrap_or(CmdResult::Cancel)
     }
+}
+
+/// The first character a block name may not hold: \ < > / ? " : ; * | , = `
+pub fn invalid_block_name_char(name: &str) -> Option<char> {
+    name.chars().find(|&c| {
+        matches!(
+            c,
+            '\\' | '<' | '>' | '/' | '?' | '"' | ':' | ';' | '*' | '|' | ',' | '=' | '`'
+        )
+    })
 }
 
 #[cfg(test)]

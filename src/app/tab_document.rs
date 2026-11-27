@@ -890,7 +890,7 @@ impl DocumentTab {
 
     /// The document as a save writes it, with this session's xref load state.
     pub(super) fn document_for_save(&self) -> document::Document {
-        let mut document = self.scene.document_for_save();
+        let mut document = self.scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
         self.xref_unloaded.write_flags(&mut document);
         document
     }

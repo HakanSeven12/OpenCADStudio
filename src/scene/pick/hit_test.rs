@@ -948,6 +948,7 @@ pub fn click_hits_all<W: WireSource + ?Sized>(
 type MeshPickItem<'a> = (
     Handle,
     &'a MeshModel,
+    Option<&'a parry3d_f64::partitioning::Bvh>,
     Option<document::types::Transform>,
     [f64; 6],
 );
@@ -1171,7 +1172,7 @@ fn mesh_click_result<'a>(
     let mut exact_triangles = 0usize;
     let (near, world_direction) = pick_ray(cursor, view_rot, eye, bounds)?;
     let mut best: Option<(f64, Handle, glam::DVec3)> = None;
-    for (handle, mesh, transform, aabb) in meshes {
+    for (handle, mesh, bvh, transform, aabb) in meshes {
         set_count += 1;
         let Some((near_t, _)) = ray_aabb(near, world_direction, aabb) else {
             continue;
@@ -1198,11 +1199,18 @@ fn mesh_click_result<'a>(
         if direction.length_squared() < 1e-18 {
             continue;
         }
-        let local_t = mesh
-            .indices
-            .chunks_exact(3)
-            .filter_map(|triangle| {
-                ray_triangle(
+        let local_t = if let Some(bvh) = bvh {
+            use parry3d_f64::math::Vector;
+            use parry3d_f64::query::Ray;
+
+            let ray = Ray::new(
+                Vector::new(origin.x, origin.y, origin.z),
+                Vector::new(direction.x, direction.y, direction.z),
+            );
+            bvh.cast_ray(&ray, f64::INFINITY, |tri_idx, best_so_far| {
+                let start = (tri_idx as usize) * 3;
+                let triangle = mesh.indices.get(start..start + 3)?;
+                let t = ray_triangle(
                     origin,
                     direction,
                     mesh_vert(
@@ -1220,9 +1228,36 @@ fn mesh_click_result<'a>(
                         &mesh.verts_low,
                         triangle[2] as usize,
                     ),
-                )
+                )?;
+                (t < best_so_far).then_some(t)
             })
-            .min_by(f64::total_cmp);
+            .map(|(_, t)| t)
+        } else {
+            mesh.indices
+                .chunks_exact(3)
+                .filter_map(|triangle| {
+                    ray_triangle(
+                        origin,
+                        direction,
+                        mesh_vert(
+                            mesh.verts[triangle[0] as usize],
+                            &mesh.verts_low,
+                            triangle[0] as usize,
+                        ),
+                        mesh_vert(
+                            mesh.verts[triangle[1] as usize],
+                            &mesh.verts_low,
+                            triangle[1] as usize,
+                        ),
+                        mesh_vert(
+                            mesh.verts[triangle[2] as usize],
+                            &mesh.verts_low,
+                            triangle[2] as usize,
+                        ),
+                    )
+                })
+                .min_by(f64::total_cmp)
+        };
         if let Some(local_t) = local_t {
             let local_hit = origin + direction * local_t;
             let world_hit = model.map_or(local_hit, |model| model.transform_point3(local_hit));

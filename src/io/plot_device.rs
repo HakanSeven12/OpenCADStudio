@@ -19,6 +19,7 @@ pub use crate::io::paper_catalog::Margins;
 use crate::io::paper_catalog::{self, CustomPaper, PaperSize, PaperUnits, PaperVariant};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+pub(crate) use crate::scene::NO_DEVICE_STORED_NAME;
 
 /// the source application's plotter configuration name for PDF output.
 pub const PDF_DEVICE_NAME: &str = "DWG To PDF.pc3";
@@ -29,10 +30,15 @@ pub const DWF_DEVICE_NAME: &str = "DWF6 ePlot.pc3";
 pub fn is_dwf_device(name: &str) -> bool {
     name.trim().to_ascii_uppercase().starts_with("DWF6")
 }
+/// The raster plotter configuration a plot to an image file is stored under.
+pub const IMAGE_DEVICE_NAME: &str = "PublishToWeb PNG.pc3";
+
+/// Whether a stored plotter name is one of the PublishToWeb raster devices.
+pub fn is_image_device(name: &str) -> bool {
+    name.trim().to_ascii_uppercase().starts_with("PUBLISHTOWEB")
+}
 /// the source application's spelling for "no plotter assigned" in the plot dialog…
 pub const NO_DEVICE_NAME: &str = "None";
-/// …and the name it actually stores in the drawing for that choice.
-const NO_DEVICE_STORED_NAME: &str = "none_device";
 /// The label older Open CAD Studio builds wrote into drawings for PDF output.
 /// Recognised on read so those drawings keep plotting to PDF, and always
 /// rewritten with [`PDF_DEVICE_NAME`] on save.

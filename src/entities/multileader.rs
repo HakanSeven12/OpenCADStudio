@@ -107,9 +107,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::{SnapHint, TangentGeom};
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::{SnapHint, TangentGeom};
 
 // ── RenderConvertible ────────────────────────────────────────────────────────
 
@@ -1770,23 +1770,23 @@ fn parse_attachment(s: &str) -> TextAttachmentType {
 // ── Transform ──────────────────────────────────────────────────────────────
 
 fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(ml, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(ml, t, |entity, p1, p2| {
         // Reflect every point on the leader (line points, connection points,
         // break-point endpoints) and the leader directions; the content
         // orientation follows AutoCAD (`mirror_content_orientation`).
         for root in &mut entity.context.leader_roots {
             for line in &mut root.lines {
                 for p in &mut line.points {
-                    crate::scene::view::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
+                    crate::entities::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
                 }
                 for bp in &mut line.break_points {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut bp.start_point.x,
                         &mut bp.start_point.y,
                         p1,
                         p2,
                     );
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut bp.end_point.x,
                         &mut bp.end_point.y,
                         p1,
@@ -1794,7 +1794,7 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
                     );
                 }
             }
-            crate::scene::view::transform::reflect_xy_point(
+            crate::entities::transform::reflect_xy_point(
                 &mut root.connection_point.x,
                 &mut root.connection_point.y,
                 p1,
@@ -1802,13 +1802,13 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
             );
             reflect_xy_direction(&mut root.direction.x, &mut root.direction.y, p1, p2);
             for bp in &mut root.break_points {
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut bp.start_point.x,
                     &mut bp.start_point.y,
                     p1,
                     p2,
                 );
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut bp.end_point.x,
                     &mut bp.end_point.y,
                     p1,
@@ -1821,7 +1821,7 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
             &mut entity.context.content_base_point,
             &mut entity.context.block_content_location,
         ] {
-            crate::scene::view::transform::reflect_xy_point(&mut point.x, &mut point.y, p1, p2);
+            crate::entities::transform::reflect_xy_point(&mut point.x, &mut point.y, p1, p2);
         }
         mirror_content_orientation(entity, p1, p2);
     });
@@ -1872,7 +1872,7 @@ fn reflect_xy_direction(dx: &mut f64, dy: &mut f64, p1: DVec3, p2: DVec3) {
     let p2_rel = DVec3::new(p2.x - p1.x, p2.y - p1.y, 0.0);
     let mut tip_x = *dx;
     let mut tip_y = *dy;
-    crate::scene::view::transform::reflect_xy_point(&mut tip_x, &mut tip_y, zero, p2_rel);
+    crate::entities::transform::reflect_xy_point(&mut tip_x, &mut tip_y, zero, p2_rel);
     *dx = tip_x;
     *dy = tip_y;
 }
@@ -1892,8 +1892,8 @@ impl crate::entities::traits::Grippable for MultiLeader {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
 
         let n_vertices: usize = self
             .context
@@ -1951,9 +1951,9 @@ impl crate::entities::traits::Grippable for MultiLeader {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         // Locate the (root, line) and vertex position owning this grip id.
         let mut idx = 0usize;
         let mut loc: Option<(usize, usize, document::types::Vector3)> = None;
@@ -2029,7 +2029,7 @@ pub(crate) fn block_content_bounds(
             .filter(|entity| !matches!(entity, document::EntityType::AttributeDefinition(_)))
         {
             let aabb = crate::scene::convert::tess::entity_aabb(entity);
-            if aabb != crate::scene::model::wire_model::WireModel::UNBOUNDED_AABB {
+            if aabb != crate::display::wire_model::WireModel::UNBOUNDED_AABB {
                 bounds[0] = bounds[0].min(aabb[0]);
                 bounds[1] = bounds[1].min(aabb[1]);
                 bounds[2] = bounds[2].max(aabb[2]);
@@ -2181,7 +2181,7 @@ pub trait MultiLeaderTess {
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
         complex_lt_anno: f32,
-    ) -> Vec<crate::scene::model::wire_model::WireModel>;
+    ) -> Vec<crate::display::wire_model::WireModel>;
 }
 
 impl MultiLeaderTess for MultiLeader {
@@ -2200,7 +2200,7 @@ impl MultiLeaderTess for MultiLeader {
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
         complex_lt_anno: f32,
-    ) -> Vec<crate::scene::model::wire_model::WireModel> {
+    ) -> Vec<crate::display::wire_model::WireModel> {
         // The leader, text and mask are laid out in f32. At large absolute
         // coordinates (survey drawings far from the origin) f32 steps grow to
         // tens of units, so a label collapses: its mask shrinks to nothing and
@@ -2239,7 +2239,7 @@ impl MultiLeaderTess for MultiLeader {
 /// Shift a wire built around `origin` back to world coordinates: everything
 /// `shift_wire_to_world` covers plus the fills, pick triangles, snap points,
 /// key vertices and tangents a MULTILEADER emits.
-fn lift_wire_to_world(w: &mut crate::scene::model::wire_model::WireModel, origin: [f64; 3]) {
+fn lift_wire_to_world(w: &mut crate::display::wire_model::WireModel, origin: [f64; 3]) {
     use crate::scene::convert::tessellate::{shift_wire_to_world, split_ds_xyz};
     shift_wire_to_world(w, origin);
     let lift = |tris: &mut Vec<[f32; 3]>, low: &mut Vec<[f32; 3]>| {
@@ -2313,7 +2313,7 @@ trait MultiLeaderFrameTess {
         bg_color: [f32; 4],
         complex_lt_anno: f32,
     ) -> (
-        Vec<crate::scene::model::wire_model::WireModel>,
+        Vec<crate::display::wire_model::WireModel>,
         std::ops::Range<usize>,
     );
 }
@@ -2336,13 +2336,13 @@ impl MultiLeaderFrameTess for MultiLeader {
         bg_color: [f32; 4],
         complex_lt_anno: f32,
     ) -> (
-        Vec<crate::scene::model::wire_model::WireModel>,
+        Vec<crate::display::wire_model::WireModel>,
         std::ops::Range<usize>,
     ) {
         use crate::scene::convert::tessellate::{
             append_arrow, arrow_from_block, color_or_inherit, ArrowKind, DimGeom,
         };
-        use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
+        use crate::display::wire_model::{SnapHint, TangentGeom, WireModel};
         use glam::Vec3;
         let ml = self;
         // line_color falls back to the entity colour when the MultiLeader's own
@@ -2642,7 +2642,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             line_weight_px: leader_lw_px,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            geom: std::sync::Arc::new(crate::scene::WireGeom {
+            geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
                 text_verts: Vec::new(),
@@ -2656,12 +2656,12 @@ impl MultiLeaderFrameTess for MultiLeader {
                 // low half as all-zero, so it draws at f32 precision (sub-metre
                 // error at UTM scale) — not a crash. Follow-up: double-single-split
                 // via points_to_ds to match emit_wire's paired fill path.
-                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                surfaces: crate::display::wire_model::WireSurfaces {
                     fill_tris: arrow_fill,
                     ..Default::default()
                 }
                 .into_optional(),
-                ..crate::scene::WireGeom::default()
+                ..crate::display::wire_model::WireGeom::default()
             }),
             ..Default::default()
         });
@@ -2953,7 +2953,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                 // Base colour stays neutral — selection / hover recolouring is
                 // done by the text-highlight overlay.
                 let neutral = color_or_inherit(&ctx.text_color, entity_color);
-                let mut sdf_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
+                let mut sdf_verts: Vec<crate::display::text_vertex::TextVertex> = Vec::new();
                 // Run-less stroke groups are decoration geometry (underline /
                 // overline / strike-through, stacked-fraction bars) — they have
                 // no glyphs to replace them, so they must be drawn as lines.
@@ -2962,12 +2962,12 @@ impl MultiLeaderFrameTess for MultiLeader {
                 // cluster-position data.
                 let mut deco_pts: Vec<[f32; 3]> = Vec::new();
                 let mut deco_fill: Vec<[f32; 3]> = Vec::new();
-                let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> =
+                let mut searchable: Vec<crate::display::wire_model::SearchableTextRun> =
                     Vec::new();
-                if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
+                if let Ok(mut atlas) = crate::text::sdf_atlas::text_atlas().lock() {
                     for ts in &layout.strokes {
                         let is_shaped = ts.run.as_ref().is_some_and(|r| {
-                            crate::scene::text::web_font::requires_shaping(&r.text)
+                            crate::text::web_font::requires_shaping(&r.text)
                         });
                         if ts.run.is_none() || is_shaped {
                             for stroke in &ts.strokes {
@@ -2995,7 +2995,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                             continue;
                         }
                         let run = ts.run.as_ref().unwrap();
-                        let (quads, pen_adv) = crate::scene::text::glyph_quads::layout_glyph_quads(
+                        let (quads, pen_adv) = crate::text::glyph_quads::layout_glyph_quads(
                             &mut atlas,
                             run.height,
                             run.rotation,
@@ -3021,7 +3021,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                             0.0,
                         );
                         {
-                            use crate::scene::model::wire_model::{
+                            use crate::display::wire_model::{
                                 clean_searchable_text, SearchableTextRun,
                             };
                             let visible = clean_searchable_text(&run.text);
@@ -3093,7 +3093,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         line_weight_px,
                         aabb: [nx as f32, ny as f32, xx as f32, xy as f32],
                         plinegen: true,
-                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
                             text_verts: sdf_verts,
@@ -3106,12 +3106,12 @@ impl MultiLeaderFrameTess for MultiLeader {
                             )],
                             tangent_geoms: vec![],
                             key_vertices: vec![],
-                            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                            surfaces: crate::display::wire_model::WireSurfaces {
                                 fill_tris: deco_fill,
                                 ..Default::default()
                             }
                             .into_optional(),
-                            ..crate::scene::WireGeom::default()
+                            ..crate::display::wire_model::WireGeom::default()
                         }),
                     });
                 }
@@ -3204,7 +3204,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                     line_weight_px,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
                         text_verts: Vec::new(),
@@ -3213,7 +3213,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         snap_pts: vec![],
                         tangent_geoms: vec![],
                         key_vertices: vec![],
-                        ..crate::scene::WireGeom::default()
+                        ..crate::display::wire_model::WireGeom::default()
                     }),
                     ..Default::default()
                 });
@@ -3276,7 +3276,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                     ];
                     wires.push(WireModel {
                         bg_adapt: (!selected && ctx.background_fill_enabled).then(|| {
-                            Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                            Box::new(crate::display::wire_model::BgAdaptInputs {
                                 raw_color: fill_color,
                                 canvas_color: true,
                                 preserve_color: true,
@@ -3303,7 +3303,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         line_weight_px: 1.0,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
                             text_verts: Vec::new(),
@@ -3312,12 +3312,12 @@ impl MultiLeaderFrameTess for MultiLeader {
                             snap_pts: vec![],
                             tangent_geoms: vec![],
                             key_vertices: vec![],
-                            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                            surfaces: crate::display::wire_model::WireSurfaces {
                                 fill_tris,
                                 ..Default::default()
                             }
                             .into_optional(),
-                            ..crate::scene::WireGeom::default()
+                            ..crate::display::wire_model::WireGeom::default()
                         }),
                         ..Default::default()
                     });
@@ -3354,7 +3354,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         line_weight_px,
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
                             text_verts: Vec::new(),
@@ -3363,7 +3363,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                             snap_pts: vec![],
                             tangent_geoms: vec![],
                             key_vertices: vec![],
-                            ..crate::scene::WireGeom::default()
+                            ..crate::display::wire_model::WireGeom::default()
                         }),
                         ..Default::default()
                     });
@@ -3516,7 +3516,7 @@ mod tests {
     }
 
     /// Vertical extent of everything a tessellated MLEADER draws.
-    fn drawn_height(wires: &[crate::scene::model::wire_model::WireModel]) -> f32 {
+    fn drawn_height(wires: &[crate::display::wire_model::WireModel]) -> f32 {
         let ys = wires.iter().flat_map(|w| {
             w.points
                 .iter()
@@ -3686,7 +3686,7 @@ mod tests {
         );
     }
 
-    use crate::scene::model::wire_model::WireModel;
+    use crate::display::wire_model::WireModel;
     use document::entities::multileader::TextAttachmentType;
 
     const H: f64 = 125.0;

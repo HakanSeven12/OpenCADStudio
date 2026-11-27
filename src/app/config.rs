@@ -46,10 +46,18 @@ pub struct AppConfig {
     /// The `.gcs` file that the Geometry Cleanup settings were last imported
     /// from, shown in their Settings dialog.
     pub geometry_cleanup_file: Option<String>,
+    /// The Geometry Cleanup errors kept as designed, by the FINGERPRINTGUID
+    /// of their drawing. A list that cannot be read is dropped, not the
+    /// whole profile.
+    #[serde(deserialize_with = "lenient_or_default")]
+    pub geometry_cleanup_kept:
+        std::collections::BTreeMap<String, Vec<crate::ui::window::geometry_cleanup::KeptError>>,
     /// Whether the Layer Manager pallet is open.
     pub show_layers: bool,
     /// Whether the Blocks palette is open.
     pub show_block_palette: bool,
+    /// Whether the Files palette is open.
+    pub show_files_palette: bool,
     /// Whether the External References pallet is open.
     pub show_external_references: bool,
     /// Whether the document file tabs are shown (FILETAB).
@@ -93,8 +101,10 @@ impl Default for AppConfig {
             show_command_history: false,
             geometry_cleanup: None,
             geometry_cleanup_file: None,
+            geometry_cleanup_kept: Default::default(),
             show_layers: false,
             show_block_palette: false,
+            show_files_palette: false,
             show_external_references: false,
             show_file_tabs: true,
             file_tabs_above_docks: false,
@@ -730,6 +740,15 @@ where
 {
     let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
     Ok(serde_json::from_value(value).ok())
+}
+
+/// As `lenient`, for a value that has a default.
+fn lenient_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    Ok(lenient(deserializer)?.unwrap_or_default())
 }
 
 #[cfg(target_arch = "wasm32")]

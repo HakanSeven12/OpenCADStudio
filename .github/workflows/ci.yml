@@ -5,7 +5,9 @@ name: Tests
 # runner swaps through the main crate's test build (#3059). A separate lint job reports rustfmt and clippy
 # results without blocking merges until the existing tree has been cleaned up,
 # and a health job reports what each pull request does to the code-health
-# measures (docs/architecture/HEALTH.md) the same way.
+# measures (docs/architecture/HEALTH.md) the same way. The architecture job
+# fails a change that adds an upward dependency between the module layers
+# (docs/architecture/RULES.md).
 
 on:
   push:
@@ -110,6 +112,27 @@ jobs:
           cargo fmt --all -- --check -l > "$RUNNER_TEMP/fmt.txt" || true
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           python3 scripts/health.py lint "$RUNNER_TEMP/clippy.json" "$RUNNER_TEMP/fmt.txt" "$RUNNER_TEMP/changed.txt" --markdown >> "$GITHUB_STEP_SUMMARY"
+
+  architecture:
+    name: architecture
+    runs-on: ubuntu-22.04
+    # Fails when a change adds an upward dependency between the module layers
+    # (docs/architecture/RULES.md): the existing ones are left to be removed,
+    # but no new one gets in. The base is the merge commit's first parent for
+    # a pull request and the previous commit for a push to main.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+
+      - name: Tool tests
+        run: python3 scripts/test_arch_check.py
+
+      - name: No new upward dependency
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+          python3 scripts/arch_check.py diff "$RUNNER_TEMP/base" --markdown >> "$GITHUB_STEP_SUMMARY" || true
+          python3 scripts/arch_check.py diff "$RUNNER_TEMP/base"
 
   health:
     name: health (informational)

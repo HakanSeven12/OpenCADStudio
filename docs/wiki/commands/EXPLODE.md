@@ -21,6 +21,7 @@ ribbon: Draw tab › Modify panel
 | Region | Lines, arcs, circles, ellipses and splines |
 | Hatch (pattern) | The lines of its pattern, clipped to the boundary |
 | Center mark | Separate lines |
+| Proxy object, or an application object such as a wall, door, alignment or surface | What it draws: lines and polylines, filled areas as 2D solids, and single-line text, on the layers and in the colours its display uses |
 
 ## Notes
 - Objects on locked layers are skipped.
@@ -30,4 +31,5 @@ ribbon: Draw tab › Modify panel
 - Exploding a block reference drops its attribute values. Use [`BURST`](BURST-Command) to keep them as text.
 - Very large multiple-block arrays are left intact instead of being expanded.
 - Multileaders are exploded at the sizes stored for the current annotation scale.
+- Exploding application objects is how to hand a drawing to a program that does not know them: select everything, explode, then save a copy with [`SAVEAS`](SAVEAS-Command) as DXF or DWG. An object that only shows a placeholder (its class name and a box) explodes into that placeholder.
 - The whole operation is one undo step.

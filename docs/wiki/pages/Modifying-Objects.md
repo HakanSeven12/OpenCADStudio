@@ -95,4 +95,4 @@ Hover a grip to see a menu of what that grip can do, for example add or remove a
 
 ## Clipboard
 
-**Ctrl+C**, **Ctrl+X** and **Ctrl+V** copy, cut and paste between drawings. **Ctrl+Shift+C** copies with a base point you pick; **Ctrl+Shift+V** pastes as a block. `PASTEORIG` pastes at the same coordinates as the original.
+**Ctrl+C**, **Ctrl+X** and **Ctrl+V** copy, cut and paste between drawings. **Ctrl+Shift+C** copies and **Ctrl+Shift+X** cuts with a base point you pick; **Ctrl+Shift+V** pastes as a block. `PASTEORIG` pastes at the same coordinates as the original.

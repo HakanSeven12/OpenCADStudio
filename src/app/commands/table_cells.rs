@@ -10,10 +10,19 @@ use document::entities::Table;
 use iced::Task;
 
 /// A blank cell carrying `cell`'s own style and state, not its content.
+/// A text cell's format stays (its text height among it): without it the
+/// blank cell is measured at the table style's height and its row grows.
 fn blank_like(cell: &TableCell) -> TableCell {
     let mut blank = TableCell::new();
     blank.style = cell.style.clone();
     blank.state = cell.state;
+    if let Some(content) = cell.contents.first().filter(|content| {
+        content.block_handle.is_none()
+            && content.content_type == document::entities::table::TableCellContentType::Value
+    }) {
+        blank.contents = vec![content.clone()];
+        blank.set_text("");
+    }
     blank
 }
 
@@ -2023,6 +2032,45 @@ mod tests {
         t.cell(r, c)
             .map(|cell| cell.text_value().to_string())
             .unwrap_or_default()
+    }
+
+    /// The cells of a new row or column keep their neighbour's text height:
+    /// blank cells that lost it were measured at the table style's taller
+    /// text and every row they sat in grew.
+    #[test]
+    fn inserted_rows_and_columns_keep_the_text_height_and_the_row_heights() {
+        use document::entities::table::CellStylePropertyFlags as P;
+        let mut document = document::Document::new();
+        let mut style = document::objects::TableStyle::standard();
+        style.data_row_style.text_height = 2.5;
+        let handle = document.allocate_handle();
+        document
+            .objects
+            .insert(handle, document::objects::ObjectType::TableStyle(style));
+        let mut t = table();
+        t.table_style_handle = Some(handle);
+        for row in &mut t.rows {
+            row.height = 1.0;
+            for cell in &mut row.cells {
+                let content = &mut cell.contents[0];
+                content.text_height = 0.5;
+                content.format_property_flags |= P::TEXT_HEIGHT.bits() as i32;
+            }
+        }
+        crate::entities::table::settle_table(&mut t, &document);
+        let before: Vec<f64> = t.rows.iter().map(|row| row.height).collect();
+        insert_columns_like(&mut t, 1, 1, 1);
+        insert_rows_like(&mut t, 1, 1, 1);
+        crate::entities::table::settle_table(&mut t, &document);
+        let new_cell = t.cell(1, 1).unwrap();
+        assert_eq!(new_cell.text_value(), "");
+        assert_eq!(new_cell.contents[0].text_height, 0.5);
+        let after: Vec<f64> = t.rows.iter().map(|row| row.height).collect();
+        assert_eq!(after.len(), before.len() + 1);
+        assert!(
+            after.iter().all(|h| (h - before[0]).abs() < 1e-9),
+            "rows {before:?} became {after:?}"
+        );
     }
 
     #[test]

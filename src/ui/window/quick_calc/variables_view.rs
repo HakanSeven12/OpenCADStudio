@@ -11,7 +11,7 @@ use super::view::{
 };
 use super::{FormMsg, QuickCalcMsg, QuickCalcPalette, VarForm, VarKind, VarMsg, Variable};
 use crate::app::Message;
-use crate::app::calc::{CalcContext, CalcError, Value};
+use crate::calc::{CalcContext, CalcError, Value};
 use crate::ui::icons::{TRI_DOWN, TRI_RIGHT};
 
 const NEW: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/var_new.svg");

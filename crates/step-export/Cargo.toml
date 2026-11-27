@@ -6,6 +6,9 @@ edition = "2021"
 license = "Apache-2.0"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }
 solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "8d1db50" }

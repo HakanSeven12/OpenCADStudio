@@ -3,16 +3,7 @@ use crate::command::{CadCommand, CmdResult, InputKind};
 use crate::scene::WireModel;
 use document::Handle;
 use glam::DVec3;
-
-/// Values answered at the placement prompt before the parameter exists.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Options {
-    pub name: Option<String>,
-    pub label: Option<String>,
-    pub chain: Option<bool>,
-    pub description: Option<String>,
-    pub palette: Option<bool>,
-}
+pub use crate::command::requests::PointParameterOptions as Options;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Asking {

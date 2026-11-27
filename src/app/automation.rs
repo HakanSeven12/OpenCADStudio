@@ -18,6 +18,9 @@
 //!                                             it (read)
 //! - `{"op":"civil_surface_stats",...}`      — a TIN surface's elevation
 //!                                             bounds and counts (read)
+//! - `{"op":"civil_surface_mesh",...}`       — a TIN surface's visible mesh,
+//!                                             vertices and triangle indices
+//!                                             (read)
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::line_read::{MAX_LINE_BYTES, lines_capped};
@@ -1171,6 +1174,10 @@ impl OpenCADStudio {
                 &self.tabs[self.active_tab].scene.document,
                 &req,
             ),
+            "civil_surface_mesh" => crate::app::civil_query::civil_surface_mesh(
+                &self.tabs[self.active_tab].scene.document,
+                &req,
+            ),
             "text_search" => self.automation_text_search(&req),
             "text_audit" => self.automation_text_audit(&req),
             "text_replace" => self.automation_text_replace(&req),
@@ -1789,6 +1796,20 @@ impl OpenCADStudio {
     }
 
     pub(super) fn drive_headless_task(
+        &mut self,
+        task: iced::Task<super::Message>,
+    ) -> Result<(), String> {
+        // Driven here to the end, a plugin command cannot wait for the
+        // window to draw: nothing in it defers, and one the line that made
+        // `task` already deferred goes on at once (#3650).
+        let pass = std::mem::replace(&mut self.plugin_frame_pass, true);
+        self.on_plugin_frame_drawn();
+        let driven = self.drive_headless_task_to_end(task);
+        self.plugin_frame_pass = pass;
+        driven
+    }
+
+    fn drive_headless_task_to_end(
         &mut self,
         task: iced::Task<super::Message>,
     ) -> Result<(), String> {

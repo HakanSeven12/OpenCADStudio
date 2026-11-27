@@ -1,6 +1,6 @@
 # Code health
 
-Open CAD Studio measures its own code health on every release and on every pull request. The results are on the wiki's **Code Health** page; each pull request's checks summary has a **Code health** section. Nothing here blocks a merge. The point is to make each pull request's effect visible, thank the ones that improve things, and give contributors small, concrete cleanups to pick up.
+Open CAD Studio measures its own code health on every release and on every pull request. The results are on the wiki's [Code Health](https://github.com/HakanSeven12/OpenCADStudio/wiki/Code-Health) page; each pull request's checks summary has a **Code health** section. Nothing here blocks a merge. The point is to make each pull request's effect visible, thank the ones that improve things, and give contributors small, concrete cleanups to pick up.
 
 ## Where to see it
 

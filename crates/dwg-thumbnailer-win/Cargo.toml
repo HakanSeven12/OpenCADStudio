@@ -7,6 +7,9 @@ license = "MIT OR Apache-2.0"
 
 # A COM in-proc server DLL. Off Windows this compiles to an empty cdylib so the
 # workspace still builds on Linux/macOS; the real handler is cfg(windows) only.
+[lints]
+workspace = true
+
 [lib]
 crate-type = ["cdylib"]
 

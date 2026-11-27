@@ -650,8 +650,9 @@ impl OpenCADStudio {
             }
             // ── TOOLBAR — the ribbon's panels as floating toolbars ──────────────
             // TOOLBAR lists them; TOOLBAR / -TOOLBAR <tab/panel | panel>
-            // [Show|Hide] shows one over the drawing or puts it back (a bare
-            // name toggles it). They stay while the ribbon is closed.
+            // [Show|Hide|Left|Right|Float] shows one over the drawing, docks
+            // it at a window side or puts it back (a bare name toggles it).
+            // They stay while the ribbon is closed.
             cmd if cmd == "TOOLBAR"
                 || cmd == "-TOOLBAR"
                 || cmd.starts_with("TOOLBAR ")
@@ -681,15 +682,18 @@ impl OpenCADStudio {
                 let (name, action) = match words.last().map(|w| w.to_ascii_uppercase()) {
                     Some(last)
                         if words.len() > 1
-                            && matches!(last.as_str(), "SHOW" | "S" | "HIDE" | "H") =>
+                            && matches!(
+                                last.as_str(),
+                                "SHOW" | "S" | "HIDE" | "H" | "LEFT" | "L" | "RIGHT" | "R"
+                                    | "FLOAT" | "F"
+                            ) =>
                     {
-                        (
-                            words[..words.len() - 1].join(" "),
-                            Some(last.starts_with('S')),
-                        )
+                        (words[..words.len() - 1].join(" "), Some(last))
                     }
                     _ => (words.join(" "), None),
                 };
+                // A name with spaces may come quoted, as in a script.
+                let name = name.trim_matches('"').to_string();
                 match self.ribbon.find_toolbar(&name) {
                     Some((module, title)) => {
                         let shown = self
@@ -698,10 +702,23 @@ impl OpenCADStudio {
                             .into_iter()
                             .any(|(m, t, shown)| m == module && t == title && shown);
                         let origin = self.toolbar_origin();
-                        if self
-                            .ribbon
-                            .show_toolbar(module, title, action.unwrap_or(!shown), origin)
-                        {
+                        use crate::ui::ribbon::ToolbarEdge;
+                        let changed = match action.as_deref().and_then(|a| a.chars().next()) {
+                            Some('L') => {
+                                self.ribbon.dock_toolbar(module, title, ToolbarEdge::Left)
+                            }
+                            Some('R') => {
+                                self.ribbon.dock_toolbar(module, title, ToolbarEdge::Right)
+                            }
+                            // Show keeps a docked toolbar where it is.
+                            Some('S') if shown => false,
+                            Some('S' | 'F') => {
+                                self.ribbon.show_toolbar(module, title, true, origin)
+                            }
+                            Some(_) => self.ribbon.show_toolbar(module, title, false, origin),
+                            None => self.ribbon.show_toolbar(module, title, !shown, origin),
+                        };
+                        if changed {
                             self.save_config();
                         }
                     }
@@ -1379,6 +1396,7 @@ impl OpenCADStudio {
             "EXPORTPDF" => {
                 self.plot_dialog.file_svg = false;
                 self.plot_dialog.file_dwf = false;
+                self.plot_dialog.file_image = false;
                 return Some(Task::done(Message::PlotExport));
             }
             // EXPORTDWF <file.dwf> [ALL] — the direct form of EXPORTPDF,
@@ -1424,6 +1442,7 @@ impl OpenCADStudio {
                 self.plot_dialog.to_file = true;
                 self.plot_dialog.file_svg = true;
                 self.plot_dialog.file_dwf = false;
+                self.plot_dialog.file_image = false;
                 return Some(Task::done(Message::PlotExport));
             }
             // PLOTSTYLE — load or clear CTB/STB plot style table
@@ -2724,7 +2743,13 @@ impl OpenCADStudio {
             // Needs the drawing's coordinate system (refused without one).
             "CREATEPTGEODETICDIR" => match crate::io::crs::document_crs(&self.tabs[i].scene.document) {
                 Ok(Some(crs)) if !crs.is_geographic() => {
-                    let c = crate::modules::civil::point_geodetic::GeodeticDirectCommand::new(crs);
+                    use crate::modules::civil::point_geodetic::{GeodeticDirectCommand, LocalGrid};
+                    // A transformation the drawing settings switch off leaves
+                    // the drawing coordinates as grid coordinates.
+                    let document = &self.tabs[i].scene.document;
+                    let applied = document::classes::civil::transformation_applied(document) != Some(false);
+                    let transform = crate::io::crs::model_space_geo_data(document).filter(|_| applied).and_then(LocalGrid::of);
+                    let c = GeodeticDirectCommand::new(crs, transform);
                     self.command_line.push_info(&c.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(c));
                 }
@@ -3532,6 +3557,7 @@ mod tests {
     fn stale_mesh() -> crate::scene::model::mesh_model::MeshLodSet {
         crate::scene::model::mesh_model::MeshLodSet {
             lods: Vec::new(),
+            triangle_bvhs: Default::default(),
             effective_layer: None,
             material: None,
             face_materials: Default::default(),
@@ -3550,6 +3576,7 @@ mod tests {
             instance_color: None,
             edge_color: None,
             instance_aabb: None,
+            cached_interaction_aabb: Default::default(),
             display_lods: Default::default(),
         }
     }

@@ -119,8 +119,6 @@ pub(super) struct State {
     /// can detect highlight changes without polling the full selection.
     selection_revision: u64,
     pub(super) routing: bool,
-    /// Session-scoped named handle sets for selection_set_save/load.
-    selection_sets: std::collections::BTreeMap<String, Vec<document::Handle>>,
     /// Live `user_select` request — the client asked the person at the screen
     /// to pick entities; Some until that person answers with Enter/Escape.
     pub(super) user_select: Option<UserSelectSession>,
@@ -739,6 +737,7 @@ impl OpenCADStudio {
                 | "query"
                 | "civil_station_offset"
                 | "civil_surface_stats"
+                | "civil_surface_mesh"
                 | "records"
                 | "record_schema"
                 | "capabilities"
@@ -1495,6 +1494,7 @@ impl OpenCADStudio {
             "grip_drag" => self.control_grip_drag(req)?,
             "click" => self.control_click(req)?,
             "pointer" => self.control_pointer(req)?,
+            "key" => self.control_key(req)?,
             "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
             "panel_input" => self.control_panel_input(req)?,
@@ -6646,6 +6646,100 @@ mod tests {
             Some(20.0),
             "the grips must belong to the set that is selected now: {after}"
         );
+    }
+
+    fn two_line_handles(app: &mut OpenCADStudio) -> Vec<String> {
+        request(app, json!({"op":"new"}));
+        request(app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
+        request(app, json!({"op":"run","cmd":"LINE 0,5 10,5"}));
+        let lines = app.control_request(json!({"op":"query","type":"Line"})).0;
+        lines["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn handle_of(hex: &str) -> document::Handle {
+        document::Handle::new(u64::from_str_radix(hex, 16).unwrap())
+    }
+
+    /// A set saved by the op is in the drawing, where NAMEDSEL and a save
+    /// of the file find it.
+    #[test]
+    fn a_set_saved_by_the_op_is_in_the_drawing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let handles = two_line_handles(&mut app);
+        let saved = request(
+            &mut app,
+            json!({"op":"selection_set_save","name":"frame-set","handles":handles}),
+        );
+        assert_eq!(saved["ok"], true, "{saved}");
+        assert_eq!(saved["result"]["count"], 2, "{saved}");
+        let stored = app.tabs[app.active_tab].scene.named_selection("FRAME-SET");
+        assert_eq!(
+            stored.map(|(_, members)| members),
+            Some(handles.iter().map(|hex| handle_of(hex)).collect())
+        );
+    }
+
+    #[test]
+    fn the_load_op_reads_a_set_saved_by_namedsel() {
+        let mut app = OpenCADStudio::new_for_test();
+        let handles = two_line_handles(&mut app);
+        let _ = app.dispatch_command(&format!("NAMEDSEL SAVE FRAME {}", handles[0]));
+        let loaded = request(&mut app, json!({"op":"selection_set_load","name":"frame"}));
+        assert_eq!(loaded["ok"], true, "{loaded}");
+        assert_eq!(loaded["result"]["selected"], 1, "{loaded}");
+        assert_eq!(loaded["result"]["name"], "FRAME", "{loaded}");
+        let selected: Vec<document::Handle> = app.tabs[app.active_tab]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(handle, _)| handle)
+            .collect();
+        assert_eq!(selected, [handle_of(&handles[0])]);
+    }
+
+    #[test]
+    fn the_save_op_is_one_undo_step() {
+        let mut app = OpenCADStudio::new_for_test();
+        let handles = two_line_handles(&mut app);
+        request(
+            &mut app,
+            json!({"op":"selection_set_save","name":"A","handles":handles}),
+        );
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .named_selection("A")
+            .is_some());
+        assert_eq!(request(&mut app, json!({"op":"undo"}))["ok"], true);
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .named_selection("A")
+            .is_none());
+        assert_eq!(
+            app.tabs[app.active_tab].scene.document.entities().count(),
+            2
+        );
+    }
+
+    #[test]
+    fn the_save_op_refuses_a_bad_name_or_no_objects() {
+        let mut app = OpenCADStudio::new_for_test();
+        let handles = two_line_handles(&mut app);
+        let bad = request(
+            &mut app,
+            json!({"op":"selection_set_save","name":"A B","handles":handles}),
+        );
+        assert_eq!(bad["code"], "invalid_value", "{bad}");
+        let none = request(
+            &mut app,
+            json!({"op":"selection_set_save","name":"A","handles":["FFFFF"]}),
+        );
+        assert_eq!(none["code"], "entity_absent", "{none}");
+        assert!(app.tabs[app.active_tab].scene.named_selections().is_empty());
     }
 
     /// An attributed placement that raises the insertion form has no command

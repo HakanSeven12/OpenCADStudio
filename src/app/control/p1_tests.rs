@@ -2926,7 +2926,7 @@ fn a_created_dimension_is_a_complete_record_across_a_save() {
     );
 
     // The document prepared the way a worker save prepares it before writing.
-    let document = app.tabs[i].scene.document_for_save();
+    let document = app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
     let version = document.version;
     let prepared = crate::io::prepare_document_for_save(document, version);
     let bytes = document::DxfWriter::new(&prepared).write_to_vec().unwrap();
@@ -4366,7 +4366,7 @@ fn native_xref_host_source_edit_grip_undo_and_offline_save() {
         let reply = control(&mut app, json!({"op":op}));
         assert_eq!(reply["ok"], true, "{reply}");
     }
-    let prepared = app.tabs[i].scene.document_for_save();
+    let prepared = app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
     let bytes = ocs_save::write_external_for_edit(
         &prepared,
         ocs_save::external_format("ifccad").unwrap(),
@@ -4389,13 +4389,19 @@ fn native_xref_host_source_edit_grip_undo_and_offline_save() {
             _ => None,
         })
         .unwrap();
-    for (actual, expected) in native.placement.origin.iter().zip([11000., 5000., 0.]) {
+    for (actual, expected) in native
+        .transform
+        .placement
+        .origin
+        .iter()
+        .zip([11000., 5000., 0.])
+    {
         assert!(
             (actual - expected).abs() <= 0.001,
             "grip placement {actual} vs {expected}"
         );
     }
-    assert_eq!(native.scale, 500.);
+    assert_eq!(native.transform.scale, [500.; 3]);
     assert!(saved.blocks.is_empty());
 }
 
@@ -4740,4 +4746,273 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
         let _ = std::fs::remove_file(path);
     }
     let _ = std::fs::remove_file(output.with_extension("bak"));
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn xref_placement_all_owners_refresh_graphics_grips_history_and_offline_save() {
+    use crate::scene::render_graph::{BlockRoot, BlockRootRole, RenderSceneGraph, SceneRoot};
+    use base64::Engine;
+    use document::{ifccad::*, EntityType, Vector3};
+    fn drawn(doc: &document::Document, owner: document::Handle) -> Vec<(Vector3, Vector3)> {
+        let depths = Default::default();
+        let graph = RenderSceneGraph::new(doc, None, None, true, &depths);
+        let mut points = vec![];
+        graph.walk_root(
+            SceneRoot::Block(BlockRoot {
+                record: owner,
+                role: if owner == doc.header.model_space_block_handle {
+                    BlockRootRole::ModelSpace
+                } else {
+                    BlockRootRole::PaperSpace
+                },
+            }),
+            |_, _| true,
+            |entity, context| {
+                if context
+                    .insert_path
+                    .iter()
+                    .any(|i| i.block_name.starts_with("grondplan"))
+                {
+                    if let EntityType::Line(l) = entity {
+                        points.push((
+                            context.transform.apply(l.start),
+                            context.transform.apply(l.end),
+                        ));
+                    }
+                }
+            },
+        );
+        points
+    }
+    let input = include_bytes!("../../../crates/ocs_save/tests/fixtures/xref-placement.ifcx");
+    let original = load_ifccad_bytes(input, Default::default())
+        .unwrap()
+        .into_document();
+    let (loaded, session) = ocs_save::read_ifccad_for_edit(input).unwrap();
+    let session = session.unwrap();
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.document = loaded.document;
+    crate::io::normalize_block_origins(&mut app.tabs[i].scene.document);
+    app.tabs[i].ifccad_session = Some(session.clone());
+    let model = app.tabs[i].scene.document.header.model_space_block_handle;
+    let papers: Vec<_> = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .iter()
+        .filter(|b| b.is_paper_space())
+        .map(|b| b.handle)
+        .collect();
+    assert_eq!(papers.len(), 2);
+    let mut previous = None;
+    let mut last_source = String::new();
+    for endpoint in [12., 13.] {
+        let mut source = document::Document::new();
+        source.header.insertion_units = 6;
+        source.header.model_space_insertion_base = Vector3::new(10., 20., 0.);
+        source.header.fingerprint_guid = "{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}".into();
+        source
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                10., 20., 0., endpoint, 20., 0.,
+            )))
+            .unwrap();
+        let paper = source
+            .block_records
+            .iter()
+            .find(|b| b.is_paper_space())
+            .unwrap()
+            .handle;
+        let mut hidden = document::entities::Line::from_coords(9999., 9999., 0., 10000., 9999., 0.);
+        hidden.common.owner_handle = paper;
+        source.add_entity(EntityType::Line(hidden)).unwrap();
+        let data = base64::engine::general_purpose::STANDARD
+            .encode(document::DwgWriter::write_to_vec(&source).unwrap());
+        last_source = data.clone();
+        let reply = control(
+            &mut app,
+            json!({"op":"xref_source_register","source_id":"1","file_name":"Detail.dwg","data_base64":data}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let doc = &app.tabs[i].scene.document;
+        let now = drawn(doc, model);
+        assert_eq!(now.len(), 3, "two local occurrences plus direct Model");
+        for p in &papers {
+            assert_eq!(drawn(doc, *p).len(), 1, "source Paper must not propagate");
+        }
+        let direct = now.iter().find(|(p, _)| (p.x - 10.).abs() < 1e-8).unwrap();
+        assert!(
+            (direct.0 - Vector3::new(10., 20., 30.)).length() < 1e-8,
+            "source base subtracted once: {direct:?}"
+        );
+        let want = Vector3::new(
+            10. + 2. * (endpoint - 10.) * 0.5f64.cos(),
+            20.,
+            30. - 2. * (endpoint - 10.) * 0.5f64.sin(),
+        );
+        assert!((direct.1 - want).length() < 1e-8, "{direct:?} != {want:?}");
+        if let Some(old) = previous {
+            assert_ne!(
+                now, old,
+                "refresh must change dependent occurrence graphics"
+            );
+        }
+        previous = Some(now);
+    }
+    let handles: Vec<_> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter_map(|e| match e {
+            EntityType::Insert(x)
+                if (x.common.owner_handle == model
+                    && (x.block_name == "grondplan" || x.block_name == "LOCAL"))
+                    || papers.contains(&x.common.owner_handle) =>
+            {
+                Some(x.common.handle)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(handles.len(), 5);
+    for handle in handles {
+        let owner = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+            .common()
+            .owner_handle;
+        let layout = if owner == model {
+            "Model".into()
+        } else {
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .iter()
+                .find(|b| b.handle == owner)
+                .and_then(|b| app.tabs[i].scene.document.objects.get(&b.layout))
+                .and_then(|o| {
+                    if let document::objects::ObjectType::Layout(l) = o {
+                        Some(l.name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+        };
+        let reply = control(&mut app, json!({"op":"layout_activate","name":layout}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        // Headless tests have no real window to initialize the viewport dimensions.
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 800.);
+        let before = drawn(&app.tabs[i].scene.document, owner);
+        let bounds = |doc: &document::Document| {
+            crate::scene::convert::tess::entity_bounds_in(doc, doc.get_entity(handle).unwrap())
+        };
+        let before_bounds = bounds(&app.tabs[i].scene.document);
+        let reply = control(
+            &mut app,
+            json!({"op":"grip_drag","handle":handle.to_string(),"grip_id":0,"point":[15,20,30]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let moved = drawn(&app.tabs[i].scene.document, owner);
+        assert_ne!(before, moved);
+        let moved_bounds = bounds(&app.tabs[i].scene.document);
+        assert_ne!(
+            before_bounds, moved_bounds,
+            "occurrence bounds must move with grips"
+        );
+        let reply = control(&mut app, json!({"op":"undo"}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(drawn(&app.tabs[i].scene.document, owner), before);
+        assert_eq!(bounds(&app.tabs[i].scene.document), before_bounds);
+        let reply = control(&mut app, json!({"op":"redo"}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(drawn(&app.tabs[i].scene.document, owner), moved);
+        assert_eq!(bounds(&app.tabs[i].scene.document), moved_bounds);
+    }
+    let prepared = app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
+    let bytes = ocs_save::write_external_for_edit(
+        &prepared,
+        ocs_save::external_format("ifccad").unwrap(),
+        false,
+        Some(&session),
+    )
+    .unwrap();
+    let saved = load_ifccad_bytes(&bytes, Default::default())
+        .unwrap()
+        .into_document();
+    assert_eq!(saved.external_sources, original.external_sources);
+    assert_eq!(saved.blocks.len(), original.blocks.len());
+    assert_eq!(saved.model.entities.len(), original.model.entities.len());
+    assert_eq!(saved.paper_layouts.len(), 2);
+    let expected_model = drawn(&app.tabs[i].scene.document, model);
+    let name = |doc: &document::Document, handle| {
+        let record = doc
+            .block_records
+            .iter()
+            .find(|b| b.handle == handle)
+            .unwrap();
+        let document::objects::ObjectType::Layout(layout) =
+            doc.objects.get(&record.layout).unwrap()
+        else {
+            panic!()
+        };
+        layout.name.clone()
+    };
+    let expected_paper: Vec<_> = papers
+        .iter()
+        .map(|p| {
+            (
+                name(&app.tabs[i].scene.document, *p),
+                drawn(&app.tabs[i].scene.document, *p),
+            )
+        })
+        .collect();
+    let (offline, next) = ocs_save::read_ifccad_for_edit(&bytes).unwrap();
+    let again = ocs_save::write_external_for_edit(
+        &offline.document,
+        ocs_save::external_format("ifccad").unwrap(),
+        false,
+        next.as_ref(),
+    )
+    .unwrap();
+    let read = load_ifccad_bytes(&again, Default::default()).unwrap();
+    assert_eq!(read.document().external_sources, saved.external_sources);
+
+    // Sources are absent on reopen. Binding again must reproduce edited graphics,
+    // including normalized local-block origins, rather than just source metadata.
+    let mut reopened = OpenCADStudio::new_for_test();
+    reopened.automation_op(r#"{"op":"new"}"#);
+    let j = reopened.active_tab;
+    reopened.tabs[j].scene.document = offline.document;
+    crate::io::normalize_block_origins(&mut reopened.tabs[j].scene.document);
+    reopened.tabs[j].ifccad_session = next;
+    let reply = control(
+        &mut reopened,
+        json!({"op":"xref_source_register","source_id":"1","file_name":"Detail.dwg","data_base64":last_source}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let doc = &reopened.tabs[j].scene.document;
+    let compare = |actual: Vec<(Vector3, Vector3)>, expected: &Vec<(Vector3, Vector3)>| {
+        assert_eq!(actual.len(), expected.len());
+        for ((a, b), (c, d)) in actual.iter().zip(expected) {
+            assert!(
+                (*a - *c).length() < 1e-9 && (*b - *d).length() < 1e-9,
+                "offline/rebound graphics differ: {actual:?} != {expected:?}"
+            );
+        }
+    };
+    compare(
+        drawn(doc, doc.header.model_space_block_handle),
+        &expected_model,
+    );
+    for owner in doc.block_records.iter().filter(|b| b.is_paper_space()) {
+        let key = name(doc, owner.handle);
+        let expected = &expected_paper.iter().find(|(n, _)| *n == key).unwrap().1;
+        compare(drawn(doc, owner.handle), expected);
+    }
 }

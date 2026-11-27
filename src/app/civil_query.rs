@@ -274,6 +274,66 @@ pub(crate) fn civil_surface_stats(document: &document::Document, req: &Value) ->
     })
 }
 
+/// `{"op":"civil_surface_mesh","handle":"…"}` — a TIN surface's drawn mesh: the
+/// vertices a visible triangle uses (`pts`, `[x, y, z]`) and the visible
+/// triangles as indices into them (`tris`). Pure read over the decoded record.
+pub(crate) fn civil_surface_mesh(document: &document::Document, req: &Value) -> Value {
+    let Some(handle) = super::automation::request_handle(&req["handle"]) else {
+        return err("civil_surface_mesh: missing or invalid \"handle\"");
+    };
+    let Some(data) = arch_named(document, handle, "AECC_TIN_SURFACE") else {
+        return err(format!(
+            "civil_surface_mesh: handle {:?} is not an AECC_TIN_SURFACE",
+            req["handle"].as_str().unwrap_or_default()
+        ));
+    };
+    let surface = data.tin_surface().or_else(|| data.tin_snapshot());
+    let Some(surface) = surface else {
+        return err(format!(
+            "civil_surface_mesh: handle {:X} keeps no readable triangulation",
+            handle.value()
+        ));
+    };
+    let mut remap = vec![u32::MAX; surface.vertices.len()];
+    let mut pts: Vec<[f64; 3]> = Vec::new();
+    let mut tris: Vec<[u32; 3]> = Vec::new();
+    for triangle in &surface.triangles {
+        if !triangle.is_visible() {
+            continue;
+        }
+        // A triangle naming a vertex past the list is skipped whole, so no
+        // vertex is emitted that no triangle uses.
+        if triangle.vertices.iter().any(|&i| i as usize >= surface.vertices.len()) {
+            continue;
+        }
+        let mut tri = [0u32; 3];
+        for (k, &index) in triangle.vertices.iter().enumerate() {
+            let i = index as usize;
+            if remap[i] == u32::MAX {
+                let v = &surface.vertices[i].position;
+                remap[i] = pts.len() as u32;
+                pts.push([v.x, v.y, v.z]);
+            }
+            tri[k] = remap[i];
+        }
+        tris.push(tri);
+    }
+    if tris.is_empty() {
+        return err(format!(
+            "civil_surface_mesh: handle {:X} draws no triangles",
+            handle.value()
+        ));
+    }
+    json!({
+        "ok": true,
+        "handle": format!("{:X}", handle.value()),
+        "vertices": pts.len(),
+        "triangles": tris.len(),
+        "pts": pts,
+        "tris": tris,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

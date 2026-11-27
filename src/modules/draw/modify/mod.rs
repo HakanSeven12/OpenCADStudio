@@ -9,7 +9,7 @@ pub mod break_cmd;
 pub mod bvstate;
 pub mod copy;
 pub mod delete;
-mod entity_index;
+pub mod entity_index;
 pub mod explode;
 pub mod fillet;
 pub mod flatten;

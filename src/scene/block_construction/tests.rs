@@ -1,8 +1,11 @@
 use super::*;
+use crate::entities::construction::APP;
 use crate::scene::{render_graph, Scene};
 use document::{
     entities::{Circle, Insert, Line},
     types::{Color, Vector3},
+    xdata::XDataValue,
+    EntityType,
 };
 
 fn fixture() -> (Scene, Handle, Vec<Handle>) {

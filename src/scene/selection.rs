@@ -345,11 +345,11 @@ impl Scene {
             .unwrap_or_default()
     }
 
-    fn qselect_candidate_handles(&self, scope: crate::app::QSelectScope) -> Vec<Handle> {
+    fn qselect_candidate_handles(&self, scope: crate::filter::QSelectScope) -> Vec<Handle> {
         match scope {
             // Through an active viewport the current space is model space,
             // the same space picking works in (#2611).
-            crate::app::QSelectScope::CurrentSpace => {
+            crate::filter::QSelectScope::CurrentSpace => {
                 let block = self.interaction_block_handle();
                 self.document
                     .block_records
@@ -358,7 +358,7 @@ impl Scene {
                     .map(|br| br.entity_handles.clone())
                     .unwrap_or_default()
             }
-            crate::app::QSelectScope::CurrentSelection => self.selected_handles_in_order(),
+            crate::filter::QSelectScope::CurrentSelection => self.selected_handles_in_order(),
         }
     }
 
@@ -372,7 +372,7 @@ impl Scene {
 
     /// The current space's objects on `layers` (names, any case).
     pub fn objects_on_layers(&self, layers: &[String]) -> Vec<Handle> {
-        self.qselect_candidate_handles(crate::app::QSelectScope::CurrentSpace)
+        self.qselect_candidate_handles(crate::filter::QSelectScope::CurrentSpace)
             .into_iter()
             .filter(|h| {
                 self.document.get_entity(*h).is_some_and(|e| {
@@ -383,12 +383,12 @@ impl Scene {
             .collect()
     }
 
-    pub fn qselect_candidate_count(&self, scope: crate::app::QSelectScope) -> usize {
+    pub fn qselect_candidate_count(&self, scope: crate::filter::QSelectScope) -> usize {
         self.qselect_candidate_handles(scope).len()
     }
 
     /// The object types in the scope, by name, with how many of each.
-    pub fn qselect_type_counts(&self, scope: crate::app::QSelectScope) -> Vec<(String, usize)> {
+    pub fn qselect_type_counts(&self, scope: crate::filter::QSelectScope) -> Vec<(String, usize)> {
         use crate::entities::traits::entity_type_name;
         let mut counts = std::collections::BTreeMap::<String, usize>::new();
         for h in self.qselect_candidate_handles(scope) {
@@ -405,7 +405,7 @@ impl Scene {
     /// given), most frequent first, at most `limit` of them.
     pub fn qselect_value_counts(
         &self,
-        scope: crate::app::QSelectScope,
+        scope: crate::filter::QSelectScope,
         type_name: Option<&str>,
         field: &str,
         limit: usize,
@@ -520,28 +520,28 @@ impl Scene {
     /// reject anything non-numeric.
     pub fn qselect(
         &mut self,
-        scope: crate::app::QSelectScope,
+        scope: crate::filter::QSelectScope,
         type_name: Option<&str>,
         property_field: Option<&str>,
-        op: crate::app::QSelectOp,
+        op: crate::filter::QSelectOp,
         value: &str,
-        mode: crate::app::QSelectMode,
+        mode: crate::filter::QSelectMode,
         append: bool,
     ) -> usize {
-        let condition = crate::app::QSelectCondition {
+        let condition = crate::filter::QSelectCondition {
             type_filter: type_name.map(str::to_owned),
-            property: property_field.map(|field| crate::app::QSelectPropertyChoice {
+            property: property_field.map(|field| crate::filter::QSelectPropertyChoice {
                 field: field.to_owned(),
                 label: field.to_owned(),
-                editor: crate::app::QSelectValueEditor::Text,
+                editor: crate::filter::QSelectValueEditor::Text,
             }),
             operator: op,
             value: value.to_owned(),
         };
         let result = if append {
-            crate::app::QSelectResult::Add
+            crate::filter::QSelectResult::Add
         } else {
-            crate::app::QSelectResult::New
+            crate::filter::QSelectResult::New
         };
         self.qselect_conditions(scope, &[condition], mode, result)
     }
@@ -550,13 +550,13 @@ impl Scene {
     /// without touching the selection.
     pub fn qselect_matches(
         &self,
-        scope: crate::app::QSelectScope,
-        conditions: &[crate::app::QSelectCondition],
-        mode: crate::app::QSelectMode,
+        scope: crate::filter::QSelectScope,
+        conditions: &[crate::filter::QSelectCondition],
+        mode: crate::filter::QSelectMode,
     ) -> Vec<Handle> {
         let filter = crate::filter::qselect::filter_from_conditions(conditions);
         let source = EntityProperties(self);
-        let include = matches!(mode, crate::app::QSelectMode::Include);
+        let include = matches!(mode, crate::filter::QSelectMode::Include);
         self.qselect_candidate_handles(scope)
             .into_iter()
             .filter(|h| {
@@ -571,7 +571,7 @@ impl Scene {
     /// ones it doesn't), without touching the selection.
     pub fn filter_matches(
         &self,
-        scope: crate::app::QSelectScope,
+        scope: crate::filter::QSelectScope,
         filter: &crate::filter::Filter,
         invert: bool,
     ) -> Vec<Handle> {
@@ -590,9 +590,9 @@ impl Scene {
     pub fn apply_found(
         &mut self,
         handles: Vec<Handle>,
-        result: crate::app::QSelectResult,
+        result: crate::filter::QSelectResult,
     ) -> usize {
-        use crate::app::QSelectResult;
+        use crate::filter::QSelectResult;
         let selection: HashSet<Handle> = match result {
             QSelectResult::New => handles.into_iter().collect(),
             QSelectResult::Add => self.selected.iter().copied().chain(handles).collect(),
@@ -613,10 +613,10 @@ impl Scene {
     /// result once: the matches become, join or leave the selection.
     pub fn qselect_conditions(
         &mut self,
-        scope: crate::app::QSelectScope,
-        conditions: &[crate::app::QSelectCondition],
-        mode: crate::app::QSelectMode,
-        result: crate::app::QSelectResult,
+        scope: crate::filter::QSelectScope,
+        conditions: &[crate::filter::QSelectCondition],
+        mode: crate::filter::QSelectMode,
+        result: crate::filter::QSelectResult,
     ) -> usize {
         let matches = self.qselect_matches(scope, conditions, mode);
         self.apply_found(matches, result)
@@ -749,8 +749,8 @@ impl Scene {
     pub fn qselect_properties(
         &self,
         type_name: Option<&str>,
-        scope: crate::app::QSelectScope,
-    ) -> Vec<crate::app::QSelectPropertyChoice> {
+        scope: crate::filter::QSelectScope,
+    ) -> Vec<crate::filter::QSelectPropertyChoice> {
         self.qselect_properties_with_sample(type_name, scope, None)
     }
 
@@ -759,10 +759,10 @@ impl Scene {
     fn qselect_properties_with_sample(
         &self,
         type_name: Option<&str>,
-        scope: crate::app::QSelectScope,
+        scope: crate::filter::QSelectScope,
         sample_handle: Option<Handle>,
-    ) -> Vec<crate::app::QSelectPropertyChoice> {
-        use crate::app::{QSelectPropertyChoice, QSelectValueEditor};
+    ) -> Vec<crate::filter::QSelectPropertyChoice> {
+        use crate::filter::{QSelectPropertyChoice, QSelectValueEditor};
         use crate::entities::traits::{entity_type_name, EntityTypeOps};
         use crate::scene::model::object::PropValue;
 
@@ -1034,8 +1034,8 @@ impl Scene {
     pub fn qselect_conditions_from_entity(
         &self,
         handle: Handle,
-    ) -> Vec<crate::app::QSelectCondition> {
-        use crate::app::{QSelectCondition, QSelectOp, QSelectScope, QSelectValueEditor};
+    ) -> Vec<crate::filter::QSelectCondition> {
+        use crate::filter::{QSelectCondition, QSelectOp, QSelectScope, QSelectValueEditor};
         let Some(entity) = self.document.get_entity(handle) else {
             return Vec::new();
         };
@@ -1361,7 +1361,7 @@ impl Scene {
             self.remember_removed_cache_categories(h);
             // A COGO point leaves the drawing's point database and point groups with it.
             if self.document.get_entity(h).is_some_and(|e| {
-                crate::modules::surface::command::civil_class(e) == Some("AECC_COGO_POINT")
+                crate::entities::civil::civil_class(e) == Some("AECC_COGO_POINT")
             }) {
                 if self.is_recording_undo() {
                     let points: Vec<(Handle, ObjectType)> = self
@@ -1597,7 +1597,7 @@ mod tests {
 
     #[test]
     fn qselect_sample_matches_identical_entities_without_unique_handles() {
-        use crate::app::{QSelectMode, QSelectScope};
+        use crate::filter::{QSelectMode, QSelectScope};
         use document::entities::Line;
         use document::types::Vector3;
         let mut scene = Scene::new();
@@ -1632,7 +1632,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &conditions,
                 QSelectMode::Include,
-                crate::app::QSelectResult::New,
+                crate::filter::QSelectResult::New,
             ),
             2
         );
@@ -1643,7 +1643,7 @@ mod tests {
     /// number matches its displayed value whatever the precision.
     #[test]
     fn qselect_samples_of_two_types_and_numbers_compare_as_numbers() {
-        use crate::app::{QSelectMode, QSelectScope};
+        use crate::filter::{QSelectMode, QSelectScope};
         use document::entities::{Circle, Line};
         use document::types::Vector3;
         let mut scene = Scene::new();
@@ -1660,7 +1660,7 @@ mod tests {
             QSelectScope::CurrentSpace,
             &conditions,
             QSelectMode::Include,
-            crate::app::QSelectResult::New,
+            crate::filter::QSelectResult::New,
         );
         assert_eq!(found, 2, "a Line and a Circle sample find both");
 
@@ -1674,7 +1674,7 @@ mod tests {
     /// rest.
     #[test]
     fn qselect_runs_on_the_filter_engine_with_patterns_and_type_groups() {
-        use crate::app::{
+        use crate::filter::{
             QSelectCondition, QSelectMode, QSelectOp, QSelectPropertyChoice, QSelectScope,
             QSelectValueEditor,
         };
@@ -1719,7 +1719,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &[layer_fal.clone()],
                 QSelectMode::Include,
-                crate::app::QSelectResult::New
+                crate::filter::QSelectResult::New
             ),
             2
         );
@@ -1735,7 +1735,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &typed,
                 QSelectMode::Include,
-                crate::app::QSelectResult::New
+                crate::filter::QSelectResult::New
             ),
             2
         );
@@ -1744,7 +1744,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &typed,
                 QSelectMode::Exclude,
-                crate::app::QSelectResult::New
+                crate::filter::QSelectResult::New
             ),
             1
         );
@@ -2101,7 +2101,7 @@ impl Scene {
                         document::objects::ObjectType::TableStyle(style) => Some(style),
                         _ => None,
                     });
-            crate::modules::annotate::table_cmd::table_cell_inside(table, style, point, margin)
+            crate::entities::table::table_cell_inside(table, style, point, margin)
                 .map(|cell| (handle, cell))
         })
     }

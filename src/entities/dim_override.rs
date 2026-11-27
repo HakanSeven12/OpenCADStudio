@@ -205,11 +205,11 @@ fn write_pairs(doc: &mut Document, handle: Handle, pairs: Vec<(i16, XDataValue)>
         if let Some(vals) = &mut values {
             vals.insert(0, XDataValue::String("DSTYLE".to_string()));
         }
-        crate::scene::view::dispatch::set_entity_xdata(doc, handle, "ACAD_DSTYLE", None);
-        crate::scene::view::dispatch::set_entity_xdata(doc, handle, "ACAD", values);
+        crate::entities::dispatch::set_entity_xdata(doc, handle, "ACAD_DSTYLE", None);
+        crate::entities::dispatch::set_entity_xdata(doc, handle, "ACAD", values);
     } else {
         // Preserve unrelated Autodesk XDATA already occupying the ACAD record.
-        crate::scene::view::dispatch::set_entity_xdata(doc, handle, "ACAD_DSTYLE", values);
+        crate::entities::dispatch::set_entity_xdata(doc, handle, "ACAD_DSTYLE", values);
     }
 }
 

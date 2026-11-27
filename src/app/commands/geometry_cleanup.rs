@@ -8,7 +8,7 @@ use crate::modules::manage::geometry_cleanup_settings::{
 };
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{
-    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, Scan,
+    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, KeptError, Scan, MARKER_REACH,
 };
 use crate::ui::window::geometry_cleanup_settings::SettingsDialog;
 use document::{EntityType, Handle};
@@ -21,6 +21,12 @@ use ocs_geom::geom2d::{Curve, Tolerance};
 /// Ends nearer than this meet: they are not an error.
 const WELD: f64 = 1e-6;
 
+/// The variables of Geometry Cleanup.
+const SYSVARS: &[&str] = &["GEOMETRYCLEANUPSTATE", "GEOMETRYCLEANUPZOOMPAN"];
+
+/// The colour index of the picked error's objects in review mode (red).
+const REVIEW_COLOR: i16 = 1;
+
 impl OpenCADStudio {
     pub(super) fn dispatch_geometry_cleanup(
         &mut self,
@@ -29,7 +35,26 @@ impl OpenCADStudio {
     ) -> Option<Task<Message>> {
         let cmd = cmd.trim();
         let (verb, rest) = cmd.split_once(char::is_whitespace).unwrap_or((cmd, ""));
-        match verb.to_ascii_uppercase().as_str() {
+        let verb = verb.to_ascii_uppercase();
+        let rest = rest.trim();
+        if verb == "SETVAR" {
+            let (name, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            let name = name.to_ascii_uppercase();
+            if !SYSVARS.contains(&name.as_str()) {
+                return None;
+            }
+            self.geometry_cleanup_sysvar(&name, Some(value.trim()).filter(|v| !v.is_empty()));
+            return Some(Task::none());
+        }
+        if SYSVARS.contains(&verb.as_str()) {
+            self.geometry_cleanup_sysvar(&verb, Some(rest).filter(|v| !v.is_empty()));
+            return Some(Task::none());
+        }
+        match verb.as_str() {
+            "GEOMETRYERRORREVIEWCLOSE" => {
+                self.geometry_cleanup_end_review(i);
+                Some(Task::none())
+            }
             "GEOMETRYCLEANUPOPEN" => {
                 self.set_geometry_cleanup(true);
                 // Objects selected before the command are scanned at once.
@@ -58,14 +83,90 @@ impl OpenCADStudio {
         }
     }
 
+    /// GEOMETRYCLEANUPSTATE is read-only; GEOMETRYCLEANUPZOOMPAN takes 0
+    /// or 1 (asked for when none is given).
+    fn geometry_cleanup_sysvar(&mut self, name: &str, value: Option<&str>) {
+        if name == "GEOMETRYCLEANUPSTATE" {
+            let v = usize::from(self.geometry_cleanup.show);
+            self.command_line
+                .push_output(&crate::tf!("{name} = {v} (read only)"));
+            return;
+        }
+        let current = i32::from(!self.geometry_cleanup.auto_zoom_off);
+        let ask = |app: &mut Self| {
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some(name.to_string());
+        };
+        match value.map(str::parse::<i32>) {
+            None => ask(self),
+            Some(Ok(n @ (0 | 1))) => {
+                self.geometry_cleanup.auto_zoom_off = n == 0;
+                self.persist_settings_if_changed();
+            }
+            Some(_) => {
+                self.command_line
+                    .push_rejection(&crate::t!("Requires 0 or 1 only."));
+                ask(self);
+            }
+        }
+    }
+
+    /// End review mode: the drawing is drawn as it is again.
+    pub(in crate::app) fn geometry_cleanup_end_review(&mut self, i: usize) {
+        self.geometry_cleanup.review = false;
+        self.geometry_cleanup_review_display(i);
+    }
+
+    /// Show or end the review display of tab `i`: in review mode, the
+    /// picked error's objects in the review colour and the rest faded (the
+    /// display of count mode). Not on a tab in count mode, which owns it.
+    pub(in crate::app) fn geometry_cleanup_review_display(&mut self, i: usize) {
+        let picked = self
+            .geometry_cleanup_scan_here(i)
+            .zip(self.geometry_cleanup.picked)
+            .and_then(|(scan, index)| scan.findings.get(index).copied())
+            .filter(|_| self.geometry_cleanup.review && self.geometry_cleanup.show);
+        if self.tabs[i].count.is_some() {
+            self.geometry_cleanup.review_shown = false;
+            return;
+        }
+        let display = picked.map(|finding| crate::scene::CountDisplay {
+            counted: std::iter::once(finding.handle)
+                .chain(finding.other.map(|o| o.0))
+                .collect(),
+            errors: Default::default(),
+            color: crate::ui::window::count_palette::aci_rgba(REVIEW_COLOR),
+            error_color: crate::ui::window::count_palette::aci_rgba(REVIEW_COLOR),
+        });
+        if display.is_none() && !self.geometry_cleanup.review_shown {
+            return;
+        }
+        self.geometry_cleanup.review_shown = display.is_some();
+        // The colours change, not the geometry: the scan is still true.
+        let fresh = self
+            .geometry_cleanup_scan_here(i)
+            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        self.tabs[i].scene.set_count_display(display);
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if let Some(scan) = self.geometry_cleanup.scan.as_mut().filter(|_| fresh) {
+            scan.epoch = epoch;
+        }
+    }
+
     /// Open or close the Geometry Cleanup palette (docked, expanded).
     pub(in crate::app) fn set_geometry_cleanup(&mut self, open: bool) {
         let id = PanelId::GeometryCleanup;
+        if !open {
+            self.geometry_cleanup_close_menu(self.active_tab);
+            self.geometry_cleanup.review = false;
+        }
         self.geometry_cleanup.show = open;
         if open {
             self.dock_open_at_default(id);
         } else {
             self.dock_unpeek(id);
+            self.geometry_cleanup_review_display(self.active_tab);
         }
     }
 
@@ -182,6 +283,8 @@ impl OpenCADStudio {
         report: bool,
     ) {
         let rescan = tolerances.is_some();
+        // The rows change: a menu or a preview of the old list is wrong.
+        self.geometry_cleanup_close_menu(i);
         let (tolerances, angles) = tolerances.unwrap_or_else(|| {
             let settings = match &self.geometry_cleanup.settings {
                 Some(settings) => settings.clone(),
@@ -189,7 +292,11 @@ impl OpenCADStudio {
             };
             (settings.tolerances(), settings.angle_tolerances())
         });
-        let findings = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
+        let found = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
+        let marks = self.geometry_cleanup_kept_marks(i);
+        let (kept, findings): (Vec<Finding>, Vec<Finding>) = found
+            .into_iter()
+            .partition(|f| marks.contains(&f.identity()));
         if report {
             self.command_line.push_output(&crate::tf!(
                 "Geometry Cleanup: {} error(s) found.",
@@ -202,6 +309,10 @@ impl OpenCADStudio {
             .and_then(|(scan, index)| scan.findings.get(index).copied())
             .filter(|_| rescan)
             .and_then(|old| findings.iter().position(|f| f.same_error(&old)));
+        if !rescan {
+            // A new selection ends review mode.
+            self.geometry_cleanup.review = false;
+        }
         self.geometry_cleanup.scan = Some(Scan {
             tab: self.tabs[i].id,
             epoch: self.tabs[i].scene.geometry_epoch,
@@ -209,8 +320,178 @@ impl OpenCADStudio {
             tolerances,
             angles,
             findings,
+            kept,
         });
         self.geometry_cleanup.picked = picked;
+        self.geometry_cleanup_review_display(i);
+    }
+
+    /// The errors kept as designed in the drawing of tab `i`. Marks of
+    /// objects that are no longer in the drawing are dropped first.
+    fn geometry_cleanup_kept_marks(&mut self, i: usize) -> Vec<KeptError> {
+        let document = &self.tabs[i].scene.document;
+        let id = &document.header.fingerprint_guid;
+        if id.is_empty() {
+            return Vec::new();
+        }
+        let Some(marks) = self.geometry_cleanup.kept.get_mut(id) else {
+            return Vec::new();
+        };
+        marks.retain(|mark| document.get_entity(Handle::new(mark.handle)).is_some());
+        if marks.is_empty() {
+            self.geometry_cleanup.kept.remove(id);
+            return Vec::new();
+        }
+        marks.clone()
+    }
+
+    /// The FINGERPRINTGUID of the drawing of tab `i`, which names its kept
+    /// errors. A drawing that has none gets one now and saves it with its
+    /// next save, as the node graph does.
+    fn geometry_cleanup_drawing_id(&mut self, i: usize) -> String {
+        let tab = &mut self.tabs[i];
+        let header = &mut tab.scene.document.header;
+        if header.fingerprint_guid.is_empty() {
+            header.fingerprint_guid =
+                format!("{{{}}}", crate::app::control::new_guid_v4().to_uppercase());
+            tab.dirty = true;
+        }
+        header.fingerprint_guid.clone()
+    }
+
+    /// The markers of the errors in the drawing of tab `i`: each error's
+    /// index in the scan and its place on the canvas, for the errors in
+    /// view. None while the palette is closed, in a layout, or while a
+    /// command runs.
+    pub(in crate::app) fn geometry_cleanup_markers(&self, i: usize) -> Vec<(usize, iced::Point)> {
+        let tab = &self.tabs[i];
+        if !self.geometry_cleanup.show
+            || tab.is_start
+            || tab.active_cmd.is_some()
+            || tab.scene.current_layout != "Model"
+        {
+            return Vec::new();
+        }
+        let Some(scan) = self.geometry_cleanup_scan_here(i) else {
+            return Vec::new();
+        };
+        let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
+        let tile = tab.scene.active_model_tile_bounds(vw, vh);
+        let project = tab.scene.camera.borrow().projector(tile);
+        scan.findings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, finding)| {
+                let [x, y] = finding.location;
+                let at = project(glam::DVec3::new(x, y, 0.0))?;
+                let at = iced::Point::new(tile.x + at.x, tile.y + at.y);
+                let inside = at.x >= tile.x
+                    && at.y >= tile.y
+                    && at.x <= tile.x + tile.width
+                    && at.y <= tile.y + tile.height;
+                inside.then_some((index, at))
+            })
+            .collect()
+    }
+
+    /// The open marker menu and the place of its marker on the canvas.
+    pub(in crate::app) fn geometry_cleanup_marker_menu(
+        &self,
+        i: usize,
+    ) -> Option<(iced::Point, iced::Element<'_, Message>)> {
+        let index = self.geometry_cleanup.menu?;
+        let (_, at) = self
+            .geometry_cleanup_markers(i)
+            .into_iter()
+            .find(|(marker, _)| *marker == index)?;
+        let finding = self.geometry_cleanup_scan_here(i)?.findings.get(index)?;
+        Some((
+            at,
+            crate::ui::window::geometry_cleanup::marker_menu(index, finding),
+        ))
+    }
+
+    /// The pointer moved on the canvas to `p`: on a marker, open its menu;
+    /// away from the marker and its menu, close the menu.
+    pub(in crate::app) fn geometry_cleanup_pointer(&mut self, i: usize, p: iced::Point) {
+        let markers = self.geometry_cleanup_markers(i);
+        let on = markers
+            .iter()
+            .filter(|(_, at)| (at.x - p.x).hypot(at.y - p.y) <= MARKER_REACH)
+            .min_by(|a, b| {
+                let d = |at: iced::Point| (at.x - p.x).hypot(at.y - p.y);
+                d(a.1).total_cmp(&d(b.1))
+            })
+            .map(|(index, _)| *index);
+        match on {
+            Some(index) if self.geometry_cleanup.menu != Some(index) => {
+                self.geometry_cleanup_close_menu(i);
+                self.geometry_cleanup.menu = Some(index);
+            }
+            Some(_) => {}
+            None if self.geometry_cleanup.menu.is_some() && !self.geometry_cleanup.menu_hovered => {
+                self.geometry_cleanup_close_menu(i);
+            }
+            None => {}
+        }
+    }
+
+    /// Close the marker menu and end the preview of a repair.
+    fn geometry_cleanup_close_menu(&mut self, i: usize) {
+        self.geometry_cleanup.menu = None;
+        self.geometry_cleanup.menu_hovered = false;
+        self.geometry_cleanup_preview(i, None);
+    }
+
+    /// Preview repair `target` in the drawing of tab `i`: the objects that
+    /// it changes are hidden, and drawn as the repair leaves them. `None`
+    /// ends the preview.
+    fn geometry_cleanup_preview(&mut self, i: usize, target: Option<(usize, Fix)>) {
+        if self.geometry_cleanup.preview == target {
+            return;
+        }
+        let had = self.geometry_cleanup.preview.is_some();
+        self.geometry_cleanup.preview = target;
+        // A command owns the preview while it runs.
+        if self.tabs[i].active_cmd.is_some() {
+            return;
+        }
+        let edits = target.and_then(|(index, fix)| {
+            let finding = *self.geometry_cleanup_scan_here(i)?.findings.get(index)?;
+            finding
+                .fixes()
+                .contains(&fix)
+                .then(|| self.geometry_cleanup_edits(i, &finding, fix))?
+        });
+        let fresh = self
+            .geometry_cleanup_scan_here(i)
+            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        let scene = &mut self.tabs[i].scene;
+        match edits.filter(|edits| !edits.is_empty()) {
+            Some(edits) => {
+                let (handles, entities): (Vec<Handle>, Vec<EntityType>) = edits.into_iter().unzip();
+                let wires = scene.wires_for_entities(&entities);
+                scene.set_command_preview_hidden(&handles);
+                scene.set_preview_wires(wires);
+            }
+            None if had => scene.clear_preview_wire(),
+            None => {}
+        }
+        // Hiding the objects moves the geometry epoch, but changes no
+        // geometry: the scan is still true, and a rescan would end the
+        // preview.
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if let Some(scan) = self.geometry_cleanup.scan.as_mut().filter(|_| fresh) {
+            scan.epoch = epoch;
+        }
+    }
+
+    /// Scan the objects of the palette's scan again, with its tolerances.
+    fn geometry_cleanup_rescan(&mut self, i: usize) {
+        if let Some(scan) = self.geometry_cleanup_scan_here(i) {
+            let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
+            self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
+        }
     }
 
     /// After the drawing changes, the open palette scans its objects again:
@@ -243,6 +524,13 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn on_geometry_cleanup(&mut self, m: GeometryCleanupMsg) -> Task<Message> {
         let i = self.active_tab;
+        if matches!(
+            m,
+            GeometryCleanupMsg::Pick(_) | GeometryCleanupMsg::Fix(..) | GeometryCleanupMsg::Keep(_)
+        ) {
+            // The drawing shows the objects as they are before a change.
+            self.geometry_cleanup_close_menu(i);
+        }
         match m {
             GeometryCleanupMsg::SelectObjects => {
                 self.tabs[i].scene.deselect_all();
@@ -261,6 +549,54 @@ impl OpenCADStudio {
                     self.geometry_cleanup_scan(i, objects, Some(tolerances), true);
                 }
             }
+            GeometryCleanupMsg::Keep(index) => {
+                let Some(scan) = self.geometry_cleanup_scan_here(i) else {
+                    return Task::none();
+                };
+                let Some(picked) = scan.findings.get(index).copied() else {
+                    return Task::none();
+                };
+                let after = rows_after(&self.geometry_cleanup, scan, index);
+                let id = self.geometry_cleanup_drawing_id(i);
+                let marks = self.geometry_cleanup.kept.entry(id).or_default();
+                if !marks.contains(&picked.identity()) {
+                    marks.push(picked.identity());
+                }
+                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_pick_next(i, &after);
+            }
+            GeometryCleanupMsg::Restore(index) => {
+                let Some(restored) = self
+                    .geometry_cleanup_scan_here(i)
+                    .and_then(|scan| scan.kept.get(index))
+                    .map(Finding::identity)
+                else {
+                    return Task::none();
+                };
+                let id = &self.tabs[i].scene.document.header.fingerprint_guid;
+                if let Some(marks) = self.geometry_cleanup.kept.get_mut(id) {
+                    marks.retain(|mark| *mark != restored);
+                    if marks.is_empty() {
+                        self.geometry_cleanup.kept.remove(id);
+                    }
+                }
+                self.geometry_cleanup_rescan(i);
+            }
+            GeometryCleanupMsg::RestoreAll => {
+                let id = &self.tabs[i].scene.document.header.fingerprint_guid;
+                self.geometry_cleanup.kept.remove(id);
+                self.geometry_cleanup_rescan(i);
+            }
+            GeometryCleanupMsg::FoldKept => {
+                self.geometry_cleanup.kept_open = !self.geometry_cleanup.kept_open;
+            }
+            GeometryCleanupMsg::Preview(target) => self.geometry_cleanup_preview(i, target),
+            GeometryCleanupMsg::MenuHover(on) => self.geometry_cleanup.menu_hovered = on,
+            GeometryCleanupMsg::CloseReview => self.geometry_cleanup_end_review(i),
+            GeometryCleanupMsg::ToggleAutoZoom => {
+                self.geometry_cleanup.auto_zoom_off = !self.geometry_cleanup.auto_zoom_off;
+                self.persist_settings_if_changed();
+            }
             GeometryCleanupMsg::Pick(index) => {
                 let Some(finding) = self.geometry_cleanup_scan_here(i).and_then(|scan| {
                     scan.findings
@@ -271,7 +607,9 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 self.geometry_cleanup.picked = Some(index);
+                self.geometry_cleanup.review = true;
                 self.geometry_cleanup_show(i, finding.0, finding.1);
+                self.geometry_cleanup_review_display(i);
             }
             GeometryCleanupMsg::Fix(index, fix) => {
                 let Some(scan) = self.geometry_cleanup_scan_here(i) else {
@@ -280,15 +618,7 @@ impl OpenCADStudio {
                 let Some(picked) = scan.findings.get(index).copied() else {
                     return Task::none();
                 };
-                // The rows below the fixed one, then those above it nearest
-                // first: where the pick goes after the repair.
-                let rows = rows(&self.geometry_cleanup, scan);
-                let at = rows.iter().position(|&row| row == index).unwrap_or(0);
-                let after: Vec<Finding> = rows[at + 1..]
-                    .iter()
-                    .chain(rows[..at].iter().rev())
-                    .map(|&row| scan.findings[row])
-                    .collect();
+                let after = rows_after(&self.geometry_cleanup, scan, index);
                 let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
                 if !self.geometry_cleanup_fix(i, picked, fix, &objects, &tolerances) {
                     return Task::none();
@@ -491,6 +821,7 @@ impl OpenCADStudio {
         if let Some((_, finding)) = next {
             self.geometry_cleanup_show(i, finding, tolerances);
         }
+        self.geometry_cleanup_review_display(i);
     }
 
     /// Zoom to an error and select its objects: round a length error by
@@ -527,16 +858,41 @@ impl OpenCADStudio {
                 )
             }
         };
-        self.handle_zoom_to_window(
+        let (low, high) = (
             glam::DVec3::new(low[0], low[1], 0.0),
             glam::DVec3::new(high[0], high[1], 0.0),
         );
+        // GEOMETRYCLEANUPZOOMPAN 0: only an error that is not in view.
+        if !self.geometry_cleanup.auto_zoom_off || !self.geometry_cleanup_in_view(i, low, high) {
+            self.handle_zoom_to_window(low, high);
+        }
         let scene = &mut self.tabs[i].scene;
         scene.select_entity(finding.handle, true);
         if let Some((other, _)) = finding.other {
             scene.select_entity(other, false);
         }
         self.refresh_selected_grips();
+    }
+
+    /// Whether the window from `low` to `high` is all in the view of tab
+    /// `i`.
+    fn geometry_cleanup_in_view(&self, i: usize, low: glam::DVec3, high: glam::DVec3) -> bool {
+        let scene = &self.tabs[i].scene;
+        let (vw, vh) = scene.selection.borrow().view.vp_size;
+        let tile = scene.active_model_tile_bounds(vw, vh);
+        let project = scene.camera.borrow().projector(tile);
+        [
+            low,
+            high,
+            glam::DVec3::new(low.x, high.y, 0.0),
+            glam::DVec3::new(high.x, low.y, 0.0),
+        ]
+        .into_iter()
+        .all(|corner| {
+            project(corner).is_some_and(|at| {
+                (0.0..=tile.width).contains(&at.x) && (0.0..=tile.height).contains(&at.y)
+            })
+        })
     }
 
     /// Repair one error as one undo step; `false` when nothing changed. The
@@ -560,6 +916,36 @@ impl OpenCADStudio {
                 .push_error(&crate::t!("The error is no longer in the drawing."));
             return false;
         };
+        let edits = self.geometry_cleanup_edits(i, &finding, fix);
+        let Some(edits) = edits.filter(|_| finding.fixes().contains(&fix)) else {
+            self.command_line
+                .push_error(&crate::t!("This error cannot be fixed that way."));
+            return false;
+        };
+        self.push_undo_snapshot(i, "GEOMETRYCLEANUP");
+        let mut changes = Vec::new();
+        for (handle, replacement) in edits {
+            if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                *target = replacement;
+                changes.push((handle, crate::scene::ChangeKind::Modified));
+            }
+        }
+        self.tabs[i].scene.bump_entities(&changes);
+        self.tabs[i].dirty = true;
+        self.refresh_selected_grips();
+        self.refresh_properties();
+        true
+    }
+
+    /// The objects that repair `fix` of `finding` changes, each with what
+    /// it becomes; `None` when the repair cannot be made. The repair and
+    /// its preview both use it.
+    fn geometry_cleanup_edits(
+        &self,
+        i: usize,
+        finding: &Finding,
+        fix: Fix,
+    ) -> Option<Vec<(Handle, EntityType)>> {
         let document = &self.tabs[i].scene.document;
         let entity = |handle: Handle| document.get_entity(handle);
         let mut edits: Vec<(Handle, EntityType)> = Vec::new();
@@ -629,25 +1015,24 @@ impl OpenCADStudio {
             }
             Some(())
         })();
-        if done.is_none() || !finding.fixes().contains(&fix) {
-            self.command_line
-                .push_error(&crate::t!("This error cannot be fixed that way."));
-            return false;
-        }
-        self.push_undo_snapshot(i, "GEOMETRYCLEANUP");
-        let mut changes = Vec::new();
-        for (handle, replacement) in edits {
-            if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                *target = replacement;
-                changes.push((handle, crate::scene::ChangeKind::Modified));
-            }
-        }
-        self.tabs[i].scene.bump_entities(&changes);
-        self.tabs[i].dirty = true;
-        self.refresh_selected_grips();
-        self.refresh_properties();
-        true
+        done.map(|()| edits)
     }
+}
+
+/// The rows below row `index`, then those above it nearest first: where the
+/// pick goes after a repair or a Keep.
+fn rows_after(
+    palette: &crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
+    scan: &Scan,
+    index: usize,
+) -> Vec<Finding> {
+    let rows = rows(palette, scan);
+    let at = rows.iter().position(|&row| row == index).unwrap_or(0);
+    rows[at + 1..]
+        .iter()
+        .chain(rows[..at].iter().rev())
+        .map(|&row| scan.findings[row])
+        .collect()
 }
 
 /// The tolerances of a scan, for a rescan.

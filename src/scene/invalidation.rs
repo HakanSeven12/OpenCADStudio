@@ -122,7 +122,7 @@ impl Scene {
         }
         // Complex-linetype glyphs ride the host entity's wire.
         let lt = crate::scene::view::render::linetype_name_for(&self.document, entity);
-        crate::io::linetypes::resolve_complex_lt(&self.document, lt).is_some()
+        crate::catalog::linetypes::resolve_complex_lt(&self.document, lt).is_some()
     }
 
     /// Stage the cache categories an entity belongs to before erase removes the

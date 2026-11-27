@@ -2484,6 +2484,15 @@ fn insert_annotation_flag(doc: &Document, insert: &document::entities::Insert) -
     block_annotation_flag(doc, &insert.block_name).or_else(|| {
         // Some files link the source only through per-reference RepData.
         let source = doc.dynamic_definition_for_insert(insert.common.handle)?;
+        // A plain reference's source is its own definition, checked above;
+        // only a different one is worth the scan of every block record.
+        if doc
+            .block_records
+            .get(&insert.block_name)
+            .is_some_and(|record| record.handle == source)
+        {
+            return None;
+        }
         doc.block_records
             .iter()
             .find(|record| record.handle == source)

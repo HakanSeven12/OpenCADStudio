@@ -17,7 +17,7 @@ impl OpenCADStudio {
             let Some(idx) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                 continue;
             };
-            if self.tabs[idx].is_start {
+            if self.tabs[idx].is_start || self.plugin_run_holds_tab(tab_id) {
                 continue;
             }
             if self.tabs[idx].active_block_edit.is_some() || self.tabs[idx].block_test.is_some() {
@@ -38,6 +38,11 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
+        // The drawing a plugin command works on stays until it ends.
+        let tab_id = self.tabs.get(idx).map(|tab| tab.id);
+        if tab_id.is_some_and(|id| self.plugin_run_holds_tab(id)) {
+            return Task::none();
+        }
         let test_return_id = self
             .tabs
             .get(idx)

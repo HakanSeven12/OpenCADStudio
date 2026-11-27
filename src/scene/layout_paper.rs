@@ -954,10 +954,10 @@ impl Scene {
                 (l.paper_width, l.paper_height)
             };
             if pw > 1e-6 && ph > 1e-6 {
-                let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
+                let (mm_per_unit, ..) = crate::catalog::paper_catalog::window_to_sheet(
                     (wx1 - wx0, wy1 - wy0),
                     (pw, ph),
-                    crate::io::paper_catalog::PlotScale::Fit,
+                    crate::catalog::paper_catalog::PlotScale::Fit,
                 );
                 return 1.0 / mm_per_unit.max(1e-9);
             }

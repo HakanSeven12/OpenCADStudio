@@ -29,6 +29,7 @@ use super::analytic_slots::BlockSlot;
 use crate::scene::model::wire_model::DashClosure;
 use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
+pub(crate) use crate::entities::common::MITER_LIMIT;
 
 /// Allocate a VERTEX buffer and fill it through the queue.
 ///
@@ -800,11 +801,6 @@ fn marker_metadata(wire: &WireModel) -> ([f32; 4], [f32; 4], [f32; 4]) {
         [normal.x, normal.y, normal.z, marker.viewport_percent],
     )
 }
-
-/// Largest |tan(turn/2)| a band joint is mitered at; sharper turns stay butt
-/// ends instead of growing a long spike. Must match `MITER_LIMIT` in the wire
-/// shaders, which decode the normalized value back.
-pub(crate) const MITER_LIMIT: f64 = 8.0;
 
 /// Per-segment miter factors `[k_a, k_b]` of a constant-width world band,
 /// normalized by `MITER_LIMIT`. The shader slides each quad corner by

@@ -20,6 +20,7 @@ pub use super::sweep_command_model::{
     swept_with_options, AssocCurve, SWEEP_SOURCES_APP,
 };
 use crate::entities::curve::entity_curve;
+use glam::DVec3;
 
 /// A drawn profile, as the kernel wants it: the plane it lies in and the
 /// chain of pieces closing a loop in that plane.
@@ -1144,6 +1145,98 @@ fn circular_loft(profiles: &[EntityType]) -> Option<Brep> {
         true,
     )
     .ok()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtrudeMode {
+    Solid,
+    Surface,
+}
+
+/// Construction options shared by SWEEP creation and its live preview.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SweepOptions {
+    pub align: bool,
+    pub bank: bool,
+    pub base_point: Option<glam::DVec3>,
+    pub scale: f64,
+    /// Total twist along the path, in radians.
+    pub twist_angle: f64,
+    /// Where the path was picked: an open path is swept from its end nearest
+    /// this point (seen from above), as the reference does.
+    pub path_pick: Option<glam::DVec3>,
+}
+
+impl Default for SweepOptions {
+    fn default() -> Self {
+        Self {
+            align: true,
+            bank: false,
+            base_point: None,
+            scale: 1.0,
+            twist_angle: 0.0,
+            path_pick: None,
+        }
+    }
+}
+
+pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType {
+    use document::entities::{Surface, SurfaceData, SurfaceKind};
+    use document::types::Vector3;
+
+    let mut surface = Surface::new(SurfaceKind::Extruded);
+    surface.u_isolines = 6;
+    surface.v_isolines = 6;
+    if let SurfaceData::Extruded {
+        options,
+        sweep_vector,
+        ..
+    } = &mut surface.surface_data
+    {
+        options.draft_angle = taper_angle;
+        options.is_solid = false;
+        *sweep_vector = Vector3::new(direction.x, direction.y, direction.z);
+    }
+    EntityType::Surface(Box::new(surface))
+}
+
+pub fn empty_revolved_surface(
+    profile: &EntityType,
+    axis_start: DVec3,
+    axis_end: DVec3,
+    angle: f64,
+    start_angle: f64,
+) -> EntityType {
+    use document::entities::{Surface, SurfaceData, SurfaceKind};
+    use document::types::Vector3;
+
+    let mut surface = Surface::new(SurfaceKind::Revolved);
+    let axis = (axis_end - axis_start).normalize_or(DVec3::Z);
+    surface.point_of_reference = Vector3::new(axis_start.x, axis_start.y, axis_start.z);
+    if let SurfaceData::Revolved {
+        revolve_entity,
+        axis_point,
+        axis_vector,
+        revolve_angle,
+        start_angle: stored_start,
+        entity_transform,
+        solid,
+        ..
+    } = &mut surface.surface_data
+    {
+        if let Some((embedded, transform)) =
+            embedded_revolve_profile(profile)
+        {
+            *revolve_entity = Some(embedded);
+            *entity_transform = transform;
+        }
+        *axis_point = Vector3::new(axis_start.x, axis_start.y, axis_start.z);
+        *axis_vector = Vector3::new(axis.x, axis.y, axis.z);
+        *revolve_angle = angle;
+        *stored_start = start_angle;
+        *solid = false;
+    }
+    EntityType::Surface(Box::new(surface))
 }
 
 #[cfg(test)]

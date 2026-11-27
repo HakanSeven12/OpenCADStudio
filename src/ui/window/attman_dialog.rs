@@ -20,6 +20,7 @@ use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
 use crate::ui::window::pdf_dialogs::{accent_text, card_style, well_style};
+pub use crate::entities::common::{color_label, parse_color, COLORS};
 
 static ICON_UP: &[u8] = include_bytes!("../../../assets/icons/ui/up.svg");
 static ICON_PICK: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
@@ -350,41 +351,6 @@ fn style_name(def: &AttributeDefinition) -> String {
         "Standard".into()
     } else {
         def.text_style.clone()
-    }
-}
-
-/// The colours the Properties tab offers.
-pub const COLORS: [&str; 9] = [
-    "ByLayer", "ByBlock", "Red", "Yellow", "Green", "Cyan", "Blue", "Magenta", "White",
-];
-
-pub fn color_label(color: document::types::Color) -> String {
-    use document::types::Color as C;
-    match color {
-        C::ByLayer => "ByLayer".into(),
-        C::ByBlock => "ByBlock".into(),
-        C::Index(n @ 1..=7) => COLORS[n as usize + 1].into(),
-        C::Index(n) => format!("{n}"),
-        C::Rgb { r, g, b } => format!("{r},{g},{b}"),
-        C::None => "None".into(),
-    }
-}
-
-pub fn parse_color(label: &str) -> Option<document::types::Color> {
-    use document::types::Color as C;
-    match COLORS
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(label.trim()))
-    {
-        Some(0) => Some(C::ByLayer),
-        Some(1) => Some(C::ByBlock),
-        Some(i) => Some(C::Index(i as u8 - 1)),
-        None => label
-            .trim()
-            .parse::<u8>()
-            .ok()
-            .filter(|n| (1..=255).contains(n))
-            .map(C::Index),
     }
 }
 

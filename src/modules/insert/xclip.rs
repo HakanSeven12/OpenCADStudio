@@ -25,6 +25,7 @@ use crate::modules::insert::pdf_clip::PdfClipCommand;
 use crate::modules::layout::mview::MviewCommand;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
+pub use crate::command::requests::XclipAction;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/xclip.svg"));
 pub fn tool() -> ToolDef {
@@ -34,26 +35,6 @@ pub fn tool() -> ToolDef {
         icon: ICON,
         event: ModuleEvent::Command("CLIP".to_string()),
     }
-}
-
-/// What XCLIP does to the chosen block references.
-#[derive(Clone, Debug, PartialEq)]
-pub enum XclipAction {
-    Enable(bool),
-    Delete,
-    Polyline,
-    /// Boundary in WCS (two points = rectangle corners).
-    New {
-        boundary: Vec<[f64; 2]>,
-        inverted: bool,
-    },
-    /// Front and back clipping planes: `Some(None)` removes one, `None`
-    /// leaves it. `rejected` prints that the front plane was not applied.
-    Depth {
-        front: Option<Option<f64>>,
-        back: Option<Option<f64>>,
-        rejected: bool,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

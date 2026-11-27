@@ -1,10 +1,4 @@
 pub mod complex_lt;
-pub mod font_face;
-pub mod glyph_quads;
 pub mod glyph_to_world;
-pub mod lff;
-pub mod sdf_atlas;
-pub mod shx;
-pub mod sysfont;
-pub mod ttf_glyph;
-pub mod web_font;
+
+pub use crate::text::{font_face, glyph_quads, lff, sdf_atlas, shx, sysfont, ttf_glyph, web_font};

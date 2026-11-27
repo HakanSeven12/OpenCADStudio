@@ -132,6 +132,7 @@ impl OpenCADStudio {
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
             Some(K::LayerStateEditor) => crate::tr!("modal", "edit-layer-state"),
             Some(K::Plot) => crate::tr!("modal", "plot"),
+            Some(K::PlotPreview) => crate::t!("Plot Preview").into_owned(),
             Some(K::PrintAll) => t!("Print All").into_owned(),
             Some(K::LayoutManager) => crate::tr!("modal", "layout-manager"),
             Some(K::ScaleManager) => crate::tr!("modal", "scale-manager"),
@@ -546,7 +547,8 @@ impl OpenCADStudio {
                     &self.command_line.dynamic_commands,
                     &self.command_aliases,
                 );
-                sized_flow(ex, 640, 440, |flow| {
+                let width = crate::ui::window::ribbon_customize::DIALOG_WIDTH;
+                sized_flow_min(ex, width, 440, |flow| {
                     crate::ui::window::ribbon_customize::view_window(
                         state,
                         &suggestions,
@@ -1011,6 +1013,12 @@ impl OpenCADStudio {
                 }
             }
             super::super::ModalKind::Plot => self.plot_modal_content(ex),
+            super::super::ModalKind::PlotPreview => {
+                let page = self.plot_preview.as_ref()?;
+                sized_flow(ex, 900, 680, |flow| {
+                    crate::ui::window::plot::view_preview(page, flow)
+                })
+            }
             super::super::ModalKind::PrintAll => sized_flow(ex, 520, 420, |flow| {
                 crate::ui::window::print_all::view_window(
                     &self.print_all_layouts,
@@ -2029,7 +2037,8 @@ impl OpenCADStudio {
                 &self.command_aliases,
             )
         });
-        sized_flow(ex, 720, 520, |flow| {
+        let width = crate::ui::window::shortcuts::SHORTCUTS_WIDTH;
+        sized_flow_min(ex, width, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
                 &self.shortcut_filter,
@@ -2122,6 +2131,24 @@ fn duplicate_rows(
         .collect();
     let duplicate_set = duplicates.iter().map(|(key, _)| key.clone()).collect();
     (duplicate_set, duplicates)
+}
+
+/// [`sized_flow`] at a fixed `width` that is also its minimum: the dialog
+/// never lays out narrower (capped by the window), so a footer row keeps
+/// its width.
+fn sized_flow_min<'a>(
+    extra: iced::Vector,
+    width: f32,
+    max_height: u16,
+    mut build: impl FnMut(crate::ui::modal::ModalSizing) -> Element<'a, Message>,
+) -> Element<'a, Message> {
+    crate::ui::modal::intrinsic_with_min(
+        build(crate::ui::modal::ModalSizing::INTRINSIC),
+        build(crate::ui::modal::ModalSizing::FILL),
+        iced::Size::new(width, max_height as f32),
+        extra,
+        iced::Size::new(width, 0.0),
+    )
 }
 
 /// Build a dialog with an explicit initial size cap. Use this for dense forms

@@ -96,6 +96,19 @@ impl MTextEditorState {
             .count()
     }
 
+    /// The editor frame's width: the defined box width, widened to the laid-out
+    /// text when an unbreakable word runs past it.
+    pub(in crate::app) fn frame_width(&self) -> f64 {
+        let (lo, hi) = self
+            .glyph_boxes
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), b| {
+                (lo.min(b.local[0]), hi.max(b.local[2]))
+            });
+        let measured = if hi >= lo { f64::from(hi - lo) } else { 0.0 };
+        self.rect_width.max(measured)
+    }
+
     /// Which way the box grows from its attachment point: 1 rightwards,
     /// 2 both ways (centred), -1 leftwards.
     pub(in crate::app) fn box_growth(&self) -> f32 {
@@ -464,6 +477,7 @@ impl crate::app::OpenCADStudio {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.hidden_source_tab = Some(self.tabs[i].id);
                 }
+                self.refresh_selected_grips();
             }
         } else {
             self.close_mtext_editor();

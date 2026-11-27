@@ -68,7 +68,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// The surface list of the Create Points > Surface commands: `surface_list_dialog`.
 /// The windows of the Create Points tools: `points_tool_dialog`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "4a533dbf1e09ba94e0c9de48ab663ec2b734a6dad6b5e944107d088f9b514d90";
+const TOOL_SCHEMA_DIGEST: &str = "63d3ca6c1bae6ddcaa308ab7b7cea618af84555079f5fb9fb4b0c6d1e7f40de5";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -83,6 +83,7 @@ const READ_OPS: &[&str] = &[
     "query",
     "civil_station_offset",
     "civil_surface_stats",
+    "civil_surface_mesh",
     "records",
     "record_schema",
     "capabilities",
@@ -131,6 +132,7 @@ const EXECUTE_OPS: &[&str] = &[
     "grip_drag",
     "click",
     "pointer",
+    "key",
     "set_properties",
     "panel_input",
     "panel_button",
@@ -5482,7 +5484,7 @@ mod tests {
             .unwrap()
         };
         let catalog = call("entity_schema", json!({}));
-        assert_eq!(catalog["types"].as_array().unwrap().len(), 13);
+        assert_eq!(catalog["types"].as_array().unwrap().len(), 15);
         assert!(catalog.get("schema").is_none());
         let circle = call("entity_schema", json!({"type":"Circle"}));
         assert_eq!(

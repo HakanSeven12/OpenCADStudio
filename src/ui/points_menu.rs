@@ -8,9 +8,7 @@ use iced::{Background, Border, Element, Length, Theme};
 
 use crate::app::Message;
 use crate::modules::ModuleEvent;
-
-/// What the ribbon's Create Points button runs: it opens or closes this menu.
-pub const OPEN_COMMAND: &str = "_CIVILPOINTSMENU";
+pub use crate::modules::civil::OPEN_COMMAND;
 
 macro_rules! icon {
     ($name:literal) => {

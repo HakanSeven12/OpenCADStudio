@@ -1506,6 +1506,58 @@ fn edge_extend_reaches_implied_boundary() {
     }
 }
 
+/// A fence EXTEND reaches the first boundary in the way and stops there: the
+/// near side of a rectangle, the near side of a circle, not the next object.
+/// The line is slanted: its new end then lands a rounding error past the
+/// boundary, where a second round set off again for the next object.
+#[test]
+fn fence_extend_stops_at_the_first_boundary() {
+    let fenced_end_y = |boundary: EntityType, lean: f64| -> f64 {
+        let all = vec![
+            xline_at(0.0, -50.0, lean, -5.0, 1),
+            boundary,
+            xline_at(-20.0, 30.0, 20.0, 30.0, 3),
+        ];
+        let fence = [[-1.0, -6.0], [1.5, -6.0]];
+        let replacements = fence_pass(
+            &all,
+            &ModifyEntityIndex::build(&all),
+            &build_geos(&all),
+            &fence,
+            None,
+            true,
+        );
+        let (_, pieces) = replacements
+            .iter()
+            .find(|(handle, _)| *handle == Handle::new(1))
+            .expect("the fenced line is extended");
+        let EntityType::Line(line) = &pieces[0] else {
+            panic!("expected a line, got {:?}", pieces[0]);
+        };
+        line.end.y
+    };
+    let mut rect = LwPolyline::new();
+    rect.common.handle = Handle::new(2);
+    rect.is_closed = true;
+    rect.vertices = [(-3.0, 0.0), (3.0, 0.0), (3.0, 4.0), (-3.0, 4.0)]
+        .into_iter()
+        .map(|(x, y)| LwVertex::from_coords(x, y))
+        .collect();
+    let mut circle = CircleEnt::from_coords(0.0, 4.0, 0.0, 2.0);
+    circle.common.handle = Handle::new(2);
+    for k in 0..40 {
+        let lean = 0.013 + 0.0127 * k as f64;
+        let y = fenced_end_y(EntityType::LwPolyline(rect.clone()), lean);
+        assert!(
+            y.abs() < 1e-6,
+            "rectangle, lean {lean}: near edge y=0, got {y}"
+        );
+        // The near side of the circle is below its centre, the far side above.
+        let y = fenced_end_y(EntityType::Circle(circle.clone()), lean);
+        assert!(y < 4.0, "circle, lean {lean}: near side, got {y}");
+    }
+}
+
 /// #336 repro: two lines forming an X; a fence across one overhanging arm
 /// must trim that arm back to the intersection.
 #[test]

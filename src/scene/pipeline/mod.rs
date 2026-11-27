@@ -3254,7 +3254,9 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             pass.draw(0..c.edge_vertex_count, 0..c.instance_count);
                         }
                     }
-                    pass.set_pipeline(&self.silhouette_black_pipeline);
+                    // Silhouettes take the edge colour, like the edges above;
+                    // black vanished on a dark background.
+                    pass.set_pipeline(&self.silhouette_pipeline);
                     for chunk in &self.silhouette_chunks {
                         pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, chunk.instance_buffer.slice(..));

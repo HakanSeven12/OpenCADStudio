@@ -123,7 +123,7 @@ pub(crate) fn resolve(doc: &mut Document, value: &str) -> Option<Handle> {
         return Some(record.handle);
     }
     let entities = standard_geometry(name)?;
-    crate::app::define_block_raw_doc(doc, name, Vector3::ZERO, &entities);
+    crate::entities::doc_edit::define_block_raw_doc(doc, name, Vector3::ZERO, &entities);
     doc.block_records.get(name).map(|record| record.handle)
 }
 

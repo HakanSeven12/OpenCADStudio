@@ -10,6 +10,9 @@ autotests = false
 # Opt-in release audit helpers; has no effect in the application executable.
 performance-audit = []
 
+[lints]
+workspace = true
+
 [workspace]
 members = [
     "crates/ocs_solid",
@@ -22,6 +25,11 @@ members = [
     "crates/ocs_geom",
     "crates/ocs_constraints",
 ]
+
+# Clippy warns at an `unsafe` block that has no `// SAFETY:` comment, the
+# rule that the health report counts as "unsafe without a SAFETY comment".
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
@@ -46,7 +54,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.16"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "c5074b3f7808cd21ed49179566dbf5b9df32e8e0", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "840feb9e8f881e30d37f70d5627e2d0e5aad4217", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -120,6 +128,8 @@ unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
 pollster = "1"
 lru = { version = "0.19", default-features = false }
+parry2d-f64 = "0.31"
+parry3d-f64 = "0.31"
 
 [dev-dependencies]
 fluent-syntax = "0.12"
@@ -133,6 +143,11 @@ tempfile = "3.27"
 [target.'cfg(target_os = "windows")'.dependencies]
 libloading = "0.9"
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Globalization", "Win32_Security_Authentication_Identity", "Win32_UI_Controls_Dialogs"] }
+
+[target.'cfg(unix)'.dependencies]
+# The local zone offset (`localtime_r`) for field dates and the date field;
+# already in the tree for the plugin runtime.
+libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The X11 CLIPBOARD selection, for the SVG a copy puts there (#2018).
@@ -151,8 +166,8 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 
 # The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
 # layer did not advance the index offset, so every later mesh in that layer
@@ -161,22 +176,25 @@ iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c
 # event loop no longer spins on a stale redraw deadline (#3418); upstream
 # bc9182e6/be79a169 (fix-strict-gles): no arrays in the triangle gradient
 # shader, which strict GLES drivers and WebGL on Mali rejected (#2608, #3587).
-# Drop when iced is bumped past all of them.
+# Fork-only (#3549): only the windows that got input repaint at once, the
+# others once the input pauses, so a second window no longer takes the main
+# window's WM_PAINTs on Windows.
+# Drop the upstream picks when iced is bumped past them.
 [patch."https://github.com/iced-rs/iced.git"]
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -502,6 +520,10 @@ harness = false
 
 [[bench]]
 name = "polygon_overlay_and_clip"
+harness = false
+
+[[bench]]
+name = "spatial_index_and_hit_test"
 harness = false
 
 [[test]]

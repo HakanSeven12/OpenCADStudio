@@ -461,6 +461,8 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .is_some_and(|c| c.is_free_text_step())
+            // MODEMACRO's value, asked for after the bare variable name.
+            || self.pending_setvar.as_deref() == Some("MODEMACRO")
     }
 
     /// What Space / Enter currently mean. Previously every key handler
@@ -555,6 +557,19 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_command_escape(&mut self) -> Task<Message> {
+        // Escape asks a plugin command running beside the window to stop.
+        if self.plugin_running() {
+            self.cancel_plugin_run();
+            return Task::none();
+        }
+        // Escape closes a panel date field's open calendar, and only that.
+        let mut closed_calendar = false;
+        for panel in self.plugin_panels.values_mut() {
+            closed_calendar |= panel.open_calendar.take().is_some();
+        }
+        if closed_calendar || self.escape_closed_a_calendar() {
+            return Task::none();
+        }
         self.table_edit_command_line = false;
         self.tabs[self.active_tab].multiple_cmd = None;
         self.tabs[self.active_tab].measurement.clear();

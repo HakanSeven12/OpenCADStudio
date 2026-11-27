@@ -327,7 +327,7 @@ fn class_stamp_and_display_set_survive_dxf_and_dwg_round_trips() {
                 "{name}: the class stamp must be byte-identical"
             );
             assert!(
-                crate::plugin::entity_labels::native_edit_disabled(
+                crate::entities::owner_stamp::native_edit_disabled(
                     back.get_entity(*handle).expect("flagged entity survives"),
                 ),
                 "{name}: the selectable-custom flag survives"

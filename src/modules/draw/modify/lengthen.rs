@@ -16,6 +16,7 @@ use glam::{DVec3, Vec3};
 use ocs_geom::geom2d::Curve;
 
 use crate::command::{CadCommand, CmdResult};
+pub use crate::command::requests::LenMode;
 
 pub struct LengthenCommand {
     state: LenState,
@@ -396,16 +397,6 @@ impl CadCommand for LengthenCommand {
     }
 }
 // ── Mode enum (also used in CmdResult) ────────────────────────────────────
-
-#[derive(Clone)]
-pub enum LenMode {
-    Delta(f64),
-    Total(f64),
-    Percent(f64),
-    DeltaAngle(f64),
-    TotalAngle(f64),
-    Dynamic(DVec3),
-}
 
 // ── Geometry ───────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 //! The QuickCalc pallet (QUICKCALC / QC): an expression field on the shared
-//! calculator engine (`app::calc`) with its history, number pad, scientific
+//! calculator engine (`calc`) with its history, number pad, scientific
 //! and point functions, a unit converter, variables, and picks that take a
 //! point, distance or angle from the drawing.
 //!
@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::calc::{self, AngleMode, CalcContext, CalcError, SysVars, Value};
+use crate::calc::{self, AngleMode, CalcContext, CalcError, SysVars, Value};
 use crate::modules::draw::inquiry::calc_pick::PickKind;
 
 /// The expression field, so the app can focus it.

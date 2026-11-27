@@ -9,6 +9,7 @@
 
 use std::fmt::Write;
 
+pub use crate::sys::clipboard_svg::{strokes_extent, Stroke};
 use crate::scene::{Scene, WireModel};
 use document::Handle;
 
@@ -22,13 +23,6 @@ fn point(wire: &WireModel, index: usize) -> [f64; 2] {
         f64::from(high[0]) + f64::from(low[0]),
         f64::from(high[1]) + f64::from(low[1]),
     ]
-}
-
-/// One object's outline for the clipboard: its pen-down runs in drawing
-/// units, and its colour as drawn on paper.
-pub struct Stroke {
-    pub runs: Vec<Vec<[f64; 2]>>,
-    pub rgb: [u8; 3],
 }
 
 /// The outlines of `handles`, empty when they draw nothing.
@@ -90,17 +84,6 @@ fn strokes(wires: &[&WireModel]) -> Vec<Stroke> {
         });
     }
     out
-}
-
-/// The bounding box of `strokes`, `None` when they hold no point.
-pub fn strokes_extent(strokes: &[Stroke]) -> Option<([f64; 2], [f64; 2])> {
-    let mut min = [f64::INFINITY; 2];
-    let mut max = [f64::NEG_INFINITY; 2];
-    for [x, y] in strokes.iter().flat_map(|s| s.runs.iter().flatten()) {
-        min = [min[0].min(*x), min[1].min(*y)];
-        max = [max[0].max(*x), max[1].max(*y)];
-    }
-    min[0].is_finite().then_some((min, max))
 }
 
 pub fn strokes_svg(strokes: &[Stroke]) -> Option<String> {

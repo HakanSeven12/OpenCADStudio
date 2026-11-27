@@ -203,7 +203,7 @@ pub const REGION_SIDE: f64 = 4096.0;
 /// Part of a page for display at `dpi`: `region` is min x, min y, max x,
 /// max y in page inches from the lower-left corner of the shown page. The
 /// last region is kept, so other entities' reseeds do not draw it again.
-/// `None` for rotated or encrypted pages (they show the whole-page raster).
+/// `None` for encrypted pages (they show the whole-page raster).
 pub fn rasterize_page_region(
     path: &str,
     page: &str,
@@ -239,9 +239,6 @@ fn region_uncached(path: &str, page: &str, region: [f64; 4], dpi: f32) -> Option
     let cropped = {
         let pdf = Pdf::new(bytes.clone()).ok()?;
         let page = pdf.pages().get(index)?;
-        if !matches!(page.rotation(), Rotation::None) {
-            return None;
-        }
         let id = page.raw().obj_id()?;
         let dict = page.raw().data();
         let close = dict.iter().rposition(|&c| c == b'>')?;
@@ -249,12 +246,18 @@ fn region_uncached(path: &str, page: &str, region: [f64; 4], dpi: f32) -> Option
             return None;
         }
         let crop = page.intersected_crop_box();
-        let r = [
-            crop.x0 + region[0] * 72.0,
-            crop.y0 + region[1] * 72.0,
-            crop.x0 + region[2] * 72.0,
-            crop.y0 + region[3] * 72.0,
-        ];
+        let [x0, y0, x1, y1] = region.map(|v| v * 72.0);
+        // `region` is on the shown page; the boxes are on the unrotated one.
+        // /Rotate turns the page clockwise, and the page keeps it, so the
+        // cropped page is drawn turned the same way.
+        let (w, h) = (crop.x1 - crop.x0, crop.y1 - crop.y0);
+        let [u0, v0, u1, v1] = match page.rotation() {
+            Rotation::None => [x0, y0, x1, y1],
+            Rotation::Horizontal => [w - y1, x0, w - y0, x1],
+            Rotation::Flipped => [w - x1, h - y1, w - x0, h - y0],
+            Rotation::FlippedHorizontal => [y0, h - x1, y1, h - x0],
+        };
+        let r = [crop.x0 + u0, crop.y0 + v0, crop.x0 + u1, crop.y0 + v1];
         if !r.iter().all(|v| v.is_finite()) || r[2] <= r[0] || r[3] <= r[1] {
             return None;
         }
@@ -948,6 +951,53 @@ mod tests {
             Arc::ptr_eq(&recent, &refetched),
             "the most recent raster stays cached while the sweep fits the budget"
         );
+    }
+
+    /// A zoomed-in region of a /Rotate page is the same part of the page
+    /// as on the whole-page raster (#2934: rotated pages kept the blurry
+    /// whole-page raster at any zoom).
+    #[test]
+    fn a_region_of_a_rotated_page_matches_the_whole_page_raster() {
+        for rotate in [0, 90, 180, 270] {
+            // 2 x 1 inch unrotated page, a red square in its lower-left inch.
+            let objects = [
+                "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+                format!(
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 144 72] /Rotate {rotate} /Contents 4 0 R >>"
+                ),
+                "<< /Length 23 >>\nstream\n1 0 0 rg 0 0 72 72 re f\nendstream".to_string(),
+            ];
+            let mut pdf = b"%PDF-1.4\n".to_vec();
+            let mut offsets = Vec::new();
+            for (i, body) in objects.iter().enumerate() {
+                offsets.push(pdf.len());
+                pdf.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+            }
+            let xref = pdf.len();
+            pdf.extend_from_slice(b"xref\n0 5\n0000000000 65535 f\r\n");
+            for o in offsets {
+                pdf.extend_from_slice(format!("{o:010} 00000 n\r\n").as_bytes());
+            }
+            pdf.extend_from_slice(
+                format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+            );
+            let path = format!("memory://rotated-region-{rotate}.pdf");
+            register_source(&path, Arc::new(pdf.clone()));
+            let whole = raster_pdf_page(&Pdf::new(Arc::new(pdf)).unwrap(), 0, 72.0, true).unwrap();
+            // The shown page's left half, inches from its lower-left corner.
+            let (w, h) = (whole.width as usize, whole.height as usize);
+            let half = [0.0, 0.0, w as f64 / 144.0, h as f64 / 72.0];
+            let part = region_uncached(&path, "1", half, 72.0).expect("rotated region");
+            assert_eq!((part.width as usize, part.height as usize), (w / 2, h), "rotate {rotate}");
+            for y in 0..h {
+                for x in 0..w / 2 {
+                    let a = part.pixels[(y * (w / 2) + x) * 4 + 3];
+                    let b = whole.pixels[(y * w + x) * 4 + 3];
+                    assert!(a.abs_diff(b) < 16, "rotate {rotate} pixel {x},{y}: {a} vs {b}");
+                }
+            }
+        }
     }
 
     #[test]

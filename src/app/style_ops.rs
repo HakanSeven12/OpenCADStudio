@@ -18,13 +18,13 @@
 //! style added without a handle (dropped on DWG save, issue #67).
 
 use super::OpenCADStudio;
-use document::objects::{Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle};
+use document::objects::{MLineStyle, MultiLeaderStyle, ObjectType, TableStyle};
 use document::tables::{DimStyle, TextStyle};
 use document::types::Handle;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
-
-const MLEADERSTYLE_DICT_NAME: &str = "ACAD_MLEADERSTYLE";
+pub(crate) use crate::scene::clipboard::kernel::sync_mleaderstyle_dictionary;
+pub(crate) use crate::scene::clipboard::kernel::MLEADERSTYLE_DICT_NAME;
 
 fn mleaderstyle_dict_handle(doc: &document::Document) -> Option<Handle> {
     let root_h = doc.header.named_objects_dict_handle;
@@ -56,75 +56,6 @@ fn import_mleaderstyle_names_from_dictionary(doc: &mut document::Document) {
             style.name = name;
             style.owner_handle = dict_h;
         }
-    }
-}
-
-pub(crate) fn sync_mleaderstyle_dictionary(doc: &mut document::Document) {
-    let root_h = crate::scene::annotative::root_named_dict_handle(doc);
-
-    let existing = match doc.objects.get(&root_h) {
-        Some(ObjectType::Dictionary(root)) => root
-            .entries
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(MLEADERSTYLE_DICT_NAME))
-            .map(|(_, handle)| *handle),
-        _ => None,
-    };
-
-    let dict_h = match existing
-        .filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_))))
-    {
-        Some(handle) => handle,
-        None => {
-            let handle = doc.allocate_handle();
-
-            let mut dict = Dictionary::new();
-            dict.handle = handle;
-            dict.owner = root_h;
-
-            doc.objects.insert(handle, ObjectType::Dictionary(dict));
-
-            handle
-        }
-    };
-
-    if let Some(ObjectType::Dictionary(root)) = doc.objects.get_mut(&root_h) {
-        // An existing entry keeps its place: the order is saved with the
-        // drawing, and an untouched Apply must not change it.
-        match root
-            .entries
-            .iter_mut()
-            .find(|(name, _)| name.eq_ignore_ascii_case(MLEADERSTYLE_DICT_NAME))
-        {
-            Some(entry) => entry.1 = dict_h,
-            None => root.add_entry(MLEADERSTYLE_DICT_NAME, dict_h),
-        }
-    }
-
-    let mut entries: Vec<(String, Handle)> = doc
-        .objects
-        .iter()
-        .filter_map(|(&handle, object)| match object {
-            ObjectType::MultiLeaderStyle(style) => Some((style.name.clone(), handle)),
-            _ => None,
-        })
-        .collect();
-
-    entries.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-
-    for (_, handle) in &entries {
-        if let Some(ObjectType::MultiLeaderStyle(style)) = doc.objects.get_mut(handle) {
-            style.owner_handle = dict_h;
-        }
-    }
-
-    if let Some(ObjectType::Dictionary(dict)) = doc.objects.get_mut(&dict_h) {
-        dict.owner = root_h;
-        dict.entries = entries;
-
-        // MLEADERSTYLE uses soft-owner entries (group 350).
-        dict.hard_owner = false;
-        dict.hard_owner_entries.clear();
     }
 }
 

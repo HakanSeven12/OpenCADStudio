@@ -2,7 +2,7 @@
 //! Points and Replace Legacy Point Blocks: what each converts and how a
 //! point number already in use is settled.
 
-use iced::widget::{Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input};
+use iced::widget::{Space, button, canvas, checkbox, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
@@ -21,6 +21,8 @@ pub struct CorridorPointsWindow {
     /// The stations each baseline gives each code a point at.
     pub stations: Vec<Vec<Vec<f64>>>,
     pub baseline: usize,
+    /// The drawing's unit mark after a station (`'` or `m`).
+    pub mark: &'static str,
     /// The user specified range is on (otherwise the entire corridor).
     pub user_range: bool,
     pub start: String,
@@ -47,8 +49,12 @@ pub struct PointBlocksWindow {
     pub window: Option<([f64; 2], [f64; 2])>,
     /// The current display when the command started: two corners.
     pub display: Option<([f64; 2], [f64; 2])>,
-    /// Point group names and whether each is selected.
+    /// Point group names in the drawing's order and whether each is
+    /// selected.
     pub groups: Vec<(String, bool)>,
+    /// The group picker while it is open: names, descriptions, the rows
+    /// selected in it and the groups' records, in the order it shows.
+    pub picker: Option<Vec<(String, String, bool, u64)>>,
     /// The drawing's blocks that hold a POINT attribute definition.
     pub blocks: Vec<String>,
     pub use_existing: bool,
@@ -57,6 +63,49 @@ pub struct PointBlocksWindow {
     pub layers: Vec<String>,
     pub layer: String,
     pub error: Option<String>,
+}
+
+/// Where the group picker's arrows move the selected rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Move {
+    Top,
+    Up,
+    Down,
+    Bottom,
+}
+
+impl Move {
+    /// The rows of `selected` moved: to the top or the bottom keeping their
+    /// order, or one row past the next row not selected.
+    pub fn apply<T>(self, rows: &mut Vec<T>, selected: impl Fn(&T) -> bool) {
+        match self {
+            Move::Top | Move::Bottom => {
+                let (mut picked, rest): (Vec<T>, Vec<T>) = rows.drain(..).partition(|r| selected(r));
+                if self == Move::Top {
+                    picked.extend(rest);
+                    *rows = picked;
+                } else {
+                    let mut all = rest;
+                    all.extend(picked);
+                    *rows = all;
+                }
+            }
+            Move::Up => {
+                for k in 1..rows.len() {
+                    if selected(&rows[k]) && !selected(&rows[k - 1]) {
+                        rows.swap(k, k - 1);
+                    }
+                }
+            }
+            Move::Down => {
+                for k in (0..rows.len().saturating_sub(1)).rev() {
+                    if selected(&rows[k]) && !selected(&rows[k + 1]) {
+                        rows.swap(k, k + 1);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// How a point number already in use is settled (the reference's order).
@@ -106,11 +155,21 @@ pub enum PointToolMsg {
     PickBaseline,
     /// Pick the start (false) or end (true) station in the drawing.
     PickStation(bool),
+    /// The range bar's start (false) or end (true) handle let go at a station.
+    RangeDrag(bool, f64),
     CorridorOk,
     // Create Blocks from COGO Points
     Spatial(Spatial),
     PickWindow,
     BlockGroup(usize, bool),
+    /// The group picker: open it, a row clicked on or off, the selected
+    /// rows moved, Apply, OK, Cancel.
+    PickGroups,
+    PickerRow(usize, bool),
+    PickerMove(Move),
+    PickerApply,
+    PickerOk,
+    PickerCancel,
     UseExisting(bool),
     Existing(String),
     NewName(String),
@@ -185,13 +244,35 @@ fn footer<'a>(help: &'static str, ok: Message) -> Element<'a, Message> {
 }
 
 static PICK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
+static UP_ICON: &[u8] = include_bytes!("../../../assets/icons/ui/up.svg");
+static TOP_ICON: &[u8] = include_bytes!("../../../assets/icons/ui/to_top.svg");
 
-/// A station as typed: `0+60.00` or `60`.
+/// An arrow button of the group picker (`turned`: pointing down).
+fn arrow<'a>(icon: &'static [u8], turned: bool, m: Option<Message>) -> Element<'a, Message> {
+    let enabled = m.is_some();
+    let svg = iced::widget::svg(crate::ui::icons::themed_handle(icon))
+        .width(13)
+        .height(13)
+        .rotation(iced::Radians(if turned { std::f32::consts::PI } else { 0.0 }))
+        .style(move |theme: &iced::Theme, _| iced::widget::svg::Style {
+            color: Some(if enabled { theme.palette().background.base.text } else { theme.palette().background.base.text.scale_alpha(0.35) }),
+        });
+    button(container(svg).center(Length::Fixed(18.0))).on_press_maybe(m).style(button_style(false)).padding(2).into()
+}
+
+/// A station as typed: `0+60.00`, `0+60.00'`, `0+60.00m` or `60`.
 pub fn parse_station(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let s = s.strip_suffix(|c| c == '\'' || c == 'm').unwrap_or(s);
     s.trim().replace('+', "").parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 impl CorridorPointsWindow {
+    /// A station as the window writes it: with the drawing's unit mark.
+    pub fn station_text(&self, s: f64) -> String {
+        format!("{}{}", crate::modules::civil::point_alignment::format_station(s), self.mark)
+    }
+
     /// The station range the points are taken from: the typed one, or
     /// none when the whole corridor is taken (or a station does not read).
     pub fn range(&self) -> Option<(f64, f64)> {
@@ -200,6 +281,15 @@ impl CorridorPointsWindow {
         }
         let (a, b) = (parse_station(&self.start)?, parse_station(&self.end)?);
         Some((a.min(b), a.max(b)))
+    }
+
+    /// The station a range bar handle (`end` or start) dragged to `t` along
+    /// the bar (0 its start, 1 its end) is let go at, as the bar drops it;
+    /// none when the range is not the user's (the bar has no handles).
+    pub fn drag_handle(&self, end: bool, t: f64) -> Option<f64> {
+        let (lo, hi) = self.baselines.get(self.baseline).map_or((0.0, 0.0), |b| (b.1, b.2));
+        let bar = RangeBar { lo, hi, taken: self.range().unwrap_or((lo, hi)), enabled: self.user_range };
+        bar.enabled.then(|| bar.dropped(end, bar.station_along(t)))
     }
 
     /// The points code `c` gives: the user range's baseline within the
@@ -241,33 +331,123 @@ fn step<'a>(n: u8, title: String, count: Option<String>, content: impl Into<Elem
     container(column![head, content.into()].spacing(10)).padding([10, 12]).width(Fill).style(card_style).into()
 }
 
-/// The baseline's station range as a bar, the stations taken filled.
-fn range_bar<'a>(lo: f64, hi: f64, taken: (f64, f64)) -> Element<'a, Message> {
-    let span = (hi - lo).max(1e-9);
-    let part = |v: f64| ((v.clamp(lo, hi) - lo) / span * 1000.0).round() as u16;
-    let (a, b) = (part(taken.0), part(taken.1));
-    let track = |fill: bool, w: u16| -> Element<'a, Message> {
-        container(Space::new().height(Length::Fixed(6.0)))
-            .width(Length::FillPortion(w.max(1)))
-            .style(move |t: &iced::Theme| container::Style {
-                background: Some(iced::Background::Color(if fill { t.palette().primary.base.color } else { t.palette().background.base.color })),
-                border: iced::Border { radius: 3.0.into(), ..Default::default() },
-                ..Default::default()
-            })
-            .into()
-    };
-    let mut bar = row![].align_y(iced::Center);
-    if a > 0 {
-        bar = bar.push(track(false, a));
+/// The baseline's station range as a bar, the stations taken filled; with a
+/// specified range its start and end handles drag along it.
+struct RangeBar {
+    lo: f64,
+    hi: f64,
+    taken: (f64, f64),
+    enabled: bool,
+}
+
+/// The handle being dragged (false start, true end) and where it is.
+#[derive(Default)]
+struct RangeDragState {
+    drag: Option<(bool, f64)>,
+}
+
+const HANDLE: f32 = 6.0;
+
+impl RangeBar {
+    fn x_of(&self, s: f64, width: f32) -> f32 {
+        let span = (self.hi - self.lo).max(1e-9);
+        HANDLE + ((s.clamp(self.lo, self.hi) - self.lo) / span) as f32 * (width - 2.0 * HANDLE)
     }
-    bar = bar.push(track(true, b.saturating_sub(a)));
-    if b < 1000 {
-        bar = bar.push(track(false, 1000 - b));
+
+    fn station_at(&self, x: f32, width: f32) -> f64 {
+        self.station_along(f64::from((x - HANDLE) / (width - 2.0 * HANDLE).max(1.0)))
     }
+
+    /// The station `t` (0 at the start, 1 at the end) along the bar, to 0.01.
+    fn station_along(&self, t: f64) -> f64 {
+        ((self.lo + t.clamp(0.0, 1.0) * (self.hi - self.lo)) * 100.0).round() / 100.0
+    }
+
+    /// Where a handle let go at `s` lands: it does not pass the other.
+    fn dropped(&self, end: bool, s: f64) -> f64 {
+        if end { s.max(self.taken.0) } else { s.min(self.taken.1) }
+    }
+
+    /// The taken range with a dragged handle where it is.
+    fn shown(&self, state: &RangeDragState) -> (f64, f64) {
+        match state.drag {
+            Some((false, s)) => (s, self.taken.1),
+            Some((true, s)) => (self.taken.0, s),
+            None => self.taken,
+        }
+    }
+}
+
+impl canvas::Program<Message> for RangeBar {
+    type State = RangeDragState;
+
+    fn update(&self, state: &mut RangeDragState, event: &iced::Event, bounds: iced::Rectangle, cursor: iced::mouse::Cursor) -> Option<canvas::Action<Message>> {
+        use iced::mouse::{Button, Event};
+        if !self.enabled {
+            state.drag = None;
+            return None;
+        }
+        let x = |p: iced::Point| p.x - bounds.x;
+        match event {
+            iced::Event::Mouse(Event::ButtonPressed(Button::Left)) => {
+                let p = cursor.position_over(bounds)?;
+                // The handle nearer the press; an end handle still on its
+                // start takes a press to the right of it.
+                let (a, b) = (self.x_of(self.taken.0, bounds.width), self.x_of(self.taken.1, bounds.width));
+                let end = (x(p) - b).abs() < (x(p) - a).abs() || (a == b && x(p) > a);
+                state.drag = Some((end, self.station_at(x(p), bounds.width)));
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::Mouse(Event::CursorMoved { position }) => {
+                let (end, _) = state.drag?;
+                state.drag = Some((end, self.dropped(end, self.station_at(x(*position), bounds.width))));
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::Mouse(Event::ButtonReleased(Button::Left)) => {
+                let (end, s) = state.drag.take()?;
+                Some(canvas::Action::publish(msg(PointToolMsg::RangeDrag(end, self.dropped(end, s)))).and_capture())
+            }
+            _ => None,
+        }
+    }
+
+    fn mouse_interaction(&self, state: &RangeDragState, bounds: iced::Rectangle, cursor: iced::mouse::Cursor) -> iced::mouse::Interaction {
+        if state.drag.is_some() {
+            iced::mouse::Interaction::Grabbing
+        } else if self.enabled && cursor.is_over(bounds) {
+            iced::mouse::Interaction::Grab
+        } else {
+            Default::default()
+        }
+    }
+
+    fn draw(&self, state: &RangeDragState, renderer: &iced::Renderer, theme: &iced::Theme, bounds: iced::Rectangle, _cursor: iced::mouse::Cursor) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let (w, y) = (bounds.width, bounds.height / 2.0);
+        let palette = theme.palette();
+        let bar = |frame: &mut canvas::Frame, a: f32, b: f32, color: iced::Color| {
+            frame.fill(&canvas::Path::rounded_rectangle(iced::Point::new(a, y - 3.0), iced::Size::new((b - a).max(0.0), 6.0), 3.0.into()), color);
+        };
+        bar(&mut frame, HANDLE, w - HANDLE, palette.background.base.color);
+        let (s, e) = self.shown(state);
+        let (a, b) = (self.x_of(s, w), self.x_of(e, w));
+        bar(&mut frame, a, b, palette.primary.base.color);
+        if self.enabled {
+            for x in [a, b] {
+                frame.fill(&canvas::Path::circle(iced::Point::new(x, y), HANDLE), palette.primary.base.color);
+                frame.fill(&canvas::Path::circle(iced::Point::new(x, y), HANDLE - 2.0), palette.background.base.text);
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+fn range_bar<'a>(state: &CorridorPointsWindow, lo: f64, hi: f64, taken: (f64, f64), enabled: bool) -> Element<'a, Message> {
+    let bar = canvas(RangeBar { lo, hi, taken, enabled }).width(Fill).height(Length::Fixed(2.0 * HANDLE + 2.0));
     let stations = row![
-        small(crate::modules::civil::point_alignment::format_station(lo)).style(muted_style),
+        small(state.station_text(lo)).style(muted_style),
         Space::new().width(Fill),
-        small(crate::modules::civil::point_alignment::format_station(hi)).style(muted_style),
+        small(state.station_text(hi)).style(muted_style),
     ];
     column![bar, stations].spacing(4).into()
 }
@@ -309,7 +489,7 @@ pub fn view_corridor<'a>(state: &'a CorridorPointsWindow, sizing: crate::ui::mod
             ]
             .spacing(8)
             .align_y(iced::Center),
-            range_bar(lo, hi, taken),
+            range_bar(state, lo, hi, taken, on),
             row![
                 small(t!("Start station")).style(muted_style),
                 container(field(&state.start, on, |s| msg(PointToolMsg::Start(s)))).width(Length::Fixed(130.0)),
@@ -394,10 +574,61 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         .spacing(6)
         .align_y(iced::Center),
     );
-    let mut groups = column![].spacing(4);
-    for (k, (name, on)) in state.groups.iter().enumerate() {
-        groups = groups.push(checkbox(*on).label(name.clone()).size(14).text_size(11).on_toggle(move |v| msg(PointToolMsg::BlockGroup(k, v))));
-    }
+    let groups: Element<'a, Message> = match &state.picker {
+        // The picker: the drawing's groups in their order, several rows
+        // selectable.
+        Some(rows) => {
+            let mut list = column![].spacing(2);
+            for (k, (name, description, on, _)) in rows.iter().enumerate() {
+                list = list.push(
+                    button(row![small(name.clone()).width(Length::Fixed(200.0)), small(description.clone()).style(muted_style)].spacing(8))
+                        .on_press(msg(PointToolMsg::PickerRow(k, !on)))
+                        .style(button_style(*on))
+                        .padding([3, 8])
+                        .width(Fill),
+                );
+            }
+            // The list and its buttons take the room of the selected list.
+            let any = rows.iter().any(|r| r.2);
+            let mv = |m: Move| any.then(|| msg(PointToolMsg::PickerMove(m)));
+            let arrows = column![
+                arrow(TOP_ICON, false, mv(Move::Top)),
+                arrow(UP_ICON, false, mv(Move::Up)),
+                arrow(UP_ICON, true, mv(Move::Down)),
+                arrow(TOP_ICON, true, mv(Move::Bottom)),
+            ]
+            .spacing(1);
+            column![
+                row![scrollable(list).height(Length::Fixed(86.0)), arrows].spacing(6),
+                small(t!("Click rows to select the point groups; the arrows set their draw order.")).style(muted_style),
+                row![
+                    Space::new().width(Fill),
+                    button(small(t!("Cancel"))).on_press(msg(PointToolMsg::PickerCancel)).style(button_style(false)).padding([4, 10]),
+                    button(small(t!("Apply"))).on_press(msg(PointToolMsg::PickerApply)).style(button_style(false)).padding([4, 10]),
+                    button(small(t!("OK"))).on_press(msg(PointToolMsg::PickerOk)).style(button_style(true)).padding([4, 10]),
+                ]
+                .spacing(6)
+                .align_y(iced::Center),
+            ]
+            .spacing(6)
+            .into()
+        }
+        // The groups selected, read only, by name.
+        None => {
+            let mut picked: Vec<&String> = state.groups.iter().filter(|g| g.1).map(|g| &g.0).collect();
+            picked.sort_by_key(|n| n.to_lowercase());
+            let mut list = column![].spacing(2);
+            for name in picked {
+                list = list.push(small(name.clone()));
+            }
+            row![
+                container(scrollable(list)).padding(6).height(Length::Fixed(120.0)).width(Fill).style(crate::ui::window::pdf_dialogs::well_style),
+                pick_button(Some(msg(PointToolMsg::PickGroups))),
+            ]
+            .spacing(8)
+            .into()
+        }
+    };
     let output = card(
         t!("Block output").into_owned(),
         column![
@@ -428,7 +659,7 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         ]
         .spacing(8),
     );
-    let mut col = column![spatial, card(t!("Selected point groups:").into_owned(), scrollable(groups).height(Length::Fixed(120.0))), output].spacing(10);
+    let mut col = column![spatial, card(t!("Selected point groups:").into_owned(), groups), output].spacing(10);
     if let Some(band) = error_band(&state.error) {
         col = col.push(band);
     }

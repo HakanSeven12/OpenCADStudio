@@ -15,6 +15,7 @@ use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
+pub(crate) use crate::entities::table::{table_cell_at, TableCellHit};
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/table.svg"));
 
@@ -103,6 +104,21 @@ pub fn row_heights(
         data_rows,
         lines,
     )
+}
+
+/// Rows of `table` that are one merged cell across every column.
+fn spanning_rows(table: &document::entities::Table) -> Vec<usize> {
+    let columns = table.columns.len();
+    if columns < 2 {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    for range in &table.merged_ranges {
+        if range.left_col == 0 && range.right_col + 1 >= columns {
+            rows.extend(range.top_row..=range.bottom_row);
+        }
+    }
+    rows
 }
 
 /// Row heights of a table whose first, second and other rows take the
@@ -768,14 +784,30 @@ impl TableCommand {
     }
 
     fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
-        let (point, widths, heights) = self.layout(first, second);
-        let point = self.plane.to_world(point);
-        self.grid_wire(point, &widths, &heights, self.title_header().0)
+        // The ghost is the table the click would place, so it cannot differ
+        // from the result in columns, rows or merged rows.
+        let EntityType::Table(table) = self.build_table(first, second) else {
+            return WireModel::default();
+        };
+        let point = DVec3::new(
+            table.insertion_point.x,
+            table.insertion_point.y,
+            table.insertion_point.z,
+        );
+        let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
+        let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
+        self.grid_wire(point, &widths, &heights, &spanning_rows(&table))
     }
 
-    /// The outline grid of a table at `point` (world); with `title` the
-    /// first row is one cell across the table, as the placed title is.
-    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64], title: bool) -> WireModel {
+    /// The outline grid of a table at `point` (world); the `merged` rows are
+    /// one cell across the table, so no column line crosses them.
+    fn grid_wire(
+        &self,
+        point: DVec3,
+        widths: &[f64],
+        heights: &[f64],
+        merged: &[usize],
+    ) -> WireModel {
         let point = self.plane.to_local(point);
         let width: f64 = widths.iter().sum();
         let height: f64 = heights.iter().sum();
@@ -786,11 +818,6 @@ impl TableCommand {
                 .to_array()
         };
         let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 3);
-        let title_height = if title {
-            heights.first().copied().unwrap_or(0.0)
-        } else {
-            0.0
-        };
         let mut x = 0.0;
         for (index, column) in std::iter::once(0.0)
             .chain(widths.iter().copied())
@@ -798,9 +825,32 @@ impl TableCommand {
         {
             x += column;
             let inner = index > 0 && index < widths.len();
-            points.push(world(x, if inner { -title_height } else { 0.0 }));
-            points.push(world(x, -height));
-            points.push([f32::NAN; 3]); // each line on its own
+            if !inner {
+                points.push(world(x, 0.0));
+                points.push(world(x, -height));
+                points.push([f32::NAN; 3]); // each line on its own
+                continue;
+            }
+            // An inner line runs through the rows that are not merged.
+            let mut y = 0.0;
+            let mut start: Option<f64> = None;
+            for (row, row_height) in heights.iter().enumerate() {
+                if merged.contains(&row) {
+                    if let Some(from) = start.take() {
+                        points.push(world(x, from));
+                        points.push(world(x, y));
+                        points.push([f32::NAN; 3]);
+                    }
+                } else if start.is_none() {
+                    start = Some(y);
+                }
+                y -= row_height;
+            }
+            if let Some(from) = start {
+                points.push(world(x, from));
+                points.push(world(x, y));
+                points.push([f32::NAN; 3]);
+            }
         }
         let mut y = 0.0;
         for row in std::iter::once(0.0).chain(heights.iter().copied()) {
@@ -1227,14 +1277,7 @@ impl CadCommand for TableCommand {
                 };
                 let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
                 let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
-                let title = widths.len() > 1
-                    && table.merged_ranges.iter().any(|r| {
-                        r.top_row == 0
-                            && r.bottom_row == 0
-                            && r.left_col == 0
-                            && r.right_col + 1 >= widths.len()
-                    });
-                Some(self.grid_wire(point, &widths, &heights, title))
+                Some(self.grid_wire(point, &widths, &heights, &spanning_rows(&table)))
             }
             Step::Insertion => Some(self.preview_grid(point, None)),
             Step::SecondCorner(first) => Some(self.preview_grid(first, Some(point))),
@@ -1288,15 +1331,6 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["TABLE", "-TABLE"]
 });
 
-/// A table cell resolved from a pick: grid coordinates plus whether its
-/// content is locked against editing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TableCellHit {
-    pub row: usize,
-    pub column: usize,
-    pub locked: bool,
-}
-
 /// Outcome of launching the table cell editor for a pick (double-click or
 /// TABLEDIT). Distinguishes "cell found but locked" — the caller should
 /// stop, the indicator is armed — from "nothing to edit" — the caller may
@@ -1317,115 +1351,6 @@ impl TableCellHit {
     pub fn index(&self, table: &document::entities::Table) -> usize {
         self.row * table.column_count() + self.column
     }
-}
-
-/// Resolve the table cell under `click_world`. Shared by the double-click
-/// shortcut and the TABLEDIT command so both agree on grid coordinates,
-/// flow direction and locked-cell detection. `table_style` is the style
-/// object the table references, when the caller has the document at hand;
-/// the table's embedded base style covers the common fallbacks.
-pub(crate) fn table_cell_at(
-    table: &document::entities::Table,
-    table_style: Option<&document::objects::TableStyle>,
-    click_world: DVec3,
-) -> Option<TableCellHit> {
-    let horizontal = glam::DVec3::new(
-        table.horizontal_direction.x,
-        table.horizontal_direction.y,
-        table.horizontal_direction.z,
-    )
-    .normalize_or(glam::DVec3::X);
-    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
-        .normalize_or(glam::DVec3::Z);
-    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
-    if crate::entities::table::resolved_flow_up(table, table_style) {
-        down = -down;
-    }
-    let origin = glam::DVec3::new(
-        table.insertion_point.x,
-        table.insertion_point.y,
-        table.insertion_point.z,
-    );
-    let relative = click_world - origin;
-    let x = relative.dot(horizontal);
-    let y = relative.dot(down);
-    if x < 0.0 || y < 0.0 {
-        return None;
-    }
-    let column = table
-        .columns
-        .iter()
-        .scan(0.0, |offset, column| {
-            *offset += column.width;
-            Some(*offset)
-        })
-        .position(|end| x <= end)?;
-    let row = table
-        .rows
-        .iter()
-        .scan(0.0, |offset, row| {
-            *offset += row.height;
-            Some(*offset)
-        })
-        .position(|end| y <= end)?;
-    // A merged cell is one cell: a pick anywhere inside its span edits the
-    // owner, never a hidden covered cell underneath it (the in-place editor
-    // already widens, and a scripted TABLEDIT must reach the same cell).
-    let (row, column, _, _) =
-        crate::entities::table::widen_to_merged(table, (row, column, row, column));
-    Some(TableCellHit {
-        row,
-        column,
-        locked: cell_locked(table, row, column),
-    })
-}
-
-/// The cell (its merged owner) whose inside holds `point`, at least `margin`
-/// away from the cell's edges: a pick near a grid line takes the table, one
-/// inside a cell takes the cell.
-pub(crate) fn table_cell_inside(
-    table: &document::entities::Table,
-    table_style: Option<&document::objects::TableStyle>,
-    point: DVec3,
-    margin: f64,
-) -> Option<(usize, usize)> {
-    let hit = table_cell_at(table, table_style, point)?;
-    let (r0, c0, r1, c1) =
-        crate::entities::table::widen_to_merged(table, (hit.row, hit.column, hit.row, hit.column));
-    let horizontal = glam::DVec3::new(
-        table.horizontal_direction.x,
-        table.horizontal_direction.y,
-        table.horizontal_direction.z,
-    )
-    .normalize_or(glam::DVec3::X);
-    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
-        .normalize_or(glam::DVec3::Z);
-    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
-    if crate::entities::table::resolved_flow_up(table, table_style) {
-        down = -down;
-    }
-    let origin = glam::DVec3::new(
-        table.insertion_point.x,
-        table.insertion_point.y,
-        table.insertion_point.z,
-    );
-    let x = (point - origin).dot(horizontal);
-    let y = (point - origin).dot(down);
-    let left: f64 = table.columns[..c0].iter().map(|c| c.width).sum();
-    let right: f64 = left + table.columns[c0..=c1].iter().map(|c| c.width).sum::<f64>();
-    let top: f64 = table.rows[..r0].iter().map(|r| r.height).sum();
-    let bottom: f64 = top + table.rows[r0..=r1].iter().map(|r| r.height).sum::<f64>();
-    (x > left + margin && x < right - margin && y > top + margin && y < bottom - margin)
-        .then_some((r0, c0))
-}
-
-/// True when the cell's content may not be edited (locked or read-only).
-pub(crate) fn cell_locked(table: &document::entities::Table, row: usize, column: usize) -> bool {
-    use document::entities::table::CellStateFlags;
-    table.cell(row, column).is_some_and(|cell| {
-        cell.state
-            .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
-    })
 }
 
 /// TABLEDIT — edit a table cell's text by picking it. The pick only
@@ -1631,6 +1556,8 @@ mod tabledit_tests {
     use document::entities::Table;
     use document::types::Vector3;
     use glam::DVec3;
+    use crate::scene::model::wire_model::WireModel;
+    use document::EntityType;
 
     fn table_2x2() -> Table {
         Table::new(Vector3::new(0.0, 0.0, 0.0), 2, 2)
@@ -1744,6 +1671,47 @@ mod tabledit_tests {
                 );
             }
         }
+    }
+
+    fn ghost_extents(wire: &WireModel) -> (f32, f32, usize) {
+        let pts: Vec<_> = wire.points.iter().filter(|p| p[0].is_finite()).collect();
+        let w = pts.iter().map(|p| p[0]).fold(f32::MIN, f32::max)
+            - pts.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+        let h = pts.iter().map(|p| p[1]).fold(f32::MIN, f32::max)
+            - pts.iter().map(|p| p[1]).fold(f32::MAX, f32::min);
+        let mut xs: Vec<f32> = wire
+            .points
+            .chunks(3)
+            .filter(|l| l[0][0] == l[1][0])
+            .map(|l| l[0][0])
+            .collect();
+        xs.sort_by(|a, b| a.total_cmp(b));
+        xs.dedup();
+        let columns = xs.len() - 1;
+        (w, h, columns)
+    }
+
+    #[test]
+    fn ghost_matches_the_placed_table() {
+        let names = ["Data", "Data", "Data"];
+        let mut cmd = TableCommand::configured(None, Some(5), Some(1), 2.5, 1, false, true, names);
+        let wire = cmd.preview_grid(DVec3::ZERO, None);
+        let (w, h, columns) = ghost_extents(&wire);
+        let CmdResult::CommitAndExit(EntityType::Table(t)) = cmd.on_point(DVec3::ZERO) else {
+            panic!("expected a table");
+        };
+        let tw: f64 = t.columns.iter().map(|c| c.width).sum();
+        let th: f64 = t.rows.iter().map(|r| r.height).sum();
+        assert_eq!(columns, 5);
+        assert_eq!(t.column_count(), 5);
+        assert!((w as f64 - tw).abs() < 1e-4 && (h as f64 - th).abs() < 1e-4);
+        // One horizontal line per row boundary.
+        let horizontals = wire
+            .points
+            .chunks(3)
+            .filter(|l| l[0][1] == l[1][1])
+            .count();
+        assert_eq!(horizontals, t.rows.len() + 1);
     }
 
     #[test]

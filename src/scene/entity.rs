@@ -7,7 +7,7 @@ pub struct CreateBlockOptions {
     pub base_point: glam::DVec3,
     pub world_to_block: document::types::Transform,
     pub block_to_world: document::types::Transform,
-    pub mode: crate::ui::window::block_definition::BlockObjectMode,
+    pub mode: BlockObjectMode,
     pub annotative: bool,
     pub match_orientation: bool,
     pub scale_uniformly: bool,
@@ -451,12 +451,7 @@ impl Scene {
     /// by the block editor, by a definition replace, by a pasted definition's
     /// twin — rather than left to whichever command set it first.
     pub(crate) fn sync_attribute_flag(document: &mut document::Document, name: &str) {
-        let holds_definitions = document
-            .entities_in_block(name)
-            .any(|entity| matches!(entity, EntityType::AttributeDefinition(_)));
-        if let Some(record) = document.block_records.get_mut(name) {
-            record.flags.has_attributes = holds_definitions;
-        }
+        crate::entities::doc_edit::sync_attribute_flag(document, name);
     }
 
     fn add_entity_internal(&mut self, mut entity: EntityType, bump: bool) -> Handle {
@@ -1283,7 +1278,7 @@ impl Scene {
             base_point: glam::DVec3::ZERO,
             world_to_block: *world_to_block,
             block_to_world: *block_to_world,
-            mode: crate::ui::window::block_definition::BlockObjectMode::Convert,
+            mode: BlockObjectMode::Convert,
             annotative: false,
             match_orientation: false,
             scale_uniformly: false,
@@ -1412,7 +1407,7 @@ impl Scene {
         let local = EntityTransform::Affine(options.world_to_block);
         for (old_handle, mut entity) in source_entities {
             view::dispatch::apply_transform(&mut entity, &local);
-            entity = crate::modules::draw::modify::explode::normalize_entity_for_block(entity);
+            entity = crate::scene::explode::normalize_entity_for_block(entity);
             if matches!(&entity, EntityType::Table(_)) {
                 Self::reset_clone_subhandles(&mut self.document, &mut entity);
             }
@@ -1429,7 +1424,7 @@ impl Scene {
             // An image draws from its cached model, not the entity (#2149).
             self.reseed_derived_caches(handle);
             member_changes.push((handle, ChangeKind::Added));
-            if options.mode != crate::ui::window::block_definition::BlockObjectMode::Retain {
+            if options.mode != BlockObjectMode::Retain {
                 self.erase_entities(&[old_handle]);
             }
         }
@@ -1454,7 +1449,7 @@ impl Scene {
 
         let mut insert_handle = Handle::NULL;
         // An empty definition has nothing to convert into a reference.
-        if options.mode == crate::ui::window::block_definition::BlockObjectMode::Convert
+        if options.mode == BlockObjectMode::Convert
             && !options.handles.is_empty()
         {
             let mut insert = DxfInsert::new(name, document::types::Vector3::ZERO);
@@ -1880,7 +1875,7 @@ impl Scene {
         let mut entity_handles = Vec::with_capacity(entities.len());
         for mut entity in entities {
             view::dispatch::apply_transform(&mut entity, &local);
-            entity = crate::modules::draw::modify::explode::normalize_entity_for_block(entity);
+            entity = crate::scene::explode::normalize_entity_for_block(entity);
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
@@ -2898,6 +2893,7 @@ impl Scene {
         .with_annotation_scale(self.annotation_scale);
         let mut models = Vec::new();
         let mut wipeout_sources = rustc_hash::FxHashMap::default();
+        let mut wipeout_block_memo = std::collections::HashMap::new();
         graph.walk_root(
             self.render_scene_root(target_block),
             |entity, context| {
@@ -2905,7 +2901,27 @@ impl Scene {
                 if plot_only && !self.layer_plottable_in_context(entity, context) {
                     return false;
                 }
-                context.is_instanced() || !self.entity_temporarily_hidden(common.handle)
+                if context.is_instanced() {
+                    return true;
+                }
+                if self.entity_temporarily_hidden(common.handle) {
+                    return false;
+                }
+                // Skip the placements of blocks that hold no mask, as the
+                // hatch walk does: they are most of a large drawing.
+                let block_uses: Vec<_> =
+                    crate::scene::render_graph::entity_render_block_uses(&self.document, entity, 1.0)
+                        .into_iter()
+                        .filter(|block_use| block_use.active)
+                        .collect();
+                block_uses.is_empty()
+                    || block_uses.into_iter().any(|block_use| {
+                        crate::scene::render_graph::block_contains_wipeout(
+                            &self.document,
+                            &block_use.insert.block_name,
+                            &mut wipeout_block_memo,
+                        )
+                    })
             },
             |entity, context| {
                 let EntityType::Wipeout(source) = entity else {
@@ -4218,9 +4234,9 @@ impl Scene {
     /// What a blank document gets on top of the codec's defaults: the
     /// standard linetypes and a compatible page setup on every paper layout.
     pub fn populate_new_drawing_defaults(&mut self) {
-        crate::io::linetypes::populate_document(&mut self.document);
+        crate::catalog::linetypes::populate_document(&mut self.document);
         // The visual styles of the reference's new drawing.
-        crate::io::visual_styles::populate_document(&mut self.document);
+        crate::catalog::visual_styles::populate_document(&mut self.document);
         // A new drawing is metric, as the reference's new drawing: metre
         // insertion units, metric measurement, and the ISO-25 dimension style
         // current. Standard stays available for imperial work.
@@ -4365,6 +4381,14 @@ pub(crate) fn normalize_block_terminators(document: &mut document::Document) {
             record.block_end_handle = end_handle;
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BlockObjectMode {
+    Retain,
+    #[default]
+    Convert,
+    Delete,
 }
 
 #[cfg(test)]

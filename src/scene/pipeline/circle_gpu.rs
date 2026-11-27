@@ -6,6 +6,7 @@
 //! and providing infinite visual smoothness.
 
 use iced::wgpu;
+pub use crate::entities::circle::ANALYTIC_MAX_RADIUS;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -103,10 +104,6 @@ impl CircleGpu {
         }
     }
 }
-
-/// Largest radius drawn as an analytical quad. Past it the f32 quad
-/// interpolation drifts visibly, so the circle stays on the wire path.
-pub const ANALYTIC_MAX_RADIUS: f64 = 1e6;
 
 /// Build the base and xray circle pipelines.
 pub fn create_pipelines(

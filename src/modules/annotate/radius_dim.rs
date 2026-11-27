@@ -10,6 +10,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 use glam::DVec3;
+pub(crate) use crate::entities::dimension::build::radial::{radius_constraint_entity, v3};
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_radius.svg"));
 
@@ -100,31 +101,6 @@ pub(crate) fn radial_dimension_entity(
         dim.base.text_rotation = angle;
     }
     plane.place_entity(EntityType::Dimension(Box::new(Dimension::Radius(dim))))
-}
-
-/// A radius dimension for a dimensional constraint: the leader leaves the
-/// centre towards `location`, and the style places the text.
-pub(crate) fn radius_constraint_entity(
-    center: DVec3,
-    radius: f64,
-    location: DVec3,
-    text: Option<String>,
-) -> Option<EntityType> {
-    let direction = radial_direction(center, location)?;
-    let chord = center + direction * radius;
-    let mut dim = DimensionRadius::new(v3(center), v3(chord));
-    dim.base.definition_point = v3(chord);
-    dim.leader_length = chord.distance(location).max(radius * 0.5);
-    dim.base.actual_measurement = dim.measurement();
-    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text);
-    Some(EntityType::Dimension(Box::new(Dimension::Radius(dim))))
-}
-
-/// The unit direction a radial constraint's dimension points in, from the
-/// centre to where its dimension line was picked.
-pub(crate) fn radial_direction(center: DVec3, location: DVec3) -> Option<DVec3> {
-    let delta = location - center;
-    (delta.length() > 1.0e-9).then(|| delta.normalize())
 }
 
 impl CadCommand for RadiusDimensionCommand {
@@ -339,10 +315,6 @@ impl CadCommand for RadiusDimensionCommand {
             self.build_dimension(source, cursor),
         )])
     }
-}
-
-fn v3(pt: DVec3) -> Vector3 {
-    Vector3::new(pt.x, pt.y, pt.z)
 }
 
 fn dvec(point: Vector3) -> DVec3 {

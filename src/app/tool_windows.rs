@@ -905,6 +905,9 @@ impl OpenCADStudio {
             Some(Detached::Tool(kind)) => {
                 self.on_tool_window_msg(kind, Message::ShortcutPressed(key))
             }
+            Some(Detached::Panel(crate::ui::dock::PanelId::ExternalReferences)) => {
+                self.xref_manager_key(&key).unwrap_or_else(Task::none)
+            }
             _ => Task::none(),
         }
     }

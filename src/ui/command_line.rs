@@ -14,6 +14,7 @@ use std::ops::Range;
 
 use crate::ui::style::common::accessible_accent_threshold;
 use crate::ui::style::{kit_metrics as km, text as ui_text};
+pub use crate::command::prompt::{value_prompt, value_prompt_bare, value_prompt_or_none};
 
 /// Maximum entries kept for the context menu's "Recent Input" list.
 pub const RECENT_INPUT_CAP: usize = 10;
@@ -109,8 +110,7 @@ const BUTTON_PAD: [f32; 2] = [
     2.0 * km::LINE,
     crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X,
 ];
-/// Around the "Command:" prompt, and around the autocomplete list.
-const PROMPT_PAD: [f32; 2] = [5.0, km::GRID_INSET_L];
+/// Around the autocomplete list.
 const LIST_PAD: [f32; 2] = [km::TOOL_GAP, km::GRID_INSET_L];
 /// Between a row's parts, and between the bar's buttons.
 const ITEM_GAP: f32 = km::TAB_INNER_GAP;
@@ -1203,22 +1203,6 @@ impl CommandLine {
                     col.push(container(entry_text(entry.text.clone())).padding(LINE_PAD))
                 }
             });
-        let prompt = container(
-            text(crate::tr!("command-line", "label"))
-                .size(self.font_size)
-                .font(self.font)
-                .style(|theme: &Theme| {
-                    let p = theme.palette();
-                    let color = accessible_accent_threshold(
-                        p.success.base.color,
-                        crate::ui::style::chrome::surface(theme),
-                        crate::ui::style::chrome::text(theme),
-                        4.5,
-                    );
-                    iced::widget::text::Style { color: Some(color) }
-                }),
-        )
-        .padding(PROMPT_PAD);
         // Literal-space toggle: while active, every line behaves as if it
         // started with `>` — Space stays in the line instead of submitting, so
         // arguments with spaces (text strings, paths, `UCS Z 90` as one line)
@@ -1266,7 +1250,14 @@ impl CommandLine {
         // text field is left without an `on_input` handler so it can't
         // grab focus or swallow numeric keys — those flow through the
         // global key subscription into the dynamic-input fields instead.
-        let mut input = text_input("", &self.input).id(cmd_input_id());
+        // No fixed "Command:" label beside the field: idle, the empty field says
+        // what it is for; in a command, the step prompt sits above it (#3768).
+        let placeholder = if self.step_prompt.is_none() {
+            crate::tr!("ribbon-menu", "search-placeholder")
+        } else {
+            Default::default()
+        };
+        let mut input = text_input(&placeholder, &self.input).id(cmd_input_id());
         if !dyn_capturing {
             input = input
                 .on_input(Message::CommandInput)
@@ -1505,7 +1496,6 @@ impl CommandLine {
         );
         let input_row = row![
             move_grip,
-            prompt,
             literal_btn,
             input_with_history,
             enter_btn,
@@ -2418,24 +2408,6 @@ mod tests {
         assert!(line.content_rows().is_empty());
         assert!(line.selected_content().is_none());
     }
-}
-
-/// `Enter new value for NAME <current>:`, the one prompt every variable asks
-/// its value with, through one catalog entry so it is translated everywhere.
-pub fn value_prompt(name: &str, current: &dyn std::fmt::Display) -> String {
-    let current = current.to_string();
-    crate::tf!("Enter new value for {name} <{current}>:").into_owned()
-}
-
-/// [`value_prompt`] for a name-valued variable that `.` clears.
-pub fn value_prompt_or_none(name: &str, current: &dyn std::fmt::Display) -> String {
-    let current = current.to_string();
-    crate::tf!("Enter new value for {name}, or . for none <\"{current}\">:").into_owned()
-}
-
-/// [`value_prompt`] for a variable with no value to offer.
-pub fn value_prompt_bare(name: &str) -> String {
-    crate::tf!("Enter new value for {name}:").into_owned()
 }
 
 #[cfg(test)]

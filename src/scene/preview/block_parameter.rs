@@ -344,29 +344,6 @@ impl Scene {
     }
 
     #[doc(hidden)]
-    pub fn bench_start_alignment_command(
-        &self,
-        insert: Handle,
-    ) -> Option<Box<dyn crate::command::CadCommand>> {
-        let alignment = self.alignment_grips(insert).into_iter().next()?;
-        let targets = crate::scene::block_alignment::Targets::from_scene(
-            self,
-            insert,
-            alignment.plane,
-        );
-        let cached_wires = self
-            .wires_for_entities(&[EntityType::Insert(alignment.reference.clone())]);
-        Some(Box::new(
-            crate::modules::block_editor::alignment::AlignmentCommand::with_cached_wires(
-                1,
-                alignment,
-                targets,
-                cached_wires,
-            ),
-        ))
-    }
-
-    #[doc(hidden)]
     pub fn bench_setup_visibility_scene(
         background_lines: usize,
         other_blocks: usize,

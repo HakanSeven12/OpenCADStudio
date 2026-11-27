@@ -488,6 +488,11 @@ pub(crate) fn window_event_with_context(
                 {
                     "ARROWDOWN"
                 }
+                // A pallet's list in a window of its own (the External
+                // References list detaches on Delete); a text field keeps it.
+                keyboard::Key::Named(keyboard::key::Named::Delete) if status == Status::Ignored => {
+                    "DELETE"
+                }
                 _ => return None,
             };
             Some(Message::OsWindowKey(win_id, name.to_string()))
@@ -2137,6 +2142,14 @@ bg={bg_ms:.1}ms n={view_count}"
                 ost_points,
                 otrack_lines,
                 parallel_ref_marker,
+                self.geometry_cleanup_markers(i)
+                    .into_iter()
+                    .map(|(index, pos)| crate::ui::overlay::CleanupMarker {
+                        pos,
+                        active: self.geometry_cleanup.menu == Some(index)
+                            || self.geometry_cleanup.picked == Some(index),
+                    })
+                    .collect(),
                 // ViewCube hover region matches the drawn cube — gone when hidden.
                 !is_paper && viewcube_visible,
                 dividers,
@@ -3113,6 +3126,13 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // Geometry Cleanup review mode: its toolbar over the drawing.
+            if self.geometry_cleanup.review_shown && !tab.is_start {
+                viewport_stack = viewport_stack.push(
+                    crate::ui::window::geometry_cleanup::review_toolbar(&self.geometry_cleanup),
+                );
+            }
+
             // Count mode: a blue frame round the drawing and the count toolbar.
             if let (Some(mode), false) = (tab.count.as_ref(), tab.is_start) {
                 viewport_stack = viewport_stack.push(crate::ui::window::count_palette::border());
@@ -3125,6 +3145,17 @@ bg={bg_ms:.1}ms n={view_count}"
             // Reserve the overlaid command line when placing cursor-anchored panels.
             mark("chrome");
             let command_line_inset = command_line_inset(self);
+            if let Some((at, menu)) = self.geometry_cleanup_marker_menu(self.active_tab) {
+                // The menu starts on the marker's corner, so the pointer goes
+                // from the marker onto it with no gap between them.
+                let reach = crate::ui::window::geometry_cleanup::MARKER_REACH * 0.5;
+                viewport_stack = viewport_stack.push(overlay::position_canvas_overlay_clamped(
+                    at,
+                    command_line_inset,
+                    iced::Vector::new(reach, reach),
+                    menu,
+                ));
+            }
             if let Some((cursor, tip)) = self.hovered_dynamic_grip_tip() {
                 viewport_stack =
                     viewport_stack.push(overlay::grip_tip_overlay(cursor, command_line_inset, tip));
@@ -3422,7 +3453,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         }
                         let angle = overlay::editor_angle(ed);
                         let (sin, cos) = angle.sin_cos();
-                        let width = (ed.rect_width as f32).max(0.001);
+                        let width = (ed.frame_width() as f32).max(0.001);
                         let padding = ed.height_value() as f32 * 0.5;
                         let top = ed
                             .glyph_boxes
@@ -3513,6 +3544,16 @@ bg={bg_ms:.1}ms n={view_count}"
         if let Some(e) = left_edge {
             parts.push(e);
         }
+        // Ribbon panels docked as toolbars sit between the pallets and the
+        // drawing, which gives them their room.
+        let docked_toolbar = |edge| {
+            (!self.clean_screen && !tab.is_start)
+                .then(|| self.ribbon.docked_toolbars(edge))
+                .flatten()
+        };
+        if let Some(e) = docked_toolbar(crate::ui::ribbon::ToolbarEdge::Left) {
+            parts.push(e);
+        }
         let viewport: Element<'_, Message> =
             crate::ui::wrap_bar::PosReport::new(VIEWPORT_CAPTURE_BOUNDS_ID, viewport_stack).into();
         // The drawing tabs sit over the drawing, between the docks, unless
@@ -3580,6 +3621,9 @@ bg={bg_ms:.1}ms n={view_count}"
                 .into()
         };
         parts.push(center);
+        if let Some(e) = docked_toolbar(crate::ui::ribbon::ToolbarEdge::Right) {
+            parts.push(e);
+        }
         if let Some(e) = right_edge {
             parts.push(e);
         }
@@ -3782,6 +3826,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 .scene
                                 .geo_data()
                                 .map(crate::entities::object_data::geo_system_label),
+                            plugin_busy: self.plugin_busy(),
                         },
                         crate::ui::statusbar::StatusBarModes {
                             grid: self.show_grid,
@@ -3807,6 +3852,11 @@ bg={bg_ms:.1}ms n={view_count}"
                             coords_mode,
                             last_point: last_coord,
                             picking,
+                            modemacro: if self.modemacro.is_empty() {
+                                String::new()
+                            } else {
+                                crate::app::commands::diesel(&tab.scene.document, &self.modemacro)
+                            },
                         },
                         &self.statusbar_config,
                         status_menu_data,
@@ -4277,6 +4327,21 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // A plugin command waits for one frame that names it (#3650); a
+        // window that draws none must not hold it.
+        let plugin_frame = if self.plugin_frame.is_some() {
+            Subscription::batch([
+                crate::app::tool_windows::main_window_frames().map(|_| Message::PluginFrameDrawn),
+                iced::time::every(crate::app::plugin_frame::FRAME_TIMEOUT)
+                    .map(|_| Message::PluginFrameDrawn),
+            ])
+        } else if self.plugin_running() {
+            // A command beside the window wakes it whenever its plugin sends
+            // something; the interval checks its deadline when it is silent.
+            iced::time::every(crate::app::plugin_run::CHECK_EVERY).map(|_| Message::PluginRunWake)
+        } else {
+            Subscription::none()
+        };
         // A deferred Properties rebuild (huge selection commit) runs on the
         // next frame instead of blocking the click that committed it.
         let properties_refresh = if self.properties_refresh_pending.is_some() {
@@ -4531,6 +4596,7 @@ impl OpenCADStudio {
             snap_dwell,
             move_coalesce,
             box_preview,
+            plugin_frame,
             properties_refresh,
             nav_settle,
             gpu_probe,

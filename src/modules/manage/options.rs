@@ -3,7 +3,7 @@ pub fn tool() -> ToolDef {
     ToolDef {
         id: "OPTIONS",
         label: "Options",
-        icon: IconKind::Svg(crate::ui::icons::GEAR),
+        icon: IconKind::Svg(crate::icon_assets::GEAR),
         event: ModuleEvent::Command("OPTIONS".to_string()),
     }
 }

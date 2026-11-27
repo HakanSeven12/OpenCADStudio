@@ -1770,3 +1770,758 @@ fn a_fit_2d_polyline_is_not_read() {
         document, handle
     ));
 }
+
+fn cleanup_msg(app: &mut OpenCADStudio, m: GeometryCleanupMsg) {
+    let _ = app.update(Message::GeometryCleanup(m));
+}
+
+fn kept(app: &OpenCADStudio) -> Vec<Finding> {
+    app.geometry_cleanup
+        .scan
+        .as_ref()
+        .map(|scan| scan.kept.clone())
+        .unwrap_or_default()
+}
+
+fn index_of(app: &OpenCADStudio, kind: ErrorType) -> usize {
+    findings(app)
+        .iter()
+        .position(|finding| finding.kind == kind)
+        .expect("the error is listed")
+}
+
+#[test]
+fn keep_takes_an_error_off_the_list_and_leaves_the_drawing_as_it_is() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    let over = objects[1];
+    let before = ends(&app, over);
+    let listed = scan(&mut app, &objects).len();
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let after: Vec<ErrorType> = findings(&app).iter().map(|f| f.kind).collect();
+    assert_eq!(after.len(), listed - 1);
+    assert!(!after.contains(&ErrorType::Overshoot), "{after:?}");
+    let kept = kept(&app);
+    assert_eq!(kept.len(), 1);
+    assert_eq!((kept[0].kind, kept[0].handle), (ErrorType::Overshoot, over));
+    assert_eq!(ends(&app, over), before, "the drawing does not change");
+}
+
+#[test]
+fn a_kept_error_stays_off_the_list_in_a_new_scan() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Undershoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let again = scan(&mut app, &objects);
+    assert!(again.iter().all(|f| f.kind != ErrorType::Undershoot));
+    assert_eq!(kept(&app).len(), 1);
+}
+
+#[test]
+fn keep_picks_the_next_error() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    // The first two rows of the palette, top to bottom.
+    let rows = crate::ui::window::geometry_cleanup::rows(
+        &app.geometry_cleanup,
+        app.geometry_cleanup.scan.as_ref().unwrap(),
+    );
+    let (index, next) = (rows[0], findings(&app)[rows[1]]);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let picked = app.geometry_cleanup.picked.expect("an error is picked");
+    assert!(findings(&app)[picked].same_error(&next));
+}
+
+#[test]
+fn keep_gives_a_drawing_with_no_fingerprint_one() {
+    let (mut app, i) = app();
+    app.tabs[i].scene.document.header.fingerprint_guid.clear();
+    app.tabs[i].dirty = false;
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let id = app.tabs[i].scene.document.header.fingerprint_guid.clone();
+    assert!(!id.is_empty());
+    assert!(
+        app.tabs[i].dirty,
+        "the new fingerprint is saved with the drawing"
+    );
+    assert_eq!(app.geometry_cleanup.kept[&id].len(), 1);
+}
+
+#[test]
+fn a_kept_error_is_kept_only_in_its_own_drawing() {
+    let (mut app, first) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    // A second drawing with the same objects, so with the same handles.
+    let _ = app.update(Message::TabNew);
+    let second = app.active_tab;
+    assert_ne!(first, second);
+    app.tabs[second].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+    let others = errors_drawing(&mut app);
+    assert_eq!(others, objects, "the same handles");
+    assert_ne!(
+        app.tabs[first].scene.document.header.fingerprint_guid,
+        app.tabs[second].scene.document.header.fingerprint_guid
+    );
+    let found = scan(&mut app, &others);
+    assert!(found.iter().any(|f| f.kind == ErrorType::Overshoot));
+    assert!(kept(&app).is_empty());
+}
+
+#[test]
+fn restore_lists_a_kept_error_again() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    let listed = scan(&mut app, &objects).len();
+    let gap = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(gap));
+    let over = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(over));
+    assert_eq!(kept(&app).len(), 2);
+    let at = kept(&app)
+        .iter()
+        .position(|f| f.kind == ErrorType::Gap)
+        .unwrap();
+    cleanup_msg(&mut app, GeometryCleanupMsg::Restore(at));
+    assert_eq!(findings(&app).len(), listed - 1);
+    assert!(findings(&app).iter().any(|f| f.kind == ErrorType::Gap));
+    assert_eq!(kept(&app).len(), 1);
+    assert_eq!(kept(&app)[0].kind, ErrorType::Overshoot);
+}
+
+#[test]
+fn restore_all_lists_every_kept_error_of_the_drawing_again() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    let listed = scan(&mut app, &objects).len();
+    for kind in [ErrorType::Gap, ErrorType::Undershoot] {
+        let index = index_of(&app, kind);
+        cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    }
+    app.geometry_cleanup
+        .kept
+        .insert("{OTHER DRAWING}".into(), vec![kept(&app)[0].identity()]);
+    cleanup_msg(&mut app, GeometryCleanupMsg::RestoreAll);
+    assert_eq!(findings(&app).len(), listed);
+    assert!(kept(&app).is_empty());
+    let id = &app.tabs[i].scene.document.header.fingerprint_guid;
+    assert!(!app.geometry_cleanup.kept.contains_key(id));
+    assert!(
+        app.geometry_cleanup.kept.contains_key("{OTHER DRAWING}"),
+        "the marks of other drawings stay"
+    );
+}
+
+#[test]
+fn the_kept_category_opens_and_folds() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let folded = app.geometry_cleanup.kept_open;
+    cleanup_msg(&mut app, GeometryCleanupMsg::FoldKept);
+    assert_eq!(app.geometry_cleanup.kept_open, !folded);
+    cleanup_msg(&mut app, GeometryCleanupMsg::FoldKept);
+    assert_eq!(app.geometry_cleanup.kept_open, folded);
+}
+
+#[test]
+fn the_mark_of_an_erased_object_is_dropped_at_the_next_scan() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let over = objects[1];
+    app.tabs[i].scene.erase_entities(&[over]);
+    scan(&mut app, &objects);
+    let id = &app.tabs[i].scene.document.header.fingerprint_guid;
+    assert!(!app.geometry_cleanup.kept.contains_key(id));
+}
+
+#[test]
+fn the_kept_errors_are_in_the_user_profile() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    let json = serde_json::to_string(&app.current_config()).unwrap();
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(&json).unwrap();
+    let id = app.tabs[i].scene.document.header.fingerprint_guid.clone();
+    assert_eq!(loaded.geometry_cleanup_kept[&id].len(), 1);
+    let (mut other, j) = self::app();
+    other.apply_config(loaded);
+    other.tabs[j].scene.document.header.fingerprint_guid = id;
+    let others = errors_drawing(&mut other);
+    let found = scan(&mut other, &others);
+    assert!(found.iter().all(|f| f.kind != ErrorType::Overshoot));
+    assert_eq!(kept(&other).len(), 1);
+}
+
+#[test]
+fn a_profile_with_kept_errors_that_cannot_be_read_keeps_the_rest() {
+    let json = r#"{"show_command_history": true,
+        "geometry_cleanup_kept": {"{A}": [{"kind": "NoSuchType"}]}}"#;
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(json).unwrap();
+    assert!(
+        loaded.show_command_history,
+        "the rest of the profile is kept"
+    );
+    assert!(loaded.geometry_cleanup_kept.is_empty());
+}
+
+#[test]
+fn a_relative_angle_is_kept_for_its_own_pair_of_lines() {
+    let (mut app, _) = app();
+    // One line meets two others, each 3° off a right angle.
+    let base = line(&mut app, [0.0, 0.0], [100.0, 0.0]);
+    let tilt = 3f64.to_radians();
+    let a = line(
+        &mut app,
+        [20.0, 0.0],
+        [20.0 + 50.0 * tilt.sin(), 50.0 * tilt.cos()],
+    );
+    let b = line(
+        &mut app,
+        [80.0, 0.0],
+        [80.0 - 50.0 * tilt.sin(), 50.0 * tilt.cos()],
+    );
+    let objects = [base, a, b];
+    let relative = |app: &OpenCADStudio| {
+        findings(app)
+            .into_iter()
+            .filter(|f| f.kind == ErrorType::RelativeAngle)
+            .collect::<Vec<_>>()
+    };
+    scan(&mut app, &objects);
+    assert_eq!(relative(&app).len(), 2, "{:?}", findings(&app));
+    let index = index_of(&app, ErrorType::RelativeAngle);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    assert_eq!(relative(&app).len(), 1, "the other pair is still listed");
+}
+
+/// The errors drawing in the open palette, scanned, with the view zoomed
+/// to it.
+fn markers_drawing(app: &mut OpenCADStudio) -> [Handle; 5] {
+    let objects = errors_drawing(app);
+    let _ = app.dispatch_command("GEOMETRYCLEANUPOPEN");
+    scan(app, &objects);
+    app.handle_zoom_to_window(
+        glam::DVec3::new(-70.0, -110.0, 0.0),
+        glam::DVec3::new(20.0, 110.0, 0.0),
+    );
+    objects
+}
+
+fn marker_of(app: &OpenCADStudio, kind: ErrorType) -> (usize, iced::Point) {
+    let index = index_of(app, kind);
+    let at = app
+        .geometry_cleanup_markers(app.active_tab)
+        .into_iter()
+        .find(|(marker, _)| *marker == index)
+        .expect("the error has a marker")
+        .1;
+    (index, at)
+}
+
+#[test]
+fn each_error_in_view_has_a_marker_at_its_place() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let markers = app.geometry_cleanup_markers(i);
+    assert_eq!(markers.len(), findings(&app).len());
+    let (vw, vh) = app.tabs[i].scene.selection.borrow().view.vp_size;
+    let tile = app.tabs[i].scene.active_model_tile_bounds(vw, vh);
+    for (index, at) in markers {
+        let [x, y] = findings(&app)[index].location;
+        let expected = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .project(glam::DVec3::new(x, y, 0.0), tile)
+            .unwrap();
+        assert!((at.x - tile.x - expected.x).abs() < 1e-3);
+        assert!((at.y - tile.y - expected.y).abs() < 1e-3);
+    }
+}
+
+#[test]
+fn an_error_out_of_view_has_no_marker() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    // Only the overshoot at (10, 50) is in this window.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(5.0, 45.0, 0.0),
+        glam::DVec3::new(15.0, 55.0, 0.0),
+    );
+    let markers = app.geometry_cleanup_markers(i);
+    let kinds: Vec<ErrorType> = markers
+        .iter()
+        .map(|(index, _)| findings(&app)[*index].kind)
+        .collect();
+    assert_eq!(kinds, vec![ErrorType::Overshoot]);
+}
+
+#[test]
+fn there_are_no_markers_while_the_palette_is_closed_or_a_command_runs() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    assert!(!app.geometry_cleanup_markers(i).is_empty());
+    let _ = app.dispatch_command("LINE");
+    assert!(app.tabs[i].active_cmd.is_some());
+    assert!(app.geometry_cleanup_markers(i).is_empty());
+    let _ = app.update(Message::CommandEscape);
+    let _ = app.dispatch_command("GEOMETRYCLEANUPCLOSE");
+    assert!(app.geometry_cleanup_markers(i).is_empty());
+}
+
+#[test]
+fn the_pointer_on_a_marker_opens_its_menu_and_off_it_closes_the_menu() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let (index, at) = marker_of(&app, ErrorType::Overshoot);
+    let near = iced::Point::new(at.x + 5.0, at.y - 3.0);
+    app.geometry_cleanup_pointer(i, near);
+    assert_eq!(app.geometry_cleanup.menu, Some(index));
+    assert!(app.geometry_cleanup_marker_menu(i).is_some());
+    app.geometry_cleanup_pointer(i, iced::Point::new(at.x + 40.0, at.y));
+    assert_eq!(app.geometry_cleanup.menu, None);
+}
+
+#[test]
+fn the_menu_stays_open_while_the_pointer_is_on_it() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let (index, at) = marker_of(&app, ErrorType::Undershoot);
+    app.geometry_cleanup_pointer(i, at);
+    cleanup_msg(&mut app, GeometryCleanupMsg::MenuHover(true));
+    app.geometry_cleanup_pointer(i, iced::Point::new(at.x + 60.0, at.y + 30.0));
+    assert_eq!(app.geometry_cleanup.menu, Some(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::MenuHover(false));
+    app.geometry_cleanup_pointer(i, iced::Point::new(at.x + 200.0, at.y + 30.0));
+    assert_eq!(app.geometry_cleanup.menu, None);
+}
+
+#[test]
+fn the_pointer_out_of_reach_of_a_marker_opens_no_menu() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let (_, at) = marker_of(&app, ErrorType::Overshoot);
+    let reach = crate::ui::window::geometry_cleanup::MARKER_REACH;
+    app.geometry_cleanup_pointer(i, iced::Point::new(at.x + reach + 2.0, at.y));
+    assert_eq!(app.geometry_cleanup.menu, None);
+}
+
+#[test]
+fn the_menu_opens_at_its_own_marker() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let markers = app.geometry_cleanup_markers(i);
+    assert!(markers.len() > 1);
+    for (index, at) in markers {
+        app.geometry_cleanup_pointer(i, at);
+        assert_eq!(app.geometry_cleanup.menu, Some(index));
+        let (place, _) = app.geometry_cleanup_marker_menu(i).expect("the menu");
+        assert_eq!(place, at);
+    }
+}
+
+#[test]
+fn of_markers_near_each_other_the_pointer_opens_the_nearest() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    // Far out, all the markers are a few pixels apart.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(-20000.0, -20000.0, 0.0),
+        glam::DVec3::new(20000.0, 20000.0, 0.0),
+    );
+    let markers = app.geometry_cleanup_markers(i);
+    let reach = crate::ui::window::geometry_cleanup::MARKER_REACH;
+    let (a, b) = markers
+        .iter()
+        .flat_map(|a| markers.iter().map(move |b| (a, b)))
+        .find(|(a, b)| {
+            let d = (a.1.x - b.1.x).hypot(a.1.y - b.1.y);
+            d > 0.5 && d <= reach
+        })
+        .expect("two markers in reach of each other");
+    for (index, at) in [a, b] {
+        app.geometry_cleanup_pointer(i, *at);
+        let open = app.geometry_cleanup.menu.expect("a menu");
+        let open_at = markers.iter().find(|(m, _)| *m == open).unwrap().1;
+        assert_eq!(open_at, *at, "marker {index}");
+    }
+}
+
+#[test]
+fn the_pointer_moving_on_the_open_marker_keeps_the_preview() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let (index, at) = marker_of(&app, ErrorType::Overshoot);
+    app.geometry_cleanup_pointer(i, at);
+    cleanup_msg(
+        &mut app,
+        GeometryCleanupMsg::Preview(Some((index, Fix::Trim))),
+    );
+    app.geometry_cleanup_pointer(i, iced::Point::new(at.x + 1.0, at.y + 1.0));
+    assert_eq!(app.geometry_cleanup.menu, Some(index));
+    assert_eq!(app.geometry_cleanup.preview, Some((index, Fix::Trim)));
+}
+
+#[test]
+fn the_preview_of_a_repair_shows_its_result_and_does_not_change_the_drawing() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let over = objects[1];
+    let before = ends(&app, over);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(
+        &mut app,
+        GeometryCleanupMsg::Preview(Some((index, Fix::Trim))),
+    );
+    let scene = &app.tabs[i].scene;
+    assert!(
+        scene.entity_temporarily_hidden(over),
+        "the object is hidden"
+    );
+    assert!(!scene.preview_wires.is_empty(), "its result is drawn");
+    // The preview line ends at the wall (x = 10), where Trim puts it.
+    let xs: Vec<f32> = scene
+        .preview_wires
+        .iter()
+        .flat_map(|wire| wire.points.iter().map(|p| p[0]))
+        .collect();
+    let right = xs.iter().copied().fold(f32::MIN, f32::max);
+    assert!((right - 10.0).abs() < 1e-3, "{xs:?}");
+    assert_eq!(ends(&app, over), before, "the drawing does not change");
+    cleanup_msg(&mut app, GeometryCleanupMsg::Preview(None));
+    let scene = &app.tabs[i].scene;
+    assert!(!scene.entity_temporarily_hidden(over));
+    assert!(scene.preview_wires.is_empty());
+}
+
+#[test]
+fn a_repair_from_the_menu_ends_the_menu_and_the_preview() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let over = objects[1];
+    let (index, at) = marker_of(&app, ErrorType::Overshoot);
+    app.geometry_cleanup_pointer(i, at);
+    cleanup_msg(
+        &mut app,
+        GeometryCleanupMsg::Preview(Some((index, Fix::Trim))),
+    );
+    cleanup_msg(&mut app, GeometryCleanupMsg::Fix(index, Fix::Trim));
+    assert!(
+        near(ends(&app, over)[1], [10.0, 50.0]),
+        "the repair is made"
+    );
+    assert_eq!(app.geometry_cleanup.menu, None);
+    assert_eq!(app.geometry_cleanup.preview, None);
+    let scene = &app.tabs[i].scene;
+    assert!(!scene.entity_temporarily_hidden(over));
+    assert!(scene.preview_wires.is_empty());
+}
+
+#[test]
+fn keep_from_the_menu_ends_the_menu() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let (index, at) = marker_of(&app, ErrorType::Gap);
+    app.geometry_cleanup_pointer(i, at);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(index));
+    assert_eq!(app.geometry_cleanup.menu, None);
+    assert!(findings(&app).iter().all(|f| f.kind != ErrorType::Gap));
+}
+
+#[test]
+fn a_new_scan_ends_the_menu_of_the_old_list() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let (_, at) = marker_of(&app, ErrorType::Gap);
+    app.geometry_cleanup_pointer(i, at);
+    assert!(app.geometry_cleanup.menu.is_some());
+    cleanup_msg(&mut app, GeometryCleanupMsg::Rescan);
+    assert_eq!(app.geometry_cleanup.menu, None);
+}
+
+#[test]
+fn the_preview_of_a_repair_that_the_error_does_not_offer_shows_nothing() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(
+        &mut app,
+        GeometryCleanupMsg::Preview(Some((index, Fix::Move))),
+    );
+    let scene = &app.tabs[i].scene;
+    assert!(!scene.entity_temporarily_hidden(objects[1]));
+    assert!(scene.preview_wires.is_empty());
+}
+
+fn view_of(app: &OpenCADStudio) -> (f64, f64, f32) {
+    let camera = app.tabs[app.active_tab].scene.camera.borrow();
+    (camera.target.x, camera.target.y, camera.ortho_size())
+}
+
+fn same_view(a: (f64, f64, f32), b: (f64, f64, f32)) -> bool {
+    (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9 && (a.2 - b.2).abs() < 1e-6
+}
+
+#[test]
+fn geometrycleanupstate_tells_whether_the_palette_is_open() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("GEOMETRYCLEANUPSTATE");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPSTATE = 0 (read only)"));
+    let _ = app.dispatch_command("GEOMETRYCLEANUPOPEN");
+    let _ = app.dispatch_command("GEOMETRYCLEANUPSTATE");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPSTATE = 1 (read only)"));
+}
+
+#[test]
+fn geometrycleanupstate_cannot_be_set() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPSTATE 1");
+    assert!(!app.geometry_cleanup.show);
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("(read only)"));
+}
+
+#[test]
+fn geometrycleanupzoompan_is_on_at_first_and_takes_0_or_1() {
+    let (mut app, _) = app();
+    assert!(!app.geometry_cleanup.auto_zoom_off);
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    assert!(app.geometry_cleanup.auto_zoom_off);
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 2");
+    assert!(app.geometry_cleanup.auto_zoom_off, "2 is refused");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("Requires 0 or 1 only."));
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 1");
+    assert!(!app.geometry_cleanup.auto_zoom_off);
+}
+
+#[test]
+fn geometrycleanupzoompan_tells_its_value_and_takes_one_after_its_name() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("GEOMETRYCLEANUPZOOMPAN");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPZOOMPAN <1>"));
+    let _ = app.dispatch_command("GEOMETRYCLEANUPZOOMPAN 0");
+    assert!(app.geometry_cleanup.auto_zoom_off);
+    let _ = app.dispatch_command("GEOMETRYCLEANUPZOOMPAN");
+    assert!(app
+        .command_line
+        .history_plain_text()
+        .contains("GEOMETRYCLEANUPZOOMPAN <0>"));
+}
+
+#[test]
+fn with_auto_zoom_off_a_pick_of_an_error_beside_the_view_zooms_to_it() {
+    let (mut app, _) = app();
+    markers_drawing(&mut app);
+    // The view holds the x of each error, but not its y.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(-100.0, 400.0, 0.0),
+        glam::DVec3::new(120.0, 420.0, 0.0),
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let before = view_of(&app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!same_view(before, view_of(&app)));
+}
+
+#[test]
+fn the_review_display_needs_no_new_scan() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let before = app.tabs[i].scene.geometry_epoch;
+    let index = index_of(&app, ErrorType::Gap);
+    // The handler alone: the update after it would scan a stale list again.
+    let _ = app.on_geometry_cleanup(GeometryCleanupMsg::Pick(index));
+    let epoch = app.tabs[i].scene.geometry_epoch;
+    assert_ne!(epoch, before, "the review display moves the epoch");
+    let scan = app.geometry_cleanup.scan.as_ref().expect("the scan");
+    assert_eq!(scan.epoch, epoch, "the colours change, not the geometry");
+}
+
+#[test]
+fn geometrycleanupzoompan_is_kept_in_the_user_profile() {
+    let (mut app, _) = app();
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let json = serde_json::to_string(&app.current_config()).unwrap();
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(&json).unwrap();
+    assert!(!loaded.settings.geometry_cleanup_zoom_pan);
+    let (mut other, _) = self::app();
+    other.apply_config(loaded);
+    assert!(other.geometry_cleanup.auto_zoom_off);
+    let fresh: crate::app::config::AppConfig = serde_json::from_str("{}").unwrap();
+    assert!(
+        fresh.settings.geometry_cleanup_zoom_pan,
+        "on in a new profile"
+    );
+}
+
+#[test]
+fn with_auto_zoom_off_a_pick_of_an_error_in_view_keeps_the_view_and_on_it_zooms() {
+    let (mut app, _) = app();
+    markers_drawing(&mut app);
+    // The whole drawing is in view, so each error's window is too.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(-200.0, -200.0, 0.0),
+        glam::DVec3::new(200.0, 200.0, 0.0),
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let before = view_of(&app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(same_view(before, view_of(&app)));
+    assert_eq!(
+        app.geometry_cleanup.picked,
+        Some(index),
+        "the error is picked"
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 1");
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!same_view(before, view_of(&app)), "Auto Zoom on zooms");
+}
+
+#[test]
+fn with_auto_zoom_off_a_pick_of_an_error_out_of_view_zooms_to_it() {
+    let (mut app, _) = app();
+    markers_drawing(&mut app);
+    // Only the overshoot at (10, 50) is in this window.
+    app.handle_zoom_to_window(
+        glam::DVec3::new(5.0, 45.0, 0.0),
+        glam::DVec3::new(15.0, 55.0, 0.0),
+    );
+    let _ = app.dispatch_command("SETVAR GEOMETRYCLEANUPZOOMPAN 0");
+    let before = view_of(&app);
+    let index = index_of(&app, ErrorType::Undershoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!same_view(before, view_of(&app)));
+}
+
+#[test]
+fn the_review_toolbar_sets_auto_zoom() {
+    let (mut app, _) = app();
+    cleanup_msg(&mut app, GeometryCleanupMsg::ToggleAutoZoom);
+    assert!(app.geometry_cleanup.auto_zoom_off);
+    cleanup_msg(&mut app, GeometryCleanupMsg::ToggleAutoZoom);
+    assert!(!app.geometry_cleanup.auto_zoom_off);
+}
+
+#[test]
+fn a_pick_starts_review_mode_with_the_error_objects_bright() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let [_, _, _, left, right] = objects;
+    assert!(app.tabs[i].scene.count_display.is_none());
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(app.geometry_cleanup.review && app.geometry_cleanup.review_shown);
+    let display = app.tabs[i]
+        .scene
+        .count_display
+        .as_ref()
+        .expect("review display");
+    let mut bright: Vec<Handle> = display.counted.iter().copied().collect();
+    bright.sort_by_key(|h| h.value());
+    assert_eq!(bright, vec![left, right]);
+}
+
+#[test]
+fn the_review_display_follows_the_pick_after_a_repair() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::Fix(index, Fix::Trim));
+    let picked = findings(&app)[app.geometry_cleanup.picked.expect("the next error")];
+    let display = app.tabs[i]
+        .scene
+        .count_display
+        .as_ref()
+        .expect("review display");
+    assert!(display.counted.contains(&picked.handle));
+}
+
+#[test]
+fn geometryerrorreviewclose_ends_review_mode() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    let _ = app.dispatch_command("GEOMETRYERRORREVIEWCLOSE");
+    assert!(!app.geometry_cleanup.review && !app.geometry_cleanup.review_shown);
+    assert!(app.tabs[i].scene.count_display.is_none());
+    assert!(app.geometry_cleanup.show, "the palette stays open");
+}
+
+#[test]
+fn the_review_toolbar_close_ends_review_mode() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    cleanup_msg(&mut app, GeometryCleanupMsg::CloseReview);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+#[test]
+fn closing_the_palette_ends_review_mode() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    let _ = app.dispatch_command("GEOMETRYCLEANUPCLOSE");
+    assert!(!app.geometry_cleanup.review);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+#[test]
+fn a_new_selection_ends_review_mode() {
+    let (mut app, i) = app();
+    let objects = markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    scan(&mut app, &objects);
+    assert!(!app.geometry_cleanup.review);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+#[test]
+fn review_mode_leaves_the_display_of_count_mode_alone() {
+    let (mut app, i) = app();
+    markers_drawing(&mut app);
+    let index = index_of(&app, ErrorType::Gap);
+    app.tabs[i].count = Some(Default::default());
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
+    assert!(!app.geometry_cleanup.review_shown);
+    assert!(app.tabs[i].scene.count_display.is_none());
+}

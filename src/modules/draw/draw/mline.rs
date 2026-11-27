@@ -1,6 +1,6 @@
 // MLINE command — create a styled group of parallel lines.
 
-use document::entities::{MLine, MLineFlags, MLineJustification, MLineSegment, MLineVertex};
+use document::entities::{MLine, MLineFlags, MLineJustification, MLineVertex};
 use document::objects::MLineStyle;
 use document::types::Vector3;
 use document::{EntityType, Handle};
@@ -8,6 +8,7 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
+pub(crate) use crate::entities::mline::sync_mline_element_parameters;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
@@ -411,42 +412,6 @@ impl CadCommand for MlineCommand {
             .then(|| self.preview(point))
             .flatten()
     }
-}
-
-pub(crate) fn sync_mline_element_parameters(mline: &mut MLine, style: &MLineStyle) {
-    let offsets: Vec<f64> = if style.elements.is_empty() {
-        vec![0.5, -0.5]
-    } else {
-        style
-            .elements
-            .iter()
-            .map(|element| element.offset)
-            .collect()
-    };
-    let minimum = offsets.iter().copied().fold(f64::INFINITY, f64::min);
-    let maximum = offsets.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let shift = match mline.justification {
-        MLineJustification::Top => -maximum,
-        MLineJustification::Zero => 0.0,
-        MLineJustification::Bottom => -minimum,
-    };
-    let normal = mline.normal;
-    for vertex in &mut mline.vertices {
-        let factor = crate::entities::mline::mline_miter_factor(vertex, normal);
-        vertex
-            .segments
-            .resize_with(offsets.len(), MLineSegment::new);
-        vertex.segments.truncate(offsets.len());
-        for (segment, offset) in vertex.segments.iter_mut().zip(&offsets) {
-            let value = (offset + shift) * mline.scale_factor / factor;
-            if let Some(first) = segment.parameters.first_mut() {
-                *first = value;
-            } else {
-                segment.parameters.extend([value, 0.0]);
-            }
-        }
-    }
-    mline.style_element_count = offsets.len();
 }
 
 pub(crate) fn build_mline(

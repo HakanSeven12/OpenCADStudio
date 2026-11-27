@@ -169,7 +169,7 @@ impl OpenCADStudio {
             }
 
             // CAL <expression> — evaluate an expression on the
-            //   shared calculator engine (`app::calc`): arithmetic, points,
+            //   shared calculator engine (`calc`): arithmetic, points,
             //   functions, unit suffixes, variables and `ans`. Free text, so
             //   spaces inside the expression don't end the input.
             // QUICKCALC / QC show or hide the QuickCalc pallet.
@@ -207,7 +207,7 @@ impl OpenCADStudio {
                 } else {
                     self.cal_context.base_unit = crate::app::quick_calc::base_unit(&self.tabs[i]);
                     self.cal_context.sysvars = Some(crate::app::quick_calc::sysvars(&self.tabs[i]));
-                    match crate::app::calc::evaluate(expr, &mut self.cal_context) {
+                    match crate::calc::evaluate(expr, &mut self.cal_context) {
                         Ok(v) => {
                             let v = v.display();
                             self.command_line.push_output(crate::tf!("= {v}").as_ref())

@@ -1740,6 +1740,7 @@ impl OpenCADStudio {
                     crate::sys::file_dialog()
                         .set_title(crate::t!("Import OBJ Mesh").as_ref())
                         .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
+                        .add_filter("glTF", &["gltf", "glb", "GLTF", "GLB"])
                         .add_filter(crate::t!("All Files").as_ref(), &["*"])
                         .pick_file()
                         .await
@@ -1760,12 +1761,13 @@ impl OpenCADStudio {
                         let handle = crate::sys::file_dialog()
                             .set_title(crate::t!("Import OBJ Mesh").as_ref())
                             .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
+                        .add_filter("glTF", &["gltf", "glb", "GLTF", "GLB"])
                             .add_filter(crate::t!("All Files").as_ref(), &["*"])
                             .pick_file()
                             .await?;
                         let path = crate::sys::handle_path(&handle);
                         let bytes = handle.read().await;
-                        let result = crate::io::obj::parse_obj(&String::from_utf8_lossy(&bytes))
+                        let result = crate::io::obj::parse_mesh_file(&path, &bytes, None, None)
                             .ok_or_else(|| "no usable geometry in file".to_string());
                         Some((tab_id, path, result))
                     },
@@ -1968,6 +1970,7 @@ impl OpenCADStudio {
             Message::Count(message) => self.on_count(message),
             Message::GeometryCleanup(message) => self.on_geometry_cleanup(message),
             Message::BricscadVisibility(message) => self.on_bricscad_visibility(message),
+            Message::FilesPalette(message) => self.on_files_palette(message),
             Message::Laywalk(message) => self.on_layer_walk(message),
             Message::QuickCalc(message) => self.on_quick_calc(message),
             Message::Assistant(message) => self.on_assistant(message),
@@ -2111,11 +2114,12 @@ impl OpenCADStudio {
                     // the command line would upper-case the whole string and
                     // mangle case-sensitive paths on Linux/macOS.
                     let line = format!("{} {}", command, path.to_string_lossy());
-                    let i = self.active_tab;
-                    if !crate::plugin::try_dispatch(self, i, &line) {
-                        self.command_line
-                            .push_error(crate::tf!("No plugin handled: {command}").as_ref());
+                    if let Some(task) = self.defer_plugin_line(&line, || {
+                        crate::app::plugin_frame::Resume::Direct(line.clone())
+                    }) {
+                        return task;
                     }
+                    return self.dispatch_plugin_answer(&line, false);
                 }
                 Task::none()
             }
@@ -2258,8 +2262,17 @@ impl OpenCADStudio {
             }
 
             Message::PluginDialogTextChange(id, val) => {
+                // Each edit reaches the plugin as a "change", as a panel's
+                // text field and a dialog's file field already report it,
+                // so it can follow the input (filter a list, check a name).
+                // A Number field reports its text as typed, partial or not.
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.text_values.insert(id, val);
+                    state.text_values.insert(id.clone(), val.clone());
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "change".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Text(val)),
+                    );
                 }
                 Task::none()
             }
@@ -2345,62 +2358,26 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginDialogFilePick(id) => {
-                let (is_save, extensions) = if let Some(state) = &self.plugin_dialog_state {
-                    fn find_fp(
-                        ctrls: &[ocs_plugin_api::dialog::DialogControl],
-                        target: &str,
-                    ) -> Option<(bool, Vec<String>)> {
-                        for c in ctrls {
-                            match c {
-                                ocs_plugin_api::dialog::DialogControl::FilePicker {
-                                    id: cid,
-                                    extensions,
-                                    save,
-                                    ..
-                                } if cid == target => return Some((*save, extensions.clone())),
-                                ocs_plugin_api::dialog::DialogControl::Fields {
-                                    controls, ..
-                                }
-                                | ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
-                                | ocs_plugin_api::dialog::DialogControl::Column {
-                                    controls, ..
-                                } => {
-                                    if let Some(res) = find_fp(controls, target) {
-                                        return Some(res);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        None
-                    }
-                    state
-                        .def
-                        .rows
-                        .iter()
-                        .find_map(|r| find_fp(&r.controls, &id))
-                        .unwrap_or((false, Vec::new()))
-                } else {
-                    (false, Vec::new())
+                use crate::ui::window::plugin_dialog::{pick_path, pick_target, PickTarget};
+                let (target, start) = match &self.plugin_dialog_state {
+                    Some(state) => (
+                        state
+                            .def
+                            .rows
+                            .iter()
+                            .find_map(|r| pick_target(&r.controls, &id)),
+                        state.file_values.get(&id).map(std::path::PathBuf::from),
+                    ),
+                    None => (None, None),
                 };
+                let target = target.unwrap_or(PickTarget::File {
+                    save: false,
+                    extensions: Vec::new(),
+                });
                 let id_clone = id.clone();
-                iced::Task::perform(
-                    async move {
-                        let mut dialog = rfd::AsyncFileDialog::new();
-                        if !extensions.is_empty() {
-                            let ext_strs: Vec<&str> =
-                                extensions.iter().map(|s| s.as_str()).collect();
-                            dialog = dialog.add_filter("Files", &ext_strs);
-                        }
-                        let handle = if is_save {
-                            dialog.save_file().await
-                        } else {
-                            dialog.pick_file().await
-                        };
-                        handle.map(|h| crate::sys::handle_path(&h))
-                    },
-                    move |path| Message::PluginDialogFilePicked(id_clone, path),
-                )
+                iced::Task::perform(pick_path(target, start), move |path| {
+                    Message::PluginDialogFilePicked(id_clone, path)
+                })
             }
             Message::PluginDialogFilePicked(id, path) => {
                 if let Some(p) = path {
@@ -2415,6 +2392,42 @@ impl OpenCADStudio {
                     );
                 }
                 Task::none()
+            }
+            Message::PluginDialogDate(id, msg) => {
+                let Some(state) = &mut self.plugin_dialog_state else {
+                    return Task::none();
+                };
+                let dismissed = msg == crate::ui::window::date_field::DateMsg::Close
+                    && state
+                        .open_calendar
+                        .as_ref()
+                        .is_some_and(|(o, _, _)| *o == id);
+                if dismissed {
+                    self.calendar_dismissed = Some(iced::time::Instant::now());
+                }
+                let Some(state) = &mut self.plugin_dialog_state else {
+                    return Task::none();
+                };
+                let controls: Vec<_> = state
+                    .def
+                    .rows
+                    .iter()
+                    .flat_map(|r| r.controls.iter().cloned())
+                    .collect();
+                match crate::ui::window::date_field::step(
+                    &mut state.open_calendar,
+                    &mut state.text_values,
+                    &controls,
+                    &id,
+                    msg,
+                ) {
+                    Some(picked) => self.dispatch_plugin_dialog_action(
+                        id,
+                        "pick".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Text(picked)),
+                    ),
+                    None => Task::none(),
+                }
             }
             Message::PluginDialogFileTextChange(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
@@ -2777,16 +2790,61 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginPanelFilePick(panel_id, control_id) => {
+                use crate::ui::window::plugin_dialog::{pick_path, pick_target, PickTarget};
+                // A panel's file field opens files without a filter, as
+                // before; its folder field the folder dialog.
+                let panel = self.plugin_panels.get(&panel_id);
+                let folder = panel.is_some_and(|p| {
+                    pick_target(&p.def.controls, &control_id) == Some(PickTarget::Folder)
+                });
+                let target = if folder {
+                    PickTarget::Folder
+                } else {
+                    PickTarget::File {
+                        save: false,
+                        extensions: Vec::new(),
+                    }
+                };
+                let start = panel
+                    .and_then(|p| p.file_values.get(&control_id))
+                    .map(std::path::PathBuf::from);
                 let pid = panel_id.clone();
                 let cid = control_id.clone();
-                iced::Task::perform(
-                    async move {
-                        let dialog = rfd::AsyncFileDialog::new();
-                        let handle = dialog.pick_file().await;
-                        handle.map(|h| crate::sys::handle_path(&h))
-                    },
-                    move |path| Message::PluginPanelFilePicked(pid, cid, path),
-                )
+                iced::Task::perform(pick_path(target, start), move |path| {
+                    Message::PluginPanelFilePicked(pid, cid, path)
+                })
+            }
+            Message::PluginPanelDate(panel_id, control_id, msg) => {
+                let Some(panel) = self.plugin_panels.get_mut(&panel_id) else {
+                    return Task::none();
+                };
+                if msg == crate::ui::window::date_field::DateMsg::Close
+                    && panel
+                        .open_calendar
+                        .as_ref()
+                        .is_some_and(|(o, _, _)| *o == control_id)
+                {
+                    self.calendar_dismissed = Some(iced::time::Instant::now());
+                }
+                let Some(panel) = self.plugin_panels.get_mut(&panel_id) else {
+                    return Task::none();
+                };
+                let controls = panel.def.controls.clone();
+                if let Some(picked) = crate::ui::window::date_field::step(
+                    &mut panel.open_calendar,
+                    &mut panel.text_values,
+                    &controls,
+                    &control_id,
+                    msg,
+                ) {
+                    crate::plugin::v4_support::publish_panel_action(
+                        panel_id,
+                        control_id,
+                        "pick".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Text(picked)),
+                    );
+                }
+                Task::none()
             }
             Message::PluginPanelFilePicked(panel_id, control_id, path) => {
                 if let Some(p) = path {
@@ -3343,8 +3401,10 @@ impl OpenCADStudio {
                 }
                 if self.command_line.has_contextual_suggestions() {
                     self.command_line.autocomplete_prev();
+                    return self.focus_cmd_input();
                 }
-                self.focus_cmd_input()
+                let moved = self.cycle_object_snap_back();
+                Task::batch([moved, self.focus_cmd_input()])
             }
 
             Message::SplitModelViewport(horizontal) => {
@@ -3923,11 +3983,13 @@ impl OpenCADStudio {
                     SelectExtend::Single
                 };
                 self.xref_manager.click_select(&id, extend);
+                self.xref_manager.keys_active = true;
                 Task::none()
             }
             Message::XrefRowRightClick(id) => {
                 self.xref_manager.row_change_path_open = false;
                 self.xref_manager.right_click_select(&id);
+                self.xref_manager.keys_active = true;
                 Task::none()
             }
             Message::XrefManagerToggleTree => {
@@ -5702,6 +5764,16 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PluginFrameDrawn => {
+                self.on_plugin_frame_drawn();
+                Task::none()
+            }
+            Message::PluginFrameResume => self.resume_plugin_frame(),
+            Message::PluginRunWake => self.on_plugin_run_wake(),
+            Message::PluginRunCancel => {
+                self.cancel_plugin_run();
+                Task::none()
+            }
             Message::LayoutSettled => {
                 // Restore the scene after the notice redraw.
                 self.layout_settling = false;
@@ -10706,7 +10778,16 @@ impl OpenCADStudio {
                 if self.mtext_navigation_key(&key) {
                     return Task::none();
                 }
+                if let Some(task) = self.mtext_editing_key(&key) {
+                    return task;
+                }
+                if self.table_cell_line_break(&key) {
+                    return Task::none();
+                }
                 if let Some(task) = self.layer_manager_key(&key) {
+                    return task;
+                }
+                if let Some(task) = self.xref_manager_key(&key) {
                     return task;
                 }
                 if let Some(task) = self.quick_calc_shortcut(&key) {
@@ -10753,7 +10834,7 @@ impl OpenCADStudio {
                 let selected = (!self.ribbon.custom_panels().is_empty()).then_some(0);
                 self.ribbon_customize = Some(crate::ui::window::ribbon_customize::State {
                     selected,
-                    draft: String::new(),
+                    ..Default::default()
                 });
                 self.active_modal = Some(crate::app::ModalKind::RibbonCustomize);
                 Task::none()
@@ -14082,7 +14163,9 @@ impl OpenCADStudio {
                 // SVG choice proposes `stem.svg` up front; EXPORTDWF
                 // proposes `stem.dwf`.
                 #[cfg(not(target_arch = "wasm32"))]
-                let svg = if dwf || self.plot_dialog.file_dwf {
+                let svg = if self.plot_dialog.file_image && !dwf {
+                    crate::io::pdf_export::PlotFileKind::Image
+                } else if dwf || self.plot_dialog.file_dwf {
                     crate::io::pdf_export::PlotFileKind::Dwf
                 } else if self.plot_dialog.file_svg {
                     crate::io::pdf_export::PlotFileKind::Svg
@@ -14123,7 +14206,9 @@ impl OpenCADStudio {
                     return Task::done(Message::PlotWindowExportPath(Some(path)));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                let svg = if self.plot_dialog.file_dwf {
+                let svg = if self.plot_dialog.file_image {
+                    crate::io::pdf_export::PlotFileKind::Image
+                } else if self.plot_dialog.file_dwf {
                     crate::io::pdf_export::PlotFileKind::Dwf
                 } else if self.plot_dialog.file_svg {
                     crate::io::pdf_export::PlotFileKind::Svg

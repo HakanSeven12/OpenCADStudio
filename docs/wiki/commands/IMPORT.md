@@ -13,6 +13,7 @@ ribbon: Insert tab › Import panel
    - **ACIS** (`.sat`), **IGES** (`.igs`, `.iges`) and **STEP** (`.ste`, `.stp`, `.step`): 3D models.
    - **Metafile** (`.wmf`) and **SVG** (`.svg`, `.svgz`): vector drawings.
    - **Wavefront OBJ** (`.obj`, with **All Files**): one MESH per object of the file, as [`IMPORTOBJ`](IMPORTOBJ-Command) does.
+   - **glTF** (`.gltf`, `.glb`, with **All Files**): one MESH per mesh the scene places, as [`IMPORTOBJ`](IMPORTOBJ-Command) does.
 
 ## Command-line form
 When [`FILEDIA`](FILEDIA-System-Variable) is 0, `IMPORT` asks `Enter import file name:` on the command line instead of opening the window. You can also type the file name after the command, for example `IMPORT plan.dgn`. This form suits scripts.

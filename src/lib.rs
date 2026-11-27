@@ -33,17 +33,21 @@ pub(crate) fn with_headless_ui(test: impl FnOnce() + Send + 'static) {
         .join()
         .unwrap_or_else(|error| std::panic::resume_unwind(error));
 }
+pub mod calc;
+pub mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cli;
 pub mod command;
 pub mod config;
 pub mod discussions;
+pub mod display;
 pub mod entities;
 pub(crate) mod entity_creation;
 pub mod filter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_backend;
 pub mod i18n;
+pub mod icon_assets;
 pub(crate) mod ifc_plan;
 pub(crate) mod input;
 pub mod io;
@@ -59,9 +63,11 @@ pub(crate) mod network;
 pub mod par;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod parametric;
+pub mod paths;
 pub mod patreon;
 pub mod perf;
 pub mod plugin;
+pub mod plugin_catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod rest;
 pub mod scene;
@@ -69,6 +75,8 @@ pub(crate) mod schema_validation;
 pub mod snap;
 pub mod sys;
 pub mod sysinfo;
+pub mod text;
 pub mod ui;
 pub mod videos;
+pub mod wildcard;
 pub(crate) mod xml_depth;

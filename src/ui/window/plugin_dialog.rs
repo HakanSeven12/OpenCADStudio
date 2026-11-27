@@ -42,6 +42,8 @@ pub struct PluginDialogState {
     /// Parsed-once handles of the dialog's [`DialogControl::Svg`] images,
     /// by control id (see [`collect_svg_handles`]).
     pub svg_handles: HashMap<String, iced::widget::svg::Handle>,
+    /// The date field whose calendar is open, and the month it shows.
+    pub open_calendar: crate::ui::window::date_field::OpenCalendar,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +55,75 @@ pub struct ChoiceOption {
 impl std::fmt::Display for ChoiceOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label)
+    }
+}
+
+/// What the Browse button of a dialog or panel path field picks.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PickTarget {
+    /// A file (`FilePicker`): saved or opened, with its extension filter.
+    File { save: bool, extensions: Vec<String> },
+    /// A folder (`FolderPicker`, API v32).
+    Folder,
+}
+
+/// The pick target of path field `id` among `controls`, searching rows,
+/// columns and field groups.
+pub fn pick_target(controls: &[DialogControl], id: &str) -> Option<PickTarget> {
+    controls.iter().find_map(|c| match c {
+        DialogControl::FilePicker {
+            id: cid,
+            extensions,
+            save,
+            ..
+        } if cid == id => Some(PickTarget::File {
+            save: *save,
+            extensions: extensions.clone(),
+        }),
+        DialogControl::FolderPicker { id: cid, .. } if cid == id => Some(PickTarget::Folder),
+        DialogControl::Fields { controls, .. }
+        | DialogControl::Row { controls, .. }
+        | DialogControl::Column { controls, .. } => pick_target(controls, id),
+        _ => None,
+    })
+}
+
+/// Open the system's dialog for `target`, starting in `start` where that is a
+/// folder. A browser picks files only, so a folder pick there gives nothing.
+pub async fn pick_path(
+    target: PickTarget,
+    start: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    match target {
+        PickTarget::File { save, extensions } => {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if !extensions.is_empty() {
+                let ext_strs: Vec<&str> = extensions.iter().map(|s| s.as_str()).collect();
+                dialog = dialog.add_filter("Files", &ext_strs);
+            }
+            let handle = if save {
+                dialog.save_file().await
+            } else {
+                dialog.pick_file().await
+            };
+            handle.map(|h| crate::sys::handle_path(&h))
+        }
+        #[cfg(target_arch = "wasm32")]
+        PickTarget::Folder => {
+            let _ = start;
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        PickTarget::Folder => {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if let Some(dir) = start.filter(|d| d.is_dir()) {
+                dialog = dialog.set_directory(dir);
+            }
+            dialog
+                .pick_folder()
+                .await
+                .map(|h| crate::sys::handle_path(&h))
+        }
     }
 }
 
@@ -192,7 +263,8 @@ impl PluginDialogState {
                     text_values.insert(id.clone(), text.clone());
                 }
                 DialogControl::Button { .. } => {}
-                DialogControl::Text { id, default, .. } => {
+                DialogControl::Text { id, default, .. }
+                | DialogControl::Date { id, default, .. } => {
                     text_values.insert(id.clone(), default.clone());
                 }
                 DialogControl::Number { id, default, .. } => {
@@ -210,6 +282,9 @@ impl PluginDialogState {
                     color_values.insert(id.clone(), *default);
                 }
                 DialogControl::FilePicker {
+                    id, default_path, ..
+                }
+                | DialogControl::FolderPicker {
                     id, default_path, ..
                 } => {
                     file_values.insert(id.clone(), default_path.clone());
@@ -292,6 +367,7 @@ impl PluginDialogState {
             hidden_controls: HashSet::new(),
             dynamic_choice_options: HashMap::new(),
             svg_handles,
+            open_calendar: None,
         }
     }
 
@@ -360,7 +436,7 @@ impl PluginDialogState {
             | DialogControl::Button { .. }
             | DialogControl::Row { .. }
             | DialogControl::Column { .. } => None,
-            DialogControl::Text { id, default, .. } => {
+            DialogControl::Text { id, default, .. } | DialogControl::Date { id, default, .. } => {
                 let val = self
                     .text_values
                     .get(id)
@@ -412,6 +488,9 @@ impl PluginDialogState {
                 Some((id.clone(), DialogValue::Color(val)))
             }
             DialogControl::FilePicker {
+                id, default_path, ..
+            }
+            | DialogControl::FolderPicker {
                 id, default_path, ..
             } => {
                 let val = self
@@ -630,7 +709,19 @@ impl PluginDialogState {
             hidden_controls: &self.hidden_controls,
             dynamic_choice_options: &self.dynamic_choice_options,
             svg_handles: &self.svg_handles,
+            open_calendar: &self.open_calendar,
         }
+    }
+}
+
+/// The message a text-like field of a dialog (`panel_id` `None`) or a
+/// form panel sends for each edit.
+fn text_change(panel_id: &Option<String>, id: &str) -> impl Fn(String) -> Message + 'static {
+    let pid = panel_id.clone();
+    let cid = id.to_string();
+    move |val| match &pid {
+        Some(p) => Message::PluginPanelTextChange(p.clone(), cid.clone(), val),
+        None => Message::PluginDialogTextChange(cid.clone(), val),
     }
 }
 
@@ -649,9 +740,39 @@ pub(crate) struct FormControlView<'a> {
     pub hidden_controls: &'a HashSet<String>,
     pub dynamic_choice_options: &'a HashMap<String, Vec<String>>,
     pub svg_handles: &'a HashMap<String, iced::widget::svg::Handle>,
+    pub open_calendar: &'a crate::ui::window::date_field::OpenCalendar,
 }
 
 impl<'a> FormControlView<'a> {
+    /// A date field: its text input and calendar button, the calendar under
+    /// them while it is open.
+    fn date_field(
+        &self,
+        id: &'a str,
+        format: &'a str,
+        input: iced::widget::TextInput<'a, Message>,
+        is_disabled: bool,
+    ) -> Element<'a, Message> {
+        use crate::ui::window::date_field::{calendar_button, with_calendar};
+        let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
+        let shown = self
+            .open_calendar
+            .as_ref()
+            .filter(|(open, _, _)| open == id)
+            .map(|(_, year, month)| (*year, *month));
+        let pid = self.panel_id.map(str::to_string);
+        let cid = id.to_string();
+        let on_date = move |msg| match &pid {
+            Some(p) => Message::PluginPanelDate(p.clone(), cid.clone(), msg),
+            None => Message::PluginDialogDate(cid.clone(), msg),
+        };
+        let field = row![input, calendar_button(is_disabled, &on_date)]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .into();
+        with_calendar(field, format, current, shown, on_date)
+    }
+
     fn view_field_item(
         &self,
         control: &'a DialogControl,
@@ -669,6 +790,25 @@ impl<'a> FormControlView<'a> {
         let panel_id = self.panel_id.map(str::to_string);
         const LABEL_WIDTH: f32 = 110.0;
         match control {
+            DialogControl::Date {
+                id, label, format, ..
+            } => {
+                let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
+                let input = text_input("", current)
+                    .padding([3, 6])
+                    .size(12)
+                    .style(field_style)
+                    .width(Fill)
+                    .on_input_maybe((!is_disabled).then(|| text_change(&panel_id, id)));
+                row![
+                    container(text(label).size(11)).width(Length::Fixed(LABEL_WIDTH)),
+                    self.date_field(id, format, input, is_disabled)
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .width(Fill)
+                .into()
+            }
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
@@ -792,7 +932,8 @@ impl<'a> FormControlView<'a> {
                 .width(Fill)
                 .into()
             }
-            DialogControl::FilePicker { id, label, .. } => {
+            DialogControl::FilePicker { id, label, .. }
+            | DialogControl::FolderPicker { id, label, .. } => {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
@@ -813,7 +954,7 @@ impl<'a> FormControlView<'a> {
                     });
                 }
 
-                let mut browse_btn = button(text("Browse...").size(11))
+                let mut browse_btn = button(text(crate::tr!("plugin-dialog", "browse")).size(11))
                     .style(button_style(false))
                     .padding([3, 6]);
                 if !is_disabled {
@@ -1021,6 +1162,24 @@ impl<'a> FormControlView<'a> {
                 }
                 btn.into()
             }
+            DialogControl::Date {
+                id, label, format, ..
+            } => {
+                let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
+                let input = text_input("", current)
+                    .padding(5)
+                    .size(12)
+                    .style(field_style)
+                    .width(Fill)
+                    .on_input_maybe((!is_disabled).then(|| text_change(&panel_id, id)));
+                column![
+                    text(label).size(11),
+                    self.date_field(id, format, input, is_disabled)
+                ]
+                .spacing(4)
+                .width(Fill)
+                .into()
+            }
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
@@ -1129,7 +1288,8 @@ impl<'a> FormControlView<'a> {
                 .spacing(4)
                 .into()
             }
-            DialogControl::FilePicker { id, label, .. } => {
+            DialogControl::FilePicker { id, label, .. }
+            | DialogControl::FolderPicker { id, label, .. } => {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
@@ -1150,7 +1310,7 @@ impl<'a> FormControlView<'a> {
                     });
                 }
 
-                let mut browse_btn = button(text("Browse...").size(11))
+                let mut browse_btn = button(text(crate::tr!("plugin-dialog", "browse")).size(11))
                     .style(button_style(false))
                     .padding([4, 8]);
                 if !is_disabled {
@@ -1774,5 +1934,113 @@ mod tests {
         assert_eq!(panel.choice_option_text("p_choice", 1), "Beta");
         assert!(panel.disabled_controls.contains("p_btn"));
         assert!(panel.hidden_controls.contains("p_choice"));
+    }
+
+    /// A folder field (API v32) holds its path like a file field and
+    /// answers it as a `FilePath`; its Browse button picks a folder, found
+    /// inside rows and field groups too.
+    #[test]
+    fn a_folder_picker_holds_its_path_and_picks_a_folder() {
+        let folder = DialogControl::FolderPicker {
+            id: "out".to_string(),
+            label: "Folder".to_string(),
+            default_path: "/plots".to_string(),
+        };
+        let file = DialogControl::FilePicker {
+            id: "src".to_string(),
+            label: "File".to_string(),
+            default_path: String::new(),
+            filter_name: "Drawings".to_string(),
+            extensions: vec!["dwg".to_string()],
+            save: true,
+        };
+        let row = DialogControl::row(vec![file, folder]);
+        let mut state = PluginDialogState::new(DialogDef::new("Export").with_control(row.clone()));
+        assert_eq!(state.file_values.get("out").unwrap(), "/plots");
+        state
+            .file_values
+            .insert("out".to_string(), "/plots/2026".to_string());
+        assert_eq!(
+            state.collect_response_map().get("out"),
+            Some(&DialogValue::FilePath("/plots/2026".to_string()))
+        );
+
+        let controls = [DialogControl::Fields {
+            id: "paths".to_string(),
+            title: None,
+            controls: vec![row],
+            collapsed: false,
+        }];
+        assert_eq!(pick_target(&controls, "out"), Some(PickTarget::Folder));
+        assert_eq!(
+            pick_target(&controls, "src"),
+            Some(PickTarget::File {
+                save: true,
+                extensions: vec!["dwg".to_string()],
+            })
+        );
+        assert_eq!(pick_target(&controls, "paths"), None);
+    }
+
+    /// A dialog draws a folder field like a file field – its label, the
+    /// path and a Browse button – and Browse asks to pick for that field.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_folder_picker_shows_its_path_and_a_browse_button() {
+        use iced_test::simulator::Simulator;
+        let state = PluginDialogState::new(DialogDef::new("Export").with_control(
+            DialogControl::FolderPicker {
+                id: "out".to_string(),
+                label: "Output folder".to_string(),
+                default_path: "/plots".to_string(),
+            },
+        ));
+        let mut ui = Simulator::with_size(iced::Settings::default(), (700.0, 400.0), state.view());
+        ui.find("Output folder").expect("the label");
+        ui.find("/plots").expect("the path");
+        ui.click("Browse...").expect("the Browse button");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::PluginDialogFilePick(id) if id == "out")),
+            "{messages:?}"
+        );
+    }
+
+    /// A date field's open calendar shows its month, the weekdays and the
+    /// days; a click on a day asks to pick it in the field's format.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_date_fields_calendar_shows_its_month_and_picks_a_day() {
+        use crate::ui::window::date_field::DateMsg;
+        use iced_test::simulator::Simulator;
+        let mut state =
+            PluginDialogState::new(DialogDef::new("Sheet").with_control(DialogControl::Date {
+                id: "issued".to_string(),
+                label: "Issued".to_string(),
+                default: "26.11.2026".to_string(),
+                format: "DD.MM.YYYY".to_string(),
+            }));
+        let mut ui = Simulator::with_size(iced::Settings::default(), (700.0, 500.0), state.view());
+        ui.find("26.11.2026").expect("the field");
+        assert!(ui.find("November 2026").is_err(), "closed until asked");
+        drop(ui);
+        state.open_calendar = Some(("issued".to_string(), 2026, 11));
+        let mut ui = Simulator::with_size(iced::Settings::default(), (700.0, 500.0), state.view());
+        ui.find("November 2026").expect("the month");
+        ui.find("Mo").expect("the weekdays");
+        ui.find("30").expect("the last day");
+        assert!(ui.find("31").is_err(), "November has 30 days");
+        ui.click("3").expect("a day");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(
+            messages.iter().any(|m| matches!(
+                m,
+                Message::PluginDialogDate(id, DateMsg::Pick(text))
+                    if id == "issued" && text == "03.11.2026"
+            )),
+            "{messages:?}"
+        );
     }
 }

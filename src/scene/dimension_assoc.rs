@@ -12,7 +12,7 @@ use ocs_geom::geom2d::{
 use ocs_geom::space::Plane;
 use std::f64::consts::TAU;
 
-use crate::command::DimensionAssociationSource;
+use crate::snap::DimensionAssociationSource;
 
 use super::dimension_assoc_chain::{self as chain, ChainError, FeatureContext, ReferenceChain};
 use super::viewport_ref::{AcceptedSnap, MeasurementScale, ViewportFrame};
@@ -2081,9 +2081,9 @@ impl Scene {
     pub(crate) fn reassociate_dimension(
         &mut self,
         dimension: Handle,
-        target: &crate::command::ReassociateTarget,
+        target: &crate::scene::dimension_assoc::ReassociateTarget,
     ) -> bool {
-        use crate::command::ReassociateTarget as T;
+        use crate::scene::dimension_assoc::ReassociateTarget as T;
         let Some(owner) = self
             .document
             .get_entity(dimension)
@@ -2847,6 +2847,21 @@ impl Scene {
         reference.osnap_distance = angle;
         reference.osnap_point = chord;
     }
+}
+
+/// What DIMREASSOCIATE moves a dimension's definition points onto.
+#[derive(Clone, Debug)]
+pub enum ReassociateTarget {
+    /// The definition point `index` goes to `point`, on the object there.
+    Point { index: usize, point: glam::DVec3 },
+    /// Both extension line origins go to the ends of a line or arc.
+    Ends(Handle),
+    /// A three-point angle takes an arc's centre and ends.
+    Arc(Handle),
+    /// One of a two-line angle's lines.
+    Line { index: usize, object: Handle },
+    /// A radius or diameter dimension measures this arc or circle.
+    Radial(Handle),
 }
 
 #[cfg(test)]

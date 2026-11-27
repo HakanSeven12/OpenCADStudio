@@ -630,7 +630,7 @@ mod selectable_custom_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|entity| crate::plugin::entity_labels::native_edit_disabled(entity))
+                .filter(|entity| crate::entities::owner_stamp::native_edit_disabled(entity))
                 .count(),
             1,
             "COPY never clones the custom façade"

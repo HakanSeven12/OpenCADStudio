@@ -51,7 +51,7 @@ fn layout_of(count: u32, extra: Extra) -> Scene {
     scene.set_current_layout("Sheet".to_string());
     if extra == Extra::PlotStyleShown {
         let mut settings = scene.effective_plot_settings().expect("layout settings");
-        settings.current_style_sheet = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        settings.current_style_sheet = crate::catalog::plot_style::MONOCHROME_PLOT_STYLE.into();
         settings.flags.show_plot_styles = true;
         assert!(scene.set_layout_plot_settings("Sheet", &settings));
     }

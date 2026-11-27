@@ -19,7 +19,6 @@ use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem, ToolDef};
-use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod draw_panel;
@@ -40,6 +39,7 @@ mod collapse;
 mod floating;
 mod keytips;
 pub(crate) use keytips::text_width;
+mod docked;
 mod layout;
 mod locate;
 mod minimize;
@@ -67,8 +67,8 @@ pub use keytips::{
 };
 pub use layout::CustomPanel;
 pub use layout::{
-    default_qat, FloatingPanel, MinimizePref, QatBuiltin, QatItem, QatPosition, RibbonLayout,
-    RibbonMinimize,
+    default_qat, DockedToolbar, FloatingPanel, MinimizePref, QatBuiltin, QatItem, QatPosition,
+    RibbonLayout, RibbonMinimize, ToolbarEdge,
 };
 pub use minimize::{MinimizeMsg, Opener};
 pub(crate) use qat::{list_source as qat_list_source, QAT_SWITCH_ID};
@@ -599,9 +599,16 @@ impl Ribbon {
             .map(|(_, name)| name.clone())
     }
 
+    /// The ribbon with the core tabs only.
     pub fn new() -> Self {
+        Self::with_modules(crate::modules::registry::all_modules())
+    }
+
+    /// The ribbon with `modules` as its tabs: the core ones plus those the
+    /// loaded plugins contribute.
+    pub fn with_modules(modules: Vec<Box<dyn CadModule>>) -> Self {
         Self {
-            modules: all_ribbon_modules(),
+            modules,
             active: 0,
             active_tool: None,
             wireframe: false,
@@ -1116,6 +1123,7 @@ impl Ribbon {
         groups.retain(|group| {
             !self.layout.panel_hidden(module_id, group.title)
                 && self.layout.floating_panel(module_id, group.title).is_none()
+                && self.layout.docked_toolbar(module_id, group.title).is_none()
         });
         groups.into_iter()
     }

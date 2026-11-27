@@ -9,6 +9,7 @@ pub mod analysis;
 pub mod annotative;
 pub mod assoc_array;
 pub mod assoc_array_grips;
+pub mod auto_constrain;
 pub(crate) mod block_action_bars;
 pub(crate) mod block_actions;
 pub(crate) mod block_alignment;
@@ -26,13 +27,14 @@ pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
 pub mod block_visibility;
+pub mod bounds;
 pub(crate) mod bricscad_parameters;
 pub mod cache;
 pub mod compare;
 pub mod convert;
 pub mod creation_style;
 pub(crate) mod frame;
-pub(crate) mod hyperlink;
+pub(crate) use crate::entities::hyperlink;
 pub mod linetype_service;
 pub mod model;
 pub mod pick;
@@ -45,13 +47,6 @@ pub mod section_cull;
 pub mod sub_select;
 pub mod text;
 pub mod view;
-
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub enum BlockScalePolicy {
-    #[default]
-    FromInsert,
-    Applied,
-}
 
 // Topic submodules split out of this root (each contributes `impl Scene`
 // blocks and/or free functions). Pure text-move from the original mod.rs.
@@ -93,9 +88,14 @@ pub use camera_ops::{add_background, copy_background, erase_background};
 pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
-pub(crate) mod centermark;
+mod center_marks;
+pub(crate) use crate::entities::centermark;
+pub mod clipboard;
 pub(crate) mod dimension_assoc;
 pub(crate) mod dimension_assoc_chain;
+pub mod drawing_vars;
+pub mod explode;
+pub(crate) mod mline_style;
 pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
@@ -107,6 +107,8 @@ pub(crate) use entity::normalize_block_terminators;
 pub(crate) use entity::wire_thumbnail_bgra;
 pub use entity::CreateBlockOptions;
 mod group_layer;
+mod named_selections;
+pub(crate) use named_selections::NamedSelectionRecall;
 /// The one grip a whole picked group shows (GROUPDISPLAYMODE 1 and 2), at
 /// the centre of its extents: each member carries it, so dragging it moves
 /// the whole group.
@@ -158,6 +160,7 @@ pub mod viewport_ref;
 mod viewport_underlay_tests;
 pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;
+pub mod xref_info;
 mod parametric_solve;
 
 #[cfg(test)]
@@ -418,7 +421,7 @@ impl Scene {
     /// pre-baked 3D hints ride is clipped; this direct mesh read is not).
     /// Worst case in those views is a snap with no geometry behind it —
     /// never a corrupt point.
-    pub(crate) fn solid_face_snaps(
+    pub fn solid_face_snaps(
         &self,
         cursor_screen: iced::Point,
         view_rot: glam::Mat4,
@@ -496,13 +499,25 @@ impl Scene {
                         extension_origin: None,
                         extension_dir: None,
                         viewport: None,
-                        source: Some(crate::command::DimensionAssociationSource::inferred(handle)),
+                        source: Some(crate::snap::DimensionAssociationSource::inferred(handle)),
                         secondary_source: None,
                         model_point: None,
                     },
                 ));
             }
         };
+        let aperture_rect = [
+            cursor[0] - aperture_px,
+            cursor[1] - aperture_px,
+            cursor[0] + aperture_px,
+            cursor[1] + aperture_px,
+        ];
+        let frustum = crate::scene::pick::interaction_index::ScreenRectFrustum::new(
+            aperture_rect,
+            view_rot,
+            eye,
+            bounds,
+        );
         for (handle, set) in self.meshes.iter() {
             let Some(lod) = set.geometry_lods().first() else {
                 continue;
@@ -510,45 +525,21 @@ impl Scene {
             if lod.indices.len() < 3 {
                 continue;
             }
-            // Screen-space cull from the mesh bounds before touching triangles.
-            // It is only sound while every corner has a real projection: a
-            // corner behind the eye mirrors across the screen, so the union of
-            // the projected corners bounds nothing (#64).
-            let (mut x0, mut y0) = (f32::INFINITY, f32::INFINITY);
-            let (mut x1, mut y1) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
-            let mut cullable = true;
-            for corner in [
-                [set.world_aabb[0], set.world_aabb[1], set.z_aabb[0]],
-                [set.world_aabb[2], set.world_aabb[1], set.z_aabb[0]],
-                [set.world_aabb[0], set.world_aabb[3], set.z_aabb[0]],
-                [set.world_aabb[2], set.world_aabb[3], set.z_aabb[0]],
-                [set.world_aabb[0], set.world_aabb[1], set.z_aabb[1]],
-                [set.world_aabb[2], set.world_aabb[1], set.z_aabb[1]],
-                [set.world_aabb[0], set.world_aabb[3], set.z_aabb[1]],
-                [set.world_aabb[2], set.world_aabb[3], set.z_aabb[1]],
-            ] {
-                let Some(s) = project(glam::DVec3::new(
-                    corner[0] as f64,
-                    corner[1] as f64,
-                    corner[2] as f64,
-                )) else {
-                    cullable = false;
-                    break;
-                };
-                x0 = x0.min(s[0]);
-                y0 = y0.min(s[1]);
-                x1 = x1.max(s[0]);
-                y1 = y1.max(s[1]);
-            }
-            if cullable
-                && (cursor[0] < x0 - aperture_px
-                    || cursor[0] > x1 + aperture_px
-                    || cursor[1] < y0 - aperture_px
-                    || cursor[1] > y1 + aperture_px)
-            {
+            if !frustum.aabb_intersects(
+                [
+                    set.world_aabb[0] as f64,
+                    set.world_aabb[1] as f64,
+                    set.z_aabb[0] as f64,
+                ],
+                [
+                    set.world_aabb[2] as f64,
+                    set.world_aabb[3] as f64,
+                    set.z_aabb[1] as f64,
+                ],
+            ) {
                 continue;
             }
-            for tri in lod.indices.chunks_exact(3) {
+            let mut evaluate_triangle = |tri: &[u32]| {
                 let mut v = [glam::DVec3::ZERO; 3];
                 let mut ok = true;
                 for (slot, index) in v.iter_mut().zip(tri.iter()) {
@@ -573,11 +564,11 @@ impl Scene {
                     }
                 }
                 if !ok {
-                    continue;
+                    return;
                 }
                 let [a, b, c] = v;
                 let (Some(sa), Some(sb), Some(sc)) = (project(a), project(b), project(c)) else {
-                    continue;
+                    return;
                 };
                 // Per-triangle screen reject before any 3D work.
                 let (tx0, ty0) = (sa[0].min(sb[0]).min(sc[0]), sa[1].min(sb[1]).min(sc[1]));
@@ -587,7 +578,7 @@ impl Scene {
                     || cursor[1] < ty0 - aperture_px
                     || cursor[1] > ty1 + aperture_px
                 {
-                    continue;
+                    return;
                 }
                 if want_nearest {
                     let (q, d2, w) = closest_point_on_tri_2d(cursor, sa, sb, sc);
@@ -610,6 +601,31 @@ impl Scene {
                             );
                         }
                     }
+                }
+            };
+            if let Some(bvh) = set.geometry_triangle_bvh(0) {
+                use parry3d_f64::partitioning::TraversalAction;
+
+                bvh.traverse(|node| {
+                    let mins = node.mins();
+                    let maxs = node.maxs();
+                    if !frustum.aabb_intersects(
+                        [mins.x, mins.y, mins.z],
+                        [maxs.x, maxs.y, maxs.z],
+                    ) {
+                        return TraversalAction::Prune;
+                    }
+                    if let Some(tri_idx) = node.leaf_data() {
+                        let start = (tri_idx as usize) * 3;
+                        if let Some(tri) = lod.indices.get(start..start + 3) {
+                            evaluate_triangle(tri);
+                        }
+                    }
+                    TraversalAction::Continue
+                });
+            } else {
+                for tri in lod.indices.chunks_exact(3) {
+                    evaluate_triangle(tri);
                 }
             }
         }
@@ -867,48 +883,56 @@ fn mesh_interaction_aabb(set: &model::mesh_model::MeshLodSet) -> Option<[f64; 6]
     if let Some(aabb) = set.instance_aabb {
         return Some(aabb);
     }
-    let mut aabb = [
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    let mut include = |high: [f32; 3], low: [f32; 3]| {
-        let point = [
-            high[0] as f64 + low[0] as f64,
-            high[1] as f64 + low[1] as f64,
-            high[2] as f64 + low[2] as f64,
+    *set.cached_interaction_aabb.get_or_init(|| {
+        let mut aabb = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
         ];
-        if point.iter().all(|value| value.is_finite()) {
-            for axis in 0..3 {
-                aabb[axis] = aabb[axis].min(point[axis]);
-                aabb[axis + 3] = aabb[axis + 3].max(point[axis]);
+        let mut include = |high: [f32; 3], low: [f32; 3]| {
+            let point = [
+                high[0] as f64 + low[0] as f64,
+                high[1] as f64 + low[1] as f64,
+                high[2] as f64 + low[2] as f64,
+            ];
+            if point.iter().all(|value| value.is_finite()) {
+                for axis in 0..3 {
+                    aabb[axis] = aabb[axis].min(point[axis]);
+                    aabb[axis + 3] = aabb[axis + 3].max(point[axis]);
+                }
+            }
+        };
+        for mesh in &set.lods {
+            for (index, &high) in mesh.verts.iter().enumerate() {
+                include(high, mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]));
             }
         }
-    };
-    for mesh in &set.lods {
-        for (index, &high) in mesh.verts.iter().enumerate() {
-            include(high, mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]));
+        for (index, &high) in set.edge_verts.iter().enumerate() {
+            include(
+                high,
+                set.edge_verts_low.get(index).copied().unwrap_or([0.0; 3]),
+            );
         }
-    }
-    for (index, &high) in set.edge_verts.iter().enumerate() {
-        include(
-            high,
-            set.edge_verts_low.get(index).copied().unwrap_or([0.0; 3]),
-        );
-    }
-    aabb.iter().all(|value| value.is_finite()).then_some(aabb)
+        aabb.iter().all(|value| value.is_finite()).then_some(aabb)
+    })
 }
 
+pub use entity::BlockObjectMode;
 pub use model::hatch_model::HatchModel;
+pub use preview::{AreaPreviewRegion, AreaPreviewSource};
 pub use model::image_model::ImageModel;
 pub use model::mesh_model::MeshLodSet;
 pub use model::object::{GripApply, GripDef};
 pub use model::wire_model::{WireGeom, WireModel};
 use pick::interaction_index::{InteractionCandidates, InteractionIndex, SnapQueryCategory};
+pub(crate) use parametric_solve::status::{display_color, normalize_color};
 pub use pick::selection_state::SelectionState;
+pub use project::PlotImage;
+pub use scale_list::ViewportLayers;
+pub(crate) use page_setup::NO_DEVICE_STORED_NAME;
 pub use pipeline::uniforms::Uniforms;
 pub use pipeline::viewcube::{
     hit_test, hit_test_cardinal, hover_id, CubeRegion, NudgeDir, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD,
@@ -934,6 +958,9 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+pub use crate::entities::insert::BlockScalePolicy;
+pub(crate) use crate::entities::insert::INSERT_ATTRIBUTE_RANK;
+pub use crate::entities::viewport::vp_effective_scale;
 
 /// Session-only object visibility used by ISOLATEOBJECTS / HIDEOBJECTS.
 ///
@@ -1433,13 +1460,6 @@ const DRAW_DEPTH_LABEL_SCALE: f32 = 1.0 / 1_073_741_824.0;
 // thousands of Adds before a full rebuild.
 const DRAW_DEPTH_EMPTY_BLOCK_STRIDE: i32 = 1 << 18;
 
-/// The rank an insert's attributes are drawn at: `insert depth + rank * half`.
-/// Block members draw at their own ranks, all inside (0, 2) of the insert's
-/// half gap, so this one is above every member (an attribute is drawn after the
-/// block's contents, over its wipeout) and still under the next sibling, which
-/// starts two half gaps further on.
-pub(crate) const INSERT_ATTRIBUTE_RANK: f32 = 1.95;
-
 /// Labels map into (0, 2): draw order only ever moves 2D geometry towards
 /// the camera. A negative bias pushed lines lying on a solid's face behind
 /// that face in shaded views (#3119); 0 stays the true depth of 3D geometry.
@@ -1593,22 +1613,6 @@ pub(crate) fn wire_gpu_patch_enabled() -> bool {
     true
 }
 
-/// Resolve a viewport's paper-to-model scale ratio from its two
-/// DXF-derived sources.
-///
-/// `view_height` is canonical. `custom_scale` is the fallback when it is
-/// missing or zero.
-#[inline]
-pub fn vp_effective_scale(custom_scale: f64, view_height: f64, vp_height: f64) -> f64 {
-    if view_height.abs() > 1e-9 {
-        return vp_height / view_height;
-    }
-    if custom_scale.abs() > 1e-9 {
-        return custom_scale;
-    }
-    1.0
-}
-
 /// A block name a user may assign: non-empty, no control characters, none of
 /// the symbol-table-reserved characters (`*` marks anonymous blocks, `|`
 /// xref-dependent ones; the rest are the DXF symbol-name exclusions).
@@ -1662,7 +1666,7 @@ pub struct DerivedCaches {
     pub object_data: crate::entities::object_data::ObjectDataCache,
     /// XREF resolution results produced by the loader worker. Keeping these in
     /// the open bundle prevents parsing and merging references on the UI thread.
-    pub xrefs: Vec<crate::io::xref::XrefInfo>,
+    pub xrefs: Vec<crate::scene::xref_info::XrefInfo>,
     /// Model wire set and its spatial interaction index, prepared on the loader
     /// thread. Installing these prevents the first visible frame from paying a
     /// whole-drawing tessellation/index build while the progress overlay freezes.
@@ -1706,7 +1710,7 @@ pub fn build_derived_caches_with_progress(
     build_derived_caches_impl(doc, Some(progress), material_base_dir)
 }
 
-fn build_derived_caches_impl(
+pub(crate) fn build_derived_caches_impl(
     doc: &Document,
     progress: Option<&(dyn Fn(u16) + Sync)>,
     material_base_dir: Option<&std::path::Path>,
@@ -2469,6 +2473,7 @@ fn transform_block_mesh_lod_set(
         std::sync::Arc::new(model::mesh_model::MeshInstanceSource {
             handle: set.entity_handle().unwrap_or(Handle::new(0)),
             lods: set.lods.clone(),
+            triangle_bvhs: model::mesh_model::new_triangle_bvh_slots(set.lods.len()),
             edge_verts: set.edge_verts.clone(),
             edge_verts_low: set.edge_verts_low.clone(),
             curved_gens: set.curved_gens.clone(),
@@ -2496,6 +2501,7 @@ fn transform_block_mesh_lod_set(
     }
     MeshLodSet {
         lods: Vec::new(),
+        triangle_bvhs: Default::default(),
         effective_layer: set.effective_layer.clone(),
         material: set.material.clone(),
         face_materials: set.face_materials.clone(),
@@ -2522,6 +2528,7 @@ fn transform_block_mesh_lod_set(
             .iter()
             .all(|value| value.is_finite())
             .then_some(bounds),
+        cached_interaction_aabb: Default::default(),
         display_lods: Default::default(),
     }
 }
@@ -3075,7 +3082,7 @@ pub struct Scene {
     /// The sheet's models split at the first content viewport's draw order.
     paper_sheet_split_cache: RefCell<paper::SheetSplitCache>,
     display_plot_style_cache:
-        RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
+        RefCell<HashMap<(String, String), Option<Arc<crate::catalog::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
     styled_hatch_cache: RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
     styled_wire_fill_cache: RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
@@ -4035,7 +4042,7 @@ impl Scene {
     /// The root drawing's geographic location (GEODATA), when it has one.
     /// Xref and paper-space GEODATA never become the scene CRS by handle order.
     pub(crate) fn geo_data(&self) -> Option<&document::objects::GeoData> {
-        crate::io::crs::model_space_geo_data(&self.document)
+        crate::catalog::crs::model_space_geo_data(&self.document)
     }
 
     pub(crate) fn refresh_object_data_cache(&mut self) {
@@ -4095,7 +4102,7 @@ impl Scene {
         key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
         // Loading a linetype does not move the block epoch, and a cache built
         // before the drawing had a complex one kept no path for its children.
-        key = key.rotate_left(13) ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
+        key = key.rotate_left(13) ^ crate::catalog::linetypes::defines_complex_lt(&self.document) as u64;
         let stale = {
             let cache = self.block_defn_cache.borrow();
             match cache.get(&key) {
@@ -4834,7 +4841,7 @@ impl Scene {
     /// active layout changes; the file otherwise always reopened in Model.
     pub fn sync_active_space_to_document(&mut self) {
         self.document.header.show_model_space = self.current_layout == "Model";
-        crate::io::set_saved_active_layout(&mut self.document, &self.current_layout);
+        crate::scene::drawing_vars::set_saved_active_layout(&mut self.document, &self.current_layout);
     }
 
     /// Record the entered viewport (or the sheet, in paper space) as the
@@ -4923,6 +4930,11 @@ impl Scene {
             }
             self.push_geometry_delta(epoch, changes, false);
         }
+    }
+
+    /// The MTEXT the in-place editor replaces while it is open.
+    pub(crate) fn mtext_editor_hidden(&self) -> Option<Handle> {
+        self.mtext_editor_hidden
     }
 
     /// Hide only the source replaced by the MTEXT editor, independently from
@@ -6963,7 +6975,7 @@ impl Scene {
         )
     }
 
-    pub fn paper_plot_images(&self) -> Vec<crate::io::pdf_export::PlotImage> {
+    pub fn paper_plot_images(&self) -> Vec<crate::scene::project::PlotImage> {
         let scale = if self.current_layout == "Model" {
             self.displayed_annotation_scale_handle()
         } else {
@@ -6987,7 +6999,7 @@ impl Scene {
         all_visible: bool,
         viewport: Option<Handle>,
         plotting: bool,
-    ) -> Vec<crate::io::pdf_export::PlotImage> {
+    ) -> Vec<crate::scene::project::PlotImage> {
         self.collect_images(
             target_block,
             frozen,
@@ -6995,7 +7007,7 @@ impl Scene {
             all_visible,
             viewport,
             plotting,
-            |image, context| crate::io::pdf_export::PlotImage {
+            |image, context| crate::scene::project::PlotImage {
                 image,
                 clips: context.clips.clone(),
             },
@@ -7049,17 +7061,42 @@ impl Scene {
             None
         }
         .unwrap_or_else(|| self.render_scene_root(target_block));
+        let mut image_block_memo = std::collections::HashMap::new();
+        let is_image = |entity: &EntityType| self.images.contains_key(&entity.common().handle);
         graph.walk_root(
             root,
             |entity, context| {
-                (!plotting
-                    || self
+                if plotting
+                    && self
                         .document
                         .layers
                         .get(&entity.common().layer)
-                        .is_none_or(|layer| layer.is_plottable))
-                    && (context.is_instanced()
-                        || !self.entity_temporarily_hidden(entity.common().handle))
+                        .is_some_and(|layer| !layer.is_plottable)
+                {
+                    return false;
+                }
+                if context.is_instanced() {
+                    return true;
+                }
+                if self.entity_temporarily_hidden(entity.common().handle) {
+                    return false;
+                }
+                // Skip the placements of blocks that hold no picture, as the
+                // hatch walk does: they are most of a large drawing.
+                let block_uses: Vec<_> =
+                    render_graph::entity_render_block_uses(&self.document, entity, 1.0)
+                        .into_iter()
+                        .filter(|block_use| block_use.active)
+                        .collect();
+                block_uses.is_empty()
+                    || block_uses.into_iter().any(|block_use| {
+                        render_graph::block_contains_kind(
+                            &self.document,
+                            &block_use.insert.block_name,
+                            &mut image_block_memo,
+                            &is_image,
+                        )
+                    })
             },
             |entity, context| {
                 let handle = entity.common().handle;
@@ -8557,7 +8594,7 @@ impl Scene {
     pub fn native_edit_disabled(&self, handle: Handle) -> bool {
         self.document
             .get_entity(handle)
-            .is_some_and(crate::plugin::entity_labels::native_edit_disabled)
+            .is_some_and(crate::entities::owner_stamp::native_edit_disabled)
     }
 
     /// Insert or remove `handle` in the scene-scoped designation set,
@@ -10964,9 +11001,11 @@ impl Scene {
             meshes.iter().filter_map(|set| {
                 (set.entity_handle()? == target).then_some(())?;
                 let mesh = set.geometry_lods().first()?;
+                let bvh = set.geometry_triangle_bvh(0);
                 Some((
                     target,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -10991,9 +11030,11 @@ impl Scene {
             meshes.iter().filter_map(|set| {
                 let handle = set.entity_handle()?;
                 let mesh = set.geometry_lods().first()?;
+                let bvh = set.geometry_triangle_bvh(0);
                 Some((
                     handle,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -11110,9 +11151,11 @@ impl Scene {
             meshes.iter().filter_map(|set| {
                 let handle = set.entity_handle()?;
                 let mesh = set.geometry_lods().first()?;
+                let bvh = set.geometry_triangle_bvh(0);
                 Some((
                     handle,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -11160,14 +11203,16 @@ impl Scene {
             cursor,
             sets.iter().filter_map(|(handle, set)| {
                 let lods = set.geometry_lods();
-                let mesh = if coarse_lod {
-                    lods.last()?
-                } else {
-                    lods.first()?
-                };
+                if lods.is_empty() {
+                    return None;
+                }
+                let lod_idx = if coarse_lod { lods.len() - 1 } else { 0 };
+                let mesh = lods.get(lod_idx)?;
+                let bvh = set.geometry_triangle_bvh(lod_idx);
                 Some((
                     *handle,
                     mesh,
+                    bvh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,
                 ))
@@ -12533,7 +12578,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         index.signatures.reserve(self.document.entity_count());
         let mut normalized_layers: HashMap<&str, String> = HashMap::default();
         let mut complex_linetypes: HashMap<&str, bool> = HashMap::default();
-        let defines_complex = crate::io::linetypes::defines_complex_lt(&self.document);
+        let defines_complex = crate::catalog::linetypes::defines_complex_lt(&self.document);
         for entity in self.document.entities() {
             let common = entity.common();
             let owner = if common.owner_handle.is_null() {
@@ -12597,7 +12642,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             // changing the scale has to re-tessellate it like annotative content.
             let mut is_complex = |name| {
                 *complex_linetypes.entry(name).or_insert_with(|| {
-                    crate::io::linetypes::resolve_complex_lt(&self.document, name).is_some()
+                    crate::catalog::linetypes::resolve_complex_lt(&self.document, name).is_some()
                 })
             };
             let lt_name = view::render::linetype_name_for_viewport(&self.document, entity, None);
@@ -13231,10 +13276,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             None => [-1.0, -1.0, 1.0, 1.0],
         };
         let t_tree_start = perf.then(iced::time::Instant::now);
-        let mut tree = pick::quadtree::QuadTree::new(root);
-        for (h, ab) in items {
-            tree.insert(h, ab);
-        }
+        let tree = pick::quadtree::QuadTree::from_items(root, items);
         let tree_ms = crate::perf::elapsed_ms(t_tree_start);
 
         if perf {

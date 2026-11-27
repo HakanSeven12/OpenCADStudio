@@ -544,7 +544,7 @@ impl Scene {
         Vec<(WireModel, f32)>,
         Vec<HatchModel>,
         Vec<HatchModel>,
-        Vec<crate::io::pdf_export::PlotImage>,
+        Vec<PlotImage>,
     ) {
         use document::entities::Viewport;
         use model::hatch_model::HatchPattern;
@@ -1677,4 +1677,11 @@ fn clip_polyline_to_rect(
         }
     }
     (result, result_stations)
+}
+
+/// Decoded image geometry plus inherited block/viewport clip boundaries.
+#[derive(Clone, Debug)]
+pub struct PlotImage {
+    pub image: ImageModel,
+    pub clips: Vec<Vec<[f64; 2]>>,
 }

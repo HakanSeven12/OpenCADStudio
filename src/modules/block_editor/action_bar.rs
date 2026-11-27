@@ -2,17 +2,11 @@ use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickConte
 use crate::scene::block_action_bars::Group;
 use document::Handle;
 use glam::DVec3;
+pub use crate::command::requests::ActionBarMode as Mode;
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &["BACTIONBAR"]
 });
-
-#[derive(Clone, Copy, Debug)]
-pub enum Mode {
-    Show,
-    Hide,
-    Reset,
-}
 
 pub(crate) struct ActionBarCommand {
     document: u64,

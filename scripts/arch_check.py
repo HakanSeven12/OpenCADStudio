@@ -12,7 +12,8 @@ upward dependency.
   python3 scripts/arch_check.py diff BASE_DIR [--markdown]
       Compare this checkout with another one (for CI, the pull request's base
       commit) and list the upward dependencies added and removed. Exits 1 if
-      any were added; CI ignores the exit code and never blocks.
+      any were added or a module has no layer; CI fails the change then (the
+      `architecture` job).
 
 Counts are files: a file that refers to a higher module five times counts
 once for that pair. Test code is skipped: files named tests.rs,
@@ -32,20 +33,20 @@ from pathlib import Path
 LAYERS = {
     # 0 foundations: no knowledge of CAD or the app
     "par": 0, "perf": 0, "sys": 0, "sysinfo": 0, "i18n": 0, "config": 0,
-    "network": 0, "schema_validation": 0, "xml_depth": 0,
+    "network": 0, "schema_validation": 0, "xml_depth": 0, "wildcard": 0, "paths": 0, "icon_assets": 0,
     # 1 drawing model and geometry behaviour
-    "entities": 1, "snap": 1, "parametric": 1, "entity_creation": 1,
-    "filter": 1,
+    "entities": 1, "display": 1, "text": 1, "parametric": 1,
+    "filter": 1, "calc": 1,
     # 2 file formats and rendering
-    "io": 2, "scene": 2, "gpu_backend": 2,
-    # 3 the tool contract and plugin runtime
-    "command": 3, "plugin": 3,
+    "io": 2, "catalog": 2, "scene": 2, "snap": 2, "gpu_backend": 2, "ifc_plan": 2,
+    # 3 the tool contract
+    "command": 3, "plugin_catalog": 3,
     # 4 features: tools and ribbon tabs
-    "modules": 4,
+    "modules": 4, "entity_creation": 4,
     # 5 presentation
     "ui": 5, "input": 5,
     # 6 the app shell and its front doors
-    "app": 6, "mcp": 6, "mcp_intent": 6, "mcp_ops": 6, "rest": 6, "cli": 6,
+    "app": 6, "plugin": 6, "mcp": 6, "mcp_intent": 6, "mcp_ops": 6, "rest": 6, "cli": 6,
     "discussions": 6, "patreon": 6, "videos": 6, "locale_catalog": 6,
 }
 
@@ -346,7 +347,7 @@ def diff(base_dir: str, markdown: bool) -> int:
                 gone = " (pair now gone)" if pair in gone_pairs else ""
                 print(f"- `{pair}`{gone}: `{f}`")
             print()
-        print("This check only reports; it does not block merging. "
+        print("A change that adds an upward dependency fails this check. "
               "See `docs/architecture/RULES.md`.")
     else:
         print(f"Upward dependencies: base {counted(bp, bf)}; this tree {counted(hp, hf)}")
@@ -360,7 +361,7 @@ def diff(base_dir: str, markdown: bool) -> int:
                       f"{layer_note(pair).replace('`', '')}. See docs/architecture/RULES.md.")
     if unlayered:
         print(f"\nModules with no layer (add them to LAYERS): {', '.join(unlayered)}")
-    return 1 if added else 0
+    return 1 if added or unlayered else 0
 
 
 def main(argv) -> int:

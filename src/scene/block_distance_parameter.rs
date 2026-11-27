@@ -18,7 +18,7 @@ pub enum Kind {
 
 /// Where a Linear parameter's base sits between its definition points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum BaseLocation {
+pub enum BaseLocation {
     #[default]
     Startpoint,
     Midpoint,
@@ -26,7 +26,7 @@ pub(crate) enum BaseLocation {
 
 /// The value set answered at a parameter's Value set option.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum ValueSet {
+pub enum ValueSet {
     None,
     Increment {
         increment: f64,

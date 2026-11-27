@@ -302,6 +302,12 @@ impl OpenCADStudio {
                 .or(self.block_palette.library_resume.as_ref())
                 .map(|dir| dir.display().to_string())
                 .unwrap_or_default(),
+            files_palette_folder: self
+                .files_palette
+                .folder
+                .as_ref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_default(),
             block_insert: self.block_palette.options.clone(),
             block_mru_list: self.block_mru_list,
             block_redefine_mode: self.block_redefine_mode,
@@ -312,6 +318,7 @@ impl OpenCADStudio {
             count_color: self.count_palette.color,
             count_error_color: self.count_palette.error_color,
             count_service: self.count_palette.service,
+            geometry_cleanup_zoom_pan: !self.geometry_cleanup.auto_zoom_off,
             count_invalid_area: self.count_palette.invalid_choice,
             sheet_set: self.sheet_set.settings,
             quick_calc: self.quick_calc.settings(),
@@ -601,6 +608,7 @@ impl OpenCADStudio {
         self.count_palette.color = s.count_color;
         self.count_palette.error_color = s.count_error_color;
         self.count_palette.service = s.count_service;
+        self.geometry_cleanup.auto_zoom_off = !s.geometry_cleanup_zoom_pan;
         self.count_palette.invalid_choice = s.count_invalid_area.min(2);
         self.sheet_set.settings = s.sheet_set;
         self.quick_calc.apply_settings(&s.quick_calc);
@@ -615,6 +623,9 @@ impl OpenCADStudio {
             crate::ui::window::block_palette::Tab::from_u8(s.block_palette_tab);
         self.block_palette.library_resume = Some(std::path::PathBuf::from(&s.block_library_folder))
             .filter(|dir| !s.block_library_folder.is_empty() && dir.is_dir());
+        self.files_palette.folder = Some(std::path::PathBuf::from(&s.files_palette_folder))
+            .filter(|dir| !s.files_palette_folder.is_empty() && dir.is_dir());
+        self.files_palette_restore();
         self.block_palette.set_options(s.block_insert.clone());
         self.trim_recent_blocks();
         // Push restored display defaults onto every drawing tab that exists now.
@@ -956,8 +967,10 @@ impl OpenCADStudio {
             show_command_history: self.show_command_history,
             geometry_cleanup: self.geometry_cleanup.settings.clone(),
             geometry_cleanup_file: self.geometry_cleanup.settings_file.clone(),
+            geometry_cleanup_kept: self.geometry_cleanup.kept.clone(),
             show_layers: self.show_layers,
             show_block_palette: self.show_block_palette,
+            show_files_palette: self.files_palette.show,
             show_external_references: self.show_external_references,
             show_file_tabs: self.show_file_tabs,
             file_tabs_above_docks: self.file_tabs_above_docks,
@@ -1042,6 +1055,7 @@ impl OpenCADStudio {
         self.show_command_history = cfg.show_command_history;
         self.geometry_cleanup.settings = cfg.geometry_cleanup.clone();
         self.geometry_cleanup.settings_file = cfg.geometry_cleanup_file.clone();
+        self.geometry_cleanup.kept = cfg.geometry_cleanup_kept.clone();
         if self.show_command_history {
             self.sync_command_history_panel();
         }
@@ -1049,6 +1063,9 @@ impl OpenCADStudio {
         self.show_layers = cfg.show_layers && self.dock.is_placed(crate::ui::dock::PanelId::Layers);
         self.show_block_palette =
             cfg.show_block_palette && self.dock.is_placed(crate::ui::dock::PanelId::BlockPalette);
+        self.files_palette.show =
+            cfg.show_files_palette && self.dock.is_placed(crate::ui::dock::PanelId::Files);
+        self.files_palette_restore();
         self.show_external_references = cfg.show_external_references
             && self.dock.is_placed(crate::ui::dock::PanelId::ExternalReferences);
         self.show_file_tabs = cfg.show_file_tabs;

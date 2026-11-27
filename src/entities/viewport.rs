@@ -5,7 +5,7 @@ use crate::entities::common::{
 };
 use crate::entities::transform::EntityTransform;
 
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
 
 // ── Standard scale options ────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ fn grips(vp: &Viewport) -> Vec<GripDef> {
 fn properties(vp: &Viewport) -> Vec<PropSection> {
     let scale_opts: Vec<String> = STANDARD_SCALES.iter().map(|(s, _)| s.to_string()).collect();
     let effective_scale =
-        crate::scene::vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
+        vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
     let current_scale_label = scale_label(effective_scale);
 
     let shade_opts: Vec<String> = SHADE_PLOT_LABELS.iter().map(|s| s.to_string()).collect();
@@ -517,8 +517,8 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
         vp.ucs_x_axis,
         vp.ucs_y_axis,
     );
-    crate::scene::view::transform::apply_standard_entity_transform(vp, t, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
+    crate::entities::transform::apply_standard_entity_transform(vp, t, |entity, p1, p2| {
+        crate::entities::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,
             p1,
@@ -537,7 +537,7 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
 crate::impl_entity_basics!(Viewport);
 
 impl crate::entities::traits::FallbackTess for Viewport {
-    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::display::tess_util::FallbackGeometry {
         // A clipped viewport uses its linked boundary entity as its visible
         // frame. Drawing the viewport's rectangular extents as well leaves an
         // incorrect box around polygonal/Object MVIEW results.
@@ -560,6 +560,22 @@ impl crate::entities::traits::FallbackTess for Viewport {
         // Midpoint to each edge, as on any closed polyline.
         (pts.clone(), vec![], vec![], pts)
     }
+}
+
+/// Resolve a viewport's paper-to-model scale ratio from its two
+/// DXF-derived sources.
+///
+/// `view_height` is canonical. `custom_scale` is the fallback when it is
+/// missing or zero.
+#[inline]
+pub fn vp_effective_scale(custom_scale: f64, view_height: f64, vp_height: f64) -> f64 {
+    if view_height.abs() > 1e-9 {
+        return vp_height / view_height;
+    }
+    if custom_scale.abs() > 1e-9 {
+        return custom_scale;
+    }
+    1.0
 }
 
 #[cfg(test)]

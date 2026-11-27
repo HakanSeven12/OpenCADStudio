@@ -14,6 +14,9 @@ use crate::snap::{SnapResult, SnapType};
 /// Bound on the retained accepted-snap history. A command's point steps are a
 /// handful at most; the cap only stops a long polyline from growing forever.
 const MAX_ACCEPTED_SNAPS: usize = 64;
+/// The most snaps Shift+Tab steps past to find the last one: each step is
+/// a full snap pass. Past this, it shows the snap it got to.
+pub(in crate::app) const MAX_CYCLE_STEPS: usize = 64;
 
 /// What a held Shift+letter override changed, so its release can undo it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -474,6 +477,47 @@ impl OpenCADStudio {
     /// again. Returns `false` when Tab keeps its dynamic-input job: a value
     /// is typed, or fewer than two snaps are found.
     pub(in crate::app) fn cycle_object_snap(&mut self) -> (bool, iced::Task<crate::app::Message>) {
+        let Some((current, pointer)) = self.snap_to_cycle() else {
+            return (false, iced::Task::none());
+        };
+        let (next, moved) = self.step_past_snap(current, pointer);
+        if next.is_some() {
+            return (true, moved);
+        }
+        // Nothing is left: start again from the first snap.
+        let stepped = self.snapper.cycle_len() > 1;
+        self.snapper.end_cycle();
+        (stepped, iced::Task::batch([moved, self.resnap_at(pointer)]))
+    }
+
+    /// Shift+Tab at a point prompt: show the snap before the current one in
+    /// the order of Tab. At the first snap, show the last one. Does nothing
+    /// in the cases where [`Self::cycle_object_snap`] returns `false`.
+    pub(in crate::app) fn cycle_object_snap_back(&mut self) -> iced::Task<crate::app::Message> {
+        let Some((current, pointer)) = self.snap_to_cycle() else {
+            return iced::Task::none();
+        };
+        if self.snapper.unskip_last_in_cycle() {
+            return self.resnap_at(pointer);
+        }
+        // At the first snap: step past each snap to the last one, then show
+        // the last one again. With one snap, that is the same snap.
+        let mut tasks = Vec::new();
+        let mut shown = Some(current);
+        while let Some(hit) = shown.filter(|_| self.snapper.cycle_len() < MAX_CYCLE_STEPS) {
+            let (next, moved) = self.step_past_snap(hit, pointer);
+            tasks.push(moved);
+            shown = next;
+        }
+        self.snapper.unskip_last_in_cycle();
+        tasks.push(self.resnap_at(pointer));
+        iced::Task::batch(tasks)
+    }
+
+    /// The object snap Tab and Shift+Tab step from, and the pointer (canvas
+    /// pixels). `None` when they keep their dynamic-input job: a value or
+    /// an option is typed, or no object snap shows.
+    fn snap_to_cycle(&self) -> Option<(SnapResult, Point)> {
         let i = self.active_tab;
         let typed = !self.command_line.input.is_empty()
             || self.tabs[i].dyn_fields.iter().any(|field| field.locked());
@@ -481,22 +525,23 @@ impl OpenCADStudio {
             .snap_result
             .filter(|hit| hit.snap_type != SnapType::Grid);
         let pointer = self.tabs[i].scene.selection.borrow().input.last_move_pos;
-        let (false, Some(current), Some(pointer)) = (typed, current, pointer) else {
-            return (false, iced::Task::none());
-        };
+        (!typed).then_some((current?, pointer?))
+    }
+
+    /// Step past `current` and snap again. Returns the object snap that
+    /// shows now, or `None` when no other object snap is left.
+    fn step_past_snap(
+        &mut self,
+        current: SnapResult,
+        pointer: Point,
+    ) -> (Option<SnapResult>, iced::Task<crate::app::Message>) {
         self.snapper.skip_in_cycle(&current, pointer);
         let moved = self.resnap_at(pointer);
-        let next = self.tabs[i].snap_result;
-        if next.is_some_and(|hit| {
+        let next = self.tabs[self.active_tab].snap_result.filter(|hit| {
             hit.snap_type != SnapType::Grid
                 && (hit.snap_type != current.snap_type || hit.world != current.world)
-        }) {
-            return (true, moved);
-        }
-        // Nothing is left: start again from the first snap.
-        let stepped = self.snapper.cycle_len() > 1;
-        self.snapper.end_cycle();
-        (stepped, iced::Task::batch([moved, self.resnap_at(pointer)]))
+        });
+        (next, moved)
     }
 
     /// Snap again at `pointer` (canvas pixels) with the full pass: the

@@ -11,11 +11,11 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{
     GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection, PropValue, Property,
 };
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::wire_model::SnapHint;
 
 const NAN: [f64; 3] = [f64::NAN; 3];
 const SECTION_SLICE_APP: &str = "IsSlice";
@@ -182,7 +182,7 @@ fn normalized(value: Vector3, fallback: Vector3) -> Vector3 {
 
 fn plane_axes(normal: Vector3) -> (Vector3, Vector3, Vector3) {
     let normal = normalized(normal, Vector3::UNIT_Z);
-    let (x, y) = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    let (x, y) = crate::entities::transform::ocs_axes((normal.x, normal.y, normal.z));
     (
         Vector3::new(x.0, x.1, x.2),
         Vector3::new(y.0, y.1, y.2),
@@ -215,7 +215,7 @@ fn append_planar_text(
     let (cos, sin) = rotation.sin_cos();
     let baseline = axis_x * cos + axis_y * sin;
     let upward = axis_y * cos - axis_x * sin;
-    let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
+    let (strokes, _) = crate::text::lff::tessellate_text_ex(
         [0.0, 0.0],
         height.abs() as f32,
         0.0,
@@ -242,7 +242,7 @@ fn append_planar_text(
 /// the arc and as wide as its font makes it, so TrueType letters fill like
 /// any TEXT (#2444).
 fn arc_aligned_text_render(data: &ArcAlignedTextData) -> RenderEntity {
-    use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
+    use crate::display::render_entity::{GlyphRun, TextStroke};
     let center = data.center;
     let mut runs = Vec::new();
     if !(data.text.is_empty() || data.radius.abs() < 1e-12 || data.text_size.abs() < 1e-12) {
@@ -334,7 +334,7 @@ fn arc_aligned_text_render(data: &ArcAlignedTextData) -> RenderEntity {
             ];
             let rotation = ty.atan2(tx) as f32;
             let value = character.to_string();
-            let (strokes, fill_tris) = crate::scene::text::lff::tessellate_text_ex(
+            let (strokes, fill_tris) = crate::text::lff::tessellate_text_ex(
                 [0.0, 0.0],
                 size as f32,
                 rotation,
@@ -348,7 +348,7 @@ fn arc_aligned_text_render(data: &ArcAlignedTextData) -> RenderEntity {
                 origin,
                 color: None,
                 fill_tris,
-                plane: crate::scene::convert::acad_to_render::ocs_text_plane(
+                plane: crate::display::render_entity::ocs_text_plane(
                     data.normal,
                     origin,
                     elevation,
@@ -600,7 +600,7 @@ fn append_missing_cloud_label(points: &mut Vec<[f64; 3]>, data: &PointCloudExDat
     if text.is_empty() {
         return;
     }
-    let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
+    let (strokes, _) = crate::text::lff::tessellate_text_ex(
         [0.0, 0.0],
         1.0,
         0.0,
@@ -1638,7 +1638,7 @@ fn reference_properties(references: &[document::objects::ProxyObjectReference]) 
 /// A Civil 3D alignment's start station, design speeds and station
 /// equations (raw station back, then the station ahead; a down arrow for
 /// stations that decrease after it).
-fn alignment_properties(data: &document::classes::arch::ArchEntityData) -> Vec<crate::scene::model::object::Property> {
+fn alignment_properties(data: &document::classes::arch::ArchEntityData) -> Vec<crate::entities::object::Property> {
     let mut props = Vec::new();
     if let Some(name) = data.alignment_name() {
         props.push(ro_prop(t!("Name").as_ref(), "ext_civil_name", name));
@@ -1679,7 +1679,7 @@ fn yes_no(flag: bool) -> String {
 
 /// What a Civil 3D object of `kind` keeps beyond its geometry: names,
 /// design settings, sample line stations.
-fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: document::classes::civil::CivilKind) -> Vec<crate::scene::model::object::Property> {
+fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: document::classes::civil::CivilKind) -> Vec<crate::entities::object::Property> {
     use document::classes::civil::CivilKind;
     let named = |(name, description): (String, String)| {
         let mut props = vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name)];
@@ -1697,8 +1697,47 @@ fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: docume
             }
             props
         }
-        CivilKind::Parcel => data.face_name().map(named).unwrap_or_default(),
+        // A TIN surface's name ("EG" in the tutorials' Surface-2.dwg, the
+        // empty shell included).
+        CivilKind::TinSurface => data
+            .surface_name()
+            .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name)])
+            .unwrap_or_default(),
+        // A parcel's number and where its area label sits. The name itself
+        // needs the document (a stored name, else the style's name
+        // template) and is read in `crate::entities::civil::properties`.
+        CivilKind::Parcel => {
+            let mut props = Vec::new();
+            if let Some((number, _)) = data.parcel_face() {
+                props.push(ro_prop(t!("Number").as_ref(), "ext_civil_number", number.to_string()));
+            }
+            if let Some(at) = data.parcel_label() {
+                props.push(ro_prop(
+                    t!("Label Location").as_ref(),
+                    "ext_civil_label_location",
+                    format!("{:.3}, {:.3}", at.x, at.y),
+                ));
+            }
+            props
+        }
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => data.feature_line_name().map(named).unwrap_or_default(),
+        // A pipe network part carries its name where its record's layout
+        // pins the name slot (the text after the record's
+        // `AeccNetworkPartDataField` groups), so renamed parts read too —
+        // the grammar read 2c545f67e asked this row to wait for.
+        CivilKind::Other if matches!(data.dxf_name.as_str(), "AECC_STRUCTURE" | "AECC_PIPE") => data
+            .network_part_name()
+            .filter(|name| !name.is_empty())
+            .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name)])
+            .unwrap_or_default(),
+        // The network's own name is its third text.
+        CivilKind::Other if data.dxf_name == "AECC_NETWORK" => data
+            .decode()
+            .strings
+            .get(2)
+            .filter(|name| !name.is_empty())
+            .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name.clone())])
+            .unwrap_or_default(),
         CivilKind::SampleLineGroup => data
             .sample_lines()
             .map(|lines| {
@@ -2173,7 +2212,7 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
                     id: SECTION_GRIP_STATE,
                     world: glam::DVec3::new(anchor.x, anchor.y, anchor.z),
                     is_midpoint: false,
-                    shape: crate::scene::model::object::GripShape::DropdownAdjacent,
+                    shape: crate::entities::object::GripShape::DropdownAdjacent,
                     dir: None,
                     axis: None,
                 });
@@ -2191,7 +2230,7 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
                     id: SECTION_GRIP_NORMAL,
                     world: glam::DVec3::new(center.x, center.y, center.z) - normal_world * offset,
                     is_midpoint: false,
-                    shape: crate::scene::model::object::GripShape::Triangle,
+                    shape: crate::entities::object::GripShape::Triangle,
                     dir: Some(-normal_world),
                     axis: Some(normal_world),
                 });
@@ -2240,7 +2279,7 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
 /// The move gizmo at a point cloud's insertion point: arrows 1-3 along X/Y/Z
 /// and squares 4-6 for the XY/YZ/ZX planes.
 pub(crate) fn point_cloud_gizmo_grips(data: &PointCloudExData) -> Vec<GripDef> {
-    use crate::scene::model::object::GripShape;
+    use crate::entities::object::GripShape;
     let world = glam::DVec3::new(data.ucs_origin.x, data.ucs_origin.y, data.ucs_origin.z);
     (0..3u8)
         .map(|k| GripDef {
@@ -2383,7 +2422,7 @@ fn section_plane_edge_grips(data: &SectionObjectData) -> Vec<GripDef> {
             id,
             world: glam::DVec3::new(world.x, world.y, world.z),
             is_midpoint: false,
-            shape: crate::scene::model::object::GripShape::Rectangle,
+            shape: crate::entities::object::GripShape::Rectangle,
             dir: Some(glam::DVec3::new(edge.x, edge.y, edge.z)),
             axis: axis.map(|axis| glam::DVec3::new(axis.x, axis.y, axis.z)),
         })
@@ -2459,7 +2498,7 @@ fn entity_transform(transform: &EntityTransform) -> Transform {
             p2,
             working_normal,
         } => {
-            crate::scene::view::transform::reflection_about_working_line(*p1, *p2, *working_normal)
+            crate::entities::transform::reflection_about_working_line(*p1, *p2, *working_normal)
         }
         EntityTransform::Affine(transform) => *transform,
     }

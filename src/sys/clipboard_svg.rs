@@ -8,7 +8,23 @@
 //! outlines also go on as an enhanced metafile, the vector format most
 //! Windows drawing programs paste (CorelDRAW reads no SVG from there).
 
-use crate::io::svg_clipboard::Stroke;
+/// One object's outline for the clipboard: its pen-down runs in drawing
+/// units, and its colour as drawn on paper.
+pub struct Stroke {
+    pub runs: Vec<Vec<[f64; 2]>>,
+    pub rgb: [u8; 3],
+}
+
+/// The bounding box of `strokes`, `None` when they hold no point.
+pub fn strokes_extent(strokes: &[Stroke]) -> Option<([f64; 2], [f64; 2])> {
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for [x, y] in strokes.iter().flat_map(|s| s.runs.iter().flatten()) {
+        min = [min[0].min(*x), min[1].min(*y)];
+        max = [max[0].max(*x), max[1].max(*y)];
+    }
+    min[0].is_finite().then_some((min, max))
+}
 
 /// The clipboard format, or selection target, SVG is read from.
 pub const SVG_FORMAT: &str = "image/svg+xml";
@@ -106,7 +122,7 @@ mod windows {
     };
     use windows_sys::Win32::System::Ole::{CF_ENHMETAFILE, CF_UNICODETEXT};
 
-    use crate::io::svg_clipboard::{strokes_extent, Stroke};
+    use super::{strokes_extent, Stroke};
 
     /// `strokes` recorded as an enhanced metafile, one drawing unit to one
     /// millimetre (scaled down when that does not fit GDI's coordinates),

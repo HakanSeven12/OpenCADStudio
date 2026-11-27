@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// Original crosshair geometry retained at the default setting values.
 pub const CROSSHAIR_SQ: f32 = 7.5;
 pub const CROSSHAIR_ARM: f32 = 60.0;
-pub(crate) const TRACKING_DASH_PX: [f32; 2] = [6.0, 4.0];
+pub(crate) use crate::command::TRACKING_DASH_PX;
 const DEFAULT_CURSOR_SIZE: i32 = 5;
 const CONSTRAINT_HOVER_MARKER_RADIUS: f32 = 7.0;
 
@@ -73,28 +73,52 @@ fn draw_concentric_constraint_glyph(frame: &mut canvas::Frame, center: Point, co
     frame.stroke(&canvas::Path::circle(center, 2.15), stroke);
 }
 
-/// Strokes a closed four-corner polygon — the outline half of the brush glyph.
-fn stroke_quad(frame: &mut canvas::Frame, corners: [Point; 4], stroke: &canvas::Stroke<'_>) {
-    let path = canvas::Path::new(|p| {
-        p.move_to(corners[0]);
-        p.line_to(corners[1]);
-        p.line_to(corners[2]);
-        p.line_to(corners[3]);
-        p.close();
-    });
-    frame.stroke(&path, *stroke);
+/// Which MATCHPROP glyph rides beside the pickbox. The two prompts must read
+/// apart at a glance: an eyedropper while the source is being picked, a filled
+/// paintbrush once it is taken and destinations are painted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchCursorGlyph {
+    /// MATCHPROP is not running.
+    None,
+    /// "Select source object": eyedropper, hollow pickbox.
+    SourcePick,
+    /// "Select destination object(s)": filled brush, filled pickbox.
+    Destination,
 }
 
-/// MATCHPROP's paintbrush cursor.
+impl MatchCursorGlyph {
+    /// The glyph for the command state: running at all, and still asking for
+    /// the source.
+    pub fn for_state(matchprop_running: bool, asking_source: bool) -> Self {
+        match (matchprop_running, asking_source) {
+            (false, _) => Self::None,
+            (true, true) => Self::SourcePick,
+            (true, false) => Self::Destination,
+        }
+    }
+}
+
+impl CrosshairOptions {
+    /// The MATCHPROP glyph these options ask for.
+    pub fn match_glyph(&self) -> MatchCursorGlyph {
+        MatchCursorGlyph::for_state(self.matchprop_pickbox, self.matchprop_source_pick)
+    }
+}
+
+/// Accent ink of the MATCHPROP glyphs (the pickbox blue).
+const MATCH_ACCENT: Color = Color {
+    r: 0.24,
+    g: 0.52,
+    b: 0.98,
+    a: 1.0,
+};
+
+/// MATCHPROP destination cursor: a filled paintbrush in the accent colour.
 ///
-/// While the user is transferring properties the CAD crosshair is replaced by a
-/// paintbrush whose tip sits exactly on the pick point, as the reference does. The
-/// body leans up-and-right so it never covers the object being picked.
-///
-/// Deliberately monochrome and geometric: the crosshair's own colour, a single
-/// stroke weight and one filled wedge, so the glyph reads as part of the CAD
-/// cursor family rather than clip-art.
-fn draw_match_brush(frame: &mut canvas::Frame, tip: Point, color: Color) {
+/// While the user paints properties onto objects the brush tip sits at the pick
+/// point; the body leans up-and-right so it never covers the object picked.
+/// Bristles, ferrule and handle are all solid so it reads at cursor size.
+fn draw_match_brush(frame: &mut canvas::Frame, tip: Point) {
     let inv = std::f32::consts::FRAC_1_SQRT_2;
     // `along` runs up-and-right (handle direction); `across` is perpendicular.
     let along = (inv, -inv);
@@ -105,36 +129,54 @@ fn draw_match_brush(frame: &mut canvas::Frame, tip: Point, color: Color) {
             tip.y + along.1 * a + across.1 * w,
         )
     };
-    let stroke = canvas::Stroke {
-        width: 1.25,
-        style: canvas::Style::Solid(color),
-        line_join: canvas::LineJoin::Miter,
-        ..Default::default()
+    let fill_quad = |frame: &mut canvas::Frame, q: [Point; 4], color: Color| {
+        let path = canvas::Path::new(|p| {
+            p.move_to(q[0]);
+            p.line_to(q[1]);
+            p.line_to(q[2]);
+            p.line_to(q[3]);
+            p.close();
+        });
+        frame.fill(&path, color);
     };
-
-    // Bristles: the only solid mass, so the working end carries the weight and
-    // the silhouette still reads at cursor size.
     let bristles = canvas::Path::new(|p| {
         p.move_to(at(0.0, 0.0));
-        p.line_to(at(9.0, -3.2));
-        p.line_to(at(12.0, -3.2));
-        p.line_to(at(12.0, 3.2));
-        p.line_to(at(9.0, 3.2));
+        p.line_to(at(10.0, -4.0));
+        p.line_to(at(14.0, -4.0));
+        p.line_to(at(14.0, 4.0));
+        p.line_to(at(10.0, 4.0));
         p.close();
     });
-    frame.fill(&bristles, color);
+    frame.fill(&bristles, MATCH_ACCENT);
+    // Ferrule: light band so bristles and handle separate.
+    fill_quad(
+        frame,
+        [at(14.0, -4.0), at(18.5, -4.0), at(18.5, 4.0), at(14.0, 4.0)],
+        Color::from_rgb(0.85, 0.90, 1.0),
+    );
+    fill_quad(
+        frame,
+        [at(18.5, -2.8), at(36.0, -2.3), at(36.0, 2.3), at(18.5, 2.8)],
+        MATCH_ACCENT,
+    );
+}
 
-    // Ferrule and handle stay outline-only: line work, not clip-art.
-    stroke_quad(
-        frame,
-        [at(12.0, -3.2), at(15.5, -3.2), at(15.5, 3.2), at(12.0, 3.2)],
-        &stroke,
-    );
-    stroke_quad(
-        frame,
-        [at(15.5, -2.3), at(30.0, -1.9), at(30.0, 1.9), at(15.5, 2.3)],
-        &stroke,
-    );
+/// MATCHPROP source cursor: a small eyedropper, tip on the pick point. Outline
+/// tube plus a filled bulb in the cursor ink, distinct from the brush.
+fn draw_match_dropper(frame: &mut canvas::Frame, tip: Point, ink: Color) {
+    let inv = std::f32::consts::FRAC_1_SQRT_2;
+    let along = (inv, -inv);
+    let at = |a: f32| Point::new(tip.x + along.0 * a, tip.y + along.1 * a);
+    let stroke = canvas::Stroke {
+        width: 1.5,
+        style: canvas::Style::Solid(ink),
+        line_cap: canvas::LineCap::Round,
+        ..Default::default()
+    };
+    let tube = canvas::Path::line(at(0.0), at(14.0));
+    frame.stroke(&tube, stroke);
+    let bulb = canvas::Path::circle(at(18.0), 4.0);
+    frame.fill(&bulb, ink);
 }
 
 /// The reference bar's padlock: white with a small orange point marker
@@ -652,6 +694,44 @@ pub fn resolve_selection_base_color(
     } else {
         theme_window
     }
+}
+
+// ── Geometry Cleanup markers ──────────────────────────────────────────────
+
+/// A Geometry Cleanup error in the drawing, marked with an X.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CleanupMarker {
+    /// Screen-space position (viewport-relative pixels).
+    pub pos: Point,
+    /// Its menu is open, or its error is picked: drawn larger.
+    pub active: bool,
+}
+
+/// Half the size of a Geometry Cleanup marker, in pixels.
+pub const CLEANUP_MARKER_HALF: f32 = 5.0;
+
+fn draw_cleanup_marker(frame: &mut canvas::Frame, marker: CleanupMarker) {
+    let r = if marker.active {
+        CLEANUP_MARKER_HALF + 2.0
+    } else {
+        CLEANUP_MARKER_HALF
+    };
+    let Point { x, y } = marker.pos;
+    let cross = canvas::Path::new(|b| {
+        b.move_to(Point::new(x - r, y - r));
+        b.line_to(Point::new(x + r, y + r));
+        b.move_to(Point::new(x - r, y + r));
+        b.line_to(Point::new(x + r, y - r));
+    });
+    // A dark edge under the red cross keeps it seen on any background.
+    let edge = canvas::Stroke::default()
+        .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.6))
+        .with_width(4.0);
+    let red = canvas::Stroke::default()
+        .with_color(Color::from_rgb(0.95, 0.25, 0.2))
+        .with_width(2.0);
+    frame.stroke(&cross, edge);
+    frame.stroke(&cross, red);
 }
 
 // ── Grip marker data ──────────────────────────────────────────────────────
@@ -1344,6 +1424,7 @@ pub fn selection_overlay<'a>(
     ost_points: Vec<OstTrackPoint>,
     otrack_lines: Vec<(Point, Point)>,
     parallel_ref_marker: Option<Point>,
+    cleanup_markers: Vec<CleanupMarker>,
     show_viewcube: bool,
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
@@ -1385,6 +1466,7 @@ pub fn selection_overlay<'a>(
         ost_points,
         otrack_lines,
         parallel_ref_marker,
+        cleanup_markers,
         show_viewcube,
         dividers,
         pane_move_rect,
@@ -1465,6 +1547,8 @@ struct SelectionCanvas {
     /// The acquired Parallel-snap reference point (screen), marked with a small
     /// ∥ glyph so the user sees which line is the parallel reference. (#277)
     parallel_ref_marker: Option<Point>,
+    /// The Geometry Cleanup errors in view, each marked with an X.
+    cleanup_markers: Vec<CleanupMarker>,
     show_viewcube: bool,
     /// Divider bars (pixel rects, canvas-relative) between Model panes — drawn
     /// as filled lines and used to suppress the crosshair over a divider.
@@ -3131,16 +3215,18 @@ impl canvas::Program<Message> for SelectionCanvas {
                     } else {
                         cp
                     };
-                    draw_match_brush(
-                        frame,
-                        brush_tip,
-                        Color {
-                            r: cr,
-                            g: cg,
-                            b: cb,
-                            a: ca,
-                        },
-                    );
+                    let ink = Color {
+                        r: cr,
+                        g: cg,
+                        b: cb,
+                        a: ca,
+                    };
+                    match self.crosshair.match_glyph() {
+                        MatchCursorGlyph::SourcePick => {
+                            draw_match_dropper(frame, brush_tip, ink)
+                        }
+                        _ => draw_match_brush(frame, brush_tip),
+                    }
                     if self.crosshair.matchprop_pickbox {
                         let half = pickbox_half;
                         let square = canvas::Path::rectangle(
@@ -3373,6 +3459,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                         frame.stroke(&canvas::Path::line(a, b), dash);
                     }
                 }
+            }
+            for marker in &self.cleanup_markers {
+                draw_cleanup_marker(frame, *marker);
             }
             // The acquired Parallel-snap reference — a small ∥ glyph on its line so
             // the user sees which line the parallel is measured from. (#277)
@@ -7579,5 +7668,20 @@ mod autosnap_magnet_tests {
             crosshair_centre(Some(grip), snap, true, Some(POINTER)),
             Some(grip)
         );
+    }
+}
+
+#[cfg(test)]
+mod match_cursor_glyph_tests {
+    use super::MatchCursorGlyph;
+
+    #[test]
+    fn matchprop_glyph_differs_between_source_and_destination_phase() {
+        let source = MatchCursorGlyph::for_state(true, true);
+        let destination = MatchCursorGlyph::for_state(true, false);
+        assert_eq!(source, MatchCursorGlyph::SourcePick);
+        assert_eq!(destination, MatchCursorGlyph::Destination);
+        assert_ne!(source, destination);
+        assert_eq!(MatchCursorGlyph::for_state(false, true), MatchCursorGlyph::None);
     }
 }

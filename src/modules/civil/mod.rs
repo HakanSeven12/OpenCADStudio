@@ -351,7 +351,7 @@ impl CadModule for CivilModule {
                             id: "CREATEPOINTS",
                             label: "Create Points",
                             icon: icon!("points"),
-                            event: ModuleEvent::Command(crate::ui::points_menu::OPEN_COMMAND.to_string()),
+                            event: ModuleEvent::Command(crate::modules::civil::OPEN_COMMAND.to_string()),
                         }),
                         tool("CREATEPOINTGROUP", "Create Point Group", icon!("pointgroup")),
                         tool("CREATEPOINTLABELSTYLE", "Create Point Label Style", icon!("pointlabelstyle")),
@@ -392,3 +392,6 @@ impl CadModule for CivilModule {
         })
     }
 }
+
+/// What the ribbon's Create Points button runs: it opens or closes this menu.
+pub const OPEN_COMMAND: &str = "_CIVILPOINTSMENU";

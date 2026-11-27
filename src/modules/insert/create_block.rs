@@ -124,7 +124,7 @@ impl CadCommand for BlockOnScreenCommand {
 mod tests {
     use super::*;
     use crate::scene::{CreateBlockOptions, Scene};
-    use crate::ui::window::block_definition::BlockObjectMode;
+    use crate::scene::BlockObjectMode;
     use document::entities::Line;
     use document::types::{Transform, Vector3};
 

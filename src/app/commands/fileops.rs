@@ -667,6 +667,16 @@ impl OpenCADStudio {
             self.script_paused = true;
             return Task::none();
         }
+        // Rows run back to back; before one that starts a plugin command the
+        // window draws once, and the row waits for it in the queue (#3650).
+        if let Some(line) = self.script_queue.front().cloned() {
+            if let Some(task) =
+                self.defer_plugin_row(&line, || crate::app::plugin_frame::Resume::ScriptRow)
+            {
+                self.script_running = true;
+                return task;
+            }
+        }
         let Some(line) = self.script_queue.pop_front() else {
             self.script_running = false;
             return Task::none();
@@ -676,14 +686,15 @@ impl OpenCADStudio {
             .chain(Task::done(Message::ScriptPump))
     }
 
-    /// An open or a save is still running.
+    /// An open, a save or a plugin command running beside the window is not
+    /// done yet.
     pub(in crate::app) fn script_busy(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         let saving =
             !self.active_save_jobs.is_empty() || self.pending_native_thumbnail_save.is_some();
         #[cfg(target_arch = "wasm32")]
         let saving = false;
-        self.opening.is_some() || !self.pending_opens.is_empty() || saving
+        self.opening.is_some() || !self.pending_opens.is_empty() || saving || self.plugin_running()
     }
 
     /// File commands ask on the command line, not in a dialog.

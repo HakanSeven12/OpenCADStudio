@@ -214,7 +214,7 @@ fn available_name(doc: &Document, name: &str) -> Result<(), LinetypeError> {
     if doc.line_types.contains(name) {
         return Err(LinetypeError::Exists(name.to_owned()));
     }
-    if crate::io::linetypes::catalog_has(name) {
+    if crate::catalog::linetypes::catalog_has(name) {
         return Err(LinetypeError::Catalog(name.to_owned()));
     }
     Ok(())

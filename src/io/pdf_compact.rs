@@ -258,6 +258,17 @@ fn drop_redundant_state(operations: Vec<Operation>) -> Vec<Operation> {
 /// its ET in the output, its font and its line matrix.
 type OpenText = (usize, Option<Vec<Object>>, Option<[f64; 6]>);
 
+/// Whether `a` and `b`, written to five significant digits, differ by at
+/// most one in the last digit.
+fn same_digits(a: f64, b: f64) -> bool {
+    let largest = a.abs().max(b.abs());
+    if largest == 0.0 {
+        return true;
+    }
+    let unit = 10f64.powf(largest.log10().floor() - 4.0);
+    (a - b).abs() <= unit * 1.5
+}
+
 /// Join text objects that follow one another, placing each next glyph run
 /// relative to the one before when it has the same size and angle.
 fn merge_text_objects(operations: Vec<Operation>) -> Vec<Operation> {
@@ -309,7 +320,10 @@ fn merge_text_objects(operations: Vec<Operation>) -> Vec<Operation> {
                 let m = [
                     values[0], values[1], values[2], values[3], values[4], values[5],
                 ];
-                if let Some(l) = line.filter(|l| l[..4] == m[..4]) {
+                // The same size and angle: equal at the five digits they
+                // are written with, give or take the last one (a rotated
+                // run's glyphs each round their own sine and cosine).
+                if let Some(l) = line.filter(|l| (0..4).all(|i| same_digits(l[i], m[i]))) {
                     // Td moves the line matrix by (tx, ty) in text space.
                     let det = l[0] * l[3] - l[1] * l[2];
                     if det.abs() > 1e-12 {
@@ -496,6 +510,41 @@ mod tests {
             );
         }
         assert_eq!(out.iter().filter(|op| op.operator == "BT").count(), 1);
+    }
+
+    /// A rotated run's glyphs round their sine and cosine each on their own,
+    /// one digit apart: they still follow one another by Td, where they were.
+    #[test]
+    fn rotated_glyphs_a_last_digit_apart_merge() {
+        let source = "BT /F1 1 Tf 0 6.831 -6.831 0 676.58 878.98 Tm [<0024>] TJ ET \
+                      BT /F1 1 Tf 0 6.8311 -6.831 0 676.58 883.54 Tm [<0055>] TJ ET \
+                      BT /F1 1 Tf 0 6.831 -6.8311 0 676.58 885.81 Tm [<004C>] TJ ET \
+                      BT /F1 1 Tf 0 6.84 -6.84 0 676.58 889.23 Tm [<004B>] TJ ET";
+        let out = compact(ops(source));
+        let count = |name: &str| out.iter().filter(|op| op.operator == name).count();
+        assert_eq!((count("BT"), count("Tm"), count("Td")), (1, 2, 2));
+        let mut line = [0.0f64; 6];
+        let mut placed = Vec::new();
+        for op in &out {
+            let v: Vec<f64> = op.operands.iter().filter_map(number).collect();
+            match op.operator.as_str() {
+                "Tm" => line = [v[0], v[1], v[2], v[3], v[4], v[5]],
+                "Td" => {
+                    line[4] += v[0] * line[0] + v[1] * line[2];
+                    line[5] += v[0] * line[1] + v[1] * line[3];
+                }
+                "TJ" => placed.push((line[4], line[5])),
+                _ => {}
+            }
+        }
+        let expected = [878.98, 883.54, 885.81, 889.23];
+        for (got, want) in placed.iter().zip(expected) {
+            assert!(
+                (got.0 - 676.58).abs() < 0.006 && (got.1 - want).abs() < 0.006,
+                "{got:?} vs {want}"
+            );
+        }
+        assert!(same_digits(6.831, 6.8311) && !same_digits(6.831, 6.84));
     }
 
     /// Marked content between text objects keeps them apart.

@@ -64,6 +64,16 @@ pub(crate) fn insunits_to_mm(code: i16) -> Option<f64> {
     })
 }
 
+/// What to multiply this drawing's lengths by to say the same distances in
+/// `to`.
+///
+/// `None` when either side is unitless: a drawing that does not say what its
+/// numbers count cannot be converted, only relabelled.
+pub fn conversion_factor(from: i16, to: i16) -> Option<f64> {
+    let millimetres = insunits_to_mm;
+    Some(millimetres(from)? / millimetres(to)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{insunits_name, insunits_to_mm};

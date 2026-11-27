@@ -28,6 +28,7 @@ src/ui/window/tool_palettes.rs
 src/ui/window/parameters_manager.rs
 src/ui/window/count_palette.rs
 src/ui/window/bricscad_visibility.rs
+src/ui/window/files_palette.rs
 src/ui/window/layer_walk.rs
 src/ui/window/quick_calc/view.rs
 src/ui/window/quick_calc/variables_view.rs

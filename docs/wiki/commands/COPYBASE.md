@@ -1,6 +1,6 @@
 ---
 summary: Copies the selected objects to the clipboard with a base point you pick.
-related: COPYCLIP, PASTECLIP, PASTEBLOCK, CUTCLIP
+related: COPYCLIP, PASTECLIP, PASTEBLOCK, CUTCLIP, CUTBASE
 ---
 
 ## Usage

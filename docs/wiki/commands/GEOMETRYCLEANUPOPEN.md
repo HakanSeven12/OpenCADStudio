@@ -7,8 +7,9 @@ ribbon: Manage tab › Cleanup panel
 ## Usage
 1. Select objects, or run the command and click **Select Objects** in the palette.
 2. The palette lists the errors it found, grouped by type, with the location of each.
-3. Click a row to zoom to the error and select its objects.
-4. Click a repair button at the end of the row. The next error is picked and zoomed to.
+3. Click a row to zoom to the error and select its objects. This starts review mode: the error's objects are drawn red and the rest of the drawing is faded.
+4. Click a repair button at the end of the row. The next error is picked and zoomed to. Put the pointer on a repair button first to see its result in the drawing.
+5. Or click **Keep** to keep the error as designed: the drawing does not change, and later scans do not list the error.
 
 ## Error types
 | Type | What it is | Repairs |
@@ -22,3 +23,7 @@ ribbon: Manage tab › Cleanup panel
 - The tolerance is proposed from the drawing: 1% of the mean length of its lines and polyline segments.
 - While the palette is open, it scans again after each change of the drawing, so the list stays current. **Rescan** does it by hand.
 - Each repair is one undo step.
+- Each error in view has a red X in the drawing. Put the pointer on it for a menu of its repairs and **Keep as Designed**; put the pointer on a repair to see its result.
+- The kept errors are kept in the user settings for each drawing. **Kept as Designed** at the end of the list shows them: **Restore** lists one again, **Restore All** lists all of them again. A drawing that has no FINGERPRINTGUID gets one at the first Keep, and is saved with it.
+- In review mode a toolbar is over the drawing. Its **Auto Zoom** button sets [`GEOMETRYCLEANUPZOOMPAN`](GEOMETRYCLEANUPZOOMPAN-System-Variable), and **Close** ends review mode, as [`GEOMETRYERRORREVIEWCLOSE`](GEOMETRYERRORREVIEWCLOSE-Command) does.
+- [`GEOMETRYCLEANUPSTATE`](GEOMETRYCLEANUPSTATE-System-Variable) tells whether the palette is open.

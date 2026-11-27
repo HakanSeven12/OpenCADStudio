@@ -891,6 +891,7 @@ impl<'a> HostSession<'a> {
                     .get(&from)
                     .map(|record| record.handle)
                     .unwrap_or(Handle::NULL);
+                let own_scope = !self.undo_group_open();
                 self.push_undo(&format!("Rename block {from} to {to}"));
                 match crate::scene::block_service::rename(
                     &mut self.app.tabs[self.tab].scene,
@@ -903,7 +904,9 @@ impl<'a> HostSession<'a> {
                         Ok(handle)
                     }
                     Err(error) => {
-                        self.app.discard_last_undo_entry(self.tab);
+                        if own_scope {
+                            self.app.discard_last_undo_entry(self.tab);
+                        }
                         Err(error.to_string())
                     }
                 }
@@ -919,6 +922,7 @@ impl<'a> HostSession<'a> {
                     .get(&name)
                     .map(|record| record.handle)
                     .unwrap_or(Handle::NULL);
+                let own_scope = !self.undo_group_open();
                 self.push_undo(&format!("Delete block {name}"));
                 match crate::scene::block_service::delete(
                     &mut self.app.tabs[self.tab].scene,
@@ -933,7 +937,9 @@ impl<'a> HostSession<'a> {
                         Ok(handle)
                     }
                     Err(error) => {
-                        self.app.discard_last_undo_entry(self.tab);
+                        if own_scope {
+                            self.app.discard_last_undo_entry(self.tab);
+                        }
                         Err(error.to_string())
                     }
                 }

@@ -25,6 +25,8 @@ pub const OUT_DEFAULT: &str = "System default printer";
 pub const OUT_PDF: &str = "Save to PDF file…";
 pub const OUT_SVG: &str = "Save to SVG file…";
 pub const OUT_DWF: &str = "Save to DWF file…";
+/// Raster file output (PNG, JPEG, BMP, TIFF by the chosen extension).
+pub const OUT_IMAGE: &str = "Save to image file…";
 
 /// Top-of-list entries: no page setup (defaults + PDF), and the last-used
 /// settings captured when the dialog opened.
@@ -267,6 +269,10 @@ pub enum PlotDlgMsg {
     Close,
     Commit,
     Preview,
+    /// Plot Preview: back to the Plot dialog.
+    PreviewClose,
+    /// Plot Preview: plot the sheet shown.
+    PreviewPlot,
     PrinterProperties,
     /// The driver options of a printer arrived (or failed to), for the
     /// in-line properties editor; carries the printer's name so a late
@@ -561,6 +567,10 @@ pub struct PlotDialogState {
     /// File output is DWF (the DWF6 ePlot device); wins over `file_svg`.
     #[serde(default)]
     pub file_dwf: bool,
+    /// File output is a raster image (the PublishToWeb devices); wins over
+    /// `file_svg` and `file_dwf`.
+    #[serde(default)]
+    pub file_image: bool,
     /// SVG-only text representation; an app preference, not a page-setup field.
     #[serde(default)]
     pub text_as_outlines: bool,
@@ -689,6 +699,7 @@ impl Default for PlotDialogState {
             vector_dpi: String::new(),
             file_svg: false,
             file_dwf: false,
+            file_image: false,
             text_as_outlines: false,
             non_scaling_stroke: false,
             layer_attributes: false,
@@ -751,6 +762,7 @@ impl PlotDialogState {
         self.to_file = o.to_file;
         self.file_svg = o.file_svg;
         self.file_dwf = o.file_dwf;
+        self.file_image = o.file_image;
         self.text_as_outlines = o.text_as_outlines;
         self.non_scaling_stroke = o.non_scaling_stroke;
         self.layer_attributes = o.layer_attributes;
@@ -1264,6 +1276,7 @@ fn output_choices(printers: &[String]) -> Vec<PlotChoice> {
         out.push(PlotChoice::localized(OUT_PDF));
         out.push(PlotChoice::localized(OUT_SVG));
         out.push(PlotChoice::localized(OUT_DWF));
+        out.push(PlotChoice::localized(OUT_IMAGE));
         out
     }
 }
@@ -1285,7 +1298,9 @@ pub fn view_window(
         t!("Apply")
     } else if to_file {
         // The web build writes PDF whatever a stored dialog state says.
-        if s.file_dwf && cfg!(not(target_arch = "wasm32")) {
+        if s.file_image && cfg!(not(target_arch = "wasm32")) {
+            t!("Export")
+        } else if s.file_dwf && cfg!(not(target_arch = "wasm32")) {
             t!("Export DWF")
         } else if s.file_svg && cfg!(not(target_arch = "wasm32")) {
             t!("Export SVG")
@@ -1441,7 +1456,9 @@ pub fn view_window(
     }
     let printer_sel = if to_file {
         Some(PlotChoice::localized(
-            if s.file_dwf && cfg!(not(target_arch = "wasm32")) {
+            if s.file_image && cfg!(not(target_arch = "wasm32")) {
+                OUT_IMAGE
+            } else if s.file_dwf && cfg!(not(target_arch = "wasm32")) {
                 OUT_DWF
             } else if s.file_svg && cfg!(not(target_arch = "wasm32")) {
                 OUT_SVG
@@ -1912,7 +1929,7 @@ pub fn view_window(
             Space::new().height(0).into()
         };
     let pdf_geopdf_option: Element<'_, Message> = if to_file
-        && (!(s.file_svg || s.file_dwf) || cfg!(target_arch = "wasm32"))
+        && (!(s.file_svg || s.file_dwf || s.file_image) || cfg!(target_arch = "wasm32"))
         && !s.paper_space
         && s.area != "Layout"
     {
@@ -2220,4 +2237,46 @@ mod sidebar_layout_tests {
             "scrollbar must sit at the sidebar edge: {sidebar:?}"
         );
     }
+}
+
+/// The Plot Preview window: the sheet as it will plot, fitted to the window,
+/// with Plot and Close (back to the Plot dialog).
+pub fn view_preview<'a>(
+    page: &'a iced::widget::image::Handle,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let picture = container(
+        iced::widget::image(page.clone())
+            .content_fit(iced::ContentFit::Contain)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .padding(8)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.weak.color)),
+        ..Default::default()
+    });
+    let footer = row![
+        Space::new().width(Length::Fill),
+        form::dialog_button_styled_opt(
+            t!("Close"),
+            Some(Message::PlotDlg(PlotDlgMsg::PreviewClose)),
+            button::secondary
+        ),
+        form::dialog_button_styled_opt(
+            t!("Plot"),
+            Some(Message::PlotDlg(PlotDlgMsg::PreviewPlot)),
+            button::primary
+        ),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    column![picture, footer]
+        .spacing(8)
+        .padding([10, 12])
+        .width(sizing.width)
+        .height(sizing.height)
+        .into()
 }

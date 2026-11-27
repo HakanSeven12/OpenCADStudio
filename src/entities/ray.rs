@@ -5,8 +5,8 @@ use crate::entities::common::{edit_prop as edit, format_length, ro_prop as ro, s
 use crate::entities::curve::{point_along, unit_direction};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
 
 /// Display length used when rendering semi-infinite / infinite lines.
 const DISPLAY_EXTENT: f64 = 1_000_000.0;
@@ -167,11 +167,11 @@ impl PropertyEditable for Ray {
 
 impl Transformable for Ray {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut entity.base_point.x,
                     &mut entity.base_point.y,
                     p1,
@@ -324,11 +324,11 @@ impl PropertyEditable for XLine {
 
 impl Transformable for XLine {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut entity.base_point.x,
                     &mut entity.base_point.y,
                     p1,

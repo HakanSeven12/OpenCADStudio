@@ -1556,8 +1556,8 @@ pub(crate) fn tolerance_alignment_label(value: i16) -> &'static str {
 pub(crate) fn choice_value(
     selected: &str,
     options: &[&str],
-) -> crate::scene::model::object::PropValue {
-    crate::scene::model::object::PropValue::Choice {
+) -> crate::entities::object::PropValue {
+    crate::entities::object::PropValue::Choice {
         selected: selected.to_string(),
         options: options.iter().map(|value| (*value).to_string()).collect(),
     }

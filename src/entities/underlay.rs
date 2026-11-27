@@ -14,9 +14,9 @@ use glam::DVec3;
 use crate::entities::common::{center_grip, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -521,7 +521,7 @@ impl PropertyEditable for Underlay {
 
 impl Transformable for Underlay {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        use crate::scene::view::transform::reflect_xy_point;
+        use crate::entities::transform::reflect_xy_point;
         match t {
             EntityTransform::Translate(d) => {
                 self.insertion_point.x += d.x;
@@ -539,7 +539,7 @@ impl Transformable for Underlay {
                 {
                     document::Entity::apply_transform(
                         self,
-                        &crate::scene::view::transform::reflection_about_working_line(
+                        &crate::entities::transform::reflection_about_working_line(
                             *p1,
                             *p2,
                             *working_normal,
@@ -577,7 +577,7 @@ impl Transformable for Underlay {
                 angle_rad,
             } => {
                 if !axis.normalize_or(DVec3::Z).abs_diff_eq(DVec3::Z, 1e-10) {
-                    crate::scene::view::transform::apply_standard_transform(
+                    crate::entities::transform::apply_standard_transform(
                         self, *center, *axis, *angle_rad,
                     );
                     return;

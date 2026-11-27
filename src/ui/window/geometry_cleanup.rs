@@ -9,11 +9,15 @@ use crate::ui::dock::PanelId;
 use crate::ui::kit;
 use crate::ui::style::kit_metrics as km;
 use document::Handle;
-use iced::widget::{button, column, container, row, text, Space};
+use iced::widget::{button, column, container, mouse_area, row, text, Space};
 use iced::{Element, Fill, Padding};
 use ocs_geom::geom2d::cleanup::{AngleErrorKind, AngleTolerances, EndErrorKind, Tolerances};
 
 pub const ICON: &[u8] = include_bytes!("../../../assets/icons/geometry_cleanup.svg");
+
+/// The pointer is on an error's marker in the drawing within this many
+/// pixels of its centre.
+pub const MARKER_REACH: f32 = 8.0;
 
 /// The length types, in the order of the tree and of the settings rows.
 pub const KINDS: [EndErrorKind; 3] = [
@@ -27,7 +31,9 @@ pub fn kind_label(kind: EndErrorKind) -> &'static str {
 }
 
 /// An error type of the palette, in the order of the tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ErrorType {
     Gap,
     Overshoot,
@@ -179,17 +185,38 @@ pub struct AngleFinding {
     pub other_segment: Option<usize>,
 }
 
+/// An error that the user keeps as designed: what identifies it across
+/// scans, in one drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct KeptError {
+    pub kind: ErrorType,
+    pub handle: u64,
+    pub at_start: bool,
+    /// The segments of an angle error; `None` for a length error.
+    pub segments: Option<(Option<usize>, Option<usize>)>,
+    /// The other line of a relative angle.
+    pub other: Option<u64>,
+}
+
 impl Finding {
-    /// Whether `other` is the same error: the same type at the same end,
-    /// or of the same lines or segments.
+    /// What identifies this error across scans: its type, its object and
+    /// end, its segments, and the other line of a relative angle.
+    pub fn identity(&self) -> KeptError {
+        KeptError {
+            kind: self.kind,
+            handle: self.handle.value(),
+            at_start: self.at_start,
+            segments: self.angle.map(|a| (a.segment, a.other_segment)),
+            other: self
+                .other
+                .filter(|_| self.kind == ErrorType::RelativeAngle)
+                .map(|o| o.0.value()),
+        }
+    }
+
+    /// Whether `other` is the same error.
     pub fn same_error(&self, other: &Finding) -> bool {
-        let segments = |f: &Finding| f.angle.map(|a| (a.segment, a.other_segment));
-        self.kind == other.kind
-            && self.handle == other.handle
-            && self.at_start == other.at_start
-            && segments(self) == segments(other)
-            && (self.kind != ErrorType::RelativeAngle
-                || self.other.map(|o| o.0) == other.other.map(|o| o.0))
+        self.identity() == other.identity()
     }
 
     /// The repairs that this error offers.
@@ -236,6 +263,9 @@ pub struct Scan {
     pub tolerances: Tolerances,
     pub angles: AngleTolerances,
     pub findings: Vec<Finding>,
+    /// The errors found that the user keeps as designed: not listed with
+    /// the others, and not repaired.
+    pub kept: Vec<Finding>,
 }
 
 #[derive(Debug, Default)]
@@ -252,6 +282,28 @@ pub struct GeometryCleanupPalette {
     pub settings_file: Option<String>,
     /// The open Settings dialog.
     pub dialog: Option<crate::ui::window::geometry_cleanup_settings::SettingsDialog>,
+    /// The errors kept as designed, by the FINGERPRINTGUID of their drawing:
+    /// a handle is unique only in its drawing.
+    pub kept: std::collections::BTreeMap<String, Vec<KeptError>>,
+    /// Whether the list of the kept errors is open.
+    pub kept_open: bool,
+    /// The error whose marker menu is open in the drawing.
+    pub menu: Option<usize>,
+    /// Whether the pointer is on the marker menu, which keeps it open.
+    pub menu_hovered: bool,
+    /// The repair whose result the drawing previews.
+    pub preview: Option<(usize, Fix)>,
+    /// Review mode: the picked error's objects are drawn bright and the
+    /// rest faded, with the review toolbar over the drawing. A pick starts
+    /// it; GEOMETRYERRORREVIEWCLOSE, the toolbar's Close, a new selection
+    /// and closing the palette end it.
+    pub review: bool,
+    /// Whether the drawing shows the review display now, so that ending it
+    /// does not clear the display of count mode.
+    pub review_shown: bool,
+    /// GEOMETRYCLEANUPZOOMPAN 0: a pick zooms only when the error is not in
+    /// view. Kept in the user profile.
+    pub auto_zoom_off: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -261,7 +313,23 @@ pub enum GeometryCleanupMsg {
     /// Pick an error: zoom to it and show its repairs.
     Pick(usize),
     Fix(usize, Fix),
+    /// Keep an error as designed: it is not listed again.
+    Keep(usize),
+    /// List a kept error again, by its index in the scan's kept errors.
+    Restore(usize),
+    /// List all the kept errors of the drawing again.
+    RestoreAll,
     Fold(ErrorType),
+    /// Open or close the list of the kept errors.
+    FoldKept,
+    /// The pointer is on a repair (preview its result) or left it.
+    Preview(Option<(usize, Fix)>),
+    /// The pointer came onto the marker menu or left it.
+    MenuHover(bool),
+    /// The review toolbar's Close: end review mode.
+    CloseReview,
+    /// The review toolbar's Auto Zoom: GEOMETRYCLEANUPZOOMPAN 1 or 0.
+    ToggleAutoZoom,
     /// The Settings dialog.
     OpenSettings,
     SettingsTolerance(EndErrorKind, String),
@@ -395,18 +463,51 @@ pub fn view<'a>(
         }
         for index in indices {
             let finding = &scan.findings[index];
-            let place = match finding.angle {
-                Some(angle) => format!("{} ({}°)", coordinates(finding.location), angle.angle),
-                None => coordinates(finding.location),
-            };
             list = list.push(
-                kit::tree_row(place)
+                kit::tree_row(place(finding))
                     .depth(1)
                     .selected(palette.picked == Some(index))
                     .trailing(fix_buttons(index, finding))
                     .on_press(msg(GeometryCleanupMsg::Pick(index)))
                     .view(),
             );
+        }
+    }
+
+    if !scan.kept.is_empty() {
+        list = list.push(kit::category_bar(
+            crate::tf!("Kept as Designed: {}", scan.kept.len()).into_owned(),
+            !palette.kept_open,
+            msg(GeometryCleanupMsg::FoldKept),
+        ));
+        if palette.kept_open {
+            list = list.push(
+                row![
+                    Space::new().width(Fill),
+                    kit::text_button(
+                        crate::t!("Restore All").into_owned(),
+                        Some(msg(GeometryCleanupMsg::RestoreAll)),
+                        false,
+                    ),
+                ]
+                .align_y(iced::Center),
+            );
+            for (index, finding) in scan.kept.iter().enumerate() {
+                list = list.push(
+                    kit::tree_row(format!(
+                        "{}: {}",
+                        crate::t!(finding.kind.label()),
+                        place(finding)
+                    ))
+                    .depth(1)
+                    .trailing(row_button(
+                        crate::t!("Restore").into_owned(),
+                        crate::t!("List this error again.").into_owned(),
+                        msg(GeometryCleanupMsg::Restore(index)),
+                    ))
+                    .view(),
+                );
+            }
         }
     }
 
@@ -417,22 +518,143 @@ pub fn view<'a>(
     kit::palette(title_bar, body, width)
 }
 
-/// The repairs of one error, at the end of its row.
-fn fix_buttons<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
-    let mut fixes = row![].spacing(km::TOOL_GAP / 2.0).align_y(iced::Center);
-    for fix in finding.fixes() {
-        let press = button(
-            text(crate::t!(fix.label()).into_owned()).size(crate::ui::style::text::UI_SMALL),
-        )
+/// Where an error is, for its row.
+fn place(finding: &Finding) -> String {
+    match finding.angle {
+        Some(angle) => format!("{} ({}°)", coordinates(finding.location), angle.angle),
+        None => coordinates(finding.location),
+    }
+}
+
+/// A small button at the end of a row, with its tooltip.
+fn row_button<'a>(label: String, tip: String, press: Message) -> Element<'a, Message> {
+    let button = button(text(label).size(crate::ui::style::text::UI_SMALL))
         .padding(Padding::from([0, 4]))
         .height(km::ROW_H - 2.0)
         .style(kit::text_button_style(false))
-        .on_press(msg(GeometryCleanupMsg::Fix(index, fix)));
-        fixes = fixes.push(kit::tooltip(
-            press,
-            crate::t!(fix.tip()).into_owned(),
+        .on_press(press);
+    kit::tooltip(button, tip, kit::TipPosition::Bottom)
+}
+
+/// `content`, which previews repair `fix` of error `index` while the
+/// pointer is on it.
+fn previews<'a>(content: Element<'a, Message>, index: usize, fix: Fix) -> Element<'a, Message> {
+    mouse_area(content)
+        .on_enter(msg(GeometryCleanupMsg::Preview(Some((index, fix)))))
+        .on_exit(msg(GeometryCleanupMsg::Preview(None)))
+        .into()
+}
+
+/// The toolbar over the drawing in review mode: Auto Zoom
+/// (GEOMETRYCLEANUPZOOMPAN) and Close (GEOMETRYERRORREVIEWCLOSE).
+pub fn review_toolbar<'a>(palette: &GeometryCleanupPalette) -> Element<'a, Message> {
+    let bar_button = |icon: Element<'a, Message>, tip: String, press: Message| {
+        kit::tooltip(
+            button(icon)
+                .style(button::text)
+                .padding([3, 5])
+                .on_press(press),
+            tip,
             kit::TipPosition::Bottom,
+        )
+    };
+    let zoom_tip = if palette.auto_zoom_off {
+        crate::t!("Auto Zoom is off: a picked error is zoomed to only when it is not in view.")
+    } else {
+        crate::t!("Auto Zoom is on: the view zooms to each picked error.")
+    };
+    let zoom_icon = if palette.auto_zoom_off {
+        crate::ui::icons::themed_disabled(crate::ui::icons::zoom_icon(), 16.0)
+    } else {
+        crate::ui::icons::themed_success(crate::ui::icons::zoom_icon(), 16.0)
+    };
+    let bar = row![
+        text(crate::t!("Geometry Cleanup: Review").into_owned()).size(13),
+        bar_button(
+            zoom_icon,
+            zoom_tip.into_owned(),
+            msg(GeometryCleanupMsg::ToggleAutoZoom)
+        ),
+        bar_button(
+            crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0),
+            crate::t!("Close").into_owned(),
+            msg(GeometryCleanupMsg::CloseReview)
+        ),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    let bar = container(bar)
+        .padding([4, 10])
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(crate::ui::style::chrome::panel(
+                theme,
+            ))),
+            border: iced::Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: km::line(),
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+    container(iced::widget::opaque(bar))
+        .width(Fill)
+        .align_x(iced::Center)
+        .padding([10, 0])
+        .into()
+}
+
+/// The menu on the marker of error `index` in the drawing: its repairs,
+/// each previewed while the pointer is on it, and Keep as Designed.
+pub fn marker_menu<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
+    let item = |label: String, press: Message| -> Element<'a, Message> {
+        button(text(label).size(crate::ui::style::text::UI_SMALL))
+            .padding(Padding::from([2, 8]))
+            .width(Fill)
+            .style(kit::text_button_style(false))
+            .on_press(press)
+            .into()
+    };
+    let mut items = column![].spacing(2);
+    for fix in finding.fixes() {
+        let press = msg(GeometryCleanupMsg::Fix(index, fix));
+        items = items.push(kit::tooltip(
+            previews(item(crate::t!(fix.label()).into_owned(), press), index, fix),
+            crate::t!(fix.tip()).into_owned(),
+            kit::TipPosition::Right,
         ));
     }
+    items = items.push(item(
+        crate::t!("Keep as Designed").into_owned(),
+        msg(GeometryCleanupMsg::Keep(index)),
+    ));
+    let panel = container(items)
+        .padding(4)
+        .width(iced::Length::Fixed(160.0))
+        .style(container::bordered_box);
+    mouse_area(panel)
+        .on_enter(msg(GeometryCleanupMsg::MenuHover(true)))
+        .on_exit(msg(GeometryCleanupMsg::MenuHover(false)))
+        .into()
+}
+
+/// The repairs of one error, and Keep, at the end of its row.
+fn fix_buttons<'a>(index: usize, finding: &Finding) -> Element<'a, Message> {
+    let mut fixes = row![].spacing(km::TOOL_GAP / 2.0).align_y(iced::Center);
+    for fix in finding.fixes() {
+        fixes = fixes.push(previews(
+            row_button(
+                crate::t!(fix.label()).into_owned(),
+                crate::t!(fix.tip()).into_owned(),
+                msg(GeometryCleanupMsg::Fix(index, fix)),
+            ),
+            index,
+            fix,
+        ));
+    }
+    fixes = fixes.push(row_button(
+        crate::t!("Keep").into_owned(),
+        crate::t!("Keep as designed: the drawing does not change, and later scans do not list this error.").into_owned(),
+        msg(GeometryCleanupMsg::Keep(index)),
+    ));
     fixes.into()
 }

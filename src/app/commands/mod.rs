@@ -33,6 +33,8 @@ mod block_editor_vars;
 mod bricscad_visibility;
 mod bvisibility;
 mod count;
+#[cfg(test)]
+mod cutbase_tests;
 mod dash;
 mod dgn_import;
 mod geometry_cleanup;
@@ -41,7 +43,11 @@ mod geometry_cleanup_tests;
 mod ifc_plan;
 #[cfg(test)]
 mod layer_variable_tests;
+mod named_selections;
+#[cfg(test)]
+mod named_selections_tests;
 pub(in crate::app) use dgn_import::read_reference_drawings;
+pub(in crate::app) use named_selections::NamedSelectionSaveError;
 mod dim;
 mod dim_cmd;
 mod dim_inspect;
@@ -54,6 +60,8 @@ mod fileops;
 mod group_display;
 mod hatch_dialogs;
 mod hatch_vars;
+mod modemacro;
+pub(in crate::app) use modemacro::diesel;
 mod layer_variable;
 mod log_file;
 mod mleader_layer;
@@ -111,6 +119,16 @@ mod xref_attach;
 // path (`commands::DrawOrderRefCommand`) from `update.rs`, so re-export it at
 // the module root to keep that path valid.
 pub(crate) use view::DrawOrderCommand;
+
+/// A point modifier a toolbar button sends (`_ENDP`, `_FROM`, ...): only
+/// these macro words, so a button running INSERT or INTERSECT stays a command.
+pub(in crate::app) fn is_point_modifier_token(cmd: &str) -> bool {
+    const WORDS: [&str; 17] = [
+        "_ENDP", "_MID", "_INT", "_APPINT", "_EXT", "_CEN", "_GCEN", "_QUA", "_TAN", "_PER",
+        "_PAR", "_INS", "_NOD", "_NEA", "_NON", "_FROM", "_M2P",
+    ];
+    WORDS.iter().any(|word| cmd.trim().eq_ignore_ascii_case(word))
+}
 
 impl OpenCADStudio {
     /// First `"{prefix}{n}"` (n ≥ 1) not already used by a block record in the
@@ -222,7 +240,22 @@ impl OpenCADStudio {
         if self.mtext_editor.is_some() {
             self.mtext_cancel();
         }
+        // `$M=` macro: the DIESEL string's value is the macro that runs.
+        if let Some(expr) = cmd.trim_start().strip_prefix("$M=") {
+            let i = self.active_tab;
+            let expanded = diesel(&self.tabs[i].scene.document, expr);
+            return self.dispatch_ribbon_command(&expanded);
+        }
         if !cmd.contains(';') {
+            // An object snap button (`_ENDP`, `_FROM`, ...) answers the
+            // running point prompt; with none it does nothing.
+            if is_point_modifier_token(cmd) {
+                return if self.point_modifier_step(self.active_tab) {
+                    self.feed_active_cmd(cmd.trim())
+                } else {
+                    Task::none()
+                };
+            }
             return self.dispatch_command(cmd);
         }
         let i = self.active_tab;
@@ -366,6 +399,10 @@ impl OpenCADStudio {
         cmd: &str,
         allow_suggest: bool,
     ) -> Option<Task<Message>> {
+        // A plugin command runs beside the window: nothing new until it ends.
+        if self.plugin_run_refuses(cmd) {
+            return Some(Task::none());
+        }
         if self.table_cell_editor.is_some()
             && self.field_dialog.is_none()
             && !self.commit_table_cell_editor()
@@ -616,6 +653,7 @@ impl OpenCADStudio {
         // Remove or a fixed Window sense must not quietly still be in force
         // when the next command asks for objects. (#596)
         self.select_remove_mode = false;
+        self.selection_named_set_pending = false;
         crate::modules::draw::select::set_remove_mode(false);
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
@@ -670,6 +708,21 @@ impl OpenCADStudio {
         self.ribbon
             .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
 
+        // A plugin command draws one frame first, naming it, then runs beside
+        // the window where it can (#3650).
+        let frame_drawn = self.plugin_frame_drawn;
+        if !self.suppress_plugin_dispatch {
+            if let Some(task) = self.defer_plugin_line(cmd, || {
+                super::plugin_frame::Resume::Command(cmd.to_string())
+            }) {
+                return Some(task);
+            }
+            if let Some(task) = self.begin_plugin_run(i, cmd, frame_drawn) {
+                self.tabs[i].last_cmd = Some(cmd.to_string());
+                self.command_line.record_recent(cmd);
+                return Some(task);
+            }
+        }
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
             // commands that it just installed. If no command is now active, the
@@ -794,6 +847,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_hatch_var(cmd) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_modemacro_var(cmd) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_layer_variable(cmd, i) {
             return Some(t);
         }
@@ -815,6 +871,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_fileops(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_named_selections(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_layers(cmd, i) {
             return Some(t);
         }
@@ -828,6 +887,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_bricscad_visibility(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_files_palette(cmd) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_bvisibility(cmd, i) {
@@ -1067,6 +1129,7 @@ inventory::submit!(crate::command::CommandRegistration {
         // Dispatched commands that the alias file names (#2452).
         "CTABLESTYLE",
         "HPNAME",
+        "MODEMACRO",
         "SELHANDLES",
         "SELH",
         // Implemented command-line block forms must also validate in ALIASEDIT.

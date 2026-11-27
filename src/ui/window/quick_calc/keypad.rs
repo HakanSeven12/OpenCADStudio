@@ -2,7 +2,7 @@
 //! do: on the last number typed, not on the whole input.
 
 use super::QuickCalcPalette;
-use crate::app::calc::{CalcContext, Value};
+use crate::calc::{CalcContext, Value};
 
 /// Standard or Scientific.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

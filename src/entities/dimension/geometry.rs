@@ -1407,7 +1407,7 @@ pub(crate) fn arc_dimension_in_ocs(dimension: &DimensionArc) -> Option<(Dimensio
     }
     let normal_tuple = (normal.x, normal.y, normal.z);
     let to_ocs = |point: Vector3| {
-        let point = crate::scene::view::transform::wcs_point_to_ocs(
+        let point = crate::entities::transform::wcs_point_to_ocs(
             (point.x, point.y, point.z),
             normal_tuple,
         );
@@ -1446,7 +1446,7 @@ pub(crate) fn large_radial_dimension_in_ocs(
     }
     let normal_tuple = (normal.x, normal.y, normal.z);
     let to_ocs = |point: Vector3| {
-        let point = crate::scene::view::transform::wcs_point_to_ocs(
+        let point = crate::entities::transform::wcs_point_to_ocs(
             (point.x, point.y, point.z),
             normal_tuple,
         );
@@ -1485,7 +1485,7 @@ pub(crate) fn linear_dimension_in_ocs(dimension: &Dimension) -> Option<(Dimensio
     }
     let normal_tuple = (normal.x, normal.y, normal.z);
     let to_ocs = |point: Vector3| {
-        let point = crate::scene::view::transform::wcs_point_to_ocs(
+        let point = crate::entities::transform::wcs_point_to_ocs(
             (point.x, point.y, point.z),
             normal_tuple,
         );
@@ -1517,7 +1517,7 @@ pub(crate) fn linear_dimension_in_ocs(dimension: &Dimension) -> Option<(Dimensio
 pub(crate) fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
     let normal_tuple = (normal.x, normal.y, normal.z);
     let map = |x: f64, y: f64, z: f64| {
-        crate::scene::view::transform::ocs_point_to_wcs((x, y, z), normal_tuple)
+        crate::entities::transform::ocs_point_to_wcs((x, y, z), normal_tuple)
     };
     let map_split = |high: &mut Vec<[f32; 3]>, low: &mut Vec<[f32; 3]>| {
         let mut mapped_high = Vec::with_capacity(high.len());
@@ -1550,7 +1550,7 @@ pub(crate) fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
         map_split(&mut surfaces.fill_tris, &mut surfaces.fill_tris_low);
         map_split(&mut surfaces.pick_tris, &mut surfaces.pick_tris_low);
     }
-    geom.text_verts = crate::scene::model::wire_model::map_text_verts(&geom.text_verts, map);
+    geom.text_verts = crate::display::wire_model::map_text_verts(&geom.text_verts, map);
     // OCS→WCS is rigid: unit height scale, no in-plane rotation change.
     wire.map_searchable_runs(
         &|p| {
@@ -1589,7 +1589,7 @@ pub(crate) fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
             }
             TangentGeom::Circle { center, radius } => {
                 let center = map(center[0] as f64, center[1] as f64, center[2] as f64);
-                let (x_axis, y_axis) = crate::scene::view::transform::ocs_axes(normal_tuple);
+                let (x_axis, y_axis) = crate::entities::transform::ocs_axes(normal_tuple);
                 *tangent = TangentGeom::PlanarCircle {
                     center: [center.0, center.1, center.2],
                     axis_x: [x_axis.0, x_axis.1, x_axis.2],

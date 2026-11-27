@@ -17,20 +17,14 @@ use crate::scene::WireModel;
 use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
+pub use crate::scene::BlockObjectMode;
+pub use crate::modules::insert::block_cmdline::invalid_block_name_char;
 
 static ICON_PICK_POINT: &[u8] = include_bytes!("../../../assets/icons/point.svg");
 static ICON_SELECT_OBJECTS: &[u8] =
     include_bytes!("../../../assets/icons/blocks/select_objects.svg");
 static ICON_QUICK_SELECT: &[u8] = include_bytes!("../../../assets/icons/blocks/quick_select.svg");
 static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum BlockObjectMode {
-    Retain,
-    #[default]
-    Convert,
-    Delete,
-}
 
 /// Dropdown entry for the Block Unit picker.
 #[derive(Clone, PartialEq, Eq)]
@@ -186,16 +180,6 @@ impl BlockDefinitionState {
     pub fn invalid_name_char(&self) -> Option<char> {
         invalid_block_name_char(&self.name)
     }
-}
-
-/// The first character a block name may not hold: \ < > / ? " : ; * | , = `
-pub fn invalid_block_name_char(name: &str) -> Option<char> {
-    name.chars().find(|&c| {
-        matches!(
-            c,
-            '\\' | '<' | '>' | '/' | '?' | '"' | ':' | ';' | '*' | '|' | ',' | '=' | '`'
-        )
-    })
 }
 
 pub(crate) fn group<'a>(

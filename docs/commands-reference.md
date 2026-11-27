@@ -256,6 +256,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `CONSTRUCTIONLINE` | — | Alias of XLINE. † |
 | `COPYCLIP` | `CC` | Copies selected drawing objects into the operating system clipboard buffer (DWG vector + image). |
 | `COPYTOLAYER` | — | Menu: Copy Objects to New Layer. |
+| `CUTBASE` | — | Menu: Cut with Base Point. |
 | `CUTCLIP` | `CX` | Copies selected entities to clipboard and immediately erases them from drawing. |
 | `DIVIDE` | `DIV` | Places evenly spaced point objects or blocks along the length of an entity. *Tip:* Does not physically cut the object; it inserts point nodes. Use the Blo (B) option to insert repeating symbols along a curve. |
 | `DONATE` | — | Ribbon: Donate. |

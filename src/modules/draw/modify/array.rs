@@ -76,19 +76,6 @@ pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
 
 // ── Item limit ─────────────────────────────────────────────────────────────
 
-/// Most items one array may create, including the source. Every item becomes
-/// a transform and then a copy of each selected object, so an unbounded typed
-/// count exhausts memory before anything is drawn.
-pub(crate) const MAX_ARRAY_ITEMS: u64 = 100_000;
-
-/// Whether an array of `counts` (rows, columns, levels, ...) stays in bounds.
-pub(crate) fn array_items_within_limit(counts: &[u64]) -> bool {
-    counts
-        .iter()
-        .try_fold(1u64, |total, &count| total.checked_mul(count))
-        .is_some_and(|total| total <= MAX_ARRAY_ITEMS)
-}
-
 pub(crate) fn array_limit_error() -> CmdResult {
     CmdResult::ReportError(
         crate::tf!("Array size exceeds the limit of {} items.", MAX_ARRAY_ITEMS).into_owned(),
@@ -619,6 +606,7 @@ use crate::entities::curve::entity_curve;
 use document::EntityType;
 use std::f64::consts::PI as FPI;
 use std::f64::consts::TAU as FTAU;
+pub(crate) use crate::scene::assoc_array::{array_items_within_limit, MAX_ARRAY_ITEMS};
 
 // ── Path geometry helpers ──────────────────────────────────────────────────
 

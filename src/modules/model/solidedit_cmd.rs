@@ -162,7 +162,7 @@ fn parse_color(text: &str) -> Option<document::types::Color> {
     if let Some([r, g, b]) = parts.as_deref() {
         return Some(document::types::Color::Rgb { r: *r, g: *g, b: *b });
     }
-    crate::ui::window::attman_dialog::parse_color(text)
+    crate::entities::common::parse_color(text)
 }
 
 impl CadCommand for SolidEditCommand {

@@ -111,7 +111,7 @@ impl CadCommand for DimOverrideCommand {
             // The reference names no variable here: "dimension variable".
             Some((_, _, current)) => format!(
                 "DIMOVERRIDE  {}",
-                crate::ui::command_line::value_prompt(t!("dimension variable").as_ref(), current)
+                crate::command::prompt::value_prompt(t!("dimension variable").as_ref(), current)
             ),
         }
     }

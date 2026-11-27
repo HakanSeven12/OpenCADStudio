@@ -42,6 +42,7 @@ These are the default shortcuts. Change them under `CUI` › **Keyboard Shortcut
 | Ctrl+C | Copy |
 | Ctrl+Shift+C | Copy with base point |
 | Ctrl+X | Cut |
+| Ctrl+Shift+X | Cut with base point |
 | Ctrl+V | Paste |
 | Ctrl+Shift+V | Paste as block |
 | Ctrl+A | Select all |

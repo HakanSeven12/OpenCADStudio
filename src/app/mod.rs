@@ -40,7 +40,7 @@ mod block_visibility;
 mod bricscad_visibility_tests;
 #[cfg(test)]
 mod visibilitystates_tests;
-pub(crate) mod calc;
+pub(crate) use crate::calc;
 mod command_driver;
 mod extraction_catalog;
 mod attr_editor;
@@ -51,9 +51,7 @@ mod insert_attributes_tests;
 mod insert_units_tests;
 #[cfg(test)]
 mod work_count_tests;
-pub(crate) use command_driver::{
-    copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
-};
+pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel, PasteSpace};
 mod assistant;
 pub(crate) mod commands;
 #[doc(hidden)]
@@ -82,6 +80,8 @@ pub(crate) mod text_match;
 mod geographic_location;
 #[cfg(not(target_arch = "wasm32"))]
 mod sheet_publish;
+pub(crate) mod plugin_frame;
+pub(crate) mod plugin_run;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -408,8 +408,7 @@ pub struct GripPendingValue {
     pub label: &'static str,
 }
 
-mod qselect_state;
-pub use self::qselect_state::*;
+pub use crate::filter::qselect_state::*;
 
 /// The Find and Replace window. Its texts, history and options outlive the
 /// window; the search position and the result list belong to one opening.
@@ -629,7 +628,7 @@ pub(super) struct OpenCADStudio {
     /// Bumped on every tab hover change, so a stale rest is ignored.
     doc_tab_hover_gen: u64,
     tab_counter: usize,
-    ribbon: Ribbon,
+    pub(crate) ribbon: Ribbon,
     /// Recently opened files, newest first — backs the Start page panel.
     recent_files: Vec<std::path::PathBuf>,
     /// Decoded DWG preview thumbnails for the Start page, keyed by path.
@@ -816,6 +815,8 @@ pub(super) struct OpenCADStudio {
     refedit_dialog: Option<crate::ui::window::refedit_dialog::RefEditDialogState>,
     /// The Password Protected PDF window.
     pdf_password: Option<crate::ui::window::pdf_password_dialog::PdfPasswordState>,
+    /// The picture the Plot Preview window shows.
+    plot_preview: Option<iced::widget::image::Handle>,
     /// The Inspection Dimension window.
     dim_inspect_dialog: Option<crate::ui::window::dim_inspect_dialog::DimInspectState>,
     /// The picked table cells' Cell Borders window.
@@ -964,6 +965,8 @@ pub(super) struct OpenCADStudio {
     hatch_associative: bool,
     /// The Hatch panel's numbers as typed.
     hatch_drafts: crate::ui::window::hatch_panel::Drafts,
+    /// MODEMACRO, the DIESEL string the status bar shows (session only).
+    modemacro: String,
     /// The user's changes to the right-click menu.
     context_menu_custom: crate::ui::popup::context_menu::MenuCustomization,
     /// Customize User Interface while it is open.
@@ -1224,6 +1227,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) selection_undoing: bool,
     /// Group at a Select objects: prompt is waiting for the group's name.
     pub(crate) selection_group_pending: bool,
+    /// Named at a Select objects: prompt is waiting for the selection set's name.
+    pub(crate) selection_named_set_pending: bool,
     /// The selection step being reported came from Group (a named group):
     /// its count carries no group total.
     pub(crate) selection_group_named: bool,
@@ -1498,6 +1503,8 @@ pub(super) struct OpenCADStudio {
     /// The Geometry Cleanup palette (GEOMETRYCLEANUPOPEN).
     pub(crate) geometry_cleanup: crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
     pub(crate) bricscad_visibility: crate::ui::window::bricscad_visibility::VisibilityPanel,
+    /// The Files palette (FILESPALETTE).
+    pub(crate) files_palette: crate::ui::window::files_palette::FilesPalette,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
     /// The Assistant pallet (ASSISTANT): chat with an external AI agent about this drawing.
@@ -1526,6 +1533,12 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
     /// Last pointer position during a dock drag.
     pub(crate) dock_drag_last: Option<iced::Point>,
+    /// When a date field's calendar last closed on its own dismiss (a click
+    /// beside it, or Escape, which the calendar does not keep to itself).
+    pub(crate) calendar_dismissed: Option<iced::time::Instant>,
+    /// The edge a press on the icon of its shown group folds, if the press
+    /// ends as a plain click.
+    pub(crate) dock_fold_on_release: Option<crate::app::config::DockSide>,
     /// The window `dock_drag_last` is in (`None`: the main window).
     pub(crate) dock_drag_window: Option<iced::window::Id>,
     /// Docked panel whose title bar the pointer is over (shows pin / close).
@@ -2261,6 +2274,18 @@ pub(super) struct OpenCADStudio {
     pub(super) opening: Option<OpenProgress>,
     /// Show a lightweight notice until the next layout redraw.
     pub(super) layout_settling: bool,
+    /// A plugin command waiting for the window to draw before it runs.
+    pub(super) plugin_frame: Option<plugin_frame::PluginFrame>,
+    /// The waiting command's frame was drawn: it passes the next check.
+    pub(super) plugin_frame_drawn: bool,
+    /// Commands run to the end where they are (`drive_headless_task`): a
+    /// plugin command among them cannot wait for a frame (#3650).
+    pub(super) plugin_frame_pass: bool,
+    /// A plugin command running beside the window (#3650, step 2).
+    pub(crate) plugin_run: Option<plugin_run::PluginRun>,
+    /// The running plugin command's requests are being served: commands
+    /// they run are not refused.
+    pub(super) plugin_serving: bool,
     open_job_serial: u64,
     /// Last repair or failed-open report shown in the recovery modal.
     recovery_report: Option<crate::io::recovery::RecoveryReport>,
@@ -2602,8 +2627,7 @@ pub enum ColorPickTarget {
     AttrEditor,
 }
 
-mod clipboard;
-pub use self::clipboard::*;
+pub use crate::scene::clipboard::*;
 
 /// The right-click menu editor's actions.
 #[derive(Debug, Clone)]
@@ -2686,6 +2710,8 @@ pub enum ModalKind {
     AutoConstrainSettings,
     LayerStateEditor,
     Plot,
+    /// The Plot dialog's Preview: the sheet as it will plot.
+    PlotPreview,
     PrintAll,
     LayoutManager,
     Plotstyle,
@@ -2871,7 +2897,7 @@ impl OpenCADStudio {
             doc_tab_layouts: None,
             doc_tab_hover_gen: 0,
             tab_counter: 0,
-            ribbon: Ribbon::new(),
+            ribbon: Ribbon::with_modules(crate::plugin::all_ribbon_modules()),
             // Populated from the consolidated config after construction
             // (`apply_config`); default empty here.
             recent_files: Vec::new(),
@@ -2978,6 +3004,7 @@ impl OpenCADStudio {
             image_adjust: None,
             refedit_dialog: None,
             pdf_password: None,
+            plot_preview: None,
             dim_inspect_dialog: None,
             table_cell_borders: None,
             table_cell_contents: None,
@@ -3037,6 +3064,7 @@ impl OpenCADStudio {
             autosnap_magnet: true,
             hatch_associative: true,
             hatch_drafts: Default::default(),
+            modemacro: String::new(),
             context_menu_custom: Default::default(),
             ribbon_customize: None,
             context_menu_editing: None,
@@ -3160,6 +3188,7 @@ impl OpenCADStudio {
             selection_undo: (0, Vec::new()),
             selection_undoing: false,
             selection_group_pending: false,
+            selection_named_set_pending: false,
             selection_group_named: false,
             last_pick_groups: 0,
             last_entered_point: None,
@@ -3259,6 +3288,7 @@ impl OpenCADStudio {
             count_palette: Default::default(),
             geometry_cleanup: Default::default(),
             bricscad_visibility: Default::default(),
+            files_palette: Default::default(),
             quick_calc: Default::default(),
             assistant: Default::default(),
             sheet_set: Default::default(),
@@ -3285,6 +3315,8 @@ impl OpenCADStudio {
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
             dock_drag_last: None,
+            calendar_dismissed: None,
+            dock_fold_on_release: None,
             dock_drag_window: None,
             dock_title_hover: None,
             dock_edge_menu: None,
@@ -3469,6 +3501,11 @@ impl OpenCADStudio {
             print_all_plot_setup_prev: None,
             opening: None,
             layout_settling: false,
+            plugin_frame: None,
+            plugin_frame_drawn: false,
+            plugin_frame_pass: false,
+            plugin_run: None,
+            plugin_serving: false,
             open_job_serial: 0,
             recovery_report: None,
             missing_fonts: None,
@@ -3816,6 +3853,14 @@ impl OpenCADStudio {
         } else {
             false
         }
+    }
+
+    /// Whether an Escape belongs to a date field's calendar that has just
+    /// closed on it: the calendar closes on the key but passes it on.
+    pub(crate) fn escape_closed_a_calendar(&mut self) -> bool {
+        self.calendar_dismissed
+            .take()
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(300))
     }
 
     /// Dispatch a reactive action event from an open plugin modal dialog to the owning command/plugin.

@@ -157,6 +157,7 @@ mod block_ops_tests;
 #[cfg(test)]
 mod block_palette_library_tests;
 pub(super) mod blocks_palette;
+pub(super) mod files_palette;
 pub(in crate::app) mod command;
 pub(crate) mod context_menu;
 mod dialog;
@@ -688,6 +689,7 @@ impl OpenCADStudio {
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 tab.layers.keys_active = false;
             }
+            self.xref_manager.keys_active = false;
         }
         // The attribute editor checks a field as the cursor leaves it.
         if let Some(task) = self.attr_editor_leave_check(&msg) {
@@ -1023,6 +1025,17 @@ impl OpenCADStudio {
                         }
                     }
                 }
+                // Esc closes an open date field's calendar first; the next
+                // Esc closes the dialog (and drops what was typed).
+                if self.active_modal == Some(super::ModalKind::PluginDialog)
+                    && (self
+                        .plugin_dialog_state
+                        .as_mut()
+                        .is_some_and(|state| state.open_calendar.take().is_some())
+                        || self.escape_closed_a_calendar())
+                {
+                    return Task::none();
+                }
                 return self.update(Message::CloseModal);
             }
             if self.active_modal == Some(super::ModalKind::BlockDefinition)
@@ -1227,10 +1240,15 @@ impl OpenCADStudio {
         // its history line stays pinned (non-fading) until the step changes.
         // A pending client pick (`user_select` / `getpoint`) pins its labeled
         // request line the same way while no command owns the prompt.
-        let prompt = self.tabs[self.active_tab]
-            .active_cmd
-            .as_ref()
-            .map(|c| c.prompt())
+        // A plugin command waiting for its frame names itself (#3650).
+        let prompt = self
+            .plugin_frame_prompt()
+            .or_else(|| {
+                self.tabs[self.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.prompt())
+            })
             // A step with nothing to ask yet keeps no line.
             .filter(|prompt| !prompt.is_empty())
             .or_else(|| self.graphic_attributes.fill_close_prompt())
@@ -1378,7 +1396,7 @@ impl OpenCADStudio {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        crate::sys::set_unsaved_changes_warning(
+        crate::io::host_bridge::report_unsaved_changes(
             self.tabs
                 .iter()
                 .any(|tab| tab.dirty && tab.block_test.is_none()),

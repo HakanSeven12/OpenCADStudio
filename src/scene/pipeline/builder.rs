@@ -179,7 +179,7 @@ impl Pipeline {
         // Select the renderer tier from device limits.
         let device_caps = DeviceCapabilities::detect(device);
         #[cfg(not(target_arch = "wasm32"))]
-        let force_compat_renderer = crate::cli::gui_config().compat_renderer;
+        let force_compat_renderer = crate::config::gui_config().compat_renderer;
         #[cfg(target_arch = "wasm32")]
         let force_compat_renderer = false;
         let wire_mode = wire_gpu::WirePipelineMode::select(device_caps, force_compat_renderer);

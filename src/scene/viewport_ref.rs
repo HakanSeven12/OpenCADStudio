@@ -3,7 +3,7 @@
 use document::types::Handle;
 use glam::{DMat3, DVec2, DVec3};
 
-use crate::command::DimensionAssociationSource;
+use crate::snap::DimensionAssociationSource;
 use crate::snap::SnapType;
 
 /// Planar orthographic mapping between a layout viewport's paper rectangle and

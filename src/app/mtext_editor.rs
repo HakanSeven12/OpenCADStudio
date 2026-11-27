@@ -902,6 +902,7 @@ impl super::OpenCADStudio {
             self.tabs[self.active_tab].scene.set_mtext_editor_hidden(Some(h));
         }
         self.mtext_editor = Some(state);
+        self.refresh_selected_grips();
         // Open centred at the editor's natural size: it renders through the
         // shared modal frame, which `modal_offset` positions and `modal_resize`
         // grows (both draggable, so reset on open).
@@ -1309,6 +1310,36 @@ impl super::OpenCADStudio {
         true
     }
 
+    /// Tab and the formatting keys in the editor: Tab types a tab (makes a
+    /// list item, or in a table cell goes to the next cell), Ctrl+B / Ctrl+I / Ctrl+U toggle bold, italic and
+    /// underline. `None` when the editor is closed or the key is another one.
+    pub(in crate::app) fn mtext_editing_key(
+        &mut self,
+        key: &str,
+    ) -> Option<iced::Task<crate::app::Message>> {
+        if !self.mtext_editor.as_ref().is_some_and(|ed| ed.show_preview) {
+            return None;
+        }
+        if key == "TAB" {
+            // In a table cell Tab moves on to the next cell.
+            if self.table_cell_editor.is_some() {
+                return None;
+            }
+            if let Some(task) = self.table_cell_tab(true) {
+                return Some(task);
+            }
+            self.mtext_type("\t");
+            return Some(iced::Task::none());
+        }
+        let fmt = match key.strip_prefix(super::shortcuts::ACCEL)?.strip_prefix('+')? {
+            "B" => MTextFmt::Bold,
+            "I" => MTextFmt::Italic,
+            "U" => MTextFmt::Underline,
+            _ => return None,
+        };
+        Some(self.update(crate::app::Message::MTextFmt(fmt)))
+    }
+
     /// Visible-character count of the current text.
     pub(super) fn mtext_vis_count(&self) -> usize {
         self.mtext_editor
@@ -1441,6 +1472,9 @@ impl super::OpenCADStudio {
         let tab_id = self.mtext_editor.as_mut().and_then(|ed| ed.hidden_source_tab.take());
         if let Some(tab) = tab_id.and_then(|id| self.tabs.iter_mut().find(|tab| tab.id == id)) {
             tab.scene.set_mtext_editor_hidden(None);
+        }
+        if tab_id.is_some() {
+            self.refresh_selected_grips();
         }
     }
 

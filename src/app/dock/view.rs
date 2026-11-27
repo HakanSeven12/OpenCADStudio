@@ -475,8 +475,13 @@ impl OpenCADStudio {
                         background: hovered.then(|| Background::Color(chrome::hover(theme))),
                         ..Default::default()
                     });
+                // The press starts a drag whose capture layer comes with the
+                // next frame; a release arriving with the press (a scripted
+                // click) would miss it and leave the drag behind, so the
+                // icon hears its own release too.
                 let cell = mouse_area(cell)
                     .on_press(Message::Dock(DockMsg::IconPress(id)))
+                    .on_release(Message::Dock(DockMsg::DragRelease))
                     .on_right_press(Message::Dock(DockMsg::EdgeMenuAtPointer(side)))
                     .on_enter(Message::Dock(DockMsg::Hover(id)))
                     .on_exit(Message::Dock(DockMsg::HoverEnd(id)))
@@ -746,6 +751,9 @@ impl OpenCADStudio {
             ),
             crate::ui::dock::PanelId::SheetSetManager => {
                 crate::ui::window::sheet_set::view(&self.sheet_set, width, chrome)
+            }
+            crate::ui::dock::PanelId::Files => {
+                crate::ui::window::files_palette::view(&self.files_palette, width, chrome)
             }
             crate::ui::dock::PanelId::Layers => {
                 let active_vp = tab

@@ -21,10 +21,10 @@ const EDGE_MARGIN: f32 = 8.0;
 /// toolbar is centred in the height below it.
 const TOP_RESERVE: f32 = 200.0;
 
-fn icon_el(icon: IconKind) -> Element<'static, Message> {
+fn icon_el(icon: IconKind, size: f32) -> Element<'static, Message> {
     match icon {
-        IconKind::Glyph(s) => text(s).size(ICON_SIZE * 0.85).into(),
-        IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, ICON_SIZE),
+        IconKind::Glyph(s) => text(s).size(size * 0.85).into(),
+        IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, size),
     }
 }
 
@@ -104,13 +104,28 @@ pub fn refedit_header(name: &str, count: usize) -> Element<'static, Message> {
 
 /// One tool's icon button with its label tip on the left.
 fn tool_button(t: &ToolDef, on: bool) -> Element<'static, Message> {
-    let btn = button(icon_el(t.icon))
+    sized_button(t, on, BTN_SIZE, ICON_SIZE, tooltip::Position::Left)
+}
+
+/// A docked toolbar's smaller button, its tip on the drawing's side.
+pub fn compact_button(t: &ToolDef, tip: tooltip::Position) -> Element<'static, Message> {
+    sized_button(t, false, 28.0, 18.0, tip)
+}
+
+fn sized_button(
+    t: &ToolDef,
+    on: bool,
+    btn_size: f32,
+    icon_size: f32,
+    tip: tooltip::Position,
+) -> Element<'static, Message> {
+    let btn = button(icon_el(t.icon, icon_size))
         .on_press(Message::RibbonToolClick {
             tool_id: t.id.to_string(),
             event: t.event.clone(),
         })
-        .width(Length::Fixed(BTN_SIZE))
-        .height(Length::Fixed(BTN_SIZE))
+        .width(Length::Fixed(btn_size))
+        .height(Length::Fixed(btn_size))
         .style(move |theme: &Theme, status| {
             let palette = theme.palette();
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
@@ -129,10 +144,8 @@ fn tool_button(t: &ToolDef, on: bool) -> Element<'static, Message> {
                 ..Default::default()
             }
         });
-    // Label tooltip on the left so it never runs off the right edge.
-    tooltip(btn, tip_panel(t.label), tooltip::Position::Left)
-        .gap(6)
-        .into()
+    // Label tooltip toward the drawing so it never runs off the window.
+    tooltip(btn, tip_panel(t.label), tip).gap(6).into()
 }
 
 /// The tools in `groups` as a grid `per_row` buttons wide (a rule between

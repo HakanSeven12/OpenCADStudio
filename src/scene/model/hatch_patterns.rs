@@ -6,7 +6,7 @@
 
 use std::sync::OnceLock;
 
-use crate::io::patterns::PatLineDef;
+use crate::catalog::patterns::PatLineDef;
 use crate::scene::model::hatch_model::{HatchPattern, PatFamily};
 use document::entities::{HatchPattern as DxfPattern, HatchPatternLine};
 use document::types::Vector2;
@@ -71,7 +71,7 @@ fn build_catalog() -> Vec<PatternEntry> {
         pat_lines: vec![],
     }];
 
-    for def in crate::io::patterns::catalog() {
+    for def in crate::catalog::patterns::catalog() {
         entries.push(PatternEntry {
             name: def.name.clone(),
             description: def.description.clone(),

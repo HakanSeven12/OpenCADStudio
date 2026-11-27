@@ -149,28 +149,6 @@ pub fn refused_notice(path: &str) -> String {
     crate::tr!("pdf-password", "refused", path = path)
 }
 
-/// A file prompt's answer for `path` (typed as `input`): the password
-/// request, or the notice to print once the file is read. `attach`: document
-/// access is enough and cancelling the window prints that the file is
-/// encrypted; otherwise owner access is needed.
-pub fn prompt_gate(
-    path: &str,
-    input: &str,
-    attach: bool,
-) -> Result<Option<String>, crate::command::CmdResult> {
-    match gate(path, !attach) {
-        Gate::Open => Ok(None),
-        Gate::Remembered => Ok(Some(remembered_notice(path))),
-        Gate::Ask { stage, remembered } => Err(crate::command::CmdResult::PdfPassword {
-            path: path.to_string(),
-            input: input.to_string(),
-            stage,
-            remembered,
-            attach,
-        }),
-    }
-}
-
 /// What attaching (`owner` false) or importing (`owner` true) `path` needs
 /// before its pages are read.
 pub fn gate(path: &str, owner: bool) -> Gate {

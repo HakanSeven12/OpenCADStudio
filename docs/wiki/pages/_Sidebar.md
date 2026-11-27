@@ -43,6 +43,7 @@
 - [Measuring and Inquiry](Measuring-and-Inquiry)
 - [Customization](Customization)
 - [Automation and Plugins](Automation-and-Plugins)
+- [Translating](Translating)
 
 **Reference**
 - [Command Reference](Command-Reference)
@@ -53,3 +54,4 @@
 - [Glossary](Glossary)
 - [What's New](Whats-New)
 - [Troubleshooting](Troubleshooting)
+- [Code Health](Code-Health)

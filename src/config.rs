@@ -1,9 +1,46 @@
 //! Shared per-user config directory used by the small settings stores (recent
 //! files, status-bar layout, ribbon collapse mode, …). Everything lives under
 //! `<platform-config>/OpenCADStudio` so the app keeps a single tidy folder.
+//! Also the GUI startup configuration `main` reads off the command line
+//! ([`GuiConfig`]).
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+
+/// GUI startup configuration, handed from `main` to `app::boot` out-of-band
+/// because the iced daemon's boot closure takes no arguments.
+#[derive(Debug, Default, Clone)]
+pub struct GuiConfig {
+    /// Files to open on launch (empty for a blank session).
+    pub files: Vec<std::path::PathBuf>,
+    /// Open a fresh drawing tab on launch instead of the welcome screen.
+    pub new: bool,
+    /// Saving disabled for this session.
+    pub read_only: bool,
+    pub low_memory: bool,
+    /// Force storage-buffer-free wire and hatch pipelines.
+    pub compat_renderer: bool,
+    /// Command lines to run once the editor is up.
+    pub script_lines: Vec<String>,
+    /// Why this launch switched graphics backend, if it did. Shown once
+    /// as a command-line warning so the switch is never silent.
+    pub gpu_fallback_notice: Option<String>,
+    /// The GPU probe found no shader storage buffers: the packed
+    /// compatibility renderer was enabled automatically for this session.
+    pub gpu_compat_auto: bool,
+}
+
+/// Set once by `main` before the GUI boots; read by `app::boot`.
+pub static GUI_CONFIG: std::sync::OnceLock<GuiConfig> = std::sync::OnceLock::new();
+
+pub(crate) fn low_memory_viewing() -> bool {
+    GUI_CONFIG.get().is_some_and(|cfg| cfg.read_only && cfg.low_memory)
+}
+
+/// The GUI config, or a default empty one if `main` never set it (e.g. tests).
+pub fn gui_config() -> GuiConfig {
+    GUI_CONFIG.get().cloned().unwrap_or_default()
+}
 
 /// The OpenCADStudio config directory (not created). `None` when the platform
 /// config base can't be resolved (e.g. no `HOME`). Callers `join` their own

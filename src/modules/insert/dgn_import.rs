@@ -27,30 +27,7 @@ use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::scene::model::underlay_vector::{
     By, DgnDimLook, DgnDimStyle, DgnElement, DgnGeom, DgnImport, P3,
 };
-
-/// What one import reads and where it goes.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DgnImportRequest {
-    pub path: String,
-    pub model: String,
-    /// Sub units (else master units) become drawing units.
-    pub sub_units: bool,
-    /// Text nodes become one TEXT per line (else one MTEXT).
-    pub explode_text_nodes: bool,
-    /// Into the current drawing (else a new one).
-    pub current_drawing: bool,
-    /// In the current drawing: every imported layer, block and text style
-    /// name gets "<file> - <model>$0$" as prefix (else names the drawing
-    /// already has keep the existing definitions).
-    pub prefix_duplicates: bool,
-    /// What becomes of the model's reference attachments.
-    pub references: ReferenceMode,
-    /// What an earlier translation of a reference already on disk gets.
-    pub existing_reference: ExistingReference,
-    /// The text code page of a V7 file (e.g. 1250 for Czech/Slovak files).
-    /// V7 names no page; `None` keeps the historical 1252 decoding.
-    pub code_page: Option<u16>,
-}
+pub use crate::command::requests::{DgnImportRequest, ExistingReference, ReferenceMode};
 
 /// Named equivalents of the -DGNIMPORT prompt answers. `None` and blank model,
 /// units and mapping answers select the command's defaults. A numeric
@@ -114,26 +91,6 @@ impl std::fmt::Display for DgnImportError {
 }
 
 impl std::error::Error for DgnImportError {}
-
-/// The External DGN references choice: translated into drawings attached
-/// as external references, left out, or attached as DGN underlays.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ReferenceMode {
-    Translate,
-    #[default]
-    Ignore,
-    Underlay,
-}
-
-/// A translated reference drawing that already exists: asked about,
-/// overwritten, or kept.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ExistingReference {
-    #[default]
-    Prompt,
-    Overwrite,
-    Keep,
-}
 
 /// The objects of an import: layers (name, colour), text styles (name, font
 /// file), blocks (name, objects) and the model's objects, in file order.

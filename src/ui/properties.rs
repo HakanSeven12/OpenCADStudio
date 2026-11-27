@@ -29,8 +29,8 @@ const ROW_H: f32 = crate::ui::style::kit_metrics::ROW_H;
 const QUICK_W: f32 = 260.0;
 const PATTERN_CARD_W: f32 = 158.0;
 const PATTERN_PREVIEW_H: f32 = 58.0;
-const PATTERN_PICKER_W: f32 = 348.0;
-const PATTERN_PICKER_H: f32 = 720.0;
+pub(crate) const PATTERN_PICKER_W: f32 = 348.0;
+pub(crate) const PATTERN_PICKER_H: f32 = 720.0;
 const LINETYPE_MENU_W: f32 = 220.0;
 use crate::app::Message;
 use crate::scene::model::object::{PropSection, PropValue};
@@ -371,12 +371,15 @@ pub(crate) fn hatch_pattern_picker_content<'a>(
             .width(Length::Fill)
             .into()
     };
-    container(column![search, results].spacing(7))
-        .style(container::bordered_box)
-        .padding(8)
-        .width(PATTERN_PICKER_W)
-        .height(Length::Fixed(PATTERN_PICKER_H))
-        .into()
+    // Opaque: over the scroll bar and the gaps between cards the picker has
+    // no cursor of its own, and the drawing under it would take the pointer.
+    iced::widget::opaque(
+        container(column![search, results].spacing(7))
+            .style(container::bordered_box)
+            .padding(8)
+            .width(PATTERN_PICKER_W)
+            .height(Length::Fixed(PATTERN_PICKER_H)),
+    )
 }
 
 /// All standard CAD lineweight options for the combobox.
@@ -1093,20 +1096,27 @@ impl PropertiesPanel {
                     open,
                     Message::PropBlockPickerToggle { key, quick },
                 );
-                let rows = options
-                    .iter()
-                    .enumerate()
-                    .map(|(index, option)| {
-                        crate::ui::kit::dropdown_option(
-                            option.as_str(),
-                            option.as_str(),
-                            Message::PropBlockChoice { key, index },
-                            index == *selected,
-                        )
-                    })
-                    .collect();
+                // A drawing can hold thousands of blocks: the rows and their
+                // width are built only while the list is open, not per frame.
+                let (rows, width) = if open {
+                    let rows = options
+                        .iter()
+                        .enumerate()
+                        .map(|(index, option)| {
+                            crate::ui::kit::dropdown_option(
+                                option.as_str(),
+                                option.as_str(),
+                                Message::PropBlockChoice { key, index },
+                                index == *selected,
+                            )
+                        })
+                        .collect();
+                    (rows, self.list_width(options.iter().map(String::as_str)))
+                } else {
+                    (Vec::new(), 0.0)
+                };
                 let list = crate::ui::dropdown_list::DropdownList::new(rows)
-                    .selected((*selected < options.len()).then_some(*selected))
+                    .selected((open && *selected < options.len()).then_some(*selected))
                     .on_escape(Message::PropBlockPickerDismiss { key, quick });
                 // The overlay reports its own Escape before the global shortcut
                 // repeats it; a distinct dismiss message lets the later repeat
@@ -1114,7 +1124,7 @@ impl PropertiesPanel {
                 let value = crate::ui::kit::dropdown(
                     head,
                     list,
-                    self.list_width(options.iter().map(String::as_str)),
+                    width,
                     Message::PropBlockPickerDismiss { key, quick },
                     open,
                 );
@@ -1552,7 +1562,8 @@ impl PropertiesPanel {
         let mut rows = Vec::with_capacity(options.len());
         let mut selected = None;
         let mut labels = Vec::with_capacity(options.len());
-        for (index, option) in options.iter().enumerate() {
+        // Rows are built only while the list is open (see `BlockChoice`).
+        for (index, option) in options.iter().enumerate().filter(|_| open) {
             let is_current = !varies && option.as_str() == current;
             if is_current {
                 selected = Some(index);
@@ -1570,7 +1581,11 @@ impl PropertiesPanel {
             ));
             labels.push(label);
         }
-        let list_w = self.list_width(labels.iter().map(String::as_str));
+        let list_w = if open {
+            self.list_width(labels.iter().map(String::as_str))
+        } else {
+            0.0
+        };
         let list = crate::ui::dropdown_list::DropdownList::new(rows)
             .selected(selected)
             .select_first_by_default(selected.is_some())
@@ -1732,7 +1747,8 @@ impl PropertiesPanel {
             .map(|s| s.to_lowercase());
         let mut rows = Vec::new();
         let mut initial_selected: Option<usize> = None;
-        for opt in options {
+        // Rows are built only while the list is open (see `BlockChoice`).
+        for opt in options.iter().filter(|_| open) {
             if let Some(f) = &filter {
                 if !opt.to_lowercase().contains(f.as_str()) {
                     continue;
@@ -1764,7 +1780,11 @@ impl PropertiesPanel {
             crate::ui::kit::dropdown(
                 head.into(),
                 list,
-                self.list_width(options.iter().map(|o| o.as_str())),
+                if open {
+                    self.list_width(options.iter().map(|o| o.as_str()))
+                } else {
+                    0.0
+                },
                 Message::PropEditChoiceToggle(field),
                 open,
             ),
@@ -2692,6 +2712,61 @@ mod tests {
             &mut messages,
         );
         messages
+    }
+
+    /// The hatch pattern picker keeps the pointer where it has no cursor of
+    /// its own (its frame, the scroll bar, the gaps between cards): the
+    /// drawing under the popup must not take it.
+    #[test]
+    fn the_hatch_pattern_picker_keeps_the_pointer_off_the_drawing() {
+        use iced::futures::executor::block_on;
+        use iced_test::core::{renderer::Headless, shell, window};
+        use iced_test::runtime::user_interface::{Cache, State, UserInterface};
+
+        let _guard = crate::headless_ui_lock();
+        let mut renderer = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .expect("headless renderer");
+        let picker = super::hatch_pattern_picker_content(
+            "",
+            0,
+            "ANSI31",
+            super::PatternPickerMessages {
+                search_id: "test-hatch-pattern-search",
+                on_search: crate::app::Message::PropHatchPatternSearchChanged,
+                on_confirm: crate::app::Message::PropHatchPatternConfirm,
+                on_focus: crate::app::Message::PropHatchPatternFocus,
+                on_changed: crate::app::Message::PropHatchPatternChanged,
+            },
+        );
+        let mut ui = UserInterface::build(
+            picker,
+            iced::Size::new(super::PATTERN_PICKER_W, super::PATTERN_PICKER_H),
+            Cache::default(),
+            &mut renderer,
+        );
+        // On the frame's padding, beside the cards.
+        let at = iced::Point::new(2.0, super::PATTERN_PICKER_H / 2.0);
+        let mut messages = Vec::new();
+        let (state, _) = ui.update(
+            &window::Headless,
+            &shell::Waker::noop(),
+            &[iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: at,
+            })],
+            iced::mouse::Cursor::Available(at),
+            &mut renderer,
+            &mut messages,
+        );
+        let State::Updated {
+            mouse_interaction, ..
+        } = state
+        else {
+            panic!("the picker should update in place");
+        };
+        assert_ne!(mouse_interaction, iced::mouse::Interaction::None);
     }
 
     fn commits(messages: &[crate::app::Message]) -> Vec<(&'static str, &str)> {

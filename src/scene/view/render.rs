@@ -1,7 +1,7 @@
 // GPU rendering primitives, shader::Program / shader::Primitive impls,
 // and entity render-style helpers for the Scene.
 
-use crate::io::plot_style::PlotStyleTableExt as _;
+use crate::catalog::plot_style::PlotStyleTableExt as _;
 use document::tables::LineType;
 use document::types::{Color as AcadColor, LineWeight};
 use document::{Document, EntityType, Handle};
@@ -3926,7 +3926,7 @@ impl Scene {
         DISPLAY_STYLE_CACHE_LIMIT.max(self.frame_wire_set_count() + 1)
     }
 
-    fn display_plot_style(&self) -> Option<Arc<crate::io::plot_style::PlotStyleTable>> {
+    fn display_plot_style(&self) -> Option<Arc<crate::catalog::plot_style::PlotStyleTable>> {
         if self.current_layout == "Model" {
             return None;
         }
@@ -3941,8 +3941,8 @@ impl Scene {
         if let Some(style) = self.display_plot_style_cache.borrow().get(&key) {
             return style.clone();
         }
-        let base = crate::io::drawing_dir(&self.document);
-        let style = crate::io::plot_style::PlotStyleTable::load_named_at(
+        let base = crate::entities::common::drawing_dir(&self.document);
+        let style = crate::catalog::plot_style::PlotStyleTable::load_named_at(
             &settings.current_style_sheet,
             base,
         )
@@ -3958,7 +3958,7 @@ impl Scene {
         &self,
         color: &mut [f32; 4],
         aci: u8,
-        style: &crate::io::plot_style::PlotStyleTable,
+        style: &crate::catalog::plot_style::PlotStyleTable,
     ) {
         if aci == 0 {
             return;
@@ -6602,7 +6602,7 @@ mod layer0_inherit_tests {
         let mut scene = Scene::new();
         scene.set_current_layout("Layout1".into());
         let mut settings = scene.effective_plot_settings().expect("layout settings");
-        settings.current_style_sheet = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        settings.current_style_sheet = crate::catalog::plot_style::MONOCHROME_PLOT_STYLE.into();
         settings.flags.show_plot_styles = true;
         settings.flags.print_lineweights = true;
         assert!(scene.set_layout_plot_settings("Layout1", &settings));
@@ -6621,7 +6621,7 @@ mod layer0_inherit_tests {
         let mut scene = Scene::new();
         scene.set_current_layout("Layout1".into());
         let mut settings = scene.effective_plot_settings().expect("layout settings");
-        settings.current_style_sheet = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        settings.current_style_sheet = crate::catalog::plot_style::MONOCHROME_PLOT_STYLE.into();
         settings.flags.show_plot_styles = true;
         assert!(scene.set_layout_plot_settings("Layout1", &settings));
         let magenta = [1.0, 0.0, 1.0, 1.0];
@@ -6650,7 +6650,7 @@ mod layer0_inherit_tests {
     /// not leave here as wide as 0.25 mm. (#3470)
     #[test]
     fn display_plot_style_keeps_lineweights_under_a_pixel() {
-        use crate::io::plot_style::{register_session_table, PlotStyleTable, LW_TABLE};
+        use crate::catalog::plot_style::{register_session_table, PlotStyleTable, LW_TABLE};
         let index = |mm: f32| {
             LW_TABLE
                 .iter()
@@ -6658,7 +6658,7 @@ mod layer0_inherit_tests {
                 .expect("standard lineweight") as u8
                 + 1 // the style number of entry N is N + 1
         };
-        let mut table = PlotStyleTable::builtin(crate::io::plot_style::MONOCHROME_PLOT_STYLE)
+        let mut table = PlotStyleTable::builtin(crate::catalog::plot_style::MONOCHROME_PLOT_STYLE)
             .expect("built-in table");
         table.name = "issue-3470-lineweights.ctb".into();
         table.lineweights = LW_TABLE.to_vec();

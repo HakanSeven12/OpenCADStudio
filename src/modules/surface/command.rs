@@ -9,6 +9,8 @@ use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, SelectionEntity};
+pub use crate::command::requests::SurfaceRequest;
+pub(crate) use crate::entities::civil::civil_class;
 
 /// What a gathering step keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,17 +48,6 @@ pub enum Filter {
     MeshSources,
     /// What converts to a surface: meshes, solids and regions.
     SurfaceSources,
-}
-
-/// The Civil 3D class of `entity`, if it is one.
-pub fn civil_class(entity: &EntityType) -> Option<&str> {
-    match entity {
-        EntityType::Extended(x) => match &x.data {
-            document::entities::ExtendedEntityData::Arch(a) => Some(a.dxf_name.as_str()),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 impl Filter {
@@ -142,17 +133,6 @@ pub enum Step {
     Value { prompt: &'static str, key: &'static str, default: f64 },
     /// The closing prompt: Enter carries the command out; an option sets its value first.
     Accept { prompt: &'static str, options: &'static [Opt] },
-}
-
-/// Everything a surface command gathered.
-#[derive(Clone, Debug, Default)]
-pub struct SurfaceRequest {
-    pub command: &'static str,
-    pub objects: [Vec<Handle>; 3],
-    pub picks: [Vec<(Handle, DVec3)>; 3],
-    pub points: Vec<DVec3>,
-    pub values: HashMap<&'static str, f64>,
-    pub texts: HashMap<&'static str, String>,
 }
 
 impl SurfaceRequest {

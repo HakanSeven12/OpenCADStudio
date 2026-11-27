@@ -643,6 +643,7 @@ const CODES: &[(&str, &str, &str)] = &[
     ("view", "TOOLPALETTES", "TP"),
     ("view", "PROPERTIES", "PR"),
     ("view", "COUNTLIST", "CT"),
+    ("view", "FILESPALETTE", "FI"),
     ("view", "SHEETSET", "SS"),
     ("view", "FILETAB", "FT"),
     ("view", "LAYOUTTAB", "LT"),

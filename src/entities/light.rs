@@ -18,9 +18,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 
 /// On-screen glyph radius in pixels for the screen-relative path.
 const GLYPH_PX: f64 = 16.0;
@@ -507,17 +507,17 @@ impl PropertyEditable for Light {
 
 impl Transformable for Light {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut entity.position.x,
                     &mut entity.position.y,
                     p1,
                     p2,
                 );
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut entity.target.x,
                     &mut entity.target.y,
                     p1,

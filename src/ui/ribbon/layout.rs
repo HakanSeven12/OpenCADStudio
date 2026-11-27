@@ -191,6 +191,24 @@ impl FloatingPanel {
     }
 }
 
+/// The window edge a docked toolbar runs down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ToolbarEdge {
+    Left,
+    Right,
+}
+
+/// A ribbon panel docked as a one-column toolbar at a window edge, beside
+/// the drawing. Like a floating panel it leaves its ribbon row.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct DockedToolbar {
+    /// Its panel key (`extras::panel_key`).
+    pub key: String,
+    /// The module id of the tab it belongs to.
+    pub module_id: String,
+    pub edge: ToolbarEdge,
+}
+
 /// The ribbon's persisted layout. Panels are named by their panel key
 /// (`extras::panel_key`), tabs by their module id.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -234,6 +252,11 @@ pub struct RibbonLayout {
     /// The Toolbar layout was shown once and got its default toolbars, so
     /// closing all of them does not bring them back.
     pub toolbar_layout_seeded: bool,
+    /// The panels docked as toolbars at the window's edges, top to bottom.
+    pub docked: Vec<DockedToolbar>,
+    /// The docked toolbars of the other layout, swapped with `docked` as
+    /// `floating_other_layout` is with `floating`.
+    pub docked_other_layout: Vec<DockedToolbar>,
     /// The user's own panels, shown on the My Tools tab.
     pub custom_panels: Vec<CustomPanel>,
     /// The tabs and the panels sit in the middle of the ribbon instead of
@@ -270,6 +293,8 @@ impl Default for RibbonLayout {
             floating: Vec::new(),
             floating_other_layout: Vec::new(),
             toolbar_layout_seeded: false,
+            docked: Vec::new(),
+            docked_other_layout: Vec::new(),
             custom_panels: Vec::new(),
             centered: false,
             wheel_switches_tabs: true,
@@ -400,6 +425,13 @@ impl RibbonLayout {
         self.floating
             .iter()
             .find(|panel| is_key(&panel.key, module_id, title))
+    }
+
+    /// The panel `title` of module `module_id`, if it is docked.
+    pub(super) fn docked_toolbar(&self, module_id: &str, title: &str) -> Option<&DockedToolbar> {
+        self.docked
+            .iter()
+            .find(|toolbar| is_key(&toolbar.key, module_id, title))
     }
 
     /// Keep each floating panel's title strip inside a window `win` big;

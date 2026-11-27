@@ -28,6 +28,9 @@ use crate::scene::model::pdf_vector::{
     bezier, circle_of as as_circle, PageVectors, PdfPath, Segment, SubClose, SubPath,
 };
 use crate::scene::model::wire_model::WireModel;
+pub use crate::command::requests::{
+    ImportArea, PdfFileImport, PdfImportRequest, PdfPromptRead, UnderlayMode,
+};
 
 /// Which layers imported objects go to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,37 +170,6 @@ pub fn image_dir(pdf: &str) -> Option<std::path::PathBuf> {
     })
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ImportArea {
-    All,
-    Polygon(Vec<DVec3>),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnderlayMode {
-    Keep,
-    Detach,
-    Unload,
-}
-
-#[derive(Clone, Debug)]
-pub struct PdfImportRequest {
-    pub underlay: Handle,
-    pub area: ImportArea,
-    pub mode: UnderlayMode,
-}
-
-/// A page of a file imported without an underlay (the File option): placed
-/// at `insertion` with a scale and rotation.
-#[derive(Clone, Debug)]
-pub struct PdfFileImport {
-    pub path: String,
-    pub page: String,
-    pub scale: f64,
-    pub rotation: f64,
-    pub insertion: DVec3,
-}
-
 impl PdfFileImport {
     /// Where the page's content goes: one drawing unit per page inch times
     /// the scale, or, on a page with a viewport measure (a plot), its
@@ -267,24 +239,6 @@ fn prompt_file_path(typed: &str) -> String {
     } else {
         typed.to_string()
     }
-}
-
-/// What the read of a file named at the -PDFIMPORT file name prompt found.
-#[derive(Debug, Clone)]
-pub enum PdfPromptRead {
-    /// The file cannot be read: the error to report.
-    Error(String),
-    /// The file needs a password first.
-    Password {
-        stage: crate::scene::model::pdf_password::Stage,
-        remembered: bool,
-    },
-    /// The number of pages, and the notice when a password supplied
-    /// earlier opened the file.
-    Pages {
-        pages: usize,
-        notice: Option<String>,
-    },
 }
 
 /// The read of a file named at the -PDFIMPORT prompt: the file, the check

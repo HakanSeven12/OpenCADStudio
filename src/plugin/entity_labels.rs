@@ -18,38 +18,13 @@ use document::xdata::{ExtendedDataRecord, XDataValue};
 use document::EntityType;
 use rustc_hash::FxHashSet;
 
-const OWNER_STAMP_FLAGS_INDEX: usize = 2;
-const SELECTABLE_CUSTOM_FLAG: i32 = 1;
+use crate::entities::owner_stamp::selectable_custom_record;
 
 /// A resolved custom type label and the façade requested by its owner stamp.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CustomEntityClassLabel {
     pub label: String,
     pub class_only: bool,
-}
-
-fn selectable_custom_record(record: &ExtendedDataRecord) -> bool {
-    matches!(
-        record.values.get(OWNER_STAMP_FLAGS_INDEX),
-        Some(XDataValue::Integer32(flags)) if flags & SELECTABLE_CUSTOM_FLAG != 0
-    )
-}
-
-/// Native geometry editing is disabled by the persisted owner-stamp flag,
-/// independently of plugin liveness and the legacy reference-only set.
-pub(crate) fn native_edit_disabled(entity: &EntityType) -> bool {
-    entity
-        .common()
-        .extended_data
-        .records()
-        .iter()
-        .any(|record| {
-            let owner_stamp_shape = matches!(record.values.first(), Some(XDataValue::Integer32(_)))
-                || record.values.iter().any(
-                    |value| matches!(value, XDataValue::String(text) if text.contains("-CLASS:")),
-                );
-            owner_stamp_shape && selectable_custom_record(record)
-        })
 }
 
 // The wire declaration type and the resolution core exist only where the
@@ -198,6 +173,7 @@ mod tests {
     use document::xdata::{ExtendedDataRecord, XDataValue};
 
     use super::*;
+    use crate::entities::owner_stamp::native_edit_disabled;
 
     fn declaration(plugin_id: &str, app_id: &str) -> (String, OwnedEntityClasses) {
         (

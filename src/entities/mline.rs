@@ -1,4 +1,4 @@
-use document::entities::{MLine, MLineFlags, MLineSegment, MLineVertex};
+use document::entities::{MLine, MLineFlags, MLineJustification, MLineSegment, MLineVertex};
 use document::types::Vector3;
 use ocs_geom::geom2d::{intersect::line_line, Vec2};
 use ocs_geom::space::Plane;
@@ -6,9 +6,9 @@ use ocs_geom::space::Plane;
 use crate::entities::common::{edit_prop as edit, ro_prop, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 use crate::t;
 
 /// One styled line or cap of a multiline.
@@ -474,7 +474,7 @@ pub(crate) fn normalize_scripted_mline(
     if !rebuild_mline_geometry(new) {
         return Err("MLine vertices are degenerate".into());
     }
-    crate::modules::draw::draw::mline::sync_mline_element_parameters(new, style);
+    sync_mline_element_parameters(new, style);
     Ok(())
 }
 
@@ -543,27 +543,6 @@ pub(crate) fn element_common(
         .find(|line_type| line_type.name.eq_ignore_ascii_case(&common.linetype))
         .map(|line_type| line_type.handle);
     common
-}
-
-/// How an element draws in `viewport`: its [`element_common`] line styled like
-/// any other entity, as `(colour, pattern length, pattern, ACI)`. A complex
-/// linetype is walked along the element rather than dashed, so it has no pattern.
-pub(crate) fn element_style(
-    document: &document::Document,
-    m: &MLine,
-    color: document::types::Color,
-    linetype: &str,
-    viewport: Option<document::Handle>,
-) -> ([f32; 4], f32, [f32; 8], u8) {
-    let common = element_common(m, color, linetype, document);
-    let (color, pattern_length, pattern, _, aci) =
-        crate::scene::view::render::render_style_for_common_viewport(document, &common, viewport);
-    let drawn = element_linetype_name(document, &m.common.layer, linetype, viewport);
-    if crate::io::linetypes::resolve_complex_lt(document, drawn).is_some() {
-        (color, 0.0, [0.0; 8], aci)
-    } else {
-        (color, pattern_length, pattern, aci)
-    }
 }
 
 pub fn mline_lines(m: &MLine, document: &document::Document) -> Vec<MLineLine> {
@@ -1066,8 +1045,8 @@ impl Grippable for MLine {
         }
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -1087,9 +1066,9 @@ impl Grippable for MLine {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::AddVertex if grip_id < n => {
@@ -1430,7 +1409,7 @@ impl Transformable for MLine {
                 working_normal,
             } => document::Entity::apply_mirror(
                 self,
-                &crate::scene::view::transform::reflection_about_working_line(
+                &crate::entities::transform::reflection_about_working_line(
                     *p1,
                     *p2,
                     *working_normal,
@@ -1441,13 +1420,52 @@ impl Transformable for MLine {
             {
                 document::Entity::apply_mirror(self, transform)
             }
-            _ => crate::scene::view::transform::apply_standard_entity_transform(
+            _ => crate::entities::transform::apply_standard_entity_transform(
                 self,
                 t,
                 |_, _, _| {},
             ),
         }
     }
+}
+
+pub(crate) fn sync_mline_element_parameters(
+    mline: &mut MLine,
+    style: &document::objects::MLineStyle,
+) {
+    let offsets: Vec<f64> = if style.elements.is_empty() {
+        vec![0.5, -0.5]
+    } else {
+        style
+            .elements
+            .iter()
+            .map(|element| element.offset)
+            .collect()
+    };
+    let minimum = offsets.iter().copied().fold(f64::INFINITY, f64::min);
+    let maximum = offsets.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let shift = match mline.justification {
+        MLineJustification::Top => -maximum,
+        MLineJustification::Zero => 0.0,
+        MLineJustification::Bottom => -minimum,
+    };
+    let normal = mline.normal;
+    for vertex in &mut mline.vertices {
+        let factor = crate::entities::mline::mline_miter_factor(vertex, normal);
+        vertex
+            .segments
+            .resize_with(offsets.len(), MLineSegment::new);
+        vertex.segments.truncate(offsets.len());
+        for (segment, offset) in vertex.segments.iter_mut().zip(&offsets) {
+            let value = (offset + shift) * mline.scale_factor / factor;
+            if let Some(first) = segment.parameters.first_mut() {
+                *first = value;
+            } else {
+                segment.parameters.extend([value, 0.0]);
+            }
+        }
+    }
+    mline.style_element_count = offsets.len();
 }
 
 #[cfg(test)]
@@ -1602,7 +1620,7 @@ mod tests {
                         bare.flags.set(MLineFlags::CLOSED, closed);
                         assert!(rebuild_mline_geometry(&mut bare), "{shape}: degenerate");
                         let mut stored = bare.clone();
-                        crate::modules::draw::draw::mline::sync_mline_element_parameters(
+                        sync_mline_element_parameters(
                             &mut stored,
                             style.as_ref().unwrap_or(&MLineStyle::new("NONE")),
                         );

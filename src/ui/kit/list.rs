@@ -160,6 +160,7 @@ pub struct ListRow<'a> {
     cells: Vec<(Element<'a, Message>, Length)>,
     selected: bool,
     on_press: Option<Message>,
+    on_release: Option<Message>,
     on_double_click: Option<Message>,
     on_right_press: Option<Message>,
 }
@@ -170,6 +171,7 @@ pub fn list_row<'a>(cells: Vec<(Element<'a, Message>, Length)>) -> ListRow<'a> {
         cells,
         selected: false,
         on_press: None,
+        on_release: None,
         on_double_click: None,
         on_right_press: None,
     }
@@ -185,6 +187,13 @@ impl<'a> ListRow<'a> {
     /// Send `message` when the row is pressed.
     pub fn on_press(mut self, message: Message) -> Self {
         self.on_press = Some(message);
+        self
+    }
+
+    /// Send `message` when the button comes up over the row (a press that
+    /// ends elsewhere is a drag).
+    pub fn on_release(mut self, message: Message) -> Self {
+        self.on_release = Some(message);
         self
     }
 
@@ -227,6 +236,9 @@ impl<'a> ListRow<'a> {
             area = area
                 .on_press(m)
                 .interaction(iced::mouse::Interaction::Pointer);
+        }
+        if let Some(m) = self.on_release {
+            area = area.on_release(m);
         }
         if let Some(m) = self.on_double_click {
             area = area.on_double_click(m);

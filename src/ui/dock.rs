@@ -142,6 +142,8 @@ pub enum PanelId {
     BricscadVisibility,
     /// The open sheet sets: subsets and sheets.
     SheetSetManager,
+    /// A folder's drawings, to open or insert (FILESPALETTE).
+    Files,
     /// The Layer Manager (LAYERS).
     Layers,
     /// The LAYWALK pallet.
@@ -158,7 +160,7 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 19] = [
+    pub const ALL: [PanelId; 20] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
@@ -173,6 +175,7 @@ impl PanelId {
         PanelId::GeometryCleanup,
         PanelId::BricscadVisibility,
         PanelId::SheetSetManager,
+        PanelId::Files,
         PanelId::Layers,
         PanelId::Laywalk,
         PanelId::QuickCalc,
@@ -197,6 +200,7 @@ impl PanelId {
             PanelId::GeometryCleanup => "Geometry Cleanup",
             PanelId::BricscadVisibility => "Visibility States",
             PanelId::SheetSetManager => "Sheet Set Manager",
+            PanelId::Files => "Files",
             PanelId::Layers => "Layer Manager",
             PanelId::Laywalk => "Layer Walk",
             PanelId::QuickCalc => "QuickCalc",
@@ -225,6 +229,7 @@ impl PanelId {
             PanelId::GeometryCleanup => crate::ui::window::geometry_cleanup::ICON,
             PanelId::BricscadVisibility => include_bytes!("../../assets/icons/ui/eye.svg"),
             PanelId::SheetSetManager => include_bytes!("../../assets/icons/sheetset.svg"),
+            PanelId::Files => crate::ui::icons::FOLDER_TREE,
             PanelId::Layers => include_bytes!("../../assets/icons/layers/panel.svg"),
             PanelId::Laywalk => include_bytes!("../../assets/icons/layers/laywalk.svg"),
             PanelId::QuickCalc => crate::ui::window::quick_calc::ICON,
@@ -251,6 +256,7 @@ impl PanelId {
             PanelId::GeometryCleanup => 280.0,
             PanelId::BricscadVisibility => 280.0,
             PanelId::SheetSetManager => 280.0,
+            PanelId::Files => 260.0,
             PanelId::Layers => 560.0,
             PanelId::Laywalk => 420.0,
             PanelId::QuickCalc => 320.0,
@@ -555,6 +561,11 @@ pub struct DockState {
     /// Auto-hide per edge (left, right): the edge shows only its icon strip
     /// until an icon is hovered.
     pub auto_hide: (bool, bool),
+    /// Folded per edge (left, right): a click on the icon of the group an
+    /// edge shows puts its pallets away to the icon strip, and a click on
+    /// any of its icons brings them back. An edge that auto-hides ignores
+    /// it.
+    pub folded: (bool, bool),
     /// Floating panels, back → front.
     pub floating: Vec<FloatPanel>,
     /// Per-panel settings, keyed by `PanelId`: the width a pallet floats at
@@ -623,6 +634,7 @@ impl Default for DockState {
             right: vec![DockGroup::single(PanelId::BlockPalette)],
             shown: (0, 0),
             auto_hide: (false, false),
+            folded: (false, false),
             floating: Vec::new(),
             panels: BTreeMap::new(),
             detached: BTreeMap::new(),
@@ -776,6 +788,26 @@ impl DockState {
         }
     }
 
+    /// Whether `side` is folded to its icon strip.
+    pub fn folded(&self, side: DockSide) -> bool {
+        match side {
+            DockSide::Left => self.folded.0,
+            DockSide::Right => self.folded.1,
+        }
+    }
+
+    /// Fold `side` to its icon strip, or unfold it. Returns whether it
+    /// changed.
+    pub fn set_folded(&mut self, side: DockSide, on: bool) -> bool {
+        let slot = match side {
+            DockSide::Left => &mut self.folded.0,
+            DockSide::Right => &mut self.folded.1,
+        };
+        let changed = *slot != on;
+        *slot = on;
+        changed
+    }
+
     /// Whether `id` auto-hides where it is: by its edge's setting when
     /// docked, by its own when floating.
     pub fn auto_hides(&self, id: PanelId) -> bool {
@@ -793,6 +825,10 @@ impl DockState {
             Some((DockSide::Left, _)) => self.auto_hide.0 = on,
             Some((DockSide::Right, _)) => self.auto_hide.1 = on,
             None => self.set_auto_collapse(id, on),
+        }
+        // Either way the edge is no longer folded.
+        if let Some((side, _)) = self.location(id) {
+            self.set_folded(side, false);
         }
         on
     }
@@ -915,6 +951,7 @@ impl DockState {
         let index = index.min(groups.len());
         groups.insert(index, DockGroup::single(id));
         self.show_group(side, index);
+        self.set_folded(side, false);
         *self != before
     }
 
@@ -929,7 +966,7 @@ impl DockState {
         // A pallet alone in its group has nowhere to move within it (and
         // detaching it would remove the group being joined).
         if self.groups(side)[group].panels == [id] {
-            return self.show_group(side, group);
+            return self.show_group(side, group) | self.set_folded(side, false);
         }
         let before = self.clone();
         let mut group = group;
@@ -948,6 +985,7 @@ impl DockState {
         }
         self.groups_mut(side)[group].insert(index, id, weight);
         self.show_group(side, group);
+        self.set_folded(side, false);
         *self != before
     }
 
@@ -975,6 +1013,7 @@ impl DockState {
         let index = index.min(dest.len());
         dest.insert(index, g);
         self.show_group(to, index);
+        self.set_folded(to, false);
         true
     }
 

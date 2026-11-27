@@ -1,0 +1,1940 @@
+use super::point_residuals::PointResiduals;
+/// Tag for pre-baked snap candidates stored inside a WireModel.
+/// Kept separate from `snap::SnapType` to avoid circular module dependencies.
+#[derive(Clone, Copy, Debug)]
+pub enum SnapHint {
+    /// Geometric center of a circle, arc, or ellipse.
+    Center,
+    /// Centre of one arc segment of a chain (a polyline). Snaps like
+    /// `Center`, but does not make the wire count as round.
+    ArcCenter,
+    /// Area centroid of a closed polyline.
+    GeometricCenter,
+    /// Point entity location.
+    Node,
+    /// 0 / 90 / 180 / 270 ° point on a circle/arc (within arc span).
+    Quadrant,
+    /// Insertion point of text or block.
+    Insertion,
+    /// Midpoint of a curve that has one well-defined midpoint (an arc's
+    /// arc-length centre, a spline's `t = 0.5`). Lines / polylines do
+    /// not use this — their midpoints are derived from `key_vertices`.
+    Midpoint,
+    /// An end of a curve that is not a chain of straight segments — an arc,
+    /// an elliptical arc, a spline.
+    ///
+    /// Such a curve cannot put its ends in `key_vertices`: consecutive
+    /// entries there are taken to be joined by a straight segment, so an
+    /// arc's two ends would also produce a midpoint snap out on the chord,
+    /// which is not on the geometry.
+    Endpoint,
+    /// B-rep corner of a 3D solid. Maps to the separate 3D snap system
+    /// (`SnapType::Vertex`), never to the 2D modes.
+    Vertex,
+    /// Centre of a 3D solid B-rep edge. Maps to the separate 3D snap system
+    /// (`SnapType::EdgeMidpoint`), never to the 2D modes.
+    EdgeMidpoint,
+    /// Centre of a 3D solid B-rep face. Maps to the separate 3D snap system
+    /// (`SnapType::FaceCenter`), never to the 2D modes.
+    FaceCenter,
+    /// NURBS knot location on a spline entity. Maps to the separate 3D snap
+    /// system (`SnapType::Knot`), never to the 2D modes.
+    Knot,
+}
+
+/// Geometric primitive used by the tangent-snap engine.
+#[derive(Clone, Debug)]
+pub enum TangentGeom {
+    /// Infinite line through these two world-space points.
+    Line { p1: [f32; 3], p2: [f32; 3] },
+    /// Complete circle.
+    Circle { center: [f32; 3], radius: f32 },
+    /// Complete circle in an arbitrary world-space plane.
+    PlanarCircle {
+        center: [f64; 3],
+        axis_x: [f64; 3],
+        axis_y: [f64; 3],
+        radius: f64,
+    },
+    /// Bounded circular arc in its world-space plane.
+    Arc {
+        center: [f64; 3],
+        axis_x: [f64; 3],
+        axis_y: [f64; 3],
+        radius: f64,
+        start_angle: f64,
+        end_angle: f64,
+    },
+    /// Ellipse or elliptical arc in an arbitrary world-space plane.
+    PlanarEllipse {
+        center: [f64; 3],
+        major_axis: [f64; 3],
+        normal: [f64; 3],
+        minor_axis_ratio: f64,
+        start_param: f64,
+        end_param: f64,
+    },
+}
+
+impl TangentGeom {
+    pub fn translated(&self, delta: glam::DVec3) -> Self {
+        match self {
+            Self::Line { p1, p2 } => Self::Line {
+                p1: [
+                    p1[0] + delta.x as f32,
+                    p1[1] + delta.y as f32,
+                    p1[2] + delta.z as f32,
+                ],
+                p2: [
+                    p2[0] + delta.x as f32,
+                    p2[1] + delta.y as f32,
+                    p2[2] + delta.z as f32,
+                ],
+            },
+            Self::Circle { center, radius } => Self::Circle {
+                center: [
+                    center[0] + delta.x as f32,
+                    center[1] + delta.y as f32,
+                    center[2] + delta.z as f32,
+                ],
+                radius: *radius,
+            },
+            Self::PlanarCircle {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+            } => Self::PlanarCircle {
+                center: [
+                    center[0] + delta.x,
+                    center[1] + delta.y,
+                    center[2] + delta.z,
+                ],
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius,
+            },
+            Self::Arc {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => Self::Arc {
+                center: [
+                    center[0] + delta.x,
+                    center[1] + delta.y,
+                    center[2] + delta.z,
+                ],
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius,
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+            },
+            Self::PlanarEllipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => Self::PlanarEllipse {
+                center: [
+                    center[0] + delta.x,
+                    center[1] + delta.y,
+                    center[2] + delta.z,
+                ],
+                major_axis: *major_axis,
+                normal: *normal,
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
+            },
+        }
+    }
+
+    pub fn rotated(&self, center: glam::DVec3, axis: glam::DVec3, angle_rad: f64) -> Self {
+        let quat = glam::DQuat::from_axis_angle(axis.normalize_or(glam::DVec3::Z), angle_rad);
+        let rot_pt =
+            |p: [f64; 3]| (center + quat * (glam::DVec3::from_array(p) - center)).to_array();
+        let rot_vec = |v: [f64; 3]| (quat * glam::DVec3::from_array(v)).to_array();
+        match self {
+            Self::Line { p1, p2 } => {
+                let p1_d = [p1[0] as f64, p1[1] as f64, p1[2] as f64];
+                let p2_d = [p2[0] as f64, p2[1] as f64, p2[2] as f64];
+                let r1 = rot_pt(p1_d);
+                let r2 = rot_pt(p2_d);
+                Self::Line {
+                    p1: [r1[0] as f32, r1[1] as f32, r1[2] as f32],
+                    p2: [r2[0] as f32, r2[1] as f32, r2[2] as f32],
+                }
+            }
+            Self::Circle { center: c, radius } => {
+                let c_d = [c[0] as f64, c[1] as f64, c[2] as f64];
+                let rc = rot_pt(c_d);
+                Self::Circle {
+                    center: [rc[0] as f32, rc[1] as f32, rc[2] as f32],
+                    radius: *radius,
+                }
+            }
+            Self::PlanarCircle {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+            } => Self::PlanarCircle {
+                center: rot_pt(*c),
+                axis_x: rot_vec(*axis_x),
+                axis_y: rot_vec(*axis_y),
+                radius: *radius,
+            },
+            Self::Arc {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => Self::Arc {
+                center: rot_pt(*c),
+                axis_x: rot_vec(*axis_x),
+                axis_y: rot_vec(*axis_y),
+                radius: *radius,
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+            },
+            Self::PlanarEllipse {
+                center: c,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => Self::PlanarEllipse {
+                center: rot_pt(*c),
+                major_axis: rot_vec(*major_axis),
+                normal: rot_vec(*normal),
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
+            },
+        }
+    }
+
+    pub fn scaled(&self, center: glam::DVec3, factor: f64) -> Self {
+        let scale_pt =
+            |p: [f64; 3]| (center + (glam::DVec3::from_array(p) - center) * factor).to_array();
+        match self {
+            Self::Line { p1, p2 } => {
+                let p1_d = [p1[0] as f64, p1[1] as f64, p1[2] as f64];
+                let p2_d = [p2[0] as f64, p2[1] as f64, p2[2] as f64];
+                let s1 = scale_pt(p1_d);
+                let s2 = scale_pt(p2_d);
+                Self::Line {
+                    p1: [s1[0] as f32, s1[1] as f32, s1[2] as f32],
+                    p2: [s2[0] as f32, s2[1] as f32, s2[2] as f32],
+                }
+            }
+            Self::Circle { center: c, radius } => {
+                let c_d = [c[0] as f64, c[1] as f64, c[2] as f64];
+                let sc = scale_pt(c_d);
+                Self::Circle {
+                    center: [sc[0] as f32, sc[1] as f32, sc[2] as f32],
+                    radius: *radius * factor.abs() as f32,
+                }
+            }
+            Self::PlanarCircle {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+            } => Self::PlanarCircle {
+                center: scale_pt(*c),
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius * factor.abs(),
+            },
+            Self::Arc {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => Self::Arc {
+                center: scale_pt(*c),
+                axis_x: *axis_x,
+                axis_y: *axis_y,
+                radius: *radius * factor.abs(),
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+            },
+            Self::PlanarEllipse {
+                center: c,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => Self::PlanarEllipse {
+                center: scale_pt(*c),
+                major_axis: (glam::DVec3::from_array(*major_axis) * factor.abs()).to_array(),
+                normal: *normal,
+                minor_axis_ratio: *minor_axis_ratio,
+                start_param: *start_param,
+                end_param: *end_param,
+            },
+        }
+    }
+
+    pub fn mirrored(&self, p1: glam::DVec3, normal: glam::DVec3) -> Self {
+        let refl_pt = |p: [f64; 3]| {
+            let pt = glam::DVec3::from_array(p);
+            (pt - 2.0 * normal.dot(pt - p1) * normal).to_array()
+        };
+        let refl_vec = |v: [f64; 3]| {
+            let vec = glam::DVec3::from_array(v);
+            (vec - 2.0 * normal.dot(vec) * normal).to_array()
+        };
+        match self {
+            Self::Line { p1: lp1, p2: lp2 } => {
+                let p1_d = [lp1[0] as f64, lp1[1] as f64, lp1[2] as f64];
+                let p2_d = [lp2[0] as f64, lp2[1] as f64, lp2[2] as f64];
+                let m1 = refl_pt(p1_d);
+                let m2 = refl_pt(p2_d);
+                Self::Line {
+                    p1: [m1[0] as f32, m1[1] as f32, m1[2] as f32],
+                    p2: [m2[0] as f32, m2[1] as f32, m2[2] as f32],
+                }
+            }
+            Self::Circle { center: c, radius } => {
+                let c_d = [c[0] as f64, c[1] as f64, c[2] as f64];
+                let mc = refl_pt(c_d);
+                Self::Circle {
+                    center: [mc[0] as f32, mc[1] as f32, mc[2] as f32],
+                    radius: *radius,
+                }
+            }
+            Self::PlanarCircle {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+            } => {
+                let ax = refl_vec(*axis_x);
+                let ay = refl_vec(*axis_y);
+                Self::PlanarCircle {
+                    center: refl_pt(*c),
+                    axis_x: ax,
+                    axis_y: [-ay[0], -ay[1], -ay[2]],
+                    radius: *radius,
+                }
+            }
+            Self::Arc {
+                center: c,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => {
+                let ax = refl_vec(*axis_x);
+                let ay = refl_vec(*axis_y);
+                Self::Arc {
+                    center: refl_pt(*c),
+                    axis_x: ax,
+                    axis_y: [-ay[0], -ay[1], -ay[2]],
+                    radius: *radius,
+                    start_angle: -end_angle,
+                    end_angle: -start_angle,
+                }
+            }
+            Self::PlanarEllipse {
+                center: c,
+                major_axis,
+                normal: n,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => {
+                let norm = refl_vec(*n);
+                Self::PlanarEllipse {
+                    center: refl_pt(*c),
+                    major_axis: refl_vec(*major_axis),
+                    normal: [-norm[0], -norm[1], -norm[2]],
+                    minor_axis_ratio: *minor_axis_ratio,
+                    start_param: *start_param,
+                    end_param: *end_param,
+                }
+            }
+        }
+    }
+}
+
+/// Viewport-relative display transform for a point marker.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointMarker {
+    pub origin: glam::DVec3,
+    pub normal: glam::DVec3,
+    pub axis_x: glam::DVec3,
+    pub axis_y: glam::DVec3,
+    pub viewport_percent: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PatternStationPiece {
+    pub source_segment: u32,
+    pub source_distances: [f32; 2],
+    pub segment_distances: [f32; 2],
+    pub vector: [f32; 3],
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PatternStationMap {
+    pub point_segments: Vec<i32>,
+    pub pieces: Vec<PatternStationPiece>,
+}
+
+pub(crate) fn pattern_station_values(data: &[f32], point_count: usize) -> Option<(&[f32], f32)> {
+    (data.len() > point_count).then(|| (&data[..point_count], data[point_count]))
+}
+
+pub(crate) fn encode_pattern_stations(
+    mut stations: Vec<f32>,
+    source_length: f32,
+    point_segments: &[i32],
+    pieces: &[PatternStationPiece],
+) -> Vec<f32> {
+    let point_count = stations.len();
+    stations.push(source_length);
+    if point_segments.len() != point_count || pieces.is_empty() {
+        return stations;
+    }
+    stations.extend(point_segments.iter().map(|segment| *segment as f32));
+    for piece in pieces {
+        stations.push(piece.source_segment as f32);
+        stations.extend(piece.source_distances);
+        stations.extend(piece.segment_distances);
+        stations.extend(piece.vector);
+    }
+    stations
+}
+
+pub(crate) fn decode_pattern_station_map(
+    data: &[f32],
+    point_count: usize,
+) -> Option<PatternStationMap> {
+    let metadata_start = point_count.checked_mul(2)?.checked_add(1)?;
+    if data.len() < metadata_start || !(data.len() - metadata_start).is_multiple_of(8) {
+        return None;
+    }
+    let point_segments = data[point_count + 1..metadata_start]
+        .iter()
+        .map(|value| *value as i32)
+        .collect();
+    let pieces = data[metadata_start..]
+        .chunks_exact(8)
+        .map(|values| PatternStationPiece {
+            source_segment: values[0] as u32,
+            source_distances: [values[1], values[2]],
+            segment_distances: [values[3], values[4]],
+            vector: [values[5], values[6], values[7]],
+        })
+        .collect();
+    Some(PatternStationMap {
+        point_segments,
+        pieces,
+    })
+}
+
+impl PointMarker {
+    pub fn resolve(self, point: glam::DVec3, view_height: f64) -> glam::DVec3 {
+        let normal = self.normal.normalize_or(glam::DVec3::Z);
+        let delta = point - self.origin;
+        let axial = normal * delta.dot(normal);
+        let scale = self.viewport_percent.max(0.0) as f64 * 0.01 * view_height.max(0.0);
+        self.origin + axial + (delta - axial) * scale
+    }
+}
+
+/// A 1-D entity (line, arc, polyline) represented as an ordered set of
+/// world-space points rendered as a quad strip (TriangleList).
+///
+/// Linetype is encoded as a GPU-side dash pattern so the CPU never needs to
+/// split wires into per-dash segments.  `pattern_length = 0.0` means solid.
+/// Everything needed to resolve a wire's display colour against a background,
+/// kept so the resolution can be redone for another background without
+/// re-tessellating.
+///
+/// `None` — the default — means the wire did not record its inputs and a
+/// resolution pass must leave it alone. Only `Batches::finalize` fills it in.
+pub type BgAdapt = Option<Box<BgAdaptInputs>>;
+
+/// One laid-out text run preserved for searchable PDF export.
+///
+/// `origin` is the final world-space baseline start (drawing units, f64 —
+/// annotation scale and block placement already applied), `height` is the
+/// world cap height (run.height × anno), `rotation` the run angle in radians.
+/// `text` holds the visible characters only (DXF controls stripped, `%%`
+/// specials decoded, `\P` → space — multi-line MTEXT arrives as one run per
+/// visual line from the layout stage, so no re-wrapping is needed).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SearchableTextRun {
+    pub text: String,
+    pub origin: [f64; 3],
+    pub height: f32,
+    pub rotation: f32,
+    pub color: [f32; 4],
+    pub bold: bool,
+    /// Style font name as laid out (`GlyphRun.font`: TTF family, LFF/SHX
+    /// name, …). Lets the PDF exporter resolve the run's *actual* font and
+    /// embed a subset instead of always falling back to Helvetica.
+    pub font: String,
+    /// Laid-out advance width in drawing units (pen advance incl. spacing,
+    /// annotation scale applied). Drives `Tz` width-matching and run-level
+    /// culling at export; scaled alongside `height` by every transform.
+    pub adv_width: f32,
+}
+
+impl SearchableTextRun {
+    /// World-space origin translated by `delta` (preview drags, block moves).
+    pub fn translated(&self, delta: [f64; 3]) -> Self {
+        let mut out = self.clone();
+        out.origin[0] += delta[0];
+        out.origin[1] += delta[1];
+        out.origin[2] += delta[2];
+        out
+    }
+}
+
+/// Clean a laid-out run's raw string into visible searchable characters.
+///
+/// The input is the exact string passed to `layout_glyph_quads` for the run,
+/// so the extracted text cannot diverge from the laid-out glyph sequence —
+/// cleaning only strips controls. Traps paid for at the format level:
+/// - `\P` is a real newline → space here (runs are already per-line).
+/// - Decoration toggles (`\L…\l`, `\O…\o`, `\K…\k`) and other backslash
+///   controls are stripped, not searched.
+/// - `\Snum^den;`/stacking → `num/den`; `\U+XXXX` → the char; `{…}` grouping
+///   braces are dropped; `\M+…` paragraph controls are stripped.
+/// - DXF `%%d`/`%%p`/`%%c` decode to `°`/`±`/`Ø`; `%%` + 3 digits → the char.
+/// - Literal `\\` → `\`, `\~` → non-breaking space.
+pub fn clean_searchable_text(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && i + 1 < bytes.len() {
+            let n = bytes[i + 1];
+            match n {
+                b'P' | b'p' => {
+                    out.push(' ');
+                    i += 2;
+                    continue;
+                }
+                b'\\' => {
+                    out.push('\\');
+                    i += 2;
+                    continue;
+                }
+                b'~' => {
+                    out.push('\u{a0}');
+                    i += 2;
+                    continue;
+                }
+                // Stacking: `\Snum^den;` → `num/den` (searchable fraction).
+                b'S' | b's' => {
+                    if let Some(semi) = raw[i + 2..].find(';') {
+                        let body = &raw[i + 2..i + 2 + semi];
+                        if let Some(caret) = body.find('^') {
+                            out.push_str(&body[..caret]);
+                            out.push('/');
+                            out.push_str(&body[caret + 1..]);
+                        } else {
+                            out.push_str(body);
+                        }
+                        i += 2 + semi + 1;
+                    } else {
+                        i += 2;
+                    }
+                    continue;
+                }
+                // Unicode escape `\U+XXXX` (4–6 hex digits) → the char.
+                // Anything else (bad length, surrogate, > U+10FFFF) leaves
+                // the digits to be copied literally below — visible
+                // garbage-in beats silently dropped text.
+                b'U' | b'u' => {
+                    let rest = &raw[i + 2..];
+                    let after_plus = rest.strip_prefix('+').unwrap_or(rest);
+                    let digits: String = after_plus
+                        .chars()
+                        .take_while(|c| c.is_ascii_hexdigit())
+                        .collect();
+                    let mut pushed = false;
+                    if (4..=6).contains(&digits.len()) {
+                        if let Ok(cp) = u32::from_str_radix(&digits, 16) {
+                            if let Some(ch) = char::from_u32(cp) {
+                                out.push(ch);
+                                pushed = true;
+                            }
+                        }
+                    }
+                    i +=
+                        2 + (rest.len() - after_plus.len()) + if pushed { digits.len() } else { 0 };
+                    continue;
+                }
+                // Decoration / format toggles: drop both the opener and closer.
+                b'L' | b'l' | b'O' | b'o' | b'K' | b'k' | b'C' | b'c' | b'F' | b'f' | b'H'
+                | b'h' | b'Q' | b'q' | b'T' | b't' | b'W' | b'w' | b'A' | b'a' | b'M' | b'm' => {
+                    // `\C1;`, `\Farial;` etc. run to the next `;` — skip it.
+                    if let Some(semi) = raw[i + 2..].find(';') {
+                        i += 2 + semi + 1;
+                    } else {
+                        i += 2;
+                    }
+                    continue;
+                }
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            }
+        } else if b == b'%' && i + 2 < bytes.len() && bytes[i + 1] == b'%' {
+            let c = bytes[i + 2];
+            match c {
+                b'd' | b'D' => out.push('°'),
+                b'p' | b'P' => out.push('±'),
+                b'c' | b'C' => out.push('∅'),
+                b'%' => out.push('%'),
+                _ if c.is_ascii_digit()
+                    && i + 4 < bytes.len()
+                    && bytes[i + 3].is_ascii_digit()
+                    && bytes[i + 4].is_ascii_digit() =>
+                {
+                    let digits = std::str::from_utf8(&bytes[i + 2..i + 5]).unwrap_or("");
+                    if let Ok(code) = digits.parse::<u32>() {
+                        out.push(char::from_u32(code).unwrap_or('?'));
+                    } else {
+                        out.push_str("%%");
+                        out.push_str(digits);
+                    }
+                    i += 5;
+                    continue;
+                }
+                _ => {
+                    out.push('%');
+                    out.push('%');
+                    out.push(c as char);
+                }
+            }
+            i += 3;
+            continue;
+        } else if b == b'{' || b == b'}' {
+            // MTEXT grouping braces: structure only, not content.
+            i += 1;
+            continue;
+        } else {
+            // Copy one UTF-8 char.
+            if let Some(ch) = raw[i..].chars().next() {
+                out.push(ch);
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+    // Collapse whitespace (MTEXT padding) but keep single spaces.
+    let mut collapsed = String::with_capacity(out.len());
+    let mut prev_space = true; // trim leading
+    for ch in out.chars() {
+        if ch.is_whitespace() {
+            if !prev_space {
+                collapsed.push(' ');
+                prev_space = true;
+            }
+        } else {
+            collapsed.push(ch);
+            prev_space = false;
+        }
+    }
+    if collapsed.ends_with(' ') {
+        collapsed.pop();
+    }
+    collapsed
+}
+
+/// The inputs `Batches::finalize` consumes when it resolves a colour.
+///
+/// The flags are independent — a wire can paint the background itself while
+/// its glyphs still adapt — so this mirrors that code's branches rather than
+/// collapsing them into one enum.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BgAdaptInputs {
+    /// Colour before adaptation. Resolution always recomputes from here rather
+    /// than from `WireModel::color`, so it is idempotent and safe over a set
+    /// mixing memo hits with freshly tessellated wires. `adapt_to_bg` is
+    /// **not** re-appliable: a near-white colour snaps to pure black on a
+    /// light background, and pure black comes back pure *white* on a dark one,
+    /// losing the tint.
+    pub raw_color: [f32; 4],
+    /// Glyph colours before adaptation, parallel to `WireModel::text_verts`.
+    /// Empty when the wire has no glyphs or their colour never adapts.
+    pub text_raw_colors: Vec<[f32; 4]>,
+    /// Adapt against this instead of the live background: an MTEXT carrying
+    /// its own background fill.
+    pub contrast_bg: Option<[f32; 4]>,
+    /// The wire paints the background; its colour *is* the live background.
+    pub canvas_color: bool,
+    /// Authored colour. The background must not touch it, glyphs included.
+    pub preserve_color: bool,
+}
+
+/// How a dash pattern closes around a closed path. A closed path holds a whole
+/// number of periods, each stretched to fit, where an open one keeps its period
+/// and aligns its ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum DashClosure {
+    /// An open path, or a closed one that aligns its ends like an open one.
+    #[default]
+    Open,
+    /// A CIRCLE or a full ELLIPSE: the pattern starts at the first point.
+    Curve,
+    /// A closed polyline with PLINEGEN: the pattern starts at the point holding
+    /// the polyline's second vertex.
+    Polyline { start: u32 },
+}
+
+/// The geometry a wire carries but rarely changes: point strips, snap aids,
+/// filled surfaces and glyph quads a tessellation produced. Held behind one
+/// `Arc` so a wire clone shares it and a write to one wire copies it first --
+/// restyling a copy (the faded drag ghost, the paper dressing) stays a
+/// hot-field change.
+#[derive(Clone, Debug, Default)]
+pub struct WireGeom {
+    /// Ordered world-space positions forming a strip of quads. Each entry is
+    /// the "high" half of a double-single f32 pair; [`points_low`] carries the
+    /// matching residual so the shader can reconstruct the f64 source.
+    pub points: Vec<[f32; 3]>,
+    /// Low-bit residual paired index-for-index with [`points`]. Empty means
+    /// "all-zero residual" (interactive draw / preview wires whose coordinates
+    /// don't need sub-f32 precision). Tessellation from CAD f64 fills it.
+    pub points_low: PointResiduals,
+    /// Per-point full band width (drawing units), aligned index-for-index with
+    /// [`points`], for a polyline whose width VARIES (a taper). Empty = a
+    /// constant band of `world_width`. The wire shader reads the two endpoint
+    /// widths of each segment and interpolates, so the band tapers smoothly.
+    pub taper_widths: Vec<f32>,
+    /// Centreline stations and optional source-piece transform metadata.
+    pub pattern_stations: Vec<f32>,
+    /// Pre-baked snap candidates (Center, Node, Quadrant, Insertion).
+    pub snap_pts: Vec<(glam::DVec3, SnapHint)>,
+    /// Per-segment tangent geometry for Tangent snap.
+    /// Line/Arc entities: 1 entry.  LwPolyline: 1 entry per segment.
+    pub tangent_geoms: Vec<TangentGeom>,
+    /// True polyline vertices used for Endpoint/Midpoint snap.
+    /// Non-empty only for entities with distinct vertex positions (Line, LwPolyline).
+    /// Empty for tessellated curves (Circle, Arc, Ellipse) which use snap_pts instead.
+    pub key_vertices: Vec<[f64; 3]>,
+    /// Allocated only by wires that carry fills, pick surfaces or plot clips.
+    pub surfaces: Option<Box<WireSurfaces>>,
+    /// SDF glyph quads for this entity's text (TEXT / MTEXT / dimension text /
+    /// block-internal text). Non-empty only when SDF text is enabled and this
+    /// wire carries a text run. Rides with the wire so it is cached by the
+    /// tess memo, cloned on hit, and transformed by the block-expand loop
+    /// exactly like `points` — no separate collector pass. The renderer
+    /// gathers these across all wires into the text vertex buffer.
+    pub text_verts: Vec<crate::display::text_vertex::TextVertex>,
+    /// Searchable text runs for PDF export (real text, not outlines).
+    ///
+    /// The SDF `text_verts` above carry only tessellated quads — the source
+    /// string is lost by the time the PDF exporter runs, so searchable text
+    /// was impossible without re-layout. Each entry preserves one laid-out
+    /// run (already positioned: MTEXT attachment/width/wrap, rotation and
+    /// block placement are baked into `origin`/`rotation`/`height`), letting
+    /// `io::pdf_export` emit `BT … Tj ET` with an embedded font instead of
+    /// vector outlines. Empty on non-text wires; transformed alongside
+    /// `text_verts` by the block-expand loop and preview clones.
+    pub searchable_text: Vec<SearchableTextRun>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WireSurfaces {
+    /// Paper-space clip ring for a wire projected through a nonrectangular
+    /// viewport for plotting. It clips the rendered ink, including pen caps
+    /// and text, without cutting the path or changing its dash phase.
+    pub plot_clip: Option<std::sync::Arc<[[f32; 2]]>>,
+    /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
+    /// Non-empty only for PolyfaceMesh / PolygonMesh entities.
+    pub fill_tris: Vec<[f32; 3]>,
+    /// Low residual paired with [`fill_tris`] (double-single). Empty = all-zero;
+    /// tessellation from CAD f64 fills it so fills stay precise at UTM scale.
+    pub fill_tris_low: Vec<[f32; 3]>,
+    /// Pre-triangulated pick-only geometry: flat vertex list, 3 per triangle.
+    /// Hit-testing treats these as solid; this wire's own draw never uses them.
+    ///
+    /// Carries the interior of things whose surface the cursor would otherwise
+    /// fall through, because [`points`] only bounds them:
+    ///
+    /// - An entity extruded by a DXF thickness (code 39) — the swept wall
+    ///   between each base segment and its extruded copy. Drawn as its four
+    ///   wireframe edges, with nothing in between to pick.
+    /// - A wide polyline (codes 43 / 40 / 41) — the solid band. It *is* drawn,
+    ///   but by the hatch pipeline off `wide_fills`, so the wire that carries
+    ///   its centreline has no fill of its own to hit-test.
+    ///
+    /// Separate from [`fill_tris`] because that channel reaches the GPU: a
+    /// thickness wall put there would render shaded and change how every such
+    /// drawing looks, and a polyline band would be drawn a second time on top
+    /// of the hatch that already draws it.
+    pub pick_tris: Vec<[f32; 3]>,
+    /// Low residual paired with [`pick_tris`] (double-single). Empty = all-zero.
+    pub pick_tris_low: Vec<[f32; 3]>,
+}
+
+impl WireSurfaces {
+    fn is_empty(&self) -> bool {
+        self.plot_clip.is_none()
+            && self.fill_tris.is_empty()
+            && self.fill_tris_low.is_empty()
+            && self.pick_tris.is_empty()
+            && self.pick_tris_low.is_empty()
+    }
+
+    pub(crate) fn into_optional(self) -> Option<Box<Self>> {
+        (!self.is_empty()).then(|| Box::new(self))
+    }
+}
+
+impl std::ops::Deref for WireGeom {
+    type Target = WireSurfaces;
+
+    fn deref(&self) -> &Self::Target {
+        static EMPTY: WireSurfaces = WireSurfaces {
+            plot_clip: None,
+            fill_tris: Vec::new(),
+            fill_tris_low: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+        };
+        self.surfaces.as_deref().unwrap_or(&EMPTY)
+    }
+}
+
+impl std::ops::DerefMut for WireGeom {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.surfaces.get_or_insert_with(Default::default)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct WireModel {
+    /// Unique identifier — the handle value as a decimal string.
+    pub name: String,
+    /// Fully resolved display/export layer for this occurrence. Block children
+    /// keep their own nonzero layer or inherit the nearest nonzero INSERT layer;
+    /// `None` retains the handle-based fallback for direct and synthetic wires.
+    pub effective_layer: Option<std::sync::Arc<str>>,
+    /// Source member used to resolve named plot styles on expanded INSERT wires.
+    pub block_member: Option<document::Handle>,
+    /// Point-marker scaling shared by the GPU, picking, and plotting paths.
+    pub point_marker: Option<PointMarker>,
+    /// RGBA colour in [0, 1].
+    pub color: [f32; 4],
+    /// How `color` and `text_verts` follow the background, or `None` when this
+    /// wire's colour must not be re-resolved.
+    pub bg_adapt: BgAdapt,
+    /// Whether this wire is currently selected.
+    #[allow(dead_code)]
+    pub selected: bool,
+    /// Total length of one pattern repeat (world units).  0 = solid line.
+    pub pattern_length: f32,
+    /// Up to 8 pattern elements: positive = dash length, negative = gap length.
+    /// Unused slots must be 0.0 (acts as end-of-pattern sentinel in shader).
+    pub pattern: [f32; 8],
+    /// Rendered line width in screen pixels (half-width = line_weight_px / 2).
+    pub line_weight_px: f32,
+    /// World-space band width (drawing units). Positive values create a wide
+    /// polyline band that scales with zoom. Zero uses `line_weight_px` and the
+    /// drawing's lineweight display setting. A negative value encodes a fixed
+    /// screen-pixel width whose absolute value bypasses that display setting.
+    pub world_width: f32,
+    /// ACI color index (1-255).  0 means true-color or unknown (no CTB lookup).
+    pub aci: u8,
+    /// World-space 2-D bounding box [min_x, min_y, max_x, max_y].
+    /// Set from document `bounding_box()` in `tessellate_entity()`.
+    /// Preview / interim wires use `UNBOUNDED_AABB` so they are never pre-rejected
+    /// by the snap world-space filter.
+    pub aabb: [f32; 4],
+    /// When false the linetype pattern restarts at each NaN-separated segment
+    /// (DXF PLINEGEN=0).  When true the pattern runs continuously (PLINEGEN=1).
+    pub plinegen: bool,
+    /// DGN line-style marker. When false (every standard linetype) the dash
+    /// pattern uses the normal phase: A-type end alignment for dash-first
+    /// patterns, else centred. When true (DGN pipe walls) the pattern is drawn
+    /// from the START vertex with continuous phase and no A-type end forcing —
+    /// DGN line styles are not end-aligned.
+    pub dash_from_start: bool,
+    /// An MLINE element's linetype as its style names it, for whoever walks a
+    /// complex one or inherits a ByBlock one. `None` on any other wire.
+    pub element_linetype: Option<String>,
+    /// An MLINE element's colour as its style names it, for whoever resolves it
+    /// in a viewport or block context. `None` on any other wire.
+    pub element_color: Option<document::types::Color>,
+    /// How the pattern closes around a closed path.
+    pub dash_closure: DashClosure,
+    /// Block-local composed draw-order offset in (-1, 1) for a wire that must
+    /// order against its *siblings inside the block* — currently wide-polyline
+    /// bands, whose solid area would otherwise cover later-drawn siblings.
+    /// `None` (all other wires) = the whole-insert depth resolved from `name`.
+    /// `Some(local)` composes at draw time: `insert_depth + local * insert_half`,
+    /// mirroring how exploded block fills seed their depth, so bands and fills
+    /// from the same block interleave by the block's internal draw order.
+    pub depth_override: Option<f32>,
+    /// Whether this wire is drawn in the normal viewport pass.
+    pub display_visible: bool,
+    /// Reference geometry excluded from ordinary picking, such as underlays.
+    /// Hidden (`display_visible` false) it is what object snaps find; drawn,
+    /// it is display only and snaps skip it too ([`Self::is_display_only`]).
+    /// REGION boundary edge clicks opt in separately below.
+    pub snap_only: bool,
+    /// Exact decomposed REGION boundary: hidden snap geometry also eligible
+    /// for edge clicks. Does not enable surface hits or other snap-only wires.
+    pub region_boundary_click: bool,
+    /// Plugin-owned reference-only source (API v9): the entity is display
+    /// geometry the built-in edit paths must not pick — clicks fall through
+    /// to the editable entity underneath. Rendering and snapping are
+    /// unaffected.
+    pub reference_only: bool,
+    /// Whether this wire is included in plotted output.
+    pub plot_visible: bool,
+    /// `true` when [`fill_tris`] is a real 3-D surface (PolyfaceMesh /
+    /// PolygonMesh face) that must render with hidden-surface depth and only in
+    /// shaded modes. `false` for a flat 2-D overlay fill (SOLID arrowhead,
+    /// dimension / MultiLeader text background, greek-LOD text) that draws in
+    /// every view mode. The render pass can't infer this from `fill_tris_low`
+    /// alone — a 2-D fill at UTM scale carries a low residual too.
+    pub fill_is_3d: bool,
+    /// `true` only for a planar SOLID entity's interior. Wireframe 3D omits
+    /// this fill while preserving its perimeter and every other 2-D overlay.
+    pub fill_is_2d_solid: bool,
+    /// The direction a planar SOLID was drawn with, in the coordinates of the
+    /// space or block that holds it. The reference of a block turns the
+    /// triangles and leaves this alone: the fill shows when the view looks
+    /// along the solid's own direction, however its block is placed. `None`
+    /// for every other fill, whose triangles tell.
+    pub solid_normal: Option<[f32; 3]>,
+    /// Shared block-render source and this placement's translation.
+    pub render_instance: Option<super::instance_model::RenderInstance>,
+    /// Set on a wire that stands for a translated copy of a nested block
+    /// expansion; its own geometry is empty (see `InstanceStub`).
+    pub stub: Option<std::sync::Arc<super::instance_model::InstanceStub>>,
+    /// Shared cold geometry. Reads go through `Deref`; writes through
+    /// `DerefMut`, which copies first when the geometry is shared.
+    pub geom: std::sync::Arc<WireGeom>,
+}
+
+impl WireModel {
+    pub(crate) fn estimated_resident_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.name.capacity() + self.geom.estimated_bytes()
+    }
+
+    pub(crate) fn compact_resident_geometry(&mut self) {
+        if let Some(geom) = std::sync::Arc::get_mut(&mut self.geom) {
+            geom.points_low.compact_planar();
+            if geom.surfaces.as_deref().is_some_and(WireSurfaces::is_empty) {
+                geom.surfaces = None;
+            }
+            if geom.text_verts.capacity() - geom.text_verts.len() >= 6 {
+                geom.text_verts.shrink_to_fit();
+            }
+        }
+    }
+
+    pub const WHITE: [f32; 4] = [1.00, 1.00, 1.00, 1.0];
+    pub const CYAN: [f32; 4] = [0.25, 0.85, 1.00, 1.0];
+    pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
+    /// Rollover (hover) highlight — orange, distinct from the blue selection.
+    pub const HOVER: [f32; 4] = [0.95, 0.55, 0.10, 1.0];
+
+    /// Clone the style fields while assigning `name`, avoiding a throwaway
+    /// heap clone of `self.name` on prototype leaf instantiation. The geometry
+    /// is shared; a block placement that moves it copies it on the first write.
+    pub(crate) fn clone_with_name(&self, name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            effective_layer: self.effective_layer.clone(),
+            block_member: self.block_member,
+            point_marker: self.point_marker,
+            color: self.color,
+            bg_adapt: self.bg_adapt.clone(),
+            selected: self.selected,
+            pattern_length: self.pattern_length,
+            pattern: self.pattern,
+            line_weight_px: self.line_weight_px,
+            world_width: self.world_width,
+            aci: self.aci,
+            aabb: self.aabb,
+            plinegen: self.plinegen,
+            dash_from_start: self.dash_from_start,
+            element_linetype: self.element_linetype.clone(),
+            element_color: self.element_color,
+            dash_closure: self.dash_closure,
+            depth_override: self.depth_override,
+            display_visible: self.display_visible,
+            snap_only: self.snap_only,
+            region_boundary_click: self.region_boundary_click,
+            reference_only: self.reference_only,
+            plot_visible: self.plot_visible,
+            fill_is_3d: self.fill_is_3d,
+            fill_is_2d_solid: self.fill_is_2d_solid,
+            solid_normal: self.solid_normal,
+            render_instance: self.render_instance.clone(),
+            stub: self.stub.clone(),
+            geom: self.geom.clone(),
+        }
+    }
+
+    /// Drawn underlay content: shown and plotted, never picked or snapped.
+    pub fn is_display_only(&self) -> bool {
+        self.snap_only && self.display_visible
+    }
+    /// A POINT's wire: the Node is its only snap; the glyph strokes are drawn
+    /// but offer no endpoints or segments to snap to.
+    pub fn is_node_marker(&self) -> bool {
+        self.key_vertices.is_empty() && matches!(self.snap_pts.as_slice(), [(_, SnapHint::Node)])
+    }
+    /// Sentinel AABB that never rejects any snap query.
+    pub const UNBOUNDED_AABB: [f32; 4] = [
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        f32::INFINITY,
+    ];
+
+    /// Double-single split: `high + low ≈ v` to ~f64 precision in two f32s.
+    /// Matches the renderer's relative-to-eye reconstruction.
+    #[inline]
+    pub fn split_ds(v: f64) -> (f32, f32) {
+        let high = v as f32;
+        (high, (v - high as f64) as f32)
+    }
+
+    /// Create a solid preview wire from f64 points, filling the double-single
+    /// `points_low` buffer so the line stays precise at UTM-scale coordinates.
+    /// Rubber-band previews built straight from f32 absolute points jitter
+    /// ~0.5 m at UTM because the wire pass is relative-to-eye and expects the
+    /// low residual; this keeps the preview glued to the cursor.
+    pub fn solid_f64(name: String, points: Vec<[f64; 3]>, color: [f32; 4], selected: bool) -> Self {
+        let mut hi = Vec::with_capacity(points.len());
+        let mut lo = Vec::with_capacity(points.len());
+        for [x, y, z] in points {
+            let (hx, lx) = Self::split_ds(x);
+            let (hy, ly) = Self::split_ds(y);
+            let (hz, lz) = Self::split_ds(z);
+            hi.push([hx, hy, hz]);
+            lo.push([lx, ly, lz]);
+        }
+        let mut w = Self::solid(name, hi, color, selected);
+        w.points_low = lo.into();
+        w
+    }
+
+    pub fn set_fixed_screen_width(&mut self, width_px: f32) {
+        let width_px = width_px.max(1.0);
+        self.line_weight_px = width_px;
+        self.world_width = -width_px;
+    }
+
+    /// Create a solid wire (no dash pattern, 1px weight).
+    pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {
+        Self {
+            name,
+            color,
+            selected,
+            geom: std::sync::Arc::new(WireGeom {
+                points,
+                ..WireGeom::default()
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// Return a clone with every point translated by `delta`.
+    pub fn translated(&self, delta: glam::Vec3) -> Self {
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        {
+            let geom = out.geom_mut();
+            map_points(&mut geom.points, geom.points_low.dense_mut(), |point| {
+                point + delta.as_dvec3()
+            });
+        }
+        if let Some(marker) = &mut out.point_marker {
+            marker.origin += delta.as_dvec3();
+        }
+        {
+            let (dx, dy, dz) = (delta.x as f64, delta.y as f64, delta.z as f64);
+            out.map_text_layout(&|p| [p[0] + dx, p[1] + dy, p[2] + dz], 1.0, 0.0);
+        }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.translated(delta.as_dvec3()))
+            .collect();
+        out
+    }
+
+    /// Return a preview clone with every point mapped through `map` (an
+    /// INSERT-style placement: per-axis scale, rotation, translation).
+    /// Tangent geometry is dropped; a preview is not snapped to.
+    pub fn mapped(&self, map: impl Fn(glam::DVec3) -> glam::DVec3) -> Self {
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        {
+            let geom = out.geom_mut();
+            map_points(&mut geom.points, geom.points_low.dense_mut(), &map);
+        }
+        if let Some(marker) = &mut out.point_marker {
+            marker.origin = map(marker.origin);
+        }
+        if !out.text_verts.is_empty() {
+            out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                let p = map(glam::DVec3::new(x, y, z));
+                (p.x, p.y, p.z)
+            });
+        }
+        // Preview-only clone: searchable export runs are rebuilt from source
+        // geometry, never carried on a rubber-band preview.
+        out.searchable_text.clear();
+        out.tangent_geoms.clear();
+        out
+    }
+
+    /// Like [`Self::mapped`], but preserves the wire's existing color and selection state.
+    pub fn mapped_preserving_style(&self, map: impl Fn(glam::DVec3) -> glam::DVec3) -> Self {
+        let mut out = self.mapped(map);
+        out.color = self.color;
+        out.selected = self.selected;
+        out
+    }
+
+    /// Return a clone with every point rotated around `center` by `angle_rad`.
+    pub fn rotated(&self, center: glam::Vec3, angle_rad: f32) -> Self {
+        self.rotated_about_axis(center, glam::Vec3::Z, angle_rad)
+    }
+
+    /// Return a clone rotated about an arbitrary world-space axis.
+    pub fn rotated_about_axis(&self, center: glam::Vec3, axis: glam::Vec3, angle_rad: f32) -> Self {
+        let rotation = glam::Quat::from_axis_angle(axis.normalize_or_zero(), angle_rad);
+        let (s, c) = angle_rad.sin_cos();
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        for p in &mut out.points {
+            let mapped = center + rotation * (glam::Vec3::from_array(*p) - center);
+            *p = mapped.to_array();
+        }
+        for p in out.points_low.dense_mut() {
+            *p = (rotation * glam::Vec3::from_array(*p)).to_array();
+        }
+        if let Some(marker) = &mut out.point_marker {
+            let center = center.as_dvec3();
+            let rotation = glam::DQuat::from_axis_angle(
+                axis.as_dvec3().normalize_or(glam::DVec3::Z),
+                angle_rad as f64,
+            );
+            marker.origin = center + rotation * (marker.origin - center);
+            marker.normal = (rotation * marker.normal).normalize_or(glam::DVec3::Z);
+            marker.axis_x = (rotation * marker.axis_x).normalize_or(glam::DVec3::X);
+            marker.axis_y = (rotation * marker.axis_y).normalize_or(glam::DVec3::Y);
+        }
+        if !out.text_verts.is_empty() {
+            let center = center.as_dvec3();
+            let axis = axis.as_dvec3().normalize_or_zero();
+            let (s, c) = (s as f64, c as f64);
+            out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                let v = glam::DVec3::new(x, y, z) - center;
+                let mapped = center + v * c + axis.cross(v) * s + axis * axis.dot(v) * (1.0 - c);
+                (mapped.x, mapped.y, mapped.z)
+            });
+        }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.rotated(center.as_dvec3(), axis.as_dvec3(), angle_rad as f64))
+            .collect();
+        out.searchable_text.clear();
+        out
+    }
+
+    /// Return a clone with every point uniformly scaled from `center` by `factor`.
+    pub fn scaled(&self, center: glam::Vec3, factor: f32) -> Self {
+        self.scaled_precise(center.as_dvec3(), factor as f64)
+    }
+
+    /// Uniform preview scaling without rounding a world-space base to f32.
+    pub fn scaled_precise(&self, center: glam::DVec3, factor: f64) -> Self {
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        if let Some(marker) = out.point_marker {
+            let normal = marker.normal.normalize_or(glam::DVec3::Z);
+            let target_origin = center + (marker.origin - center) * factor;
+            {
+                let geom = out.geom_mut();
+                map_points(&mut geom.points, geom.points_low.dense_mut(), |point| {
+                    let delta = point - marker.origin;
+                    let axial = normal * delta.dot(normal);
+                    target_origin + (delta - axial) + axial * factor
+                });
+            }
+            if let Some(target) = &mut out.point_marker {
+                target.origin = target_origin;
+            }
+        } else {
+            {
+                let geom = out.geom_mut();
+                map_points(&mut geom.points, geom.points_low.dense_mut(), |point| {
+                    center + (point - center) * factor
+                });
+            }
+        }
+        if !out.text_verts.is_empty() {
+            let (cx, cy, cz) = (center.x, center.y, center.z);
+            let f = factor;
+            out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                (cx + (x - cx) * f, cy + (y - cy) * f, cz + (z - cz) * f)
+            });
+        }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.scaled(center, factor))
+            .collect();
+        out.searchable_text.clear();
+        out
+    }
+
+    /// Return a clone mirrored across the line through `p1`→`p2`.
+    pub fn mirrored(&self, p1: glam::Vec3, p2: glam::Vec3) -> Self {
+        self.mirrored_in_plane(p1, p2, glam::Vec3::Z)
+    }
+
+    /// Return a clone reflected through the plane containing the picked line
+    /// and the supplied working-plane normal.
+    pub fn mirrored_in_plane(
+        &self,
+        p1: glam::Vec3,
+        p2: glam::Vec3,
+        working_normal: glam::Vec3,
+    ) -> Self {
+        let plane_normal = (p2 - p1)
+            .cross(working_normal.normalize_or_zero())
+            .normalize_or_zero();
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        if plane_normal.length_squared() < 1e-12 {
+            return out;
+        }
+        for p in &mut out.points {
+            let point = glam::Vec3::from_array(*p);
+            *p = (point - 2.0 * plane_normal.dot(point - p1) * plane_normal).to_array();
+        }
+        // World position is the double-single sum `points + points_low` (text /
+        // UTM wires split it), so the residual must reflect too — as a direction
+        // (linear reflection about the axis, no `p1` offset).
+        for p in out.points_low.dense_mut() {
+            let point = glam::Vec3::from_array(*p);
+            *p = (point - 2.0 * plane_normal.dot(point) * plane_normal).to_array();
+        }
+        if let Some(marker) = &mut out.point_marker {
+            let p1 = p1.as_dvec3();
+            let normal = plane_normal.as_dvec3();
+            marker.origin -= 2.0 * normal.dot(marker.origin - p1) * normal;
+            marker.normal = (marker.normal - 2.0 * normal.dot(marker.normal) * normal)
+                .normalize_or(glam::DVec3::Z);
+            marker.axis_x = (marker.axis_x - 2.0 * normal.dot(marker.axis_x) * normal)
+                .normalize_or(glam::DVec3::X);
+            marker.axis_y = (marker.axis_y - 2.0 * normal.dot(marker.axis_y) * normal)
+                .normalize_or(glam::DVec3::Y);
+        }
+        // Glyph quads reflect wholesale (true mirror) — the caller only routes
+        // text through here for MIRRTEXT-on; MIRRTEXT-off relocates via
+        // `translated` so glyphs stay readable.
+        if !out.text_verts.is_empty() {
+            let p1 = p1.as_dvec3();
+            let normal = plane_normal.as_dvec3();
+            out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                let point = glam::DVec3::new(x, y, z);
+                let mapped = point - 2.0 * normal.dot(point - p1) * normal;
+                (mapped.x, mapped.y, mapped.z)
+            });
+        }
+        out.tangent_geoms = self
+            .tangent_geoms
+            .iter()
+            .map(|tg| tg.mirrored(p1.as_dvec3(), plane_normal.as_dvec3()))
+            .collect();
+        out.searchable_text.clear();
+        out
+    }
+
+    /// Total arc-length of this wire (sum of segment lengths).
+    #[allow(dead_code)]
+    pub fn length(&self) -> f32 {
+        self.points
+            .windows(2)
+            .map(|w| {
+                let dx = w[1][0] - w[0][0];
+                let dy = w[1][1] - w[0][1];
+                let dz = w[1][2] - w[0][2];
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            })
+            .sum()
+    }
+
+    /// Plot output: a lone circle, arc or ellipse drawn as one unbroken run
+    /// takes its points again from its geometry, fine enough that a large
+    /// radius stays round on paper. The display set keeps few points for such
+    /// curves, since the GPU draws them analytically.
+    // ponytail: relative chord tolerance (2e-5 of the radius), a paper-space
+    // tolerance needs the plot scale here.
+    pub(crate) fn resample_plot_curve(&mut self) {
+        use glam::DVec3;
+        const STEP: f64 = 0.0126; // 2·acos(1 − 2e-5): sagitta ≤ 2e-5·r
+        const MAX_POINTS: usize = 16384;
+        if self.tangent_geoms.len() != 1
+            || self.points.len() < 2
+            || self.world_width > 0.0
+            || self.point_marker.is_some()
+            || !self.pattern_stations.is_empty()
+            || !self.taper_widths.is_empty()
+            || self.points.iter().flatten().any(|v| !v.is_finite())
+        {
+            return;
+        }
+        let v = |a: [f64; 3]| DVec3::from_array(a);
+        // (centre, x axis, y axis, start, end), each axis carrying its radius.
+        let (c, ax, ay, t0, t1) = match self.tangent_geoms[0] {
+            TangentGeom::Circle { center, radius } => (
+                DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64),
+                DVec3::X * radius as f64,
+                DVec3::Y * radius as f64,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+            TangentGeom::PlanarCircle {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+            } => (
+                v(center),
+                v(axis_x).normalize_or_zero() * radius,
+                v(axis_y).normalize_or_zero() * radius,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+            TangentGeom::Arc {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => (
+                v(center),
+                v(axis_x).normalize_or_zero() * radius,
+                v(axis_y).normalize_or_zero() * radius,
+                start_angle,
+                if end_angle < start_angle {
+                    end_angle + std::f64::consts::TAU
+                } else {
+                    end_angle
+                },
+            ),
+            TangentGeom::PlanarEllipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => {
+                let major = v(major_axis);
+                let minor =
+                    v(normal).cross(major).normalize_or_zero() * major.length() * minor_axis_ratio;
+                (
+                    v(center),
+                    major,
+                    minor,
+                    start_param,
+                    if end_param < start_param {
+                        end_param + std::f64::consts::TAU
+                    } else {
+                        end_param
+                    },
+                )
+            }
+            TangentGeom::Line { .. } => return,
+        };
+        let size = ax.length().max(ay.length());
+        if !(size.is_finite() && size > 0.0 && (t1 - t0).is_finite()) {
+            return;
+        }
+        let at = |t: f64| c + ax * t.cos() + ay * t.sin();
+        let last = self.points.len() - 1;
+        let (first_pt, last_pt) = (self.point_world(0, 1.0), self.point_world(last, 1.0));
+        let close = |a: DVec3, b: DVec3| a.distance(b) <= size * 1e-4 + 1e-9;
+        // The run must be this curve, in either direction.
+        let reversed = if close(first_pt, at(t0)) && close(last_pt, at(t1)) {
+            false
+        } else if close(first_pt, at(t1)) && close(last_pt, at(t0)) {
+            true
+        } else {
+            return;
+        };
+        let n = (((t1 - t0) / STEP).ceil() as usize).min(MAX_POINTS);
+        if n <= last {
+            return;
+        }
+        let mut points = Vec::with_capacity(n + 1);
+        let mut low = Vec::with_capacity(n + 1);
+        for k in 0..=n {
+            let k = if reversed { n - k } else { k };
+            let p = at(t0 + (t1 - t0) * k as f64 / n as f64);
+            let high = p.as_vec3();
+            points.push(high.to_array());
+            low.push((p - high.as_dvec3()).as_vec3().to_array());
+        }
+        self.points = points;
+        self.points_low = low.into();
+    }
+
+    pub fn point_world(&self, index: usize, view_height: f64) -> glam::DVec3 {
+        let high = self.points[index];
+        let low = self.points_low.get(index).unwrap_or([0.0; 3]);
+        let point = glam::DVec3::new(
+            high[0] as f64 + low[0] as f64,
+            high[1] as f64 + low[1] as f64,
+            high[2] as f64 + low[2] as f64,
+        );
+        self.point_marker
+            .map_or(point, |marker| marker.resolve(point, view_height))
+    }
+}
+
+fn map_points(
+    points: &mut [[f32; 3]],
+    points_low: &mut Vec<[f32; 3]>,
+    map: impl Fn(glam::DVec3) -> glam::DVec3,
+) {
+    let old_low = std::mem::take(points_low);
+    points_low.reserve(points.len());
+    for (index, high) in points.iter_mut().enumerate() {
+        if !high[0].is_finite() || !high[1].is_finite() || !high[2].is_finite() {
+            points_low.push([0.0; 3]);
+            continue;
+        }
+        let low = old_low.get(index).copied().unwrap_or([0.0; 3]);
+        let mapped = map(glam::DVec3::new(
+            high[0] as f64 + low[0] as f64,
+            high[1] as f64 + low[1] as f64,
+            high[2] as f64 + low[2] as f64,
+        ));
+        let (hx, lx) = WireModel::split_ds(mapped.x);
+        let (hy, ly) = WireModel::split_ds(mapped.y);
+        let (hz, lz) = WireModel::split_ds(mapped.z);
+        *high = [hx, hy, hz];
+        points_low.push([lx, ly, lz]);
+    }
+}
+
+impl WireModel {
+    /// Remap every text channel geometrically in ONE call.
+    ///
+    /// The SDF quads and the searchable runs describe the same placed text;
+    /// transforming one without the other strands invisible text away from its
+    /// outlines. Every geometric remap of text (block expand, OCS→WCS, paper
+    /// projection, preview drags) MUST go through here so the rule — origins
+    /// via `map`, cap height and advance scaled by `height_scale`, rotation
+    /// shifted by `rot_delta` — lives in exactly one place instead of being
+    /// re-implemented (and drifted) per call site.
+    pub fn map_text_layout(
+        &mut self,
+        map: &dyn Fn([f64; 3]) -> [f64; 3],
+        height_scale: f64,
+        rot_delta: f32,
+    ) {
+        if !self.text_verts.is_empty() {
+            let geom = self.geom_mut();
+            geom.text_verts = map_text_verts(&geom.text_verts, |x, y, z| {
+                let p = map([x, y, z]);
+                (p[0], p[1], p[2])
+            });
+        }
+        self.map_searchable_runs(map, height_scale, rot_delta);
+    }
+
+    /// Remap only the searchable runs (origin, cap height, advance, rotation).
+    /// Used where the quads need custom handling (per-vertex colour, per-quad
+    /// culling) but the runs must follow the same geometry — same rule as
+    /// [`Self::map_text_layout`], runs half.
+    pub fn map_searchable_runs(
+        &mut self,
+        map: &dyn Fn([f64; 3]) -> [f64; 3],
+        height_scale: f64,
+        rot_delta: f32,
+    ) {
+        map_searchable_runs(&mut self.searchable_text, map, height_scale, rot_delta);
+    }
+}
+
+/// Remap a run slice geometrically: origins via `map`, cap height and advance
+/// scaled by `height_scale`, rotation shifted by `rot_delta`. The single rule
+/// behind [`WireModel::map_text_layout`] and [`WireModel::map_searchable_runs`];
+/// batch code (block expand) maps runs it appends to shared entries through
+/// this so the geometry can never drift from the method pair.
+pub fn map_searchable_runs(
+    runs: &mut [SearchableTextRun],
+    map: &dyn Fn([f64; 3]) -> [f64; 3],
+    height_scale: f64,
+    rot_delta: f32,
+) {
+    for run in runs {
+        run.origin = map(run.origin);
+        run.height = (run.height as f64 * height_scale) as f32;
+        run.adv_width = (run.adv_width as f64 * height_scale) as f32;
+        run.rotation += rot_delta;
+    }
+}
+
+/// Overlap of a text run's rect with an axis-aligned rect (SAT on both axes).
+///
+/// The run occupies `adv_width` along its baseline direction and roughly
+/// `height` above (cap) plus a descender allowance below: corners span
+/// `[-0.3h, +1.0h]` across the baseline. `rect` is `[x0, y0, x1, y1]`.
+/// Conservative by design (it only gates searchability, never drawing).
+pub fn run_rect_overlap(
+    origin: [f64; 2],
+    rotation: f32,
+    adv_width: f64,
+    height: f64,
+    rect: [f64; 4],
+) -> bool {
+    if !adv_width.is_finite() || !height.is_finite() || adv_width <= 0.0 || height <= 0.0 {
+        return true;
+    }
+    let (s, c) = rotation.sin_cos();
+    let (dx, dy) = (c as f64, s as f64);
+    let (nx, ny) = (-dy, dx);
+    let corners = [
+        [
+            origin[0] + nx * -0.3 * height,
+            origin[1] + ny * -0.3 * height,
+        ],
+        [
+            origin[0] + dx * adv_width + nx * -0.3 * height,
+            origin[1] + dy * adv_width + ny * -0.3 * height,
+        ],
+        [
+            origin[0] + dx * adv_width + nx * height,
+            origin[1] + dy * adv_width + ny * height,
+        ],
+        [origin[0] + nx * height, origin[1] + ny * height],
+    ];
+    // Separating-axis test on the OBB axes plus world x/y.
+    for (ax, ay) in [(dx, dy), (nx, ny), (1.0, 0.0), (0.0, 1.0)] {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for p in &corners {
+            let t = p[0] * ax + p[1] * ay;
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        let (mut rlo, mut rhi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for p in [
+            [rect[0], rect[1]],
+            [rect[2], rect[1]],
+            [rect[2], rect[3]],
+            [rect[0], rect[3]],
+        ] {
+            let t = p[0] * ax + p[1] * ay;
+            rlo = rlo.min(t);
+            rhi = rhi.max(t);
+        }
+        if hi < rlo || rhi < lo {
+            return false;
+        }
+    }
+    true
+}
+
+/// Map every glyph vertex's double-single world position through `f`, re-
+/// splitting the result. The preview transforms above move `points`, but SDF
+/// glyph quads live in `text_verts` (absolute-world double-single) — so a text
+/// ghost (MOVE / COPY / ROTATE / SCALE / STRETCH / MIRROR preview) must carry
+/// these along or the dragged text renders frozen at its source (issue #316).
+/// Paper-space viewport projection uses it for the same reason (issue #385).
+pub(crate) fn map_text_verts(
+    verts: &[crate::display::text_vertex::TextVertex],
+    f: impl Fn(f64, f64, f64) -> (f64, f64, f64),
+) -> Vec<crate::display::text_vertex::TextVertex> {
+    use crate::display::text_vertex::split_ds;
+    verts
+        .iter()
+        .map(|v| {
+            let (nx, ny, nz) = f(
+                v.pos[0] as f64 + v.pos_low[0] as f64,
+                v.pos[1] as f64 + v.pos_low[1] as f64,
+                v.pos[2] as f64 + v.pos_low[2] as f64,
+            );
+            let (xh, xl) = split_ds(nx);
+            let (yh, yl) = split_ds(ny);
+            let (zh, zl) = split_ds(nz);
+            crate::display::text_vertex::TextVertex {
+                pos: [xh, yh, zh],
+                pos_low: [xl, yl, zl],
+                ..*v
+            }
+        })
+        .collect()
+}
+
+impl WireGeom {
+    pub(crate) fn estimated_bytes(&self) -> usize {
+        fn bytes<T>(values: &Vec<T>) -> usize {
+            values.capacity() * std::mem::size_of::<T>()
+        }
+        std::mem::size_of::<Self>()
+            + self.surfaces.as_deref().map_or(0, |surfaces| {
+                std::mem::size_of::<WireSurfaces>()
+                    + surfaces.plot_clip.as_deref().map_or(0, std::mem::size_of_val)
+                    + bytes(&surfaces.fill_tris)
+                    + bytes(&surfaces.fill_tris_low)
+                    + bytes(&surfaces.pick_tris)
+                    + bytes(&surfaces.pick_tris_low)
+            })
+            + bytes(&self.points)
+            + self.points_low.allocated_bytes()
+            + bytes(&self.taper_widths)
+            + bytes(&self.pattern_stations)
+            + bytes(&self.snap_pts)
+            + bytes(&self.tangent_geoms)
+            + bytes(&self.key_vertices)
+            + bytes(&self.text_verts)
+            + bytes(&self.searchable_text)
+    }
+
+    /// The empty geometry as a shared `Arc`: a wire built from `Default` costs
+    /// one refcount bump, not an allocation, until it is written. Clones of the
+    /// shared empty value detach on their first write.
+    fn empty_arc() -> std::sync::Arc<WireGeom> {
+        static EMPTY: std::sync::OnceLock<std::sync::Arc<WireGeom>> = std::sync::OnceLock::new();
+        std::sync::Arc::clone(EMPTY.get_or_init(|| std::sync::Arc::new(WireGeom::default())))
+    }
+}
+
+impl Default for WireModel {
+    fn default() -> Self {
+        Self {
+            geom: WireGeom::empty_arc(),
+            point_marker: None,
+            name: String::new(),
+            effective_layer: None,
+            block_member: None,
+            color: Self::WHITE,
+            bg_adapt: None,
+            selected: false,
+            pattern_length: 0.0,
+            pattern: [0.0; 8],
+            line_weight_px: 1.0,
+            world_width: 0.0,
+            aci: 0,
+            aabb: Self::UNBOUNDED_AABB,
+            plinegen: true,
+            dash_from_start: false,
+            element_linetype: None,
+            element_color: None,
+            dash_closure: DashClosure::Open,
+            depth_override: None,
+            display_visible: true,
+            snap_only: false,
+            region_boundary_click: false,
+            reference_only: false,
+            plot_visible: true,
+            fill_is_3d: false,
+            fill_is_2d_solid: false,
+            solid_normal: None,
+            render_instance: None,
+            stub: None,
+        }
+    }
+}
+
+impl std::ops::Deref for WireModel {
+    type Target = WireGeom;
+
+    fn deref(&self) -> &WireGeom {
+        &self.geom
+    }
+}
+
+impl std::ops::DerefMut for WireModel {
+    fn deref_mut(&mut self) -> &mut WireGeom {
+        std::sync::Arc::make_mut(&mut self.geom)
+    }
+}
+
+impl WireModel {
+    /// The geometry as one mutable block, copied first when shared. Lets a
+    /// transform borrow two of its buffers at once; `wire.points.push(..)`
+    /// needs no call at all.
+    pub(crate) fn geom_mut(&mut self) -> &mut WireGeom {
+        std::sync::Arc::make_mut(&mut self.geom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_transformations_preserve_and_update_tangent_geoms() {
+        let mut wire = WireModel::default();
+        wire.tangent_geoms.push(TangentGeom::PlanarCircle {
+            center: [10.0, 20.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+        });
+        wire.tangent_geoms.push(TangentGeom::Arc {
+            center: [10.0, 20.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 5.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+        });
+        wire.tangent_geoms.push(TangentGeom::PlanarEllipse {
+            center: [10.0, 20.0, 0.0],
+            major_axis: [10.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.5,
+            start_param: 0.0,
+            end_param: std::f64::consts::PI,
+        });
+
+        // Test translated
+        let trans = wire.translated(glam::Vec3::new(5.0, -5.0, 1.0));
+        assert_eq!(trans.tangent_geoms.len(), 3);
+        if let TangentGeom::PlanarCircle { center, radius, .. } = trans.tangent_geoms[0] {
+            assert!((center[0] - 15.0).abs() < 1e-5);
+            assert!((center[1] - 15.0).abs() < 1e-5);
+            assert!((center[2] - 1.0).abs() < 1e-5);
+            assert!((radius - 5.0).abs() < 1e-5);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+        if let TangentGeom::Arc {
+            center,
+            radius,
+            start_angle,
+            end_angle,
+            ..
+        } = trans.tangent_geoms[1]
+        {
+            assert!((center[0] - 15.0).abs() < 1e-5);
+            assert!((center[1] - 15.0).abs() < 1e-5);
+            assert!((center[2] - 1.0).abs() < 1e-5);
+            assert!((radius - 5.0).abs() < 1e-5);
+            assert_eq!(start_angle, 0.0);
+            assert_eq!(end_angle, std::f64::consts::FRAC_PI_2);
+        } else {
+            panic!("Expected Arc");
+        }
+        if let TangentGeom::PlanarEllipse {
+            center,
+            major_axis,
+            minor_axis_ratio,
+            ..
+        } = trans.tangent_geoms[2]
+        {
+            assert!((center[0] - 15.0).abs() < 1e-5);
+            assert!((center[1] - 15.0).abs() < 1e-5);
+            assert!((center[2] - 1.0).abs() < 1e-5);
+            assert_eq!(major_axis, [10.0, 0.0, 0.0]);
+            assert_eq!(minor_axis_ratio, 0.5);
+        } else {
+            panic!("Expected PlanarEllipse");
+        }
+
+        // Test scaled
+        let scaled = wire.scaled(glam::Vec3::new(10.0, 20.0, 0.0), 2.0);
+        if let TangentGeom::PlanarCircle { radius, .. } = scaled.tangent_geoms[0] {
+            assert!((radius - 10.0).abs() < 1e-5);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+        if let TangentGeom::Arc { radius, .. } = scaled.tangent_geoms[1] {
+            assert!((radius - 10.0).abs() < 1e-5);
+        } else {
+            panic!("Expected Arc");
+        }
+        if let TangentGeom::PlanarEllipse { major_axis, .. } = scaled.tangent_geoms[2] {
+            assert!((major_axis[0] - 20.0).abs() < 1e-5);
+        } else {
+            panic!("Expected PlanarEllipse");
+        }
+
+        // Test rotated
+        let rot = wire.rotated(glam::Vec3::ZERO, std::f32::consts::FRAC_PI_2);
+        if let TangentGeom::PlanarCircle {
+            center,
+            axis_x,
+            axis_y,
+            ..
+        } = rot.tangent_geoms[0]
+        {
+            assert!((center[0] - -20.0).abs() < 1e-4);
+            assert!((center[1] - 10.0).abs() < 1e-4);
+            assert!((axis_x[1] - 1.0).abs() < 1e-4);
+            assert!((axis_y[0] - -1.0).abs() < 1e-4);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+
+        // Test mirrored across Y=0 plane (normal = Y)
+        let mirr = wire.mirrored(
+            glam::Vec3::new(0.0, 0.0, 0.0),
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        if let TangentGeom::PlanarCircle { center, .. } = mirr.tangent_geoms[0] {
+            assert!((center[0] - 10.0).abs() < 1e-4);
+            assert!((center[1] - -20.0).abs() < 1e-4);
+        } else {
+            panic!("Expected PlanarCircle");
+        }
+    }
+
+    #[test]
+    fn map_text_layout_moves_quads_and_runs_together() {
+        let mut wire = WireModel::default();
+        wire.searchable_text.push(SearchableTextRun {
+            text: "AB".into(),
+            origin: [10.0, 20.0, 0.0],
+            height: 5.0,
+            rotation: 0.0,
+            color: WireModel::WHITE,
+            bold: false,
+            font: "txt".into(),
+            adv_width: 8.0,
+        });
+        // Uniform scale ×2 about the origin plus translation: quads and runs
+        // must agree afterwards (the lockstep this helper exists to enforce).
+        wire.map_text_layout(&|p| [p[0] * 2.0 + 1.0, p[1] * 2.0, p[2]], 2.0, 0.5);
+        let run = &wire.searchable_text[0];
+        assert_eq!(run.origin, [21.0, 40.0, 0.0]);
+        assert!((run.height - 10.0).abs() < 1e-4);
+        assert!((run.adv_width - 16.0).abs() < 1e-4);
+        assert!((run.rotation - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn run_rect_overlap_keeps_straddlers_drops_outsiders() {
+        assert!(run_rect_overlap(
+            [10.0, 20.0],
+            0.0,
+            8.0,
+            5.0,
+            [0.0, 0.0, 30.0, 30.0]
+        ));
+        assert!(!run_rect_overlap(
+            [10.0, 20.0],
+            0.0,
+            8.0,
+            5.0,
+            [100.0, 100.0, 130.0, 130.0]
+        ));
+        // A 90° run crossing the rect edge still counts (origin-only culling
+        // would have dropped it).
+        assert!(run_rect_overlap(
+            [28.0, 20.0],
+            std::f32::consts::FRAC_PI_2,
+            8.0,
+            5.0,
+            [0.0, 0.0, 30.0, 30.0]
+        ));
+        // Degenerate runs never cull (conservative: searchability only).
+        assert!(run_rect_overlap(
+            [500.0, 500.0],
+            0.0,
+            0.0,
+            5.0,
+            [0.0, 0.0, 30.0, 30.0]
+        ));
+    }
+
+    #[test]
+    fn cloned_wires_share_geometry_until_one_is_written() {
+        let wire = WireModel::solid(
+            "L1".to_string(),
+            vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            WireModel::WHITE,
+            false,
+        );
+        let mut copy = wire.clone();
+        assert_eq!(
+            copy.points.as_ptr(),
+            wire.points.as_ptr(),
+            "a clone shares its geometry rather than copying every buffer"
+        );
+        assert_eq!(
+            wire.clone_with_name("L2").points.as_ptr(),
+            wire.points.as_ptr(),
+            "a block occurrence reuses its prototype's geometry until it moves it"
+        );
+        // Restyling is a hot-field change: the geometry stays shared.
+        copy.color = WireModel::CYAN;
+        assert_eq!(copy.points.as_ptr(), wire.points.as_ptr());
+
+        // A geometry write copies first, so the original is untouched.
+        copy.points[1] = [20.0, 0.0, 0.0];
+        assert_eq!(
+            wire.points[1],
+            [10.0, 0.0, 0.0],
+            "writing the copy leaves the original alone"
+        );
+    }
+
+    #[test]
+    fn searchable_text_cleaning_handles_mtext_traps() {
+        // `\P` is a real newline → space (runs arrive per-line).
+        assert_eq!(clean_searchable_text("A\\PB"), "A B");
+        // Decoration toggles are stripped, not searched.
+        assert_eq!(clean_searchable_text("\\LAB\\l"), "AB");
+        // DXF specials decode (incl. %%nnn codes).
+        assert_eq!(clean_searchable_text("%%d"), "°");
+        assert_eq!(clean_searchable_text("%%p"), "±");
+        assert_eq!(clean_searchable_text("%%c"), "∅");
+        assert_eq!(clean_searchable_text("%%065"), "A");
+        // Stacking, unicode escapes and grouping braces.
+        assert_eq!(clean_searchable_text("\\S1^2;"), "1/2");
+        assert_eq!(clean_searchable_text("\\U+00E9"), "é");
+        assert_eq!(clean_searchable_text("{AB}"), "AB");
+        // Plain text survives verbatim (drawing codes stay searchable).
+        assert_eq!(clean_searchable_text("CMa-03"), "CMa-03");
+        assert_eq!(clean_searchable_text(""), "");
+    }
+}

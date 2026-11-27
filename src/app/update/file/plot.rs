@@ -225,6 +225,33 @@ pub(crate) fn ratio_scale_name(factor: f64) -> String {
     }
 }
 
+/// The raster format a plot file's extension asks for, `None` for a vector one.
+pub(crate) fn raster_file_format(path: &std::path::Path) -> Option<image::ImageFormat> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some(image::ImageFormat::Png),
+        "jpg" | "jpeg" => Some(image::ImageFormat::Jpeg),
+        "bmp" => Some(image::ImageFormat::Bmp),
+        "tif" | "tiff" => Some(image::ImageFormat::Tiff),
+        _ => None,
+    }
+}
+
+/// Write `page` as a raster image at the page's raster DPI (300 when the
+/// dialog leaves it blank), so the sheet comes out at print resolution
+/// rather than at screen size as JPGOUT/PNGOUT do.
+fn plot_page_raster(
+    page: &PdfPageInput,
+    format: image::ImageFormat,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let dpi = f64::from(page.options.raster_dpi.unwrap_or(300).clamp(10, 2400));
+    let pixels = |mm: f64| ((mm / 25.4 * dpi).round() as u32).max(1);
+    let (w, h) = (page.paper_w.max(1.0), page.paper_h.max(1.0));
+    let bytes = raster_page(page, pixels(w), pixels(h), format)?;
+    write_export(path, &bytes)
+}
+
 /// The plot device the dialog currently targets.
 pub(crate) fn plot_dialog_device(
     d: &crate::ui::window::plot::PlotDialogState,
@@ -250,7 +277,15 @@ pub(crate) fn device_name_for_settings(
 ) -> String {
     use crate::io::plot_device::PlotDevice;
     let device = plot_dialog_device(d);
-    let dwf = d.to_file && d.file_dwf;
+    let image = d.to_file && d.file_image;
+    if image != crate::io::plot_device::is_image_device(&stored.printer_name) {
+        return if image {
+            crate::io::plot_device::IMAGE_DEVICE_NAME.to_string()
+        } else {
+            device.canonical_name()
+        };
+    }
+    let dwf = d.to_file && d.file_dwf && !image;
     if dwf != crate::io::plot_device::is_dwf_device(&stored.printer_name) {
         return if dwf {
             crate::io::plot_device::DWF_DEVICE_NAME.to_string()
@@ -1399,6 +1434,7 @@ impl OpenCADStudio {
         let is_dwf = path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("dwf"));
+        let raster = raster_file_format(&path);
         self.refresh_current_plot_context();
         let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
@@ -1406,7 +1442,7 @@ impl OpenCADStudio {
             );
             return Task::none();
         };
-        if !is_svg && !is_dwf {
+        if !is_svg && !is_dwf && raster.is_none() {
             if let Err(error) = self.validate_geopdf_page(&page) {
                 self.command_line.push_error(&error);
                 return Task::none();
@@ -1418,7 +1454,9 @@ impl OpenCADStudio {
         let work = move || {
             // SVG and DWF share the plot page with PDF: pick the writer from
             // the chosen extension.
-            let result = if is_svg {
+            let result = if let Some(format) = raster {
+                plot_page_raster(&page, format, &worker_path)
+            } else if is_svg {
                 crate::io::svg_export::export_svg(&page, &worker_path)
             } else if is_dwf {
                 crate::io::dwf_export::export_dwf(&page, &sheet, &worker_path)
@@ -1448,6 +1486,7 @@ impl OpenCADStudio {
         let is_dwf = path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("dwf"));
+        let raster = raster_file_format(&path);
         let job = match self.plot_dialog.area.as_str() {
             "Display" => self.display_plot_job(),
             "Extents" => self.extents_plot_job(),
@@ -1458,7 +1497,7 @@ impl OpenCADStudio {
                 .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
             return Task::none();
         };
-        if !is_svg && !is_dwf {
+        if !is_svg && !is_dwf && raster.is_none() {
             if let Err(error) = self.validate_geopdf_page(&page) {
                 self.command_line.push_error(&error);
                 return Task::none();
@@ -1469,7 +1508,9 @@ impl OpenCADStudio {
         let open_when_done = self.plot_dialog.open_when_done;
         let sheet = self.tabs[self.active_tab].scene.current_layout.clone();
         let work = move || {
-            let result = if is_svg {
+            let result = if let Some(format) = raster {
+                plot_page_raster(&page, format, &worker_path)
+            } else if is_svg {
                 crate::io::svg_export::export_svg(&page, &worker_path)
             } else if is_dwf {
                 crate::io::dwf_export::export_dwf(&page, &sheet, &worker_path)
@@ -1503,6 +1544,17 @@ impl OpenCADStudio {
         }
         if reopen_plot {
             self.active_modal = Some(crate::app::ModalKind::Plot);
+            // A desktop preview drew its sheet: show it in the Plot Preview window.
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(page) = crate::io::print_to_printer::take_preview_page() {
+                self.plot_preview = Some(iced::widget::image::Handle::from_rgba(
+                    page.width,
+                    page.height,
+                    page.pixels.to_vec(),
+                ));
+                self.active_modal = Some(crate::app::ModalKind::PlotPreview);
+                self.reset_modal_geometry();
+            }
         }
     }
 
@@ -2008,7 +2060,9 @@ impl OpenCADStudio {
                         .min((paper_h / MARGIN) / content_h)
                         .max(1e-9)
                 } else {
-                    (plot_dialog_scale_factor(&self.plot_dialog) * mm_per_unit).max(1e-9)
+                    // Millimetres per paper unit already, as in
+                    // `area_plot_job` (#3437, #3769).
+                    plot_dialog_scale_factor(&self.plot_dialog).max(1e-9)
                 };
                 let target_x = if centered {
                     (paper_w - content_w * scale) * 0.5
@@ -2331,7 +2385,9 @@ impl OpenCADStudio {
         let path = folder
             .filter(|folder| std::fs::create_dir_all(folder).is_ok())
             .map(|folder| {
-                let ext = if self.plot_dialog.file_dwf {
+                let ext = if self.plot_dialog.file_image {
+                    "png"
+                } else if self.plot_dialog.file_dwf {
                     "dwf"
                 } else if self.plot_dialog.file_svg {
                     "svg"
@@ -2755,7 +2811,8 @@ impl OpenCADStudio {
         msg: crate::ui::window::plot::PlotDlgMsg,
     ) -> Task<Message> {
         use crate::ui::window::plot::{
-            PlotDlgMsg as M, PlotFlag, OUT_DEFAULT, OUT_DWF, OUT_PDF, OUT_SVG, STYLE_NONE,
+            PlotDlgMsg as M, PlotFlag, OUT_DEFAULT, OUT_DWF, OUT_IMAGE, OUT_PDF, OUT_SVG,
+            STYLE_NONE,
         };
         match msg {
             M::Close => {
@@ -2770,7 +2827,8 @@ impl OpenCADStudio {
                 // the target changes.
                 self.plot_dialog.printer_editor = None;
                 self.plot_dialog.file_dwf = s == OUT_DWF;
-                if s == OUT_PDF || s == OUT_DWF {
+                self.plot_dialog.file_image = s == OUT_IMAGE;
+                if s == OUT_PDF || s == OUT_DWF || s == OUT_IMAGE {
                     self.plot_dialog.to_file = true;
                     self.plot_dialog.file_svg = false;
                 } else if s == OUT_SVG {
@@ -3047,7 +3105,8 @@ impl OpenCADStudio {
                     }
                     PlotFlag::GeoPdf
                         if (d.to_file || cfg!(target_arch = "wasm32"))
-                            && (!(d.file_svg || d.file_dwf) || cfg!(target_arch = "wasm32"))
+                            && (!(d.file_svg || d.file_dwf || d.file_image)
+                                || cfg!(target_arch = "wasm32"))
                             && !d.paper_space
                             && d.area != "Layout" =>
                     {
@@ -3266,6 +3325,16 @@ impl OpenCADStudio {
                 Task::none()
             }
             M::Preview => self.on_plot_dlg_commit(true),
+            M::PreviewClose => {
+                self.plot_preview = None;
+                self.active_modal = Some(crate::app::ModalKind::Plot);
+                Task::none()
+            }
+            M::PreviewPlot => {
+                self.plot_preview = None;
+                self.active_modal = Some(crate::app::ModalKind::Plot);
+                self.on_plot_dlg_commit(false)
+            }
             M::Commit if self.print_all_options => {
                 if self.plot_dialog.style_missing && self.plot_dialog.apply_plot_styles {
                     self.command_line.push_error(
@@ -3321,6 +3390,7 @@ impl OpenCADStudio {
             d.to_file = true;
             d.file_svg = false;
             d.file_dwf = false;
+            d.file_image = false;
             let a4 = crate::io::paper_catalog::default_paper();
             d.paper = a4.canonical.to_string();
             d.orientation = "Landscape".into();
@@ -3563,18 +3633,21 @@ impl OpenCADStudio {
                 // ponytail: DWF has no PlotDevice of its own; the stored
                 // DWF6 name is recognised here and kept by the stored-name rule.
                 d.file_dwf = crate::io::plot_device::is_dwf_device(&ps.printer_name);
+                d.file_image = crate::io::plot_device::is_image_device(&ps.printer_name);
                 d.printer = None;
             }
             crate::io::plot_device::PlotDevice::Printer(name) => {
                 d.to_file = false;
                 d.file_svg = false;
                 d.file_dwf = false;
+                d.file_image = false;
                 d.printer = Some(name);
             }
             crate::io::plot_device::PlotDevice::None => {
                 d.to_file = false;
                 d.file_svg = false;
                 d.file_dwf = false;
+                d.file_image = false;
                 d.printer = None;
             }
         }
@@ -3665,7 +3738,7 @@ impl OpenCADStudio {
         if d.geopdf
             && !preview
             && to_file
-            && (!(d.file_svg || d.file_dwf) || cfg!(target_arch = "wasm32"))
+            && (!(d.file_svg || d.file_dwf || d.file_image) || cfg!(target_arch = "wasm32"))
             && d.area != "Layout"
         {
             // Missing CRS or units means the ordinary plain-PDF fallback; only
@@ -3713,7 +3786,7 @@ impl OpenCADStudio {
             };
             if !preview
                 && to_file
-                && (!(d.file_svg || d.file_dwf) || cfg!(target_arch = "wasm32"))
+                && (!(d.file_svg || d.file_dwf || d.file_image) || cfg!(target_arch = "wasm32"))
             {
                 if let Err(error) = self.validate_geopdf_page(&page) {
                     self.command_line.push_error(&error);

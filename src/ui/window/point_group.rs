@@ -100,6 +100,15 @@ pub struct PointGroupWindow {
     pub error: Option<String>,
     /// The group Apply wrote; OK and a later Apply rewrite it.
     pub written: Option<document::Handle>,
+    /// Raw Desc Matching: the codes of the drawing's description keys
+    /// (code, format, ticked).
+    pub codes: Vec<(String, String, bool)>,
+    /// Object locked: the window's other fields are off and the group's
+    /// name and description stay as last written (`applied`).
+    pub locked: bool,
+    pub applied: (String, String),
+    /// The drawing's coordinate unit mark (`m`, `'` or none).
+    pub unit: &'static str,
 }
 
 impl PointGroupWindow {
@@ -130,6 +139,9 @@ pub enum PointGroupMsg {
     Description(String),
     PointStyle(String),
     LabelStyle(String),
+    Locked(bool),
+    /// A Raw Desc Matching code ticked or unticked.
+    RawCode(usize, bool),
     Group(usize, bool),
     /// Include (false) or Exclude (true) rule `index` turned on or off.
     Rule(bool, usize, bool),
@@ -195,7 +207,7 @@ fn rule_row<'a>(label: String, rule: &'a crate::modules::civil::point_group_quer
 
 fn rules_view<'a>(state: &'a PointGroupWindow, exclude: bool) -> Element<'a, Message> {
     let rules = if exclude { &state.exclude } else { &state.include };
-    let enabled = !state.modify_query && (exclude || !state.include_all);
+    let enabled = !state.locked && !state.modify_query && (exclude || !state.include_all);
     let labels = [
         t!("With numbers matching:"),
         t!("With elevations matching:"),
@@ -214,6 +226,10 @@ fn rules_view<'a>(state: &'a PointGroupWindow, exclude: bool) -> Element<'a, Mes
                         .on_press_maybe((enabled && rules.0[0].on).then(|| msg(PointGroupMsg::Pick(exclude))))
                         .style(button_style(false))
                         .padding([4, 10]),
+                    // Project points: only for a drawing in a data project,
+                    // which OpenCAD Studio does not open (off in every
+                    // drawing measured).
+                    button(small(t!("Project Points in Window >>"))).style(button_style(false)).padding([4, 10]),
                 ]
                 .spacing(8),
             );
@@ -221,7 +237,7 @@ fn rules_view<'a>(state: &'a PointGroupWindow, exclude: bool) -> Element<'a, Mes
     }
     if !exclude {
         let mut all = checkbox(state.include_all).label(t!("Include all points")).size(14).text_size(11);
-        if !state.modify_query {
+        if !state.modify_query && !state.locked {
             all = all.on_toggle(|v| msg(PointGroupMsg::IncludeAll(v)));
         }
         col = col.push(Space::new().height(8)).push(all);
@@ -245,10 +261,11 @@ fn style_pick<'a>(label: String, styles: &'a [(String, u64)], current: usize, on
 }
 
 fn query_builder<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
-    let on = state.modify_query;
+    let on = state.modify_query && !state.locked;
+    let free = !state.locked;
     let mut head = column![
-        checkbox(state.case_sensitive).label(t!("Use case-sensitive matching")).size(14).text_size(11).on_toggle(|v| msg(PointGroupMsg::CaseSensitive(v))),
-        checkbox(state.modify_query).label(t!("Modify query")).size(14).text_size(11).on_toggle(|v| msg(PointGroupMsg::ModifyQuery(v))),
+        checkbox(state.case_sensitive).label(t!("Use case-sensitive matching")).size(14).text_size(11).on_toggle_maybe(free.then_some(|v| msg(PointGroupMsg::CaseSensitive(v)))),
+        checkbox(state.modify_query).label(t!("Modify query")).size(14).text_size(11).on_toggle_maybe(free.then_some(|v| msg(PointGroupMsg::ModifyQuery(v)))),
     ]
     .spacing(6);
     let header = row![
@@ -296,17 +313,17 @@ fn query_builder<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
                 .width(Fill),
         );
     }
-    let body: Element<'a, Message> = if on {
+    let body: Element<'a, Message> = if state.modify_query {
         column![
             scrollable(list).height(Length::Fixed(200.0)),
             row![
-                button(small(t!("Insert Row"))).on_press(msg(PointGroupMsg::InsertRow)).style(button_style(false)).padding([4, 10]),
+                button(small(t!("Insert Row"))).on_press_maybe(on.then(|| msg(PointGroupMsg::InsertRow))).style(button_style(false)).padding([4, 10]),
                 button(small(t!("Delete Row")))
-                    .on_press_maybe(state.row.map(|_| msg(PointGroupMsg::DeleteRow)))
+                    .on_press_maybe(state.row.filter(|_| on).map(|_| msg(PointGroupMsg::DeleteRow)))
                     .style(button_style(false))
                     .padding([4, 10]),
                 Space::new().width(Fill),
-                button(small(t!("Reset"))).on_press(msg(PointGroupMsg::Reset)).style(button_style(false)).padding([4, 10]),
+                button(small(t!("Reset"))).on_press_maybe(on.then(|| msg(PointGroupMsg::Reset))).style(button_style(false)).padding([4, 10]),
             ]
             .spacing(6),
         ]
@@ -324,9 +341,10 @@ fn query_builder<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
 fn overrides<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
     let style = state.point_styles.get(state.point_style).map(|s| s.0.clone()).unwrap_or_default();
     let label = state.label_styles.get(state.label_style).map(|s| s.0.clone()).unwrap_or_default();
+    let free = !state.locked;
     let line = |index: usize, name: String, on: bool, value: Element<'a, Message>| -> Element<'a, Message> {
         row![
-            checkbox(on).label(name).size(14).text_size(11).on_toggle(move |v| msg(PointGroupMsg::Override(index, v))).width(Length::Fixed(200.0)),
+            checkbox(on).label(name).size(14).text_size(11).on_toggle_maybe(free.then_some(move |v| msg(PointGroupMsg::Override(index, v)))).width(Length::Fixed(200.0)),
             value,
         ]
         .spacing(8)
@@ -336,8 +354,8 @@ fn overrides<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
     card(
         t!("Overrides").into_owned(),
         column![
-            line(0, t!("Raw Description").into_owned(), state.override_raw.0, field(&state.override_raw.1, state.override_raw.0, |s| msg(PointGroupMsg::OverrideText(0, s)))),
-            line(1, t!("Point Elevation").into_owned(), state.override_elevation.0, field(&state.override_elevation.1, state.override_elevation.0, |s| msg(PointGroupMsg::OverrideText(1, s)))),
+            line(0, t!("Raw Description").into_owned(), state.override_raw.0, field(&state.override_raw.1, free && state.override_raw.0, |s| msg(PointGroupMsg::OverrideText(0, s)))),
+            line(1, t!("Point Elevation").into_owned(), state.override_elevation.0, field(&state.override_elevation.1, free && state.override_elevation.0, |s| msg(PointGroupMsg::OverrideText(1, s)))),
             line(2, t!("Style").into_owned(), state.override_style, small(style).into()),
             line(3, t!("Point Label Style").into_owned(), state.override_label, small(label).into()),
         ]
@@ -356,8 +374,21 @@ pub enum ListCol {
     Name,
     Raw,
     Full,
+    Format,
     GridEasting,
     GridNorthing,
+    Longitude,
+    Latitude,
+    ScaleFactor,
+    Convergence,
+    Style,
+    LabelStyle,
+    Layer,
+    Project,
+    XyScale,
+    ZScale,
+    MarkerRotation,
+    LabelRotation,
 }
 
 impl ListCol {
@@ -370,15 +401,28 @@ impl ListCol {
             ListCol::Name => "Name",
             ListCol::Raw => "Raw Description",
             ListCol::Full => "Full Description",
+            ListCol::Format => "Description Format",
             ListCol::GridEasting => "Grid Easting",
             ListCol::GridNorthing => "Grid Northing",
+            ListCol::Longitude => "Longitude",
+            ListCol::Latitude => "Latitude",
+            ListCol::ScaleFactor => "Scale Factor",
+            ListCol::Convergence => "Convergence",
+            ListCol::Style => "Style",
+            ListCol::LabelStyle => "Point Label Style",
+            ListCol::Layer => "Point Layer",
+            ListCol::Project => "Project Version",
+            ListCol::XyScale => "X-Y Scale",
+            ListCol::ZScale => "Z Scale",
+            ListCol::MarkerRotation => "Marker Rotation",
+            ListCol::LabelRotation => "Label Rotation",
         }
     }
 
     /// The column a script names: its title in lower case, spaces as `_`.
     pub fn of(name: &str) -> Option<ListCol> {
         use ListCol::*;
-        [Number, Easting, Northing, Elevation, Name, Raw, Full, GridEasting, GridNorthing]
+        [Number, Easting, Northing, Elevation, Name, Raw, Full, Format, GridEasting, GridNorthing, Longitude, Latitude, ScaleFactor, Convergence, Style, LabelStyle, Layer, Project, XyScale, ZScale, MarkerRotation, LabelRotation]
             .into_iter()
             .find(|c| c.title().to_lowercase().replace(' ', "_") == name)
     }
@@ -387,40 +431,80 @@ impl ListCol {
         match self {
             ListCol::Number => 100.0,
             ListCol::Name => 70.0,
-            ListCol::Raw | ListCol::Full => 100.0,
+            ListCol::Raw | ListCol::Full | ListCol::Format => 100.0,
+            ListCol::GridEasting | ListCol::GridNorthing | ListCol::Longitude | ListCol::Latitude => 110.0,
+            ListCol::Style | ListCol::LabelStyle | ListCol::Layer | ListCol::Project => 100.0,
             _ => 90.0,
         }
     }
 
     fn numeric(self) -> bool {
-        !matches!(self, ListCol::Name | ListCol::Raw | ListCol::Full)
+        !matches!(
+            self,
+            ListCol::Name | ListCol::Raw | ListCol::Full | ListCol::Format | ListCol::Style | ListCol::LabelStyle | ListCol::Layer | ListCol::Project
+        )
     }
 
-    /// The cell of point `p`. Without description keys the full
-    /// description is the raw one; without a coordinate system grid
-    /// coordinates are the drawing's.
-    pub fn cell(self, p: &Point) -> String {
+    /// The cell of point `p`, coordinates with the drawing's unit mark
+    /// (measured: `140.0000m`, elevation `5.000m`). The full description
+    /// is the raw one in its description key's format; grid coordinates
+    /// are empty without a coordinate system (measured), as are the
+    /// latitude (`N40° 39' 27.90"`), longitude (`E27° 00' 51.19"`), scale
+    /// factor (`1.000`) and convergence (`0° 00' 33.35"`). Style and label
+    /// style are the point's own (empty when it draws with its group's);
+    /// the project version is empty outside a data project.
+    pub fn cell(self, p: &Point, unit: &str) -> String {
+        use crate::modules::civil::point_geodetic::{dms, hemisphere};
+        let grid = |k: usize| p.geo.map(|g| format!("{:.4}{unit}", g.grid[k])).unwrap_or_default();
         match self {
             ListCol::Number => p.number.to_string(),
-            ListCol::Easting | ListCol::GridEasting => format!("{:.4}", p.position[0]),
-            ListCol::Northing | ListCol::GridNorthing => format!("{:.4}", p.position[1]),
+            ListCol::Easting => format!("{:.4}{unit}", p.position[0]),
+            ListCol::Northing => format!("{:.4}{unit}", p.position[1]),
+            ListCol::GridEasting => grid(0),
+            ListCol::GridNorthing => grid(1),
             ListCol::Elevation => {
                 if p.has_elevation() {
-                    format!("{:.3}", p.position[2])
+                    format!("{:.3}{unit}", p.position[2])
                 } else {
                     String::new()
                 }
             }
             ListCol::Name => p.name.clone().unwrap_or_default(),
-            ListCol::Raw | ListCol::Full => p.raw.clone().unwrap_or_default(),
+            ListCol::Raw => p.raw.clone().unwrap_or_default(),
+            ListCol::Full => p.full.clone().unwrap_or_default(),
+            ListCol::Format => p.format.clone().unwrap_or_default(),
+            ListCol::Longitude => p.geo.map(|g| hemisphere(g.longitude, 'E', 'W')).unwrap_or_default(),
+            ListCol::Latitude => p.geo.map(|g| hemisphere(g.latitude, 'N', 'S')).unwrap_or_default(),
+            ListCol::ScaleFactor => p.geo.map(|g| format!("{:.3}", g.scale)).unwrap_or_default(),
+            ListCol::Convergence => p.geo.map(|g| dms(g.convergence, 2)).unwrap_or_default(),
+            ListCol::Style => p.style.clone(),
+            ListCol::LabelStyle => p.label.clone(),
+            ListCol::Layer => p.layer.clone(),
+            ListCol::Project => String::new(),
+            // Empty at the default (scale 1, rotation 0); rotations in
+            // degrees as `30.0000 (d)` (measured).
+            ListCol::XyScale => p.overrides.xy_scale.map(|v| format!("{v:.3}")).unwrap_or_default(),
+            ListCol::ZScale => p.overrides.z_scale.map(|v| format!("{v:.3}")).unwrap_or_default(),
+            ListCol::MarkerRotation => p.overrides.rotation.map(degrees).unwrap_or_default(),
+            ListCol::LabelRotation => p.overrides.label_rotation.map(degrees).unwrap_or_default(),
         }
     }
 
     fn key(self, p: &Point) -> f64 {
         match self {
             ListCol::Number => p.number as f64,
-            ListCol::Easting | ListCol::GridEasting => p.position[0],
-            ListCol::Northing | ListCol::GridNorthing => p.position[1],
+            ListCol::Easting => p.position[0],
+            ListCol::Northing => p.position[1],
+            ListCol::GridEasting => p.geo.map_or(f64::NEG_INFINITY, |g| g.grid[0]),
+            ListCol::GridNorthing => p.geo.map_or(f64::NEG_INFINITY, |g| g.grid[1]),
+            ListCol::Longitude => p.geo.map_or(f64::NEG_INFINITY, |g| g.longitude),
+            ListCol::Latitude => p.geo.map_or(f64::NEG_INFINITY, |g| g.latitude),
+            ListCol::ScaleFactor => p.geo.map_or(f64::NEG_INFINITY, |g| g.scale),
+            ListCol::Convergence => p.geo.map_or(f64::NEG_INFINITY, |g| g.convergence),
+            ListCol::XyScale => p.overrides.xy_scale.unwrap_or(1.0),
+            ListCol::ZScale => p.overrides.z_scale.unwrap_or(1.0),
+            ListCol::MarkerRotation => p.overrides.rotation.unwrap_or(0.0),
+            ListCol::LabelRotation => p.overrides.label_rotation.unwrap_or(0.0),
             _ => p.position[2],
         }
     }
@@ -436,6 +520,8 @@ pub struct PointListView {
     pub full: bool,
     pub name: bool,
     pub raw: bool,
+    /// Style, label style, layer and project version.
+    pub styles: bool,
     /// The column switches are open under the toolbar.
     pub columns_open: bool,
     pub picked: Option<u32>,
@@ -451,6 +537,7 @@ impl Default for PointListView {
             full: true,
             name: true,
             raw: true,
+            styles: false,
             columns_open: false,
             picked: None,
         }
@@ -464,8 +551,21 @@ impl PointListView {
             (self.name, ListCol::Name),
             (self.raw, ListCol::Raw),
             (self.full, ListCol::Full),
+            (self.full, ListCol::Format),
             (self.grid, ListCol::GridEasting),
             (self.grid, ListCol::GridNorthing),
+            (self.grid, ListCol::Longitude),
+            (self.grid, ListCol::Latitude),
+            (self.grid, ListCol::ScaleFactor),
+            (self.grid, ListCol::Convergence),
+            (self.styles, ListCol::Style),
+            (self.styles, ListCol::LabelStyle),
+            (self.styles, ListCol::Layer),
+            (self.styles, ListCol::Project),
+            (self.styles, ListCol::XyScale),
+            (self.styles, ListCol::ZScale),
+            (self.styles, ListCol::MarkerRotation),
+            (self.styles, ListCol::LabelRotation),
         ];
         c.extend(optional.into_iter().filter(|o| o.0).map(|o| o.1));
         c
@@ -479,14 +579,14 @@ impl PointListView {
             .iter()
             .filter(|p| members.contains(&p.number))
             .filter(|p| {
-                needle.is_empty() || [ListCol::Number, ListCol::Name, ListCol::Raw].iter().any(|c| c.cell(p).to_lowercase().contains(&needle))
+                needle.is_empty() || [ListCol::Number, ListCol::Name, ListCol::Raw].iter().any(|c| c.cell(p, "").to_lowercase().contains(&needle))
             })
             .collect();
         let col = self.sort;
         if col.numeric() {
             rows.sort_by(|a, b| col.key(a).total_cmp(&col.key(b)));
         } else {
-            rows.sort_by_key(|p| col.cell(p).to_lowercase());
+            rows.sort_by_key(|p| col.cell(p, "").to_lowercase());
         }
         if self.descending {
             rows.reverse();
@@ -502,6 +602,7 @@ pub enum ListSwitch {
     Full,
     Name,
     Raw,
+    Styles,
     Columns,
 }
 
@@ -532,6 +633,7 @@ fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
                 small(t!("Columns:")).style(muted_style),
                 chip(t!("Name").into_owned(), view.name, switch(ListSwitch::Name)),
                 chip(t!("Raw Description").into_owned(), view.raw, switch(ListSwitch::Raw)),
+                chip(t!("Style").into_owned(), view.styles, switch(ListSwitch::Styles)),
             ]
             .spacing(6)
             .align_y(iced::Center),
@@ -556,7 +658,7 @@ fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
         let cells = cols
             .iter()
             .map(|c| {
-                let v = c.cell(p);
+                let v = c.cell(p, state.unit);
                 let cell = if c.numeric() { number_cell(v) } else { text_cell(v, false) };
                 (cell, Length::Fixed(c.width()))
             })
@@ -569,7 +671,13 @@ fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
                 .view(),
         );
     }
-    let table = container(column![header, scrollable(list).height(Fill)]).height(Fill).width(Fill).style(well_style);
+    // Columns past the window's width scroll sideways; the header moves
+    // with them.
+    let total: f32 = cols.iter().map(|c| c.width()).sum::<f32>() + 16.0;
+    let wide = scrollable(column![header, scrollable(list).height(Fill)].width(Length::Fixed(total)).height(Fill))
+        .direction(iced::widget::scrollable::Direction::Horizontal(iced::widget::scrollable::Scrollbar::default()))
+        .height(Fill);
+    let table = container(wide).height(Fill).width(Fill).style(well_style);
     let note = small(t!("Click a title to sort; double-click a row to select its point in the drawing.")).style(muted_style);
     card(t!("Point List").into_owned(), body.push(table).push(note)).into()
 }
@@ -611,8 +719,9 @@ pub fn view<'a>(state: &'a PointGroupWindow, sizing: crate::ui::modal::ModalSizi
             card(
                 t!("Information").into_owned(),
                 column![
-                    row![small(t!("Name:")).style(muted_style).width(Length::Fixed(110.0)), field(&state.name, true, |s| msg(PointGroupMsg::Name(s)))].spacing(8).align_y(iced::Center),
-                    row![small(t!("Description:")).style(muted_style).width(Length::Fixed(110.0)), field(&state.description, true, |s| msg(PointGroupMsg::Description(s)))].spacing(8).align_y(iced::Center),
+                    row![small(t!("Name:")).style(muted_style).width(Length::Fixed(110.0)), field(&state.name, !state.locked, |s| msg(PointGroupMsg::Name(s)))].spacing(8).align_y(iced::Center),
+                    row![small(t!("Description:")).style(muted_style).width(Length::Fixed(110.0)), field(&state.description, !state.locked, |s| msg(PointGroupMsg::Description(s)))].spacing(8).align_y(iced::Center),
+                    checkbox(state.locked).label(t!("Object locked")).size(14).text_size(11).on_toggle(|v| msg(PointGroupMsg::Locked(v))),
                 ]
                 .spacing(8),
             ),
@@ -631,22 +740,35 @@ pub fn view<'a>(state: &'a PointGroupWindow, sizing: crate::ui::modal::ModalSizi
             let mut list = column![].spacing(4);
             for (k, g) in state.groups.iter().enumerate() {
                 let mut c = checkbox(g.picked).label(g.name.clone()).size(14).text_size(11).width(Length::Fixed(260.0));
-                if !state.modify_query {
+                if !state.modify_query && !state.locked {
                     c = c.on_toggle(move |v| msg(PointGroupMsg::Group(k, v)));
                 }
                 list = list.push(row![c, small(g.description.clone()).style(muted_style)].spacing(8));
             }
             card(t!("Point Groups").into_owned(), scrollable(list).height(Length::Fixed(310.0))).into()
         }
-        PgTab::RawDesc => card(
-            t!("Raw Desc Matching").into_owned(),
-            column![
-                row![small(t!("Code")).style(muted_style).width(Length::Fixed(260.0)), small(t!("Format")).style(muted_style)].spacing(8),
-                Space::new().height(Length::Fixed(300.0)),
-            ]
-            .spacing(6),
-        )
-        .into(),
+        PgTab::RawDesc => {
+            // A ticked code joins the Include raw description rule.
+            let free = !state.locked && !state.modify_query;
+            let mut list = column![].spacing(4);
+            for (k, (code, format, on)) in state.codes.iter().enumerate() {
+                let mut c = checkbox(*on).label(code.clone()).size(14).text_size(11).width(Length::Fixed(260.0));
+                if free {
+                    c = c.on_toggle(move |v| msg(PointGroupMsg::RawCode(k, v)));
+                }
+                list = list.push(row![c, small(format.clone())].spacing(8).align_y(iced::Center));
+            }
+            let body: Element<'a, Message> = if state.codes.is_empty() {
+                small(t!("The drawing has no description keys.")).style(muted_style).into()
+            } else {
+                scrollable(list).height(Length::Fixed(290.0)).into()
+            };
+            card(
+                t!("Raw Desc Matching").into_owned(),
+                column![row![small(t!("Code")).style(muted_style).width(Length::Fixed(260.0)), small(t!("Format")).style(muted_style)].spacing(8), body].spacing(6),
+            )
+            .into()
+        }
         PgTab::Include => rules_view(state, false),
         PgTab::Exclude => rules_view(state, true),
         PgTab::QueryBuilder => query_builder(state),
@@ -690,4 +812,9 @@ pub fn view<'a>(state: &'a PointGroupWindow, sizing: crate::ui::modal::ModalSizi
         .align_y(iced::Center),
     );
     col.padding([10, 12]).width(sizing.width).into()
+}
+
+/// A rotation in radians as the Point List shows it: `30.0000 (d)`.
+fn degrees(radians: f64) -> String {
+    format!("{:.4} (d)", radians.to_degrees())
 }

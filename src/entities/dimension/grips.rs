@@ -478,8 +478,8 @@ impl Grippable for Dimension {
         self.base_mut().actual_measurement = self.stored_measurement();
     }
 
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         let (dim_line_grip, text_grip) = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
@@ -563,9 +563,9 @@ impl Grippable for Dimension {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let (_dim_line_grip, text_grip) = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => (2, 3),
             Dimension::Radius(_) | Dimension::Diameter(_) => (1, 2),
@@ -617,9 +617,9 @@ impl Grippable for Dimension {
     fn grip_menu_value_prompt(
         &self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let text_grip = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => 3,
             Dimension::Radius(_) | Dimension::Diameter(_) => 2,
@@ -641,10 +641,10 @@ impl Grippable for Dimension {
     fn apply_grip_menu_value(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if self.grip_menu_value_prompt(grip_id, action).is_some() && matches!(action, A::RotateText)
         {
             self.base_mut().text_rotation = value.to_radians();

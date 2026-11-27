@@ -11,13 +11,13 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::tess_util::aci_to_rgba;
+use crate::display::tess_util::aci_to_rgba;
 use crate::scene::convert::tessellate::{
     add_polyline, add_segment, append_arrow, arrow_from_block_with_deferred_hatch, normalized_or,
     ArrowKind, DimGeom,
 };
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::{SnapHint, TangentGeom, WireModel};
 use crate::t;
 use document::entities::{MText, Text};
 use document::tables::DimStyle;
@@ -59,6 +59,7 @@ fn dimension_definition_point(dim: &Dimension) -> document::types::Vector3 {
 }
 
 mod baked;
+pub mod build;
 mod format;
 mod geometry;
 mod grips;

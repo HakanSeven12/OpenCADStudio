@@ -1,6 +1,5 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
-use crate::command::{AreaPreviewRegion, AreaPreviewSource};
 use crate::scene::model::hatch_model::HatchPattern;
 
 pub(super) mod block_parameter;
@@ -50,6 +49,41 @@ impl Scene {
 
     pub fn set_command_preview_hatches(&mut self, models: Vec<HatchModel>) {
         self.preview_hatches = std::sync::Arc::new(models);
+    }
+
+    /// Hit test against the stand-in fills of entities a command preview hides
+    /// (a hidden fill is skipped by the normal pick, so its hover would drop).
+    pub fn preview_hidden_hatch_hit(
+        &self,
+        cursor: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        aperture_px: f32,
+    ) -> Option<Handle> {
+        let stand_ins: rustc_hash::FxHashMap<Handle, HatchModel> = self
+            .preview_hatches
+            .iter()
+            .filter_map(|model| {
+                let handle = model.entity?;
+                self.command_preview_hidden
+                    .contains(&handle)
+                    .then(|| (handle, model.clone()))
+            })
+            .collect();
+        if stand_ins.is_empty() {
+            return None;
+        }
+        crate::scene::pick::hit_test::click_hit_hatch(
+            cursor,
+            &stand_ins,
+            view_rot,
+            eye,
+            bounds,
+            aperture_px,
+            &self.draw_depth_map(),
+            None,
+        )
     }
 
     /// Selected Model-space hatches use a small overlay instead of baking the
@@ -372,6 +406,11 @@ impl Scene {
     pub fn shown_rubber_band(&self) -> (Option<&WireModel>, &[WireModel]) {
         if self.drawing_feedback_shown() {
             (self.interim_wire.as_ref(), &self.preview_wires[..])
+        } else if self.table_cell_editing.is_some() {
+            // The table being edited is drawn from these wires (its own
+            // lines stand in for the hidden table), not a rubber band: they
+            // stay while the view is dragged.
+            (None, &self.preview_wires[..])
         } else {
             (None, &[])
         }
@@ -613,7 +652,12 @@ impl Scene {
             EntityType::Solid(solid) => Some(Self::solid_hatch_model(solid, color)),
             _ => None,
         };
-        let hatches = hatch.into_iter().collect::<Vec<_>>();
+        let mut hatches = hatch.into_iter().collect::<Vec<_>>();
+        for model in &mut hatches {
+            // The stand-in stands for the target: its hover hit-test and its
+            // hidden original are found through this handle.
+            model.entity = Some(target);
+        }
         for model in &hatches {
             if let Some(outline) = Self::hatch_model_outline_wire(target, model) {
                 wires.push(outline);
@@ -663,6 +707,18 @@ impl Scene {
         }
         transform_preview_wires(out)
     }
+}
+
+#[derive(Clone)]
+pub struct AreaPreviewRegion {
+    pub source: AreaPreviewSource,
+    pub subtract: bool,
+}
+
+#[derive(Clone)]
+pub enum AreaPreviewSource {
+    Handles(Vec<Handle>),
+    Boundary(Vec<[f64; 2]>),
 }
 
 #[cfg(test)]

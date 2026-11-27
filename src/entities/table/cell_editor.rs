@@ -123,7 +123,13 @@ pub(crate) fn cell_picture(
                     P::MARGIN_TOP => s.margin_top,
                     _ => s.margin_bottom,
                 })
-                .unwrap_or(default.max(height * 0.5))
+                // The margin the drawn text uses (see `side_margin`): the
+                // style's own when it sets one, else the table's, and half the
+                // text height only when that is zero. Raising a small table
+                // margin to half the text height put the editor's text (and
+                // caret) away from where the table draws it.
+                .filter(|m| *m > 1e-6)
+                .unwrap_or_else(|| side_margin(default, height))
         };
         let alignment = cell_content_alignment(
             table,
@@ -184,6 +190,14 @@ pub(crate) fn cell_picture(
             }
         })
         .unwrap_or_default();
+    // A cell read from a file may keep no source text of its own: a field or
+    // a typed value shows through its evaluated or formatted value. The
+    // editor opens with that, as Properties shows it, not with nothing.
+    if text.value.is_empty() {
+        if let Some(content) = cell.contents.first() {
+            text.value = content_display_value(doc, table, content);
+        }
+    }
     Some(CellPicture {
         text,
         members,

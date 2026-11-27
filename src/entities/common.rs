@@ -1,8 +1,8 @@
 use std::cell::Cell;
 use std::collections::HashSet;
 
-use crate::scene::model::object::{GripDef, GripShape, PropValue, Property};
-use crate::scene::model::wire_model::PatternStationPiece;
+use crate::entities::object::{GripDef, GripShape, PropValue, Property};
+use crate::display::wire_model::PatternStationPiece;
 
 pub const VARIES_LABEL: &str = "*VARIES*";
 
@@ -893,15 +893,15 @@ pub fn bulge_arc_to_tangent(
     arc: &BulgeArc,
     to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
     normal: (f64, f64, f64),
-) -> crate::scene::model::wire_model::TangentGeom {
+) -> crate::display::wire_model::TangentGeom {
     let (cwx, cwy, cwz) = to_wcs(arc.center[0], arc.center[1]);
-    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
+    let (ax, ay) = crate::entities::transform::ocs_axes(normal);
     let (sa, ea) = if arc.sweep >= 0.0 {
         (arc.start_angle, arc.end_angle)
     } else {
         (arc.end_angle, arc.start_angle)
     };
-    crate::scene::model::wire_model::TangentGeom::Arc {
+    crate::display::wire_model::TangentGeom::Arc {
         center: [cwx, cwy, cwz],
         axis_x: [ax.0, ax.1, ax.2],
         axis_y: [ay.0, ay.1, ay.2],
@@ -1290,7 +1290,7 @@ pub(crate) fn mitre_wide_joins(
             continue;
         }
         let half_turn = (sin / (1.0 + cos)).abs() as f64;
-        if half_turn > crate::scene::pipeline::wire_gpu::MITER_LIMIT {
+        if half_turn > MITER_LIMIT {
             continue;
         }
         // Left normals; their sum over (1 + cos) reaches the bisector.
@@ -1384,6 +1384,46 @@ pub(crate) fn polyline_segment_fill(
         Some(boundary)
     }
 }
+
+/// The colours the Properties tab offers.
+pub const COLORS: [&str; 9] = [
+    "ByLayer", "ByBlock", "Red", "Yellow", "Green", "Cyan", "Blue", "Magenta", "White",
+];
+
+pub fn color_label(color: document::types::Color) -> String {
+    use document::types::Color as C;
+    match color {
+        C::ByLayer => "ByLayer".into(),
+        C::ByBlock => "ByBlock".into(),
+        C::Index(n @ 1..=7) => COLORS[n as usize + 1].into(),
+        C::Index(n) => format!("{n}"),
+        C::Rgb { r, g, b } => format!("{r},{g},{b}"),
+        C::None => "None".into(),
+    }
+}
+
+pub fn parse_color(label: &str) -> Option<document::types::Color> {
+    use document::types::Color as C;
+    match COLORS
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(label.trim()))
+    {
+        Some(0) => Some(C::ByLayer),
+        Some(1) => Some(C::ByBlock),
+        Some(i) => Some(C::Index(i as u8 - 1)),
+        None => label
+            .trim()
+            .parse::<u8>()
+            .ok()
+            .filter(|n| (1..=255).contains(n))
+            .map(C::Index),
+    }
+}
+
+/// Largest |tan(turn/2)| a band joint is mitered at; sharper turns stay butt
+/// ends instead of growing a long spike. Must match `MITER_LIMIT` in the wire
+/// shaders, which decode the normalized value back.
+pub(crate) const MITER_LIMIT: f64 = 8.0;
 
 #[cfg(test)]
 mod typed_range_tests {
@@ -1621,8 +1661,8 @@ mod negative_zero_format_tests {
 
 /// An Enabled / Disabled list row (a polyline's linetype generation), as the
 /// reference shows it.
-pub(crate) fn enabled_choice(on: bool) -> crate::scene::model::object::PropValue {
-    crate::scene::model::object::PropValue::Choice {
+pub(crate) fn enabled_choice(on: bool) -> crate::entities::object::PropValue {
+    crate::entities::object::PropValue::Choice {
         selected: if on {
             crate::t!("Enabled")
         } else {
@@ -1641,4 +1681,13 @@ pub(crate) fn enabled_value(value: &str) -> bool {
     value == "true"
         || value.eq_ignore_ascii_case("enabled")
         || value == crate::t!("Enabled").as_ref()
+}
+
+/// The folder of the drawing `doc` was read from, where resources stored
+/// relative to it are looked up first.
+pub(crate) fn drawing_dir(doc: &document::Document) -> Option<&std::path::Path> {
+    doc.source_path
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::parent)
 }

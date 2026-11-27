@@ -7,9 +7,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::TangentGeom;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::TangentGeom;
 use crate::t;
 
 // ── RenderConvertible (used for snap/grip key-vertices) ─────────────────────
@@ -256,7 +256,7 @@ fn properties(leader: &Leader) -> Vec<PropSection> {
     let vi = if n == 0 {
         0
     } else {
-        crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
+        crate::entities::dispatch::prop_current_vertex().min(n - 1)
     };
     let vertex_label = if n == 0 {
         "—".to_string()
@@ -349,7 +349,7 @@ fn apply_geom_prop(leader: &mut Leader, field: &str, value: &str) {
     let vi = if leader.vertices.is_empty() {
         0
     } else {
-        crate::scene::view::dispatch::prop_current_vertex().min(leader.vertices.len() - 1)
+        crate::entities::dispatch::prop_current_vertex().min(leader.vertices.len() - 1)
     };
 
     match field {
@@ -490,25 +490,25 @@ fn apply_geom_prop(leader: &mut Leader, field: &str, value: &str) {
 // ── Transform ──────────────────────────────────────────────────────────────
 
 fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(leader, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(leader, t, |entity, p1, p2| {
         for v in &mut entity.vertices {
-            crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
+            crate::entities::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
         }
         // Offsets from the last vertex reflect as directions.
         let axis = p2 - p1;
-        crate::scene::view::transform::reflect_xy_point(
+        crate::entities::transform::reflect_xy_point(
             &mut entity.block_offset.x,
             &mut entity.block_offset.y,
             glam::DVec3::ZERO,
             axis,
         );
-        crate::scene::view::transform::reflect_xy_point(
+        crate::entities::transform::reflect_xy_point(
             &mut entity.annotation_offset.x,
             &mut entity.annotation_offset.y,
             glam::DVec3::ZERO,
             axis,
         );
-        crate::scene::view::transform::reflect_xy_point(
+        crate::entities::transform::reflect_xy_point(
             &mut entity.horizontal_direction.x,
             &mut entity.horizontal_direction.y,
             glam::DVec3::ZERO,
@@ -535,8 +535,8 @@ impl crate::entities::traits::Grippable for Leader {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         let n = self.vertices.len();
         if grip_id == 0 {
             // Arrow head — stretch only.
@@ -570,9 +570,9 @@ impl crate::entities::traits::Grippable for Leader {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::AddVertex if grip_id < n => {
@@ -626,7 +626,7 @@ pub trait LeaderTess {
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-    ) -> crate::scene::model::wire_model::WireModel;
+    ) -> crate::display::wire_model::WireModel;
 }
 
 impl LeaderTess for Leader {
@@ -638,12 +638,12 @@ impl LeaderTess for Leader {
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-    ) -> crate::scene::model::wire_model::WireModel {
+    ) -> crate::display::wire_model::WireModel {
         use crate::entities::dim_override as dov;
         use crate::scene::convert::tessellate::{
             append_arrow, arrow_from_block, ArrowKind, DimGeom,
         };
-        use crate::scene::model::wire_model::WireModel;
+        use crate::display::wire_model::WireModel;
         let xd = &self.common.extended_data;
         // Dim-line colour: a per-object ACAD_DSTYLE override (code 176, an ACI
         // index) wins over the assigned dim style's DIMCLRD; ByLayer / ByBlock
@@ -664,7 +664,7 @@ impl LeaderTess for Leader {
             });
             match dim_clr {
                 Some(idx) if idx != 0 && idx != 256 => {
-                    crate::scene::convert::tess_util::aci_to_rgba(
+                    crate::display::tess_util::aci_to_rgba(
                         &document::types::Color::from_index(idx),
                     )
                 }
@@ -709,7 +709,7 @@ impl LeaderTess for Leader {
                 line_weight_px,
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
                     text_verts: Vec::new(),
@@ -718,7 +718,7 @@ impl LeaderTess for Leader {
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     key_vertices: vec![],
-                    ..crate::scene::WireGeom::default()
+                    ..crate::display::wire_model::WireGeom::default()
                 }),
                 ..Default::default()
             };
@@ -889,7 +889,7 @@ impl LeaderTess for Leader {
             line_weight_px,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            geom: std::sync::Arc::new(crate::scene::WireGeom {
+            geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
                 text_verts: Vec::new(),
@@ -898,13 +898,13 @@ impl LeaderTess for Leader {
                 snap_pts: vec![],
                 tangent_geoms: tangents,
                 key_vertices,
-                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                surfaces: crate::display::wire_model::WireSurfaces {
                     fill_tris,
                     fill_tris_low,
                     ..Default::default()
                 }
                 .into_optional(),
-                ..crate::scene::WireGeom::default()
+                ..crate::display::wire_model::WireGeom::default()
             }),
             ..Default::default()
         }

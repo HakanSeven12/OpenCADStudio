@@ -9,7 +9,7 @@ use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 use super::QuickCalcPalette;
-use crate::app::calc::{self, CalcContext, CalcError, Definition, SysVars, Value};
+use crate::calc::{self, CalcContext, CalcError, Definition, SysVars, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -538,7 +538,7 @@ mod tests {
         q.apply_settings(&serde_json::from_str(&json).unwrap());
         assert_eq!(q.variables.len(), 5);
         assert_eq!(q.mode, p.mode);
-        assert_eq!(q.mode, crate::app::calc::AngleMode::Radians);
+        assert_eq!(q.mode, crate::calc::AngleMode::Radians);
         assert_eq!(q.keypad_mode, p.keypad_mode);
         assert_eq!(q.open, [false, true]);
         assert_eq!(q.variables[4].category, "General");

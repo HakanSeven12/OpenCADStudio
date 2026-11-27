@@ -1,9 +1,9 @@
 use document::types::aci_table::aci_to_rgb;
 use document::Document;
 
-use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
-use crate::scene::text::font_face::Face;
-use crate::scene::text::lff;
+use crate::display::render_entity::{GlyphRun, TextStroke};
+use crate::text::font_face::Face;
+use crate::text::lff;
 
 /// A font reference a drawing holds — a style's font file, or an inline `\f`
 /// code — turned into an installed family.
@@ -16,15 +16,15 @@ fn resolve_font_reference(reference: &str) -> Option<String> {
     if lff::is_builtin(reference) {
         return None;
     }
-    crate::scene::text::sysfont::family_for_reference(reference)
+    crate::text::sysfont::family_for_reference(reference)
 }
 
 fn resolve_font_reference_at(reference: &str, document: &Document) -> Option<String> {
     if lff::is_builtin(reference) {
         return None;
     }
-    let base = crate::io::drawing_dir(document);
-    crate::scene::text::sysfont::family_for_reference_at(reference, base)
+    let base = crate::entities::common::drawing_dir(document);
+    crate::text::sysfont::family_for_reference_at(reference, base)
 }
 
 /// `font_name` naming its own bold / italic face when it is a TrueType
@@ -32,12 +32,12 @@ fn resolve_font_reference_at(reference: &str, document: &Document) -> Option<Str
 /// font, a big-font pairing, or a family without such a face — bold stroke
 /// text keeps its wider pen, italic its slant.
 pub fn styled_font(font_name: &str, bold: bool, italic: bool) -> Option<String> {
-    if !(bold || italic) || font_name.contains(crate::scene::text::font_face::BIG_FONT_SEP) {
+    if !(bold || italic) || font_name.contains(crate::text::font_face::BIG_FONT_SEP) {
         return None;
     }
     match Face::resolve(font_name) {
         Face::Ttf { family, .. } => {
-            crate::scene::text::sysfont::styled_family(&family, bold, italic)
+            crate::text::sysfont::styled_family(&family, bold, italic)
         }
         _ => None,
     }
@@ -115,7 +115,7 @@ fn resolve_style(
                     .as_deref()
                     .map(std::path::Path::new)
                     .and_then(|p| p.parent());
-                crate::io::font_repo::font_file_path(&shx_file, base)
+                crate::text::font_repo::font_file_path(&shx_file, base)
             });
             if let Some(p) = shx_path {
                 p
@@ -155,7 +155,7 @@ fn resolve_style(
     };
 
     if !lff::is_builtin(&font_name) && !lff::is_shx_name(&font_name) {
-        if let Some(canonical) = crate::scene::text::sysfont::canonical_family_name(&font_name) {
+        if let Some(canonical) = crate::text::sysfont::canonical_family_name(&font_name) {
             font_name = canonical;
         }
     }
@@ -178,8 +178,8 @@ fn resolve_style(
     // renderer and the SDF cache uses the right shape; Unicode unifonts ignore
     // it. Apply this before pairing a big font so its primary face keeps it.
     if font_name.to_ascii_lowercase().ends_with(".shx")
-        && crate::scene::text::shx::file_on_disk(&font_name)
-        && crate::scene::text::shx::font_metrics(&font_name).is_some()
+        && crate::text::shx::file_on_disk(&font_name)
+        && crate::text::shx::font_metrics(&font_name).is_some()
     {
         font_name = Face::with_code_page(&font_name, &document.header.code_page);
     }
@@ -197,19 +197,19 @@ fn resolve_style(
             .as_deref()
             .map(std::path::Path::new)
             .and_then(|p| p.parent());
-        let resolve_big = |name: &str| crate::io::font_repo::font_file_path(name, base);
+        let resolve_big = |name: &str| crate::text::font_repo::font_file_path(name, base);
         let mut big_path = resolve_big(big);
         // If the referenced big font is not a valid big font (e.g. legacy Chinese
         // shape-only container `chinese.shx`), try the standard Big5 big font
         // `chineset.shx`.
         if big_path
             .as_deref()
-            .map_or(true, |p| !crate::scene::text::shx::is_bigfont(p))
+            .map_or(true, |p| !crate::text::shx::is_bigfont(p))
         {
             let stem = big.rsplit(['/', '\\']).next().unwrap_or(big);
             if stem.eq_ignore_ascii_case("chinese.shx") {
                 if let Some(alt) = resolve_big("chineset.shx") {
-                    if crate::scene::text::shx::is_bigfont(&alt) {
+                    if crate::text::shx::is_bigfont(&alt) {
                         big_path = Some(alt);
                     }
                 }
@@ -268,11 +268,11 @@ pub fn text_local_bounds(
     let mut max_y = f32::NEG_INFINITY;
 
     let shaping_family = face.ttf_family().or_else(|| {
-        crate::scene::text::web_font::requires_shaping(text)
-            .then(|| crate::scene::text::web_font::primary_script().family())
+        crate::text::web_font::requires_shaping(text)
+            .then(|| crate::text::web_font::primary_script().family())
     });
     if let Some(family) = shaping_family {
-        if let Some(run) = crate::scene::text::ttf_glyph::shape_run(family, text) {
+        if let Some(run) = crate::text::ttf_glyph::shape_run(family, text) {
             let advance = run.advance * scale * wf;
             for g in &run.glyphs {
                 for stroke in &g.strokes {
@@ -356,13 +356,13 @@ pub fn text_char_cells(
     let scale = height / 9.0;
     let wf = width_factor.abs().clamp(0.01, 100.0);
     let shaping_family = face.ttf_family().or_else(|| {
-        crate::scene::text::web_font::requires_shaping(text)
-            .then(|| crate::scene::text::web_font::primary_script().family())
+        crate::text::web_font::requires_shaping(text)
+            .then(|| crate::text::web_font::primary_script().family())
     });
     if let Some(run) =
-        shaping_family.and_then(|family| crate::scene::text::ttf_glyph::shape_run(family, text))
+        shaping_family.and_then(|family| crate::text::ttf_glyph::shape_run(family, text))
     {
-        return crate::scene::text::ttf_glyph::char_cells(&run, text)
+        return crate::text::ttf_glyph::char_cells(&run, text)
             .into_iter()
             .map(|(x0, x1)| (x0 * scale * wf, x1 * scale * wf))
             .collect();
@@ -1079,7 +1079,7 @@ pub fn is_rtl_char(c: char) -> bool {
 
 /// Left-to-right mark: keeps the shaper's paragraph direction left to right
 /// and closes a right-to-left run inside a word.
-pub(crate) use crate::scene::text::ttf_glyph::LRM;
+pub(crate) use crate::text::ttf_glyph::LRM;
 
 /// Whether a word is written right to left as a whole: right-to-left
 /// letters (and their marks) only.
@@ -1189,7 +1189,7 @@ fn run_font<'a>(state: &'a RunState, base: &'a str) -> std::borrow::Cow<'a, str>
 /// except before a closing mark (`，。、）」…`) or after an opening one
 /// (`（「《…`) — the basic kinsoku rule.
 pub(crate) fn cjk_break_between(prev: char, next: char) -> bool {
-    use crate::scene::text::ttf_glyph::is_full_width;
+    use crate::text::ttf_glyph::is_full_width;
     const CLOSING: &str = "，。、；：？！）」』】〕》〉』﹚﹞．～…‥、〞”’,.;:!?)]}%";
     const OPENING: &str = "（「『【〔《〈﹙﹝“‘([{";
     if !(is_full_width(prev) || is_full_width(next)) {
@@ -1205,7 +1205,7 @@ pub(crate) fn cjk_break_between(prev: char, next: char) -> bool {
 /// marks that close them) in a TrueType face — so `שלום|12` keeps a thin
 /// bar and digits. A TrueType style shapes the whole word.
 pub(crate) fn word_runs<'t>(text: &'t str, face: &Face) -> Vec<(&'t str, bool)> {
-    use crate::scene::text::web_font::requires_shaping;
+    use crate::text::web_font::requires_shaping;
     if face.ttf_family().is_some() {
         return vec![(text, true)];
     }
@@ -1243,7 +1243,7 @@ pub(crate) fn word_runs<'t>(text: &'t str, face: &Face) -> Vec<(&'t str, bool)> 
 /// The shaper's face for a word run.
 fn run_family(face: &Face) -> &str {
     face.ttf_family()
-        .unwrap_or_else(|| crate::scene::text::web_font::primary_script().family())
+        .unwrap_or_else(|| crate::text::web_font::primary_script().family())
 }
 
 /// Advance of a stroke-font run (glyph units × `scale`).
@@ -1261,7 +1261,7 @@ fn stroke_run_width(face: &Face, text: &str, tracking: f32, scale: f32) -> f32 {
 /// Width of one word run, as it is drawn.
 pub(crate) fn run_width(face: &Face, text: &str, shaped: bool, tracking: f32, scale: f32) -> f32 {
     if shaped {
-        if let Some(run) = crate::scene::text::ttf_glyph::shape_run(run_family(face), text) {
+        if let Some(run) = crate::text::ttf_glyph::shape_run(run_family(face), text) {
             return run.advance * scale;
         }
     }
@@ -1307,12 +1307,12 @@ pub fn word_cells(
     let mut x = 0.0_f32;
     for (run, shaped) in runs {
         let shaped_run = shaped
-            .then(|| crate::scene::text::ttf_glyph::shape_run(run_family(&face), run))
+            .then(|| crate::text::ttf_glyph::shape_run(run_family(&face), run))
             .flatten();
         match shaped_run {
             Some(shaped_run) => {
                 cells.extend(
-                    crate::scene::text::ttf_glyph::char_cells(&shaped_run, run)
+                    crate::text::ttf_glyph::char_cells(&shaped_run, run)
                         .into_iter()
                         .zip(run.chars())
                         .filter(|(_, c)| *c != LRM)
@@ -1690,10 +1690,10 @@ pub fn resolve_inline_color(c: &InlineColor, layer: Option<&InlineColor>) -> Opt
             if *idx == 7 {
                 rgb
             } else {
-                crate::scene::convert::tess_util::authored_rgb(rgb)
+                crate::display::tess_util::authored_rgb(rgb)
             }
         }),
-        InlineColor::True(rgb) => Some(crate::scene::convert::tess_util::authored_rgb(*rgb)),
+        InlineColor::True(rgb) => Some(crate::display::tess_util::authored_rgb(*rgb)),
     }
 }
 
@@ -3507,8 +3507,8 @@ mod tests {
         gone.font_file = "ocs_no_such_font_for_lookup.shx".into();
         doc.text_styles.add(gone).unwrap();
         let doc: document::Document = doc.into();
-        let searches = || crate::io::font_repo::FOLDER_SEARCHES.with(std::cell::Cell::get);
-        let _keep = crate::io::font_repo::KEEP_FONT_PATHS
+        let searches = || crate::text::font_repo::FOLDER_SEARCHES.with(std::cell::Cell::get);
+        let _keep = crate::text::font_repo::KEEP_FONT_PATHS
             .write()
             .unwrap_or_else(|e| e.into_inner());
 
@@ -4511,7 +4511,7 @@ mod v_anchor_tests {
 #[cfg(test)]
 mod font_style_tests {
     use super::{resolve_font, resolve_text_style, RunState, TTF_FLAG_BOLD};
-    use crate::scene::text::sysfont;
+    use crate::text::sysfont;
 
     /// Bold — inline or the style's — draws the family's own bold face, a
     /// separate file, not the regular one (#1974). Skips where no family
@@ -4533,7 +4533,7 @@ mod font_style_tests {
         let bold = resolve_font(&state, "Standard").into_owned();
         assert_eq!(sysfont::split_style(&bold), (family, true, false));
         let width = |f: &str| {
-            crate::scene::text::ttf_glyph::shape_run(f, "Bold text")
+            crate::text::ttf_glyph::shape_run(f, "Bold text")
                 .expect("shaped")
                 .advance
         };
@@ -4556,7 +4556,7 @@ mod font_style_tests {
         // A valid synthetic bigfont chineset.shx
         std::fs::write(
             dir.join("chineset.shx"),
-            &crate::scene::text::shx::tests::synthetic_bigfont(),
+            &crate::text::shx::tests::synthetic_bigfont(),
         )
         .unwrap();
 
@@ -4606,7 +4606,7 @@ mod font_style_tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("cs_ENGINEERING.shx"),
-            crate::scene::text::shx::tests::synthetic_shapes(&[0xEC, 0xF9]),
+            crate::text::shx::tests::synthetic_shapes(&[0xEC, 0xF9]),
         )
         .unwrap();
         let mut doc = document::Document::new();
@@ -4619,11 +4619,11 @@ mod font_style_tests {
         let resolved = resolve_text_style("CS", &doc);
         let (path, page) = resolved
             .font_name
-            .split_once(crate::scene::text::font_face::CODE_PAGE_SEP)
+            .split_once(crate::text::font_face::CODE_PAGE_SEP)
             .expect("the resolved SHX identity carries its code page");
         assert!(path.ends_with("cs_ENGINEERING.shx"), "{path}");
         assert_eq!(page, "ANSI_1250");
-        let face = crate::scene::text::font_face::Face::resolve(&resolved.font_name);
+        let face = crate::text::font_face::Face::resolve(&resolved.font_name);
         assert!(face.own_glyph('ě').is_some());
         assert!(face.own_glyph('ů').is_some());
         let _ = std::fs::remove_dir_all(&dir);

@@ -507,7 +507,7 @@ pub struct PointCloudSet {
 
 /// POINTCLOUDPOINTSIZE in pixels (1–10, default 2).
 pub(crate) fn point_size(document: &Document) -> f32 {
-    crate::io::drawing_variable(document, "POINTCLOUDPOINTSIZE")
+    crate::scene::drawing_vars::drawing_variable(document, "POINTCLOUDPOINTSIZE")
         .and_then(|v| v.trim().parse::<i16>().ok())
         .unwrap_or(2)
         .clamp(1, 10) as f32
@@ -1193,7 +1193,7 @@ pub(crate) fn setting(name: &str) -> Option<Setting> {
 
 /// A setting's value in the drawing, or its default.
 pub(crate) fn setting_value(document: &Document, setting: Setting) -> i64 {
-    crate::io::drawing_variable(document, setting.name)
+    crate::scene::drawing_vars::drawing_variable(document, setting.name)
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(setting.default)
 }

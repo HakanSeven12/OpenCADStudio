@@ -25,7 +25,11 @@ pub fn tool() -> ToolDef {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["GEOMETRYCLEANUPOPEN", "GEOMETRYCLEANUPCLOSE"]
+    names: &[
+        "GEOMETRYCLEANUPOPEN",
+        "GEOMETRYCLEANUPCLOSE",
+        "GEOMETRYERRORREVIEWCLOSE"
+    ]
 });
 
 /// Nearer than this to zero counts as zero: a Z, an elevation, the X and Y

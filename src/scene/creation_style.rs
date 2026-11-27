@@ -860,12 +860,7 @@ pub fn apply_current_creation_styles(doc: &Document, entity: &mut EntityType) {
     apply_object_defaults(doc, entity);
 }
 
-pub(crate) fn transparency_options() -> Vec<String> {
-    ["ByLayer".to_string(), "ByBlock".to_string()]
-        .into_iter()
-        .chain((0..=90).step_by(10).map(|value| value.to_string()))
-        .collect()
-}
+pub(crate) use crate::entities::properties::transparency_options;
 
 pub(crate) fn parse_current_transparency(value: &str) -> Option<document::types::Transparency> {
     use document::types::Transparency;

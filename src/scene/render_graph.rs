@@ -206,7 +206,7 @@ impl BlockStyle {
     }
 }
 
-fn layer_aci(document: &Document, layer: &str) -> u8 {
+pub(crate) fn layer_aci(document: &Document, layer: &str) -> u8 {
     document
         .layers
         .get(layer)
@@ -786,7 +786,7 @@ fn picture_off_scale(
         return false;
     }
     let expected = style.dimtxt
-        * crate::modules::draw::modify::explode::annotative_picture_scale(dimension, document);
+        * crate::scene::explode::annotative_picture_scale(dimension, document);
     let drawn = record.entity_handles.iter().find_map(|handle| match document.get_entity(*handle) {
         Some(EntityType::Text(text)) => Some(text.height),
         Some(EntityType::MText(text)) => Some(text.height),
@@ -1348,7 +1348,8 @@ pub fn block_contains_mesh(
     })
 }
 
-fn block_contains_kind(
+/// Whether the block, or a block it nests, holds an entity `is_kind` accepts.
+pub(crate) fn block_contains_kind(
     document: &Document,
     block_name: &str,
     memo: &mut std::collections::HashMap<String, bool>,

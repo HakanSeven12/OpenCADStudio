@@ -13,10 +13,10 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
-use crate::scene::view::transform;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
+use crate::entities::transform;
 
 // ── Marker geometry ───────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ fn shape_marker(
 fn shx_polylines(
     shape: &Shape,
     document: &document::Document,
-) -> Option<crate::scene::text::shx::ShapePolylines> {
+) -> Option<crate::text::shx::ShapePolylines> {
     let base = document
         .source_path
         .as_deref()
@@ -81,16 +81,16 @@ fn shx_polylines(
         if font.is_empty() {
             return None;
         }
-        let resolved = crate::io::linetypes::find_shape_file(font, base)?;
+        let resolved = crate::text::shape_files::find_shape_file(font, base)?;
         if let Ok(num) = u16::try_from(shape.shape_number) {
             if num != 0 {
-                if let Some(p) = crate::scene::text::shx::shape_polylines(&resolved, num) {
+                if let Some(p) = crate::text::shx::shape_polylines(&resolved, num) {
                     return Some(p);
                 }
             }
         }
         if !name.is_empty() {
-            return crate::scene::text::shx::shape_polylines_by_name(&resolved, name);
+            return crate::text::shx::shape_polylines_by_name(&resolved, name);
         }
         None
     };
@@ -135,7 +135,7 @@ impl RenderConvertible for Shape {
     fn to_render(&self, _document: &document::Document) -> Option<RenderEntity> {
         // SHAPE insertion point is OCS (planar entity) — map through the
         // arbitrary axis so a mirrored shape's marker lands where it renders.
-        let (ox, oy, oz) = crate::scene::view::transform::ocs_point_to_wcs(
+        let (ox, oy, oz) = crate::entities::transform::ocs_point_to_wcs(
             (
                 self.insertion_point.x,
                 self.insertion_point.y,
@@ -172,7 +172,7 @@ impl RenderConvertible for Shape {
                     let ly = py * scale;
                     let wx = lx * cos_r - ly * sin_r;
                     let wy = lx * sin_r + ly * cos_r;
-                    let (gx, gy, gz) = crate::scene::view::transform::ocs_point_to_wcs(
+                    let (gx, gy, gz) = crate::entities::transform::ocs_point_to_wcs(
                         (
                             self.insertion_point.x + wx,
                             self.insertion_point.y + wy,

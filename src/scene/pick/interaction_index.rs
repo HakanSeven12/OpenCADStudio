@@ -13,7 +13,6 @@ use std::sync::Arc;
 const TARGET_ENTRIES_PER_CELL: usize = 8;
 const MAX_SPAN_CELLS: u64 = 64;
 const MAX_AXIS_CELLS: u32 = 8_192;
-const BVH_LEAF_SIZE: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SegmentRef {
@@ -104,121 +103,83 @@ fn entry_aabb2<T>(entry: &Entry3<T>) -> [f64; 4] {
     [bounds.at(0), bounds.at(1), bounds.at(3), bounds.at(4)]
 }
 
-#[derive(Clone, Copy)]
-struct BvhNode2 {
-    aabb: [f64; 4],
-    left: u32,
-    right: u32,
-    start: u32,
-    len: u32,
-}
-
+#[derive(Default)]
 struct SpatialBvh2 {
-    nodes: Vec<BvhNode2>,
-    order: Vec<u32>,
+    bvh: parry2d_f64::partitioning::Bvh,
+    /// Entry index of each BVH leaf (leaves are numbered `0..n`).
+    ids: Vec<u32>,
 }
 
 impl SpatialBvh2 {
-    fn build<T>(entries: &[Entry3<T>], mut order: Vec<u32>) -> Self {
-        let mut nodes = Vec::new();
-        if !order.is_empty() {
-            build_bvh2_node(entries, &mut order, 0, &mut nodes);
+    fn build<T>(entries: &[Entry3<T>], order: Vec<u32>) -> Self {
+        use parry2d_f64::bounding_volume::Aabb;
+        use parry2d_f64::math::Vector;
+        use parry2d_f64::partitioning::{Bvh, BvhBuildStrategy};
+
+        if order.is_empty() {
+            return Self::default();
         }
-        Self { nodes, order }
+        // Leaves are numbered 0..n and mapped back to entry indices on query:
+        // parry's `Bvh::from_iter` only builds one- and two-leaf trees whose
+        // leaf ids are 0 / 0 and 1 (other ids panic with "key not present").
+        let leaves = order.iter().enumerate().map(|(leaf, &idx)| {
+            let aabb = entry_aabb2(&entries[idx as usize]);
+            (
+                leaf,
+                Aabb::new(Vector::new(aabb[0], aabb[1]), Vector::new(aabb[2], aabb[3])),
+            )
+        });
+        Self {
+            bvh: Bvh::from_iter(BvhBuildStrategy::Binned, leaves),
+            ids: order,
+        }
     }
 
-    fn query<T>(&self, entries: &[Entry3<T>], query: [f64; 4], out: &mut Vec<u32>) {
-        if self.nodes.is_empty() {
+    fn query<T>(&self, _entries: &[Entry3<T>], query: [f64; 4], out: &mut Vec<u32>) {
+        use parry2d_f64::bounding_volume::Aabb;
+        use parry2d_f64::math::Vector;
+
+        if self.bvh.is_empty() {
             return;
         }
-        let mut stack = vec![0u32];
-        while let Some(node_idx) = stack.pop() {
-            let node = self.nodes[node_idx as usize];
-            if !aabb_overlaps(node.aabb, query) {
-                continue;
-            }
-            if node.left == u32::MAX {
-                for &entry_idx in &self.order[node.start as usize..(node.start + node.len) as usize]
-                {
-                    if aabb_overlaps(entry_aabb2(&entries[entry_idx as usize]), query) {
-                        out.push(entry_idx);
-                    }
-                }
-            } else {
-                stack.push(node.left);
-                stack.push(node.right);
-            }
-        }
+        let query_aabb = Aabb::new(
+            Vector::new(query[0], query[1]),
+            Vector::new(query[2], query[3]),
+        );
+        out.extend(
+            self.bvh
+                .intersect_aabb(&query_aabb)
+                .map(|leaf| self.ids[leaf as usize]),
+        );
     }
-}
-
-fn build_bvh2_node<T>(
-    entries: &[Entry3<T>],
-    order: &mut [u32],
-    base: usize,
-    nodes: &mut Vec<BvhNode2>,
-) -> u32 {
-    let mut bounds = [
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    for &idx in order.iter() {
-        let aabb = entry_aabb2(&entries[idx as usize]);
-        bounds[0] = bounds[0].min(aabb[0]);
-        bounds[1] = bounds[1].min(aabb[1]);
-        bounds[2] = bounds[2].max(aabb[2]);
-        bounds[3] = bounds[3].max(aabb[3]);
-    }
-    let node_idx = nodes.len() as u32;
-    nodes.push(BvhNode2 {
-        aabb: bounds,
-        left: u32::MAX,
-        right: u32::MAX,
-        start: base as u32,
-        len: order.len() as u32,
-    });
-    if order.len() <= BVH_LEAF_SIZE {
-        return node_idx;
-    }
-    let axis = usize::from(bounds[3] - bounds[1] > bounds[2] - bounds[0]);
-    let mid = order.len() / 2;
-    order.select_nth_unstable_by(mid, |&a, &b| {
-        let aa = entry_aabb2(&entries[a as usize]);
-        let bb = entry_aabb2(&entries[b as usize]);
-        (aa[axis] + aa[axis + 2]).total_cmp(&(bb[axis] + bb[axis + 2]))
-    });
-    let (left_order, right_order) = order.split_at_mut(mid);
-    let left = build_bvh2_node(entries, left_order, base, nodes);
-    let right = build_bvh2_node(entries, right_order, base + mid, nodes);
-    nodes[node_idx as usize].left = left;
-    nodes[node_idx as usize].right = right;
-    node_idx
-}
-
-#[derive(Clone, Copy)]
-struct BvhNode3 {
-    aabb: [f64; 6],
-    left: u32,
-    right: u32,
-    start: u32,
-    len: u32,
 }
 
 struct SpatialBvh3 {
-    nodes: Vec<BvhNode3>,
-    order: Vec<u32>,
+    bvh: parry3d_f64::partitioning::Bvh,
 }
 
 impl SpatialBvh3 {
     fn build<T>(entries: &[Entry3<T>]) -> Self {
-        let mut order: Vec<u32> = (0..entries.len() as u32).collect();
-        let mut nodes = Vec::new();
-        if !order.is_empty() {
-            build_bvh3_node(entries, &mut order, 0, &mut nodes);
+        use parry3d_f64::bounding_volume::Aabb;
+        use parry3d_f64::math::Vector;
+        use parry3d_f64::partitioning::{Bvh, BvhBuildStrategy};
+
+        if entries.is_empty() {
+            return Self { bvh: Bvh::new() };
         }
-        Self { nodes, order }
+        let leaves = entries.iter().enumerate().map(|(idx, entry)| {
+            let b = entry.aabb.xyz();
+            (
+                idx,
+                Aabb::new(
+                    Vector::new(b[0], b[1], b[2]),
+                    Vector::new(b[3], b[4], b[5]),
+                ),
+            )
+        });
+        Self {
+            bvh: Bvh::from_iter(BvhBuildStrategy::Binned, leaves),
+        }
     }
 
     fn query_screen<T: Copy + Ord>(
@@ -229,85 +190,33 @@ impl SpatialBvh3 {
         eye: DVec3,
         bounds: Rectangle,
     ) -> Vec<T> {
-        if self.nodes.is_empty() {
+        use parry3d_f64::partitioning::TraversalAction;
+
+        if self.bvh.is_empty() {
             return Vec::new();
         }
-        let mut stack = vec![0u32];
+        let frustum = ScreenRectFrustum::new(screen_rect, view_rot, eye, bounds);
         let mut entry_indices = Vec::new();
-        while let Some(node_idx) = stack.pop() {
-            let node = self.nodes[node_idx as usize];
-            if !aabb3_projects_into(node.aabb, screen_rect, view_rot, eye, bounds) {
-                continue;
+        self.bvh.traverse(|node| {
+            let mins = node.mins();
+            let maxs = node.maxs();
+            if !frustum.aabb_intersects(
+                [mins.x, mins.y, mins.z],
+                [maxs.x, maxs.y, maxs.z],
+            ) {
+                return TraversalAction::Prune;
             }
-            if node.left == u32::MAX {
-                for &entry_idx in &self.order[node.start as usize..(node.start + node.len) as usize]
-                {
-                    let entry = entries[entry_idx as usize];
-                    if aabb3_projects_into(entry.aabb.xyz(), screen_rect, view_rot, eye, bounds) {
-                        entry_indices.push(entry.value);
-                    }
+            if let Some(leaf_id) = node.leaf_data() {
+                if let Some(entry) = entries.get(leaf_id as usize) {
+                    entry_indices.push(entry.value);
                 }
-            } else {
-                stack.push(node.left);
-                stack.push(node.right);
             }
-        }
+            TraversalAction::Continue
+        });
         entry_indices.sort_unstable();
         entry_indices.dedup();
         entry_indices
     }
-}
-
-fn build_bvh3_node<T>(
-    entries: &[Entry3<T>],
-    order: &mut [u32],
-    base: usize,
-    nodes: &mut Vec<BvhNode3>,
-) -> u32 {
-    let mut bounds = [
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    for &idx in order.iter() {
-        let aabb = entries[idx as usize].aabb.xyz();
-        for axis in 0..3 {
-            bounds[axis] = bounds[axis].min(aabb[axis]);
-            bounds[axis + 3] = bounds[axis + 3].max(aabb[axis + 3]);
-        }
-    }
-    let node_idx = nodes.len() as u32;
-    nodes.push(BvhNode3 {
-        aabb: bounds,
-        left: u32::MAX,
-        right: u32::MAX,
-        start: base as u32,
-        len: order.len() as u32,
-    });
-    if order.len() <= BVH_LEAF_SIZE {
-        return node_idx;
-    }
-    let mut axis = 0;
-    for candidate in 1..3 {
-        if bounds[candidate + 3] - bounds[candidate] > bounds[axis + 3] - bounds[axis] {
-            axis = candidate;
-        }
-    }
-    let mid = order.len() / 2;
-    order.select_nth_unstable_by(mid, |&a, &b| {
-        let aa = entries[a as usize].aabb;
-        let bb = entries[b as usize].aabb;
-        (aa.at(axis) + aa.at(axis + 3)).total_cmp(&(bb.at(axis) + bb.at(axis + 3)))
-    });
-    let (left_order, right_order) = order.split_at_mut(mid);
-    let left = build_bvh3_node(entries, left_order, base, nodes);
-    let right = build_bvh3_node(entries, right_order, base + mid, nodes);
-    nodes[node_idx as usize].left = left;
-    nodes[node_idx as usize].right = right;
-    node_idx
 }
 
 struct SpatialGrid {
@@ -330,10 +239,7 @@ impl SpatialGrid {
                 rows: 1,
                 cell_offsets: vec![0, 0],
                 cell_entries: Vec::new(),
-                oversized: SpatialBvh2 {
-                    nodes: Vec::new(),
-                    order: Vec::new(),
-                },
+                oversized: SpatialBvh2::default(),
             };
         }
 
@@ -3158,44 +3064,131 @@ fn append_triangle_entries(
     }
 }
 
-fn aabb3_projects_into(
-    aabb: [f64; 6],
-    screen_rect: [f32; 4],
-    view_rot: Mat4,
+/// Precomputed 4-plane frustum + near-w guard for testing 3D world AABBs
+/// against a 2D screen rectangle without projecting all 8 corners per node.
+#[derive(Clone, Copy)]
+pub(crate) struct ScreenRectFrustum {
     eye: DVec3,
-    bounds: Rectangle,
-) -> bool {
-    let mut projected = [
-        f32::INFINITY,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
-        f32::NEG_INFINITY,
-    ];
-    for x in [aabb[0], aabb[3]] {
-        for y in [aabb[1], aabb[4]] {
-            for z in [aabb[2], aabb[5]] {
-                let clip = view_rot * (DVec3::new(x, y, z) - eye).as_vec3().extend(1.0);
-                if !clip.is_finite() || clip.w <= 1e-6 {
-                    return true;
-                }
-                let ndc = clip.truncate() / clip.w;
-                let sx = (ndc.x + 1.0) * 0.5 * bounds.width;
-                let sy = (1.0 - ndc.y) * 0.5 * bounds.height;
-                projected[0] = projected[0].min(sx);
-                projected[1] = projected[1].min(sy);
-                projected[2] = projected[2].max(sx);
-                projected[3] = projected[3].max(sy);
-            }
+    valid: bool,
+    w_pos: glam::Vec3,
+    w_neg: glam::Vec3,
+    w_d: f32,
+    planes: [(glam::Vec3, glam::Vec3, f32); 4],
+}
+
+impl ScreenRectFrustum {
+    pub(crate) fn new(
+        screen_rect: [f32; 4],
+        view_rot: Mat4,
+        eye: DVec3,
+        bounds: Rectangle,
+    ) -> Self {
+        let valid = bounds.width.is_finite()
+            && bounds.width > 0.0
+            && bounds.height.is_finite()
+            && bounds.height > 0.0
+            && screen_rect.iter().all(|v| v.is_finite())
+            && eye.is_finite();
+        if !valid {
+            return Self {
+                eye,
+                valid: false,
+                w_pos: glam::Vec3::ZERO,
+                w_neg: glam::Vec3::ZERO,
+                w_d: 0.0,
+                planes: [(glam::Vec3::ZERO, glam::Vec3::ZERO, 0.0); 4],
+            };
+        }
+        let r0 = view_rot.row(0);
+        let r1 = view_rot.row(1);
+        let r3 = view_rot.row(3);
+        let nx0 = screen_rect[0] / bounds.width * 2.0 - 1.0;
+        let nx1 = screen_rect[2] / bounds.width * 2.0 - 1.0;
+        let ny0 = 1.0 - screen_rect[3] / bounds.height * 2.0;
+        let ny1 = 1.0 - screen_rect[1] / bounds.height * 2.0;
+
+        let make_plane = |v: glam::Vec4| -> (glam::Vec3, glam::Vec3, f32) {
+            let n = v.truncate();
+            (n.max(glam::Vec3::ZERO), n.min(glam::Vec3::ZERO), v.w)
+        };
+        let r3_n = r3.truncate();
+        Self {
+            eye,
+            valid: true,
+            w_pos: r3_n.max(glam::Vec3::ZERO),
+            w_neg: r3_n.min(glam::Vec3::ZERO),
+            w_d: r3.w,
+            planes: [
+                make_plane(r0 - r3 * nx0),
+                make_plane(r3 * nx1 - r0),
+                make_plane(r1 - r3 * ny0),
+                make_plane(r3 * ny1 - r1),
+            ],
         }
     }
-    projected[2] >= screen_rect[0]
-        && projected[0] <= screen_rect[2]
-        && projected[3] >= screen_rect[1]
-        && projected[1] <= screen_rect[3]
+
+    #[inline]
+    pub(crate) fn aabb_intersects(&self, mins: [f64; 3], maxs: [f64; 3]) -> bool {
+        if !self.valid {
+            return true;
+        }
+        let lo = glam::Vec3::new(
+            (mins[0] - self.eye.x) as f32,
+            (mins[1] - self.eye.y) as f32,
+            (mins[2] - self.eye.z) as f32,
+        );
+        let hi = glam::Vec3::new(
+            (maxs[0] - self.eye.x) as f32,
+            (maxs[1] - self.eye.y) as f32,
+            (maxs[2] - self.eye.z) as f32,
+        );
+        let min_w = self.w_pos.dot(lo) + self.w_neg.dot(hi) + self.w_d;
+        if !min_w.is_finite() || min_w <= 1e-6 {
+            return true;
+        }
+        for &(p_pos, p_neg, d) in &self.planes {
+            let max_val = p_pos.dot(hi) + p_neg.dot(lo) + d;
+            if max_val < -1e-5 * (d.abs() + 1.0) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 fn aabb_overlaps(a: [f64; 4], b: [f64; 4]) -> bool {
     a[2] >= b[0] && a[0] <= b[2] && a[3] >= b[1] && a[1] <= b[3]
+}
+
+#[cfg(test)]
+mod spatial_bvh2_tests {
+    use super::*;
+
+    fn entry(x: f64, value: u32) -> Entry3<u32> {
+        Entry3::new([x, 0.0, 0.0, x + 1.0, 1.0, 0.0], value)
+    }
+
+    fn hits(bvh: &SpatialBvh2, entries: &[Entry3<u32>], query: [f64; 4]) -> Vec<u32> {
+        let mut out = Vec::new();
+        bvh.query(entries, query, &mut out);
+        out.sort_unstable();
+        out
+    }
+
+    /// One or two oversized entries that are not the first entries used to
+    /// panic inside parry ("key not present"), e.g. a single large table in a
+    /// drawing that otherwise holds only an xref.
+    #[test]
+    fn one_or_two_leaves_with_any_entry_index() {
+        let entries: Vec<_> = (0..5).map(|i| entry(f64::from(i) * 10.0, i)).collect();
+        let one = SpatialBvh2::build(&entries, vec![3]);
+        assert_eq!(hits(&one, &entries, [-100.0, -1.0, 100.0, 2.0]), vec![3]);
+        let two = SpatialBvh2::build(&entries, vec![2, 4]);
+        assert_eq!(hits(&two, &entries, [-100.0, -1.0, 100.0, 2.0]), vec![2, 4]);
+        assert_eq!(hits(&two, &entries, [39.5, 0.2, 40.5, 0.8]), vec![4]);
+        let three = SpatialBvh2::build(&entries, vec![1, 2, 4]);
+        assert_eq!(hits(&three, &entries, [9.5, 0.2, 10.5, 0.8]), vec![1]);
+    }
 }
 
 #[cfg(test)]

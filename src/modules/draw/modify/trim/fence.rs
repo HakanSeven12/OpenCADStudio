@@ -482,7 +482,9 @@ pub(crate) fn fence_pieces(
             }
         }
         pieces = next;
-        if !any || pieces.len() > 64 {
+        // EXTEND reaches the first boundary only: another round would start
+        // from that boundary and run on past it to the next one.
+        if !any || extend || pieces.len() > 64 {
             break;
         }
     }

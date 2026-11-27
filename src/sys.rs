@@ -137,10 +137,6 @@ thread_local! {
 pub fn set_unsaved_changes_warning(active: bool) {
     use wasm_bindgen::JsCast;
 
-    if crate::io::host_bridge::is_embed_mode() {
-        crate::io::host_bridge::emit_dirty(active);
-        return;
-    }
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -368,7 +364,10 @@ fn clipboard_image_extensions_cover_the_paste_flavors() {
 /// Like `read_clipboard_text`, the Ctrl+V keypress that reaches it is a user
 /// gesture, which is what makes the permission-gated read allowed at all.
 #[cfg(target_arch = "wasm32")]
-pub async fn read_clipboard_image() -> Option<(String, Vec<u8>)> {
+pub async fn read_clipboard_image(
+    taken: fn(&str) -> bool,
+    register: fn(&str, std::sync::Arc<Vec<u8>>),
+) -> Option<(String, Vec<u8>)> {
     use wasm_bindgen::JsCast;
 
     let clipboard = web_sys::window()?.navigator().clipboard();
@@ -403,17 +402,14 @@ pub async fn read_clipboard_image() -> Option<(String, Vec<u8>)> {
         if bytes.is_empty() {
             return None;
         }
-        let name = pasted_image_name(&mime_type);
+        let name = pasted_image_name(&mime_type, taken);
         // Register under the chosen name BEFORE returning: no other wasm
         // code can run between the uniqueness check and this insert (one
         // thread), so a second paste landing in the same millisecond sees
         // this name as taken and takes a `-2` suffix instead of overwriting
         // these bytes. The paste handler's own `register_source` call with
         // the same name is then an idempotent overwrite of identical bytes.
-        crate::scene::model::image_model::register_source(
-            &name,
-            std::sync::Arc::new(bytes.clone()),
-        );
+        register(&name, std::sync::Arc::new(bytes.clone()));
         return Some((name, bytes));
     }
     None
@@ -428,7 +424,7 @@ pub async fn read_clipboard_image() -> Option<(String, Vec<u8>)> {
 /// key would overwrite the earlier paste's bytes (the registry is last-wins)
 /// and make its entity display the newer pixels.
 #[cfg(target_arch = "wasm32")]
-fn pasted_image_name(mime_type: &str) -> String {
+fn pasted_image_name(mime_type: &str, taken: fn(&str) -> bool) -> String {
     let now = js_sys::Date::new_0();
     unique_pasted_image_name(
         &format!(
@@ -442,7 +438,7 @@ fn pasted_image_name(mime_type: &str) -> String {
             (now.get_time() as u64) % 1000,
         ),
         clipboard_image_extension(mime_type),
-        crate::scene::model::image_model::has_source,
+        taken,
     )
 }
 
@@ -450,7 +446,7 @@ fn pasted_image_name(mime_type: &str) -> String {
 /// `base.ext` first, then `-2`, `-3`, … inserted before the extension while
 /// the candidate already names a registered source. The taken-check is
 /// injectable so this — the part worth locking with tests — runs natively;
-/// wasm passes [`crate::scene::model::image_model::has_source`].
+/// wasm passes the image registry's check, which the caller supplies.
 pub(crate) fn unique_pasted_image_name(
     base: &str,
     ext: &str,

@@ -9,10 +9,10 @@ use crate::entities::text_support::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{GlyphRun, RenderEntity, RenderObject, TextStroke};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
-use crate::scene::text::lff;
+use crate::display::render_entity::{GlyphRun, RenderEntity, RenderObject, TextStroke};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
+use crate::text::lff;
 use crate::t;
 
 /// Combined single-line-text justification (horizontal × vertical) shown as one
@@ -158,7 +158,7 @@ pub(crate) fn to_render_at_scale(
             color: None,
             fill_tris,
             // Text out of the XY plane lies in its own object coordinate plane.
-            plane: crate::scene::convert::acad_to_render::ocs_text_plane(
+            plane: crate::display::render_entity::ocs_text_plane(
                 t.normal,
                 p.origin,
                 t.insertion_point.z,
@@ -195,7 +195,7 @@ pub fn text_run_placement_at_scale(
         1.0
     };
     let normal = (t.normal.x, t.normal.y, t.normal.z);
-    let (wsx, wsy, wsz) = crate::scene::view::transform::ocs_point_to_wcs(
+    let (wsx, wsy, wsz) = crate::entities::transform::ocs_point_to_wcs(
         (
             t.insertion_point.x,
             t.insertion_point.y,
@@ -620,15 +620,15 @@ fn apply_grip(t: &mut Text, grip_id: usize, apply: GripApply) {
 
 fn apply_transform(t: &mut Text, tr: &EntityTransform) {
     let normal = t.normal;
-    crate::scene::view::transform::apply_ocs_entity_transform(t, tr, normal, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
+    crate::entities::transform::apply_ocs_entity_transform(t, tr, normal, |entity, p1, p2| {
+        crate::entities::transform::reflect_xy_point(
             &mut entity.insertion_point.x,
             &mut entity.insertion_point.y,
             p1,
             p2,
         );
         if let Some(ref mut a) = entity.alignment_point {
-            crate::scene::view::transform::reflect_xy_point(&mut a.x, &mut a.y, p1, p2);
+            crate::entities::transform::reflect_xy_point(&mut a.x, &mut a.y, p1, p2);
         }
         let dx = p2.x - p1.x;
         let dy = p2.y - p1.y;
@@ -653,8 +653,8 @@ impl Grippable for Text {
         apply_grip(self, grip_id, apply);
     }
 
-    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, _grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         vec![
             GripMenuItem {
                 label: "Stretch",
@@ -674,7 +674,7 @@ impl Grippable for Text {
     fn apply_grip_menu(
         &mut self,
         _grip_id: usize,
-        _action: crate::scene::model::object::GripMenuAction,
+        _action: crate::entities::object::GripMenuAction,
     ) {
         // Move-with-Text falls through to Stretch (single grip moves
         // the whole text); Rotate needs a follow-up angle handled by
@@ -684,9 +684,9 @@ impl Grippable for Text {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::RotateText => Some("Rotation (deg)"),
             _ => None,
@@ -696,10 +696,10 @@ impl Grippable for Text {
     fn apply_grip_menu_value(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if matches!(action, A::RotateText)
             && !matches!(self.horizontal_alignment, HA::Aligned | HA::Fit)
         {

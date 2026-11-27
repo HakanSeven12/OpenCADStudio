@@ -13,11 +13,11 @@ use crate::entities::text_support::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{GlyphRun, RenderEntity, RenderObject, TextStroke};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
-use crate::scene::text::lff;
-use crate::scene::view::transform;
+use crate::display::render_entity::{GlyphRun, RenderEntity, RenderObject, TextStroke};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
+use crate::text::lff;
+use crate::entities::transform;
 use crate::t;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -370,7 +370,7 @@ fn build_attr_layout(
             fill_tris,
             // An attribute out of the XY plane (a block aimed in 3D) lies in
             // its own object coordinate plane.
-            plane: crate::scene::convert::acad_to_render::ocs_text_plane(
+            plane: crate::display::render_entity::ocs_text_plane(
                 input.normal,
                 origin,
                 input.insertion_point.z,

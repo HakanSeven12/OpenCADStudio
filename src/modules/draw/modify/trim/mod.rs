@@ -105,6 +105,6 @@ pub(crate) use self::preview::*;
 
 pub use self::extend_cmd::ExtendCommand;
 pub use self::extrim_cmd::ExtrimCommand;
-pub use self::geo::is_trim_boundary_entity;
+pub use self::geo::{is_trim_boundary_entity, TrimAabbIndex};
 pub use self::mode::{quick_mode, set_quick_mode};
 pub use self::trim_cmd::TrimCommand;

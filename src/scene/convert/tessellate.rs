@@ -1286,7 +1286,7 @@ fn tessellate_wires(
             // The viewport and block context re-resolve both off the wire.
             // Selection forces a plain solid highlight.
             let (element_color, element_pattern_length, element_pattern, aci) =
-                crate::entities::mline::element_style(document, m, l.color, &l.linetype, None);
+                crate::scene::mline_style::element_style(document, m, l.color, &l.linetype, None);
             let wcolor = if selected {
                 WireModel::SELECTED
             } else {
@@ -2247,17 +2247,30 @@ fn tessellate_wires(
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
                                 text_verts: Vec::new(),
+                                // Two strokes: the break keeps the strip from
+                                // joining the end of one to the start of the
+                                // other, a diagonal that shows on block points,
+                                // which are sized in world units.
                                 points: vec![
                                     [x - s, y, z],
                                     [x + s, y, z],
+                                    [f32::NAN; 3],
                                     [x, y - s, z],
                                     [x, y + s, z],
                                 ],
                                 // All four cross points share the Point's residual
                                 // (the cross arms are tiny, < 0.1 m, so the low
                                 // component of the centre is also the right one
-                                // for the arm tips at f32 precision).
-                                points_low: vec![[xl, yl, zl]; 4].into(),
+                                // for the arm tips at f32 precision); the break
+                                // takes a zero, as in `points_to_ds`.
+                                points_low: vec![
+                                    [xl, yl, zl],
+                                    [xl, yl, zl],
+                                    [0.0; 3],
+                                    [xl, yl, zl],
+                                    [xl, yl, zl],
+                                ]
+                                .into(),
                                 snap_pts,
                                 tangent_geoms: te.tangent_geoms,
                                 key_vertices,
@@ -2941,7 +2954,7 @@ fn tessellate_wires(
         // the document stays untouched and every piece retains the REGION's
         // source handle. Separate wires keep holes and disconnected edges from
         // acquiring fictitious joining segments or chord midpoint snaps.
-        for piece in crate::modules::draw::modify::explode::explode_entity(entity, document) {
+        for piece in crate::scene::explode::explode_entity(entity, document) {
             let mut boundary = tessellate(
                 document,
                 handle,
@@ -3786,7 +3799,7 @@ mod tests {
         let mut doc = Document::new();
         let circle =
             document::entities::Circle::from_center_radius(document::types::Vector3::ZERO, 0.25);
-        crate::app::define_block_raw_doc(
+        crate::entities::doc_edit::define_block_raw_doc(
             &mut doc,
             "_NONE",
             document::types::Vector3::ZERO,
@@ -3805,7 +3818,7 @@ mod tests {
 
         // AutoCAD's own "_None" is empty: no arrow.
         let mut doc = Document::new();
-        crate::app::define_block_raw_doc(&mut doc, "_None", document::types::Vector3::ZERO, &[]);
+        crate::entities::doc_edit::define_block_raw_doc(&mut doc, "_None", document::types::Vector3::ZERO, &[]);
         let handle = doc.block_records.get("_None").unwrap().handle;
         assert!(matches!(
             arrow_from_block(&doc, handle, 50.0),
@@ -4169,6 +4182,42 @@ mod tests {
         assert_eq!(inst.start_width, 25.0);
         // params.w (end_width) is at end_angle (physical start, 5.0)
         assert_eq!(inst.params[3], 5.0);
+    }
+
+    #[test]
+    fn a_dot_point_draws_two_strokes_without_a_diagonal() {
+        // Inside a block a dot point is sized in world units (no
+        // world-per-pixel), so a strip joining its strokes shows a diagonal.
+        let mut point = document::entities::Point::default();
+        point.location = document::types::Vector3::new(10.0, 20.0, 0.0);
+        let wires = tessellate(
+            &document::Document::new(),
+            Handle::new(123),
+            &EntityType::Point(point),
+            false,
+            [1.0; 4],
+            0.0,
+            [0.0; 8],
+            1.0,
+            1.0,
+            None,
+            None,
+            [0.0; 4],
+            false,
+        );
+        let [wire] = &wires[..] else {
+            panic!("a dot point is one wire");
+        };
+        let runs: Vec<&[[f32; 3]]> = wire
+            .points
+            .split(|p| p[0].is_nan())
+            .filter(|run| !run.is_empty())
+            .collect();
+        assert_eq!(runs.len(), 2, "two strokes: {:?}", wire.points);
+        assert!(runs.iter().all(|run| run.len() == 2));
+        assert_eq!(runs[0][0][1], runs[0][1][1], "the first stroke is level");
+        assert_eq!(runs[1][0][0], runs[1][1][0], "the second stroke is upright");
+        assert_eq!(wire.points_low.len(), wire.points.len());
     }
 
     #[test]

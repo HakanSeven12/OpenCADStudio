@@ -134,7 +134,11 @@ impl OpenCADStudio {
         }
         // Dismiss any open dropdown / collapsed-panel flyout on tool use.
         self.ribbon.close_dropdown();
-        self.ribbon.activate_tool(&tool_id);
+        // An object snap button leaves the running command's tool lit.
+        if !matches!(&event, ModuleEvent::Command(cmd) if crate::app::commands::is_point_modifier_token(cmd))
+        {
+            self.ribbon.activate_tool(&tool_id);
+        }
         match event {
             // `dispatch_command` turns a one-shot tool's highlight off
             // again once nothing is left running (#355).
@@ -1959,6 +1963,69 @@ mod tests {
         );
     }
 
+    /// Removing a reference without the right-click menu: after a click in
+    /// the list, Delete detaches the selected references (one undo step) and
+    /// leaves the drawing's own selection alone; a click in the drawing gives
+    /// Delete back to the drawing. The toolbar's Detach is greyed until a
+    /// reference is selected.
+    #[test]
+    fn delete_in_the_reference_list_detaches_the_selected_references() {
+        use crate::app::Message;
+        use crate::ui::window::xref_manager::XrefRowId;
+        use document::tables::BlockRecord;
+        let mut app = fresh();
+        let i = app.active_tab;
+        for name in ["PLAN", "SITE"] {
+            let mut br = BlockRecord::new(name);
+            br.flags.is_xref = true;
+            br.xref_path = format!("old/{}.dwg", name.to_lowercase());
+            br.handle = app.tabs[i].scene.document.allocate_handle();
+            app.tabs[i].scene.document.block_records.add(br).unwrap();
+        }
+        app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_repro_host.dwg"));
+        app.show_external_references = true;
+        app.refresh_xref_manager();
+        let row = |app: &OpenCADStudio, name: &str| {
+            let e = app
+                .xref_manager
+                .entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{name} listed"));
+            XrefRowId::of(e.key, &e.saved_path)
+        };
+        let has = |app: &OpenCADStudio, name: &str| {
+            app.tabs[i].scene.document.block_records.get(name).is_some()
+        };
+        assert!(app.xref_manager.detach_gate().is_some(), "nothing selected");
+
+        // Delete without a click in the list stays the drawing's.
+        let _ = app.update(Message::ShortcutPressed("DELETE".into()));
+        assert!(has(&app, "PLAN") && has(&app, "SITE"));
+
+        let _ = app.update(Message::XrefManagerSelect(row(&app, "PLAN")));
+        assert!(app.xref_manager.keys_active);
+        assert!(app.xref_manager.detach_gate().is_none());
+        let _ = app.update(Message::ShortcutPressed("DELETE".into()));
+        assert!(!has(&app, "PLAN"), "Delete detached PLAN");
+        assert!(has(&app, "SITE"), "SITE was not selected");
+
+        let _ = app.update(Message::Undo);
+        assert!(has(&app, "PLAN"), "one undo step brings it back");
+
+        // A click in the drawing gives Delete back to the drawing.
+        let _ = app.update(Message::XrefManagerSelect(row(&app, "SITE")));
+        let _ = app.update(Message::ViewportLeftPress);
+        assert!(!app.xref_manager.keys_active);
+        let _ = app.update(Message::ShortcutPressed("DELETE".into()));
+        assert!(has(&app, "SITE"));
+
+        // Esc in the list gives the keys back as well.
+        let _ = app.update(Message::XrefManagerSelect(row(&app, "SITE")));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(!app.xref_manager.keys_active);
+    }
+
     #[test]
     fn palette_overlay_and_pathtype_rowop_gui_path() {
         // Row-menu Overlay + Change-Path row ops on a direct row via the
@@ -2726,6 +2793,239 @@ mod tests {
             state.text_values.get("lbl_status").unwrap(),
             "List cleared. 0 items in table."
         );
+    }
+
+    /// A date field (API v33): its calendar opens at the month the field
+    /// names, steps between months, and a picked day goes into the field in
+    /// the plugin's format and reaches the command as a "pick"; typing is a
+    /// "change" as in a text field, and the calendar then opens there.
+    #[test]
+    fn interactive_dialog_date_field_picks_a_day_from_its_calendar() {
+        use crate::command::{CadCommand, CmdResult};
+        use crate::ui::window::date_field::DateMsg;
+        use ocs_plugin_api::dialog::{
+            DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
+        };
+        use std::sync::{Arc, Mutex};
+
+        struct DateCmd {
+            events: Arc<Mutex<Vec<DialogEvent>>>,
+        }
+        impl CadCommand for DateCmd {
+            fn name(&self) -> &'static str {
+                "DATETEST"
+            }
+            fn prompt(&self) -> String {
+                "Date test".to_string()
+            }
+            fn on_point(&mut self, _pt: glam::DVec3) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_enter(&mut self) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_dialog_action(&mut self, event: DialogEvent) -> DialogActionResponse {
+                self.events.lock().unwrap().push(event);
+                DialogActionResponse::None
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].active_cmd = Some(Box::new(DateCmd {
+            events: events.clone(),
+        }));
+        app.open_plugin_dialog(DialogDef::new("Sheet").with_control(DialogControl::Date {
+            id: "issued".to_string(),
+            label: "Issued".to_string(),
+            default: "26.11.2026".to_string(),
+            format: "DD.MM.YYYY".to_string(),
+        }));
+        let date = |app: &mut OpenCADStudio, msg| {
+            let _ = app.update(Message::PluginDialogDate("issued".to_string(), msg));
+        };
+        let open = |app: &OpenCADStudio| {
+            app.plugin_dialog_state
+                .as_ref()
+                .unwrap()
+                .open_calendar
+                .clone()
+        };
+
+        date(&mut app, DateMsg::Toggle);
+        assert_eq!(open(&app), Some(("issued".to_string(), 2026, 11)));
+        date(&mut app, DateMsg::Month(2026, 12));
+        assert_eq!(open(&app), Some(("issued".to_string(), 2026, 12)));
+        date(&mut app, DateMsg::Pick("03.12.2026".to_string()));
+        assert_eq!(open(&app), None);
+        let state = app.plugin_dialog_state.as_ref().unwrap();
+        assert_eq!(state.text_values.get("issued").unwrap(), "03.12.2026");
+        assert_eq!(
+            state.collect_response_map().get("issued"),
+            Some(&DialogValue::Text("03.12.2026".to_string()))
+        );
+        {
+            let events = events.lock().unwrap();
+            let last = events.last().unwrap();
+            assert_eq!(
+                (last.control_id.as_str(), last.action.as_str()),
+                ("issued", "pick")
+            );
+            assert_eq!(
+                last.value,
+                Some(DialogValue::Text("03.12.2026".to_string()))
+            );
+        }
+
+        let _ = app.update(Message::PluginDialogTextChange(
+            "issued".to_string(),
+            "1.2.2027".to_string(),
+        ));
+        assert_eq!(events.lock().unwrap().last().unwrap().action, "change");
+        date(&mut app, DateMsg::Toggle);
+        assert_eq!(open(&app), Some(("issued".to_string(), 2027, 2)));
+        date(&mut app, DateMsg::Close);
+        assert_eq!(open(&app), None);
+        assert!(app.plugin_dialog_state.is_some(), "the dialog stays open");
+
+        // Escape closes the open calendar first, the dialog only after.
+        date(&mut app, DateMsg::Toggle);
+        app.active_modal = Some(crate::app::ModalKind::PluginDialog);
+        let _ = app.update(Message::CommandEscape);
+        assert_eq!(open(&app), None);
+        assert!(
+            app.plugin_dialog_state.is_some(),
+            "Esc closed the calendar only"
+        );
+
+        // The calendar closes on Escape itself and passes the key on: that
+        // Escape is the calendar's too.
+        date(&mut app, DateMsg::Toggle);
+        date(&mut app, DateMsg::Close);
+        let _ = app.update(Message::CommandEscape);
+        assert!(
+            app.plugin_dialog_state.is_some(),
+            "the calendar's Escape left the dialog open"
+        );
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.plugin_dialog_state.is_none(), "the next Esc closes it");
+    }
+
+    /// A text field in a dialog reports each edit to the command as a
+    /// "change" with its text, as a panel's text field and a dialog's file
+    /// field do, so the command can follow the input: here it keeps a count
+    /// label in step. A Number field reports its text as typed.
+    #[test]
+    fn interactive_dialog_text_field_reports_each_edit() {
+        use crate::command::{CadCommand, CmdResult};
+        use ocs_plugin_api::dialog::{
+            DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
+        };
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        struct FilterCmd {
+            events: Arc<Mutex<Vec<DialogEvent>>>,
+        }
+
+        impl CadCommand for FilterCmd {
+            fn name(&self) -> &'static str {
+                "FILTERTEST"
+            }
+            fn prompt(&self) -> String {
+                "Filter test".to_string()
+            }
+            fn on_point(&mut self, _pt: glam::DVec3) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_enter(&mut self) -> CmdResult {
+                CmdResult::Cancel
+            }
+            fn on_dialog_action(&mut self, event: DialogEvent) -> DialogActionResponse {
+                self.events.lock().unwrap().push(event.clone());
+                match (
+                    event.control_id.as_str(),
+                    event.action.as_str(),
+                    event.value,
+                ) {
+                    ("filter", "change", Some(DialogValue::Text(t))) => {
+                        let n = ["alpha", "beta", "alphabet"]
+                            .iter()
+                            .filter(|name| name.contains(t.as_str()))
+                            .count();
+                        DialogActionResponse::UpdateValues(HashMap::from([(
+                            "count".to_string(),
+                            DialogValue::Text(format!("{n} match")),
+                        )]))
+                    }
+                    _ => DialogActionResponse::None,
+                }
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].active_cmd = Some(Box::new(FilterCmd {
+            events: events.clone(),
+        }));
+        app.open_plugin_dialog(
+            DialogDef::new("Filter")
+                .with_control(DialogControl::Text {
+                    id: "filter".to_string(),
+                    label: "Name".to_string(),
+                    default: String::new(),
+                })
+                .with_control(DialogControl::Number {
+                    id: "size".to_string(),
+                    label: "Size".to_string(),
+                    default: 1.0,
+                    min: None,
+                    max: None,
+                    step: None,
+                })
+                .with_control(DialogControl::Label {
+                    id: "count".to_string(),
+                    text: "3 match".to_string(),
+                    align_h: None,
+                }),
+        );
+
+        for typed in ["a", "al", "alp"] {
+            let _ = app.update(Message::PluginDialogTextChange(
+                "filter".to_string(),
+                typed.to_string(),
+            ));
+        }
+        let state = app.plugin_dialog_state.as_ref().unwrap();
+        assert_eq!(state.text_values.get("filter").unwrap(), "alp");
+        assert_eq!(state.text_values.get("count").unwrap(), "2 match");
+        {
+            let events = events.lock().unwrap();
+            assert_eq!(events.len(), 3);
+            let last = events.last().unwrap();
+            assert_eq!(last.action, "change");
+            assert_eq!(last.value, Some(DialogValue::Text("alp".to_string())));
+            assert_eq!(
+                last.current_values.get("filter"),
+                Some(&DialogValue::Text("alp".to_string()))
+            );
+        }
+
+        let _ = app.update(Message::PluginDialogTextChange(
+            "size".to_string(),
+            "2.".to_string(),
+        ));
+        let events = events.lock().unwrap();
+        let last = events.last().unwrap();
+        assert_eq!(last.control_id, "size");
+        assert_eq!(last.value, Some(DialogValue::Text("2.".to_string())));
+        assert_eq!(
+            last.current_values.get("size"),
+            Some(&DialogValue::Number(2.0))
+        );
+        assert!(app.plugin_dialog_state.is_some(), "the dialog stays open");
     }
 }
 

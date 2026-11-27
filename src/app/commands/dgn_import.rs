@@ -113,8 +113,9 @@ fn route(path: &str, format: Option<usize>) -> Result<Route, String> {
     }
     let ext = extension(path);
     let by_extension = f.is_none_or(|f| f.support == Support::ByExtension);
-    // Wavefront OBJ is not among the listed types; All Files still reads it.
-    if by_extension && ext == "obj" {
+    // Wavefront OBJ and glTF are not among the listed types; All Files
+    // still reads them.
+    if by_extension && matches!(ext.as_str(), "obj" | "gltf" | "glb") {
         return Ok(Route::Obj);
     }
     // The chosen format, or the one whose patterns name the extension.

@@ -1443,6 +1443,8 @@ impl OpenCADStudio {
                         | ocs_plugin_api::dialog::DialogControl::Choice { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Color { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::FilePicker { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::FolderPicker { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Date { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Fields { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Table { id, .. }
                         | ocs_plugin_api::dialog::DialogControl::Label { id, .. }
@@ -1547,7 +1549,10 @@ impl OpenCADStudio {
                     text,
                 )))
             }
-            (DialogControl::Text { .. } | DialogControl::Number { .. }, "change") => {
+            (
+                DialogControl::Text { .. } | DialogControl::Number { .. } | DialogControl::Date { .. },
+                "change",
+            ) => {
                 // RAW: a plain string or finite number (the widget sends
                 // the draft text); tagged `{"Text": …}` / `{"Number": …}`
                 // DialogValue JSON is tolerated.
@@ -1728,6 +1733,27 @@ impl OpenCADStudio {
         outcome?;
         self.set_control_result(json!({"steps":steps}));
         Ok(Task::batch(tasks))
+    }
+
+    /// A key press as the keyboard sends it: the name is normalized the way
+    /// Customize stores bindings, then runs as `ShortcutPressed`.
+    pub(super) fn control_key(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        use crate::app::shortcuts::{is_named_key, normalize_key, ACCEL};
+        let name = string(req, "key")?;
+        let name = name
+            .split('+')
+            .map(|part| if part.trim().eq_ignore_ascii_case("ACCEL") { ACCEL } else { part })
+            .collect::<Vec<_>>()
+            .join("+");
+        let key = normalize_key(&name);
+        let base = key.rsplit('+').next().unwrap_or("");
+        let modifier = matches!(base, "CTRL" | "CMD" | "ALT" | "SHIFT");
+        if modifier || !(is_named_key(base) || base.chars().count() == 1) {
+            return Err(failure("unknown_key", &format!("Unknown key name: {name}")));
+        }
+        let task = self.update(Message::ShortcutPressed(key.clone()));
+        self.set_control_result(json!({"key": key}));
+        Ok(task)
     }
 
     pub(super) fn control_set_property(&mut self, req: &Value) -> Result<Task<Message>, Value> {
@@ -1945,12 +1971,14 @@ impl OpenCADStudio {
             "conversion_loss_back" => Message::ConversionLossBack,
             // Show a layout (or "Model"), as clicking its tab does.
             "layout_switch" => Message::LayoutSwitch(string(req, "value")?.into()),
-            // Pick the Plot dialog's output device: a printer name, "pdf" or "svg".
+            // Pick the Plot dialog's output device: a printer name, "pdf", "svg"
+            // or "image".
             "plot_printer" => {
-                use crate::ui::window::plot::{PlotDlgMsg, OUT_PDF, OUT_SVG};
+                use crate::ui::window::plot::{PlotDlgMsg, OUT_IMAGE, OUT_PDF, OUT_SVG};
                 let device = match string(req, "value")? {
                     "pdf" => OUT_PDF.to_string(),
                     "svg" => OUT_SVG.to_string(),
+                    "image" => OUT_IMAGE.to_string(),
                     other => other.to_string(),
                 };
                 Message::PlotDlg(PlotDlgMsg::Printer(device))
@@ -3645,7 +3673,8 @@ impl OpenCADStudio {
             // call. Point Group Properties: "tab=<information|point_groups|
             // raw_desc_matching|include|exclude|query_builder|overrides|
             // point_list|summary>", "name=", "description=", "point_style=",
-            // "label_style=", "group=<k>:0|1", "include=<k>:<text>" /
+            // "label_style=", "locked=0|1", "raw_code=<k>:0|1" (Raw Desc
+            // Matching code k), "group=<k>:0|1", "include=<k>:<text>" /
             // "exclude=<k>:<text>" (rule k on with the text; k 0 numbers,
             // 1 elevations, 2 names, 3 raw, 4 full descriptions),
             // "include_off=<k>", "exclude_off=<k>", "include_all=0|1",
@@ -3654,14 +3683,17 @@ impl OpenCADStudio {
             // "row=<k>:<set operator>:<0|1 open>:<property 0-4>:<operator>:
             // <value>:<0|1 close>", "reset", "override=<k>:0|1",
             // "override_text=<k>:<text>", "list_filter=<text>",
-            // "list_sort=<column title>", "list_switch=grid|full|name|raw|
+            // "list_sort=<column title>", "list_switch=grid|full|name|raw|styles|
             // columns", "list_pick=<number>", "list_show[=<number>]",
             // "apply", "ok", "cancel".
             // Create COGO Points (corridor): "range=entire|user",
             // "baseline=<name>", "start=", "end=", "group_name=",
             // "code=<k>:0|1", "pick_baseline", "pick_station=start|end",
+            // "drag=start|end:<0..1 along the range bar>",
             // "ok". Create Blocks from COGO Points:
             // "spatial=none|display|window", "pick_window", "group=<k>:0|1",
+            // "pick_groups", "picker=<k>:0|1", "picker_move=top|up|down|
+            // bottom", "picker_apply", "picker_ok", "picker_cancel",
             // "existing=<block>", "new=<name>", "layer=<name>", "ok". The
             // duplicate block question: "skip", "overwrite", "cancel".
             // Duplicate Point Number: "resolution=<label>", "offset=",
@@ -3684,6 +3716,8 @@ impl OpenCADStudio {
                         "description" => G::Description(value.into()),
                         "point_style" => G::PointStyle(value.into()),
                         "label_style" => G::LabelStyle(value.into()),
+                        "locked" => G::Locked(on(value)),
+                        "raw_code" => pair().map(|(k, v)| G::RawCode(k, on(&v))).ok_or_else(bad)?,
                         "group" => pair().map(|(k, v)| G::Group(k, on(&v))).ok_or_else(bad)?,
                         "include" | "exclude" => pair().map(|(k, v)| G::SetRule(key == "exclude", k, v)).ok_or_else(bad)?,
                         "include_off" | "exclude_off" => G::Rule(key == "exclude_off", value.parse().map_err(|_| bad())?, false),
@@ -3720,6 +3754,7 @@ impl OpenCADStudio {
                                 "full" => S::Full,
                                 "name" => S::Name,
                                 "raw" => S::Raw,
+                                "styles" => S::Styles,
                                 "columns" => S::Columns,
                                 _ => return Err(bad()),
                             })
@@ -3755,6 +3790,14 @@ impl OpenCADStudio {
                             (K::CorridorPoints, "code") => pair().map(|(k, v)| P::Code(k, v)).ok_or_else(bad)?,
                             (K::CorridorPoints, "pick_baseline") => P::PickBaseline,
                             (K::CorridorPoints, "pick_station") => P::PickStation(value == "end"),
+                            // A range bar handle dragged to a fraction along the bar.
+                            (K::CorridorPoints, "drag") => {
+                                let (which, t) = value.split_once(':').ok_or_else(bad)?;
+                                let t: f64 = t.parse().map_err(|_| bad())?;
+                                let end = which == "end";
+                                let s = self.point_tools.corridor.as_ref().and_then(|w| w.drag_handle(end, t));
+                                P::RangeDrag(end, s.ok_or_else(|| failure("disabled", "The range bar has no handles unless the range is specified"))?)
+                            }
                             (K::CorridorPoints, "ok") => P::CorridorOk,
                             (K::PointBlocks, "spatial") => P::Spatial(match value {
                                 "display" => Spatial::CurrentDisplay,
@@ -3763,6 +3806,18 @@ impl OpenCADStudio {
                             }),
                             (K::PointBlocks, "pick_window") => P::PickWindow,
                             (K::PointBlocks, "group") => pair().map(|(k, v)| P::BlockGroup(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "pick_groups") => P::PickGroups,
+                            (K::PointBlocks, "picker") => pair().map(|(k, v)| P::PickerRow(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "picker_move") => P::PickerMove(match value {
+                                "top" => crate::ui::window::point_tools::Move::Top,
+                                "up" => crate::ui::window::point_tools::Move::Up,
+                                "down" => crate::ui::window::point_tools::Move::Down,
+                                "bottom" => crate::ui::window::point_tools::Move::Bottom,
+                                _ => return Err(bad()),
+                            }),
+                            (K::PointBlocks, "picker_apply") => P::PickerApply,
+                            (K::PointBlocks, "picker_ok") => P::PickerOk,
+                            (K::PointBlocks, "picker_cancel") => P::PickerCancel,
                             (K::PointBlocks, "existing") => {
                                 let _ = self.on_point_tool(P::UseExisting(true));
                                 P::Existing(value.into())

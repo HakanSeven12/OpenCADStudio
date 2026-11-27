@@ -670,13 +670,13 @@ fn dynamic_dimension_follow_points(
     }
     let text = dimension.base().user_text.clone();
     let rebuilt = match axis {
-        None => crate::modules::annotate::aligned_dim::aligned_dimension_entity(
+        None => crate::entities::dimension::build::aligned::aligned_dimension_entity(
             to_dvec(first),
             to_dvec(second),
             to_dvec(definition),
             text,
         ),
-        Some(axis) => crate::modules::annotate::linear_dim::linear_dimension_entity(
+        Some(axis) => crate::entities::dimension::build::linear::linear_dimension_entity(
             to_dvec(first),
             to_dvec(second),
             to_dvec(definition),
@@ -770,7 +770,7 @@ fn dynamic_dimension_follow_radial(
             let direction = to_dvec(d.definition_point) - to_dvec(d.angle_vertex);
             let direction = direction.try_normalize().unwrap_or(glam::DVec3::X);
             (
-                crate::modules::annotate::radius_dim::radius_constraint_entity(
+                crate::entities::dimension::build::radial::radius_constraint_entity(
                     center,
                     radius,
                     center + direction * radius.max(1.0e-9),
@@ -783,7 +783,7 @@ fn dynamic_dimension_follow_radial(
             let direction = to_dvec(d.angle_vertex) - to_dvec(d.definition_point);
             let direction = direction.try_normalize().unwrap_or(glam::DVec3::X);
             (
-                crate::modules::annotate::diameter_dim::diameter_constraint_entity(
+                crate::entities::dimension::build::radial::diameter_constraint_entity(
                     center,
                     radius,
                     center + direction * radius.max(1.0e-9),
@@ -847,7 +847,7 @@ fn dynamic_dimension_follow_angle(
             {
                 return false;
             }
-            crate::modules::annotate::angular_dim::angular_two_line_entity(
+            crate::entities::dimension::build::angular::angular_two_line_entity(
                 to_dvec(*a),
                 to_dvec(*b),
                 to_dvec(*c),
@@ -863,7 +863,7 @@ fn dynamic_dimension_follow_angle(
             {
                 return false;
             }
-            crate::modules::annotate::angular_dim::angular_three_point_entity(
+            crate::entities::dimension::build::angular::angular_three_point_entity(
                 to_dvec(*vertex),
                 to_dvec(*first),
                 to_dvec(*second),
@@ -1120,7 +1120,7 @@ pub enum ConstraintKind {
     RigidSet,
 }
 
-pub type ConstraintId = u32;
+pub use crate::entities::object::ConstraintId;
 
 pub(crate) mod distance_direction_type {
     pub const UNDIRECTED: u8 = 0;
@@ -2780,7 +2780,13 @@ impl super::Scene {
     /// overrides are a display matter and stay out of the file, and so does
     /// what resolving an external reference merged in (its geometry, nested
     /// blocks and styles), which the file never stores.
-    pub(crate) fn document_for_save(&self) -> document::Document {
+    ///
+    /// `strip_xrefs` takes out what resolving the external references merged
+    /// in; the file code supplies it (`io::xref::strip_resolved_xref_content`).
+    pub(crate) fn document_for_save_with(
+        &self,
+        strip_xrefs: fn(&mut document::Document),
+    ) -> document::Document {
         use crate::entities::dim_override as ov;
         let mut document = self.document.clone();
         for set in &self.parametric_constraints {
@@ -2802,7 +2808,7 @@ impl super::Scene {
                 }
             }
         }
-        crate::io::xref::strip_resolved_xref_content(&mut document);
+        strip_xrefs(&mut document);
         // Centre marks and centre lines go out in their stored form.
         crate::scene::center_native::export(&mut document);
         crate::entities::field::stamp_save_dates(&mut document);
@@ -3061,7 +3067,7 @@ impl super::Scene {
         &self,
         scope: ParametricScope,
         handles: &[Handle],
-        settings: &crate::app::settings::AutoConstrainSettings,
+        settings: &crate::scene::auto_constrain::AutoConstrainSettings,
     ) -> Vec<(ConstraintKind, Vec<ParametricRef>)> {
         use ocs_geom::geom2d::{
             infer_constraints_with_settings, Arc, Circle, ConstraintEndpoint, InferenceKind,
@@ -3177,16 +3183,17 @@ impl super::Scene {
             ConstraintEndpoint::Start => 0usize,
             ConstraintEndpoint::End => 1usize,
         };
+        use crate::scene::auto_constrain::AutoConstraintKind as Auto;
         let kind = |kind| match kind {
-            crate::app::settings::AutoConstraintKind::Coincident => InferenceKind::Coincident,
-            crate::app::settings::AutoConstraintKind::Collinear => InferenceKind::Collinear,
-            crate::app::settings::AutoConstraintKind::Parallel => InferenceKind::Parallel,
-            crate::app::settings::AutoConstraintKind::Perpendicular => InferenceKind::Perpendicular,
-            crate::app::settings::AutoConstraintKind::Tangent => InferenceKind::Tangent,
-            crate::app::settings::AutoConstraintKind::Concentric => InferenceKind::Concentric,
-            crate::app::settings::AutoConstraintKind::Horizontal => InferenceKind::Horizontal,
-            crate::app::settings::AutoConstraintKind::Vertical => InferenceKind::Vertical,
-            crate::app::settings::AutoConstraintKind::Equal => InferenceKind::Equal,
+            Auto::Coincident => InferenceKind::Coincident,
+            Auto::Collinear => InferenceKind::Collinear,
+            Auto::Parallel => InferenceKind::Parallel,
+            Auto::Perpendicular => InferenceKind::Perpendicular,
+            Auto::Tangent => InferenceKind::Tangent,
+            Auto::Concentric => InferenceKind::Concentric,
+            Auto::Horizontal => InferenceKind::Horizontal,
+            Auto::Vertical => InferenceKind::Vertical,
+            Auto::Equal => InferenceKind::Equal,
         };
         let inference_settings = InferenceSettings {
             priority: settings
@@ -3951,7 +3958,7 @@ mod tests {
             .document
             .add_entity(document::EntityType::Line(line))
             .unwrap();
-        let dimension = crate::modules::annotate::linear_dim::linear_dimension_entity(
+        let dimension = crate::entities::dimension::build::linear::linear_dimension_entity(
             glam::DVec3::new(700.0, 200.0, 0.0),
             glam::DVec3::new(740.0, 240.0, 0.0),
             glam::DVec3::new(740.0, 260.0, 0.0),
@@ -4674,7 +4681,7 @@ mod tests {
         let inferred = scene.inferred_parametric_constraints(
             ParametricScope::ModelSpace,
             &[first, second],
-            &crate::app::settings::AutoConstrainSettings::default(),
+            &crate::scene::auto_constrain::AutoConstrainSettings::default(),
         );
 
         assert!(!inferred.iter().any(|(kind, refs)| {

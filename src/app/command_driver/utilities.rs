@@ -1255,7 +1255,12 @@ impl OpenCADStudio {
     /// `chain`: words a command that took none leaves behind start the next
     /// command, as a script line (`REGEN CIRCLE 0,0 5`) expects. Off, they stay
     /// unconsumed.
-    fn run_command_line_impl(&mut self, cmd: &str, finish: bool, chain: bool) -> Task<Message> {
+    pub(in crate::app) fn run_command_line_impl(
+        &mut self,
+        cmd: &str,
+        finish: bool,
+        chain: bool,
+    ) -> Task<Message> {
         let trimmed = cmd.trim_start();
         if trimmed
             .split_whitespace()
@@ -1268,6 +1273,10 @@ impl OpenCADStudio {
                 chain,
             );
         }
+        // A plugin command runs beside the window: nothing new until it ends.
+        if self.plugin_run_refuses(cmd) {
+            return Task::none();
+        }
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
         let tokens = quoted_words(cmd);
@@ -1279,6 +1288,24 @@ impl OpenCADStudio {
         // dispatch first. A built-in interactive tool matches only its bare name
         // (`LINE`), so the full line is not a plugin command and falls through to
         // the first-word + fed-tokens path below. (#162)
+        // The window draws once before a plugin command starts (#3650).
+        let frame_drawn = self.plugin_frame_drawn;
+        if !self.suppress_plugin_dispatch {
+            if let Some(task) =
+                self.defer_plugin_line(cmd, || crate::app::plugin_frame::Resume::Line {
+                    line: cmd.to_string(),
+                    finish,
+                    chain,
+                })
+            {
+                return task;
+            }
+            if let Some(task) = self.begin_plugin_run(i, cmd, frame_drawn) {
+                self.tabs[i].last_cmd = Some(cmd.to_string());
+                self.command_line.record_recent(cmd);
+                return task;
+            }
+        }
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             self.tabs[i].last_cmd = Some(cmd.to_string());
             self.command_line.record_recent(cmd);
@@ -1296,6 +1323,8 @@ impl OpenCADStudio {
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
             return self.finish_active_command(&toks, finish);
         }
+        // A line no plugin took goes the built-in way as it came.
+        self.plugin_frame_drawn = frame_drawn;
         // Bare XREF opens the External References palette, so probing the
         // verb alone would open it (and refresh every entry) before the
         // argument form `XREF Reload A` runs.
@@ -1632,10 +1661,57 @@ impl OpenCADStudio {
                 .collect();
             return Some(self.feed_command(StepInput::SelectionComplete(handles)));
         }
+        // The name Named asked for: the members of that selection set that
+        // are in this space join the set (or leave it in Remove mode); an
+        // unknown name asks again and Enter gives up on the set.
+        if std::mem::take(&mut self.selection_named_set_pending) {
+            let name = text.trim();
+            if name.is_empty() {
+                let found = 0;
+                self.command_line
+                    .push_info(crate::tf!("{found} found").as_ref());
+                reprompt(self);
+                return Some(Task::none());
+            }
+            let Some(recall) = self.tabs[i].scene.named_selection_recall(name) else {
+                self.command_line
+                    .push_error(crate::t!("Invalid selection set name.").as_ref());
+                self.command_line
+                    .push_info(crate::t!("Enter selection set name:").as_ref());
+                self.selection_named_set_pending = true;
+                return Some(Task::none());
+            };
+            self.report_named_selection_left_out(&recall);
+            let add = recall.selectable;
+            let remove = self.select_remove_mode;
+            self.selection_group_named = true;
+            self.last_pick = Some((add.clone(), remove));
+            for handle in add {
+                if remove {
+                    self.tabs[i].scene.deselect_entity(handle);
+                } else {
+                    self.tabs[i].scene.select_entity(handle, false);
+                }
+            }
+            self.refresh_properties();
+            let handles: Vec<Handle> = self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect();
+            return Some(self.feed_command(StepInput::SelectionComplete(handles)));
+        }
         if let "G" | "GROUP" = kw.as_str() {
             self.selection_group_pending = true;
             self.command_line
                 .push_info(crate::t!("Enter group name:").as_ref());
+            return Some(Task::none());
+        }
+        if let "N" | "NAMED" = kw.as_str() {
+            self.selection_named_set_pending = true;
+            self.command_line
+                .push_info(crate::t!("Enter selection set name:").as_ref());
             return Some(Task::none());
         }
         // SUbobject: picks take faces, edges and vertices of 3D objects
@@ -1676,7 +1752,7 @@ impl OpenCADStudio {
             self.command_line
                 .push_error(crate::t!("*Invalid selection*").as_ref());
             self.command_line.push_info(
-                crate::t!("Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object")
+                crate::t!("Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Named/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object")
                     .as_ref(),
             );
             if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {

@@ -1125,7 +1125,7 @@ fn a_renamed_lookup_row_keeps_the_name_across_a_save() {
         "Grip9",
     )
     .expect("the lookup takes a name");
-    let document = app.tabs[tab].scene.document_for_save();
+    let document = app.tabs[tab].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
     let version = document.version;
     let prepared = crate::io::prepare_document_for_save(document, version);
     let bytes = document::DxfWriter::new(&prepared).write_to_vec().unwrap();

@@ -29,14 +29,14 @@ pub(super) fn modify_aabb(entity: &EntityType) -> Option<[f64; 4]> {
     })
 }
 
-pub(crate) struct ModifyEntityIndex {
+pub struct ModifyEntityIndex {
     by_handle: FxHashMap<Handle, usize>,
     tree: Option<QuadTree>,
     unbounded: Vec<Handle>,
 }
 
 impl ModifyEntityIndex {
-    pub(super) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             by_handle: FxHashMap::default(),
             tree: None,
@@ -44,9 +44,10 @@ impl ModifyEntityIndex {
         }
     }
 
-    pub(super) fn build(entities: &[EntityType]) -> Self {
-        let mut by_handle = FxHashMap::default();
-        let mut bounded = Vec::new();
+    pub fn build(entities: &[EntityType]) -> Self {
+        let mut by_handle =
+            FxHashMap::with_capacity_and_hasher(entities.len(), Default::default());
+        let mut bounded = Vec::with_capacity(entities.len());
         let mut unbounded = Vec::new();
         let mut world = [
             f64::INFINITY,
@@ -74,16 +75,15 @@ impl ModifyEntityIndex {
         } else {
             let span = (world[2] - world[0]).max(world[3] - world[1]).max(1.0);
             let pad = span * 1.0e-9 + 1.0e-6;
-            let mut tree = QuadTree::new([
-                world[0] - pad,
-                world[1] - pad,
-                world[2] + pad,
-                world[3] + pad,
-            ]);
-            for (handle, aabb) in bounded {
-                tree.insert(handle, aabb);
-            }
-            Some(tree)
+            Some(QuadTree::from_items(
+                [
+                    world[0] - pad,
+                    world[1] - pad,
+                    world[2] + pad,
+                    world[3] + pad,
+                ],
+                bounded,
+            ))
         };
 
         Self {
@@ -94,7 +94,7 @@ impl ModifyEntityIndex {
     }
 
     #[inline]
-    pub(super) fn get<'a>(
+    pub fn get<'a>(
         &self,
         entities: &'a [EntityType],
         handle: Handle,
@@ -106,7 +106,7 @@ impl ModifyEntityIndex {
 
     /// Take `handle` out of `entities` and the index. The last entity moves
     /// into its slot, so nothing else is re-indexed.
-    pub(super) fn remove(&mut self, entities: &mut Vec<EntityType>, handle: Handle) {
+    pub fn remove(&mut self, entities: &mut Vec<EntityType>, handle: Handle) {
         let Some(index) = self.by_handle.remove(&handle) else {
             return;
         };
@@ -121,7 +121,7 @@ impl ModifyEntityIndex {
     }
 
     /// Append `entity` to `entities` and index it in place.
-    pub(super) fn push(&mut self, entities: &mut Vec<EntityType>, entity: EntityType) {
+    pub fn push(&mut self, entities: &mut Vec<EntityType>, entity: EntityType) {
         let handle = entity.common().handle;
         self.by_handle.insert(handle, entities.len());
         match modify_aabb(&entity) {
@@ -139,7 +139,7 @@ impl ModifyEntityIndex {
     /// Query a selection rectangle against the already-built command index.
     /// Entities without a finite AABB remain candidates for correctness
     /// (rays, XLINEs and other unbounded/unsupported shapes).
-    pub(super) fn handles_in_aabb(&self, aabb: [f64; 4]) -> FxHashSet<Handle> {
+    pub fn handles_in_aabb(&self, aabb: [f64; 4]) -> FxHashSet<Handle> {
         let mut handles: FxHashSet<Handle> = self
             .tree
             .as_ref()
@@ -149,7 +149,7 @@ impl ModifyEntityIndex {
         handles
     }
 
-    pub(super) fn nearby_handles(
+    pub fn nearby_handles(
         &self,
         entities: &[EntityType],
         handle: Handle,

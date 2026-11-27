@@ -612,6 +612,9 @@ enum Step<'s, 'b, 'a> {
     FormEnd,
 }
 
+/// Maximum cumulative Form XObject expansions walked per page.
+const MAX_FORM_EXPANSIONS: usize = 4096;
+
 /// [`walk_operators`], also told where each form begins and ends.
 fn walk_steps<'a>(
     page: &hayro::hayro_syntax::page::Page<'a>,
@@ -624,6 +627,7 @@ fn walk_steps<'a>(
         data: &[u8],
         resources: &Resources<'a>,
         depth: usize,
+        expansions: &mut usize,
         visit: &mut dyn FnMut(Step<'_, '_, '_>, &Resources<'a>),
     ) {
         let mut ops = TypedIter::new(data);
@@ -632,8 +636,9 @@ fn walk_steps<'a>(
             let TypedInstruction::XObject(x) = &op else {
                 continue;
             };
-            // Nested forms are followed a few levels deep.
-            if depth >= 8 {
+            // Bound both recursion depth and cumulative XObject expansion count
+            // so branching form DAGs cannot blow up memory/CPU exponentially.
+            if depth >= 8 || *expansions >= MAX_FORM_EXPANSIONS {
                 continue;
             }
             let Some(stream) = resources.get_x_object(x.0) else {
@@ -653,6 +658,7 @@ fn walk_steps<'a>(
                 None => resources.clone(),
             };
             if let Ok(data) = stream.decoded() {
+                *expansions += 1;
                 let m: Vec<f64> = stream
                     .dict()
                     .get::<Array<'_>>(b"Matrix")
@@ -663,13 +669,17 @@ fn walk_steps<'a>(
                     _ => Affine::IDENTITY,
                 };
                 visit(Step::FormStart(matrix), &own);
-                walk(&data, &own, depth + 1, visit);
+                walk(&data, &own, depth + 1, expansions, visit);
                 visit(Step::FormEnd, &own);
+                if *expansions >= MAX_FORM_EXPANSIONS {
+                    break;
+                }
             }
         }
     }
     if let Some(data) = page.page_stream() {
-        walk(data, page.resources(), 0, visit);
+        let mut expansions = 0;
+        walk(data, page.resources(), 0, &mut expansions, visit);
     }
 }
 
@@ -1374,25 +1384,17 @@ impl<'a> Device<'a> for Collector {
             |data, alpha| {
                 use hayro::hayro_interpret::ImageData;
                 let (w, h) = (data.width(), data.height());
-                let n = (w * h) as usize;
-                let mut rgba = vec![255u8; n * 4];
-                match &data {
-                    ImageData::Rgb(rgb) => {
-                        for i in 0..n {
-                            rgba[i * 4..i * 4 + 3].copy_from_slice(&rgb.data[i * 3..i * 3 + 3]);
-                        }
-                    }
-                    ImageData::Luma(luma) => {
-                        for i in 0..n {
-                            rgba[i * 4..i * 4 + 3].fill(luma.data[i]);
-                        }
-                    }
-                }
-                if let Some(a) = alpha.filter(|a| a.width == w && a.height == h) {
-                    for i in 0..n {
-                        rgba[i * 4 + 3] = a.data[i];
-                    }
-                }
+                let pixels = match &data {
+                    ImageData::Rgb(rgb) => RasterPixels::Rgb(&rgb.data),
+                    ImageData::Luma(luma) => RasterPixels::Luma(&luma.data),
+                };
+                let alpha_slice = alpha
+                    .as_ref()
+                    .filter(|a| a.width == w && a.height == h)
+                    .map(|a| a.data.as_slice());
+                let Some(mut rgba) = assemble_rgba(w, h, pixels, alpha_slice) else {
+                    return;
+                };
                 // The transform maps pixel space (y down) onto the page.
                 let at = |x: f64, y: f64| pt(transform * Point::new(x, y));
                 if let Some(clip) = clip {
@@ -1416,8 +1418,8 @@ impl<'a> Device<'a> for Collector {
                     width: w,
                     height: h,
                     origin: o,
-                    u: [(x1[0] - o[0]) / w as f64, (x1[1] - o[1]) / w as f64],
-                    v: [(y1[0] - o[0]) / h as f64, (y1[1] - o[1]) / h as f64],
+                    u: [(x1[0] - o[0]) / wf, (x1[1] - o[1]) / wf],
+                    v: [(y1[0] - o[0]) / hf, (y1[1] - o[1]) / hf],
                 });
             },
             None,
@@ -1435,6 +1437,56 @@ impl<'a> Device<'a> for Collector {
         self.clips.pop();
     }
     fn pop_transparency_group(&mut self) {}
+}
+
+/// Maximum raster pixels accepted for one PDF underlay image (256 MiB RGBA).
+const MAX_PDF_IMAGE_PIXELS: usize = 64 * 1024 * 1024;
+
+enum RasterPixels<'a> {
+    Rgb(&'a [u8]),
+    Luma(&'a [u8]),
+}
+
+fn assemble_rgba(
+    w: u32,
+    h: u32,
+    pixels: RasterPixels<'_>,
+    alpha: Option<&[u8]>,
+) -> Option<Vec<u8>> {
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let n = (w as usize).checked_mul(h as usize)?;
+    if n > MAX_PDF_IMAGE_PIXELS {
+        return None;
+    }
+    let rgba_len = n.checked_mul(4)?;
+    let has_data = match pixels {
+        RasterPixels::Rgb(rgb) => n.checked_mul(3).is_some_and(|need| rgb.len() >= need),
+        RasterPixels::Luma(luma) => luma.len() >= n,
+    };
+    if !has_data {
+        return None;
+    }
+    let mut rgba = vec![255u8; rgba_len];
+    match pixels {
+        RasterPixels::Rgb(rgb) => {
+            for i in 0..n {
+                rgba[i * 4..i * 4 + 3].copy_from_slice(&rgb[i * 3..i * 3 + 3]);
+            }
+        }
+        RasterPixels::Luma(luma) => {
+            for i in 0..n {
+                rgba[i * 4..i * 4 + 3].fill(luma[i]);
+            }
+        }
+    }
+    if let Some(a) = alpha.filter(|a| a.len() >= n) {
+        for i in 0..n {
+            rgba[i * 4 + 3] = a[i];
+        }
+    }
+    Some(rgba)
 }
 
 impl Collector {
@@ -2610,5 +2662,75 @@ mod tests {
             }
         }
         assert!(cases > 5_000, "{cases} damaged files");
+    }
+
+    #[test]
+    fn assemble_rgba_guards_dimensions_overflow_and_slices() {
+        assert!(assemble_rgba(0, 4, RasterPixels::Rgb(&[1, 2, 3, 4]), None).is_none());
+        assert!(assemble_rgba(4, 0, RasterPixels::Luma(&[1, 2, 3, 4]), None).is_none());
+        assert!(assemble_rgba(u32::MAX, 2, RasterPixels::Luma(&[]), None).is_none());
+        assert!(assemble_rgba(10_000, 10_000, RasterPixels::Luma(&[]), None).is_none());
+        // Truncated pixel slices must fail closed rather than panic.
+        assert!(assemble_rgba(2, 2, RasterPixels::Rgb(&[10; 11]), None).is_none());
+        assert!(assemble_rgba(2, 2, RasterPixels::Luma(&[10; 3]), None).is_none());
+        // Truncated alpha leaves opaque 255 without out-of-bounds indexing.
+        assert_eq!(
+            assemble_rgba(
+                1,
+                2,
+                RasterPixels::Luma(&[10, 20]),
+                Some(&[99]),
+            ),
+            Some(vec![10, 10, 10, 255, 20, 20, 20, 255]),
+        );
+        assert_eq!(
+            assemble_rgba(
+                1,
+                2,
+                RasterPixels::Rgb(&[1, 2, 3, 4, 5, 6]),
+                Some(&[100, 200]),
+            ),
+            Some(vec![1, 2, 3, 100, 4, 5, 6, 200]),
+        );
+    }
+
+    #[test]
+    fn walk_steps_caps_exponential_form_xobjects() {
+        // 7-level DAG: each level invokes the next 4 times -> 4^7 > 16k without expansion budget.
+        let mut objects = Vec::new();
+        for level in 0..6 {
+            let next_obj = 6 + level;
+            let name = format!("/F{}", level + 2);
+            let res = format!("/Resources << /XObject << {name} {next_obj} 0 R >> >>");
+            let body = format!("{name} Do {name} Do {name} Do {name} Do");
+            objects.push(stream(
+                &format!("/Type /XObject /Subtype /Form /BBox [0 0 100 100] {res}"),
+                &body,
+            ));
+        }
+        objects.push(stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 100]",
+            "0 0 m 10 0 l S",
+        ));
+        let bytes = Pdf {
+            content: "/F1 Do /F1 Do /F1 Do /F1 Do",
+            resources: "/XObject << /F1 5 0 R >>",
+            objects: &objects,
+            ..Pdf::default()
+        }
+        .bytes();
+        let pdf = hayro::hayro_syntax::Pdf::new(Arc::new(bytes)).expect("valid DAG pdf");
+        let page = &pdf.pages()[0];
+        let mut form_starts = 0usize;
+        walk_steps(page, &mut |step, _| {
+            if matches!(step, Step::FormStart(_)) {
+                form_starts += 1;
+            }
+        });
+        assert!(form_starts > 0);
+        assert!(
+            form_starts <= MAX_FORM_EXPANSIONS,
+            "form expansions exceeded cap: {form_starts}"
+        );
     }
 }

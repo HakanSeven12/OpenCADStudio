@@ -265,6 +265,8 @@ fn paint_color(paint: &Paint) -> Option<Color> {
 
 /// How deeply an SVG's elements may nest: usvg's own limit.
 const MAX_XML_DEPTH: usize = 1024;
+/// Ceiling on raw or decompressed SVG byte length to prevent SVGZ bombs.
+const MAX_SVG_BYTES: usize = 64 * 1024 * 1024;
 
 /// Reads an SVG (or gzip-compressed SVGZ), scaled so the picture fits
 /// within `fit` (width and height, drawing units).
@@ -278,9 +280,21 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Result<Picture, Error> {
     };
     let unpacked;
     let bytes = if bytes.starts_with(&[0x1f, 0x8b]) {
-        unpacked = usvg::decompress_svgz(bytes).map_err(|_| Error::NotSvg)?;
+        use std::io::Read;
+        let mut buf = Vec::new();
+        flate2::read::GzDecoder::new(bytes)
+            .take((MAX_SVG_BYTES + 1) as u64)
+            .read_to_end(&mut buf)
+            .map_err(|_| Error::NotSvg)?;
+        if buf.len() > MAX_SVG_BYTES {
+            return Err(Error::NotSvg);
+        }
+        unpacked = buf;
         &unpacked[..]
     } else {
+        if bytes.len() > MAX_SVG_BYTES {
+            return Err(Error::NotSvg);
+        }
         bytes
     };
     let text = std::str::from_utf8(bytes).map_err(|_| Error::NotSvg)?;
@@ -424,5 +438,20 @@ mod tests {
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         gz.write_all(SQUARE.as_bytes()).unwrap();
         assert!(read(&gz.finish().unwrap(), [100.0, 50.0]).is_ok());
+    }
+
+    #[test]
+    fn svgz_bomb_past_size_cap_is_refused() {
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        gz.write_all(b"<svg xmlns=\"http://www.w3.org/2000/svg\">")
+            .unwrap();
+        let spaces = vec![b' '; 1024 * 1024];
+        for _ in 0..65 {
+            gz.write_all(&spaces).unwrap();
+        }
+        gz.write_all(b"</svg>").unwrap();
+        let bomb = gz.finish().unwrap();
+        assert_eq!(read(&bomb, [10.0, 10.0]).err(), Some(Error::NotSvg));
     }
 }

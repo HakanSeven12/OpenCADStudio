@@ -41,4 +41,5 @@ pub mod view;
 
 // ── Core module registry ─────────────────────────────────────────────────
 // Hand-written `all_modules()` listing the built-in ribbon tabs.
+pub(crate) mod panel_extras;
 pub mod registry;

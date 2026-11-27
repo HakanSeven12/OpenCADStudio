@@ -19,6 +19,10 @@ use iced::{
 
 use super::{draw_panel, extras, Ribbon};
 use crate::app::Message;
+use crate::modules::panel_extras::{
+    DIMENSION_LAUNCHER, LEADER_LAUNCHER, MTED_PARAGRAPH_LAUNCHER, TABLE_LAUNCHER, TEXT_LAUNCHER,
+    XREF_LAUNCHER,
+};
 use crate::modules::{RibbonItem, ToolDef};
 use crate::ui::wrap_bar::{fresh_bounds, PosReport};
 
@@ -101,23 +105,10 @@ thread_local! {
 
 /// Id of the whole ribbon (tab row and tools), for the hint bar.
 const RIBBON_AREA: &str = "KEYTIP_RIBBON_AREA";
-/// The Reference panel's corner arrow.
-pub(super) const XREF_LAUNCHER: &str = "XREF_LAUNCHER";
 /// The xref fading switch in the Reference slide-out.
 pub(super) const XREF_FADE: &str = "XREF_FADE";
-/// The Text panel's corner arrow (Text Style).
-pub(super) const TEXT_LAUNCHER: &str = "TEXT_LAUNCHER";
-/// The Text Editor's Paragraph and Spell Check launchers.
-pub(super) const MTED_PARAGRAPH_LAUNCHER: &str = "MTED_PARAGRAPH_LAUNCHER";
-pub(super) const MTED_SPELL_LAUNCHER: &str = "MTED_SPELL_LAUNCHER";
 /// The Text panel's text height box.
 pub(super) const TEXT_HEIGHT: &str = "TEXT_HEIGHT";
-/// The Dimensions panel's corner arrow (Dimension Style).
-pub(super) const DIMENSION_LAUNCHER: &str = "DIMENSION_LAUNCHER";
-/// The Leaders panel's corner arrow (Multileader Style).
-pub(super) const LEADER_LAUNCHER: &str = "LEADER_LAUNCHER";
-/// Annotate > Tables: the corner arrow to the table styles.
-pub(super) const TABLE_LAUNCHER: &str = "TABLE_LAUNCHER";
 const COLLAPSED_PREFIX: &str = "panel:";
 
 pub fn active() -> bool {

@@ -492,7 +492,7 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                     .or_insert((standalone.label, standalone.icon));
             }
         }
-        for (command, label, icon) in crate::ui::ribbon::panel_tools() {
+        for (command, label, icon) in super::panel_extras::tools() {
             out.entry(command.to_string())
                 .or_insert((label, IconKind::Svg(icon)));
         }

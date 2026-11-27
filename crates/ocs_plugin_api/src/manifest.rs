@@ -226,14 +226,16 @@
 /// panels. A v32 host cannot decode it, so a plugin that sends it declares v33.
 pub const API_VERSION: u32 = 33;
 
-/// Oldest plugin API major the current host still loads. Pre-v14 plugins pass
-/// raw Rust trait objects across cdylib boundaries without a matching host/plugin
-/// runner layout, so only v14+ self-hosted plugins (`ocs_plugin_run`) are
-/// accepted.
-pub const API_VERSION_MIN_SUPPORTED: u32 = 14;
+/// Oldest plugin API major the current host still loads. This keeps previously
+/// compiled cdylibs usable as long as their vtable layout is a prefix of the
+/// current `HostApi` trait. V2 is no longer loaded: its ribbon wire types
+/// predate the current ones, so a V2 plugin passed the gate and then failed
+/// silently while registering its ribbon (#1085, #987).
+pub const API_VERSION_MIN_SUPPORTED: u32 = 3;
 
 /// Environment variable that caps the API major accepted by the host at
-/// runtime. Set to `15` to disable v16 plugins, or `14` for v14-only mode.
+/// runtime. Set to `5` to disable V6 plugins, `4` to disable V5, or `3` for
+/// V3-only mode.
 pub const MAX_API_VERSION_ENV: &str = "OCS_PLUGIN_MAX_API_VERSION";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,25 +342,25 @@ mod tests {
 
     #[test]
     #[serial]
-    fn effective_max_can_disable_above_min() {
+    fn effective_max_can_disable_v4() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var(MAX_API_VERSION_ENV, "14");
-        assert_eq!(effective_max_api_version(), 14);
-        assert!(!host_accepts_plugin_version(15));
-        assert!(host_accepts_plugin_version(14));
-        assert!(!host_accepts_plugin_version(13));
+        std::env::set_var(MAX_API_VERSION_ENV, "3");
+        assert_eq!(effective_max_api_version(), 3);
+        assert!(!host_accepts_plugin_version(4));
+        assert!(host_accepts_plugin_version(3));
+        assert!(!host_accepts_plugin_version(2));
         std::env::remove_var(MAX_API_VERSION_ENV);
     }
 
     #[test]
     #[serial]
-    fn effective_max_below_minimum_clamps_to_min() {
+    fn effective_max_below_minimum_is_v3_only_mode() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var(MAX_API_VERSION_ENV, "13");
-        assert_eq!(effective_max_api_version(), 14);
-        assert!(!host_accepts_plugin_version(15));
-        assert!(host_accepts_plugin_version(14));
-        assert!(!host_accepts_plugin_version(13));
+        std::env::set_var(MAX_API_VERSION_ENV, "2");
+        assert_eq!(effective_max_api_version(), 3);
+        assert!(!host_accepts_plugin_version(4));
+        assert!(host_accepts_plugin_version(3));
+        assert!(!host_accepts_plugin_version(2));
         std::env::remove_var(MAX_API_VERSION_ENV);
     }
 

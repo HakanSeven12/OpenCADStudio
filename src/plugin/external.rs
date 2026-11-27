@@ -620,7 +620,7 @@ mod tests {
     use crate::plugin::v4_support;
 
     #[test]
-    fn api_v14_plugin_from_template_is_compatible_and_pre_v14_rejected() {
+    fn api_v2_plugin_from_template_is_compatible() {
         let toml = r#"
 [plugin]
 id = "opencad.my_plugin"
@@ -630,27 +630,21 @@ description = "Template plugin"
 repository = "https://github.com/example/opencad-my-plugin.git"
 
 [opencad]
-api_version = 14
+api_version = 3
 ribbon_order = 60
 command_prefixes = ["MP_"]
 xdata_apps = ["MYPLUGIN_RECORD"]
 "#;
         let p = parse_plugin_toml(toml).expect("parsed");
-        assert_eq!(p.api_version, 14);
+        assert_eq!(p.api_version, 3);
         assert_eq!(p.repository.as_deref(), Some("example/opencad-my-plugin"));
         assert!(p.command_prefixes.contains(&"MP_".to_string()));
         assert!(
             p.api_compatible(),
-            "V14+ self-hosted plugins must be accepted by the current host"
+            "V3 plugins must be accepted by the current host"
         );
-        for old in [2, 3, 13] {
-            let old_toml = format!("id=\"old\"\napi_version = {old}");
-            let old_p = parse_plugin_toml(&old_toml).expect("parsed");
-            assert!(
-                !old_p.api_compatible(),
-                "pre-V14 plugins (v{old}) must be rejected"
-            );
-        }
+        let v2 = parse_plugin_toml("id=\"old\"\napi_version = 2").expect("parsed");
+        assert!(!v2.api_compatible(), "V2 plugins are no longer loaded");
     }
 
     #[test]
@@ -814,12 +808,9 @@ rustc_version = "rustc 0.0.0-fake"
         assert!(p.rustc_declared);
         assert!(
             p.rustc_compatible(),
-            "API v3 helper check still treats rustc gate as v4+"
+            "API v3 plugin should bypass rustc gate"
         );
-        assert!(
-            !p.loadable(),
-            "API v3 plugin must be rejected by the v14+ minimum gate"
-        );
+        assert!(p.loadable());
     }
 
     #[test]
@@ -942,12 +933,9 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
         assert!(p.acadrust_declared);
         assert!(
             p.acadrust_compatible(),
-            "API v3 helper check still treats codec gate as v4+"
+            "API v3 plugin should bypass the codec gate"
         );
-        assert!(
-            !p.loadable(),
-            "API v3 plugin must be rejected by the v14+ minimum gate"
-        );
+        assert!(p.loadable());
     }
 
     /// Integration smoke test for the out-of-process plugin path.

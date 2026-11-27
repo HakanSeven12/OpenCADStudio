@@ -1020,7 +1020,15 @@ unsafe fn run_self_hosted(
         .get(b"ocs_plugin_api_version")
         .map_err(|_| "missing ocs_plugin_api_version symbol")?;
     let v = version();
-    if !crate::host_accepts_plugin_version(v) || v < crate::version_info::SELF_HOSTED_API_VERSION {
+    if v < crate::version_info::SELF_HOSTED_API_VERSION {
+        return Err(format!(
+            "the library was built with API version {v}, older than the self-hosted runner \
+             (v{}); rebuild the plugin against the current ocs_plugin_api",
+            crate::version_info::SELF_HOSTED_API_VERSION
+        )
+        .into());
+    }
+    if !crate::host_accepts_plugin_version(v) {
         return Err(format!(
             "API version {v} is incompatible (host supports {}-{})",
             crate::API_VERSION_MIN_SUPPORTED,

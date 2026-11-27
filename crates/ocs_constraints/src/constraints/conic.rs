@@ -14,6 +14,14 @@ use crate::constraints::Constraint;
 use crate::geo::{Conic, Curve, DeriVector2, Ellipse, Hyperbola, Line, Parabola, Point};
 use crate::util::{ParamId, ParamStore};
 
+fn safe_div(num: f64, den: f64) -> f64 {
+    if den.is_finite() && den > f64::EPSILON {
+        num / den
+    } else {
+        0.0
+    }
+}
+
 /// Point `p` lies on the ellipse `e` (sum of distances to both foci equals
 /// the major axis length, `2a`).
 pub struct PointOnEllipse {
@@ -70,25 +78,31 @@ impl Constraint for PointOnEllipse {
 
         let mut deriv = 0.0;
         if param == p1x {
-            deriv += (x0 - xf1) / d_pf1 + (x0 + xf1 - 2.0 * xc) / d_pf2;
+            deriv += safe_div(x0 - xf1, d_pf1) + safe_div(x0 + xf1 - 2.0 * xc, d_pf2);
         }
         if param == p1y {
-            deriv += (y0 - yf1) / d_pf1 + (y0 + yf1 - 2.0 * yc) / d_pf2;
+            deriv += safe_div(y0 - yf1, d_pf1) + safe_div(y0 + yf1 - 2.0 * yc, d_pf2);
         }
         if param == f1x {
-            deriv += -(x0 - xf1) / d_pf1 - 2.0 * (xf1 - xc) / d_cf1 + (x0 + xf1 - 2.0 * xc) / d_pf2;
+            deriv += safe_div(-(x0 - xf1), d_pf1)
+                - safe_div(2.0 * (xf1 - xc), d_cf1)
+                + safe_div(x0 + xf1 - 2.0 * xc, d_pf2);
         }
         if param == f1y {
-            deriv += -(y0 - yf1) / d_pf1 - 2.0 * (yf1 - yc) / d_cf1 + (y0 + yf1 - 2.0 * yc) / d_pf2;
+            deriv += safe_div(-(y0 - yf1), d_pf1)
+                - safe_div(2.0 * (yf1 - yc), d_cf1)
+                + safe_div(y0 + yf1 - 2.0 * yc, d_pf2);
         }
         if param == cx {
-            deriv += 2.0 * (xf1 - xc) / d_cf1 - 2.0 * (x0 + xf1 - 2.0 * xc) / d_pf2;
+            deriv += safe_div(2.0 * (xf1 - xc), d_cf1)
+                - safe_div(2.0 * (x0 + xf1 - 2.0 * xc), d_pf2);
         }
         if param == cy {
-            deriv += 2.0 * (yf1 - yc) / d_cf1 - 2.0 * (y0 + yf1 - 2.0 * yc) / d_pf2;
+            deriv += safe_div(2.0 * (yf1 - yc), d_cf1)
+                - safe_div(2.0 * (y0 + yf1 - 2.0 * yc), d_pf2);
         }
         if param == rmin {
-            deriv += -2.0 * b / d_cf1;
+            deriv += safe_div(-2.0 * b, d_cf1);
         }
         deriv
     }
@@ -270,7 +284,7 @@ impl Constraint for PointOnHyperbola {
 
         -((x0 - xf1).powi(2) + (y0 - yf1).powi(2)).sqrt()
             + ((x0 + xf1 - 2.0 * xc).powi(2) + (y0 + yf1 - 2.0 * yc).powi(2)).sqrt()
-            - 2.0 * (-b.powi(2) + (xf1 - xc).powi(2) + (yf1 - yc).powi(2)).sqrt()
+            - 2.0 * (-b.powi(2) + (xf1 - xc).powi(2) + (yf1 - yc).powi(2)).max(0.0).sqrt()
     }
 
     fn grad_value(&self, store: &ParamStore, param: ParamId) -> f64 {
@@ -288,29 +302,35 @@ impl Constraint for PointOnHyperbola {
 
         let d_pf1 = ((x0 - xf1).powi(2) + (y0 - yf1).powi(2)).sqrt();
         let d_pf2 = ((x0 + xf1 - 2.0 * xc).powi(2) + (y0 + yf1 - 2.0 * yc).powi(2)).sqrt();
-        let d_cf1 = (-b.powi(2) + (xf1 - xc).powi(2) + (yf1 - yc).powi(2)).sqrt();
+        let d_cf1 = (-b.powi(2) + (xf1 - xc).powi(2) + (yf1 - yc).powi(2)).max(0.0).sqrt();
 
         let mut deriv = 0.0;
         if param == p1x {
-            deriv += -(x0 - xf1) / d_pf1 + (x0 + xf1 - 2.0 * xc) / d_pf2;
+            deriv += safe_div(-(x0 - xf1), d_pf1) + safe_div(x0 + xf1 - 2.0 * xc, d_pf2);
         }
         if param == p1y {
-            deriv += -(y0 - yf1) / d_pf1 + (y0 + yf1 - 2.0 * yc) / d_pf2;
+            deriv += safe_div(-(y0 - yf1), d_pf1) + safe_div(y0 + yf1 - 2.0 * yc, d_pf2);
         }
         if param == f1x {
-            deriv += (x0 - xf1) / d_pf1 - 2.0 * (xf1 - xc) / d_cf1 + (x0 + xf1 - 2.0 * xc) / d_pf2;
+            deriv += safe_div(x0 - xf1, d_pf1)
+                - safe_div(2.0 * (xf1 - xc), d_cf1)
+                + safe_div(x0 + xf1 - 2.0 * xc, d_pf2);
         }
         if param == f1y {
-            deriv += (y0 - yf1) / d_pf1 - 2.0 * (yf1 - yc) / d_cf1 + (y0 + yf1 - 2.0 * yc) / d_pf2;
+            deriv += safe_div(y0 - yf1, d_pf1)
+                - safe_div(2.0 * (yf1 - yc), d_cf1)
+                + safe_div(y0 + yf1 - 2.0 * yc, d_pf2);
         }
         if param == cx {
-            deriv += 2.0 * (xf1 - xc) / d_cf1 - 2.0 * (x0 + xf1 - 2.0 * xc) / d_pf2;
+            deriv += safe_div(2.0 * (xf1 - xc), d_cf1)
+                - safe_div(2.0 * (x0 + xf1 - 2.0 * xc), d_pf2);
         }
         if param == cy {
-            deriv += 2.0 * (yf1 - yc) / d_cf1 - 2.0 * (y0 + yf1 - 2.0 * yc) / d_pf2;
+            deriv += safe_div(2.0 * (yf1 - yc), d_cf1)
+                - safe_div(2.0 * (y0 + yf1 - 2.0 * yc), d_pf2);
         }
         if param == rmin {
-            deriv += 2.0 * b / d_cf1;
+            deriv += safe_div(2.0 * b, d_cf1);
         }
         deriv
     }
@@ -478,5 +498,25 @@ mod tests {
         let c = PointOnParabola::new(p, e);
         assert!(c.error_value(&store).abs() < 1e-9);
         assert_grad_matches_finite_difference(&c, &mut store);
+    }
+
+    #[test]
+    fn degenerate_hyperbola_and_focus_coincidence_stay_finite() {
+        let mut store = ParamStore::new();
+        // b > c (imaginary major axis before clamp) and point coinciding with focus1
+        let e = Hyperbola {
+            center: point(&mut store, 0.0, 0.0),
+            focus1: point(&mut store, 1.0, 0.0),
+            radmin: store.add(5.0, false),
+        };
+        let p = point(&mut store, 1.0, 0.0);
+        let c = PointOnHyperbola::new(p, e);
+        assert!(c.error_value(&store).is_finite());
+        for param in c.params() {
+            assert!(
+                c.grad_value(&store, param).is_finite(),
+                "non-finite hyperbola gradient for {param:?}"
+            );
+        }
     }
 }

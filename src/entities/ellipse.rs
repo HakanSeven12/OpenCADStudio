@@ -386,50 +386,45 @@ impl crate::entities::traits::MassPropsCalc for document::entities::Ellipse {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         use std::f64::consts::{PI, TAU};
         let e = self;
-        let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-        let b = a * e.minor_axis_ratio;
+        let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2) + e.major_axis.z.powi(2)).sqrt();
+        if !a.is_finite()
+            || a <= 1e-12
+            || !e.minor_axis_ratio.is_finite()
+            || !e.start_parameter.is_finite()
+            || !e.end_parameter.is_finite()
+        {
+            return crate::entities::traits::MassProps {
+                area: 0.0,
+                perimeter: 0.0,
+                cx: e.center.x,
+                cy: e.center.y,
+            };
+        }
+        let b = a * e.minor_axis_ratio.abs();
         let t0 = e.start_parameter;
-        let t1 = {
-            let mut t = e.end_parameter;
-            if t <= t0 {
-                t += TAU;
-            }
-            t
+        let raw_span = e.end_parameter - t0;
+        let span = if raw_span.abs() >= TAU - 1e-6 || raw_span.abs() < 1e-12 {
+            TAU
+        } else {
+            raw_span.rem_euclid(TAU)
         };
-        let span = t1 - t0;
         let is_full = (span - TAU).abs() < 1e-6;
         let area = if is_full {
             PI * a * b
         } else {
-            // Sector area of ellipse approximated via 256-pt integration
-            let n = 256usize;
-            let mut s = 0.0f64;
-            for k in 0..n {
-                let t = t0 + span * (k as f64 / n as f64);
-                let tp = t0 + span * ((k + 1) as f64 / n as f64);
-                let nx = e.major_axis.x / a;
-                let ny = e.major_axis.y / a;
-                let x0 = a * t.cos() * nx - b * t.sin() * ny;
-                let y0 = a * t.cos() * ny + b * t.sin() * nx;
-                let x1 = a * tp.cos() * nx - b * tp.sin() * ny;
-                let y1 = a * tp.cos() * ny + b * tp.sin() * nx;
-                s += x0 * y1 - x1 * y0;
-            }
-            (s / 2.0).abs()
+            0.5 * a * b * span
         };
-        // Arc length via 256-pt numerical integration
-        let nx = e.major_axis.x / a.max(1e-12);
-        let ny = e.major_axis.y / a.max(1e-12);
+        // Arc length via 256-pt numerical integration in the ellipse's local plane.
         let perimeter = {
             let n = 256usize;
             let mut len = 0.0f64;
             for k in 0..n {
                 let t = t0 + span * (k as f64 / n as f64);
                 let tp = t0 + span * ((k + 1) as f64 / n as f64);
-                let x0 = e.center.x + a * t.cos() * nx - b * t.sin() * ny;
-                let y0 = e.center.y + a * t.cos() * ny + b * t.sin() * nx;
-                let x1 = e.center.x + a * tp.cos() * nx - b * tp.sin() * ny;
-                let y1 = e.center.y + a * tp.cos() * ny + b * tp.sin() * nx;
+                let x0 = a * t.cos();
+                let y0 = b * t.sin();
+                let x1 = a * tp.cos();
+                let y1 = b * tp.sin();
                 len += (x1 - x0).hypot(y1 - y0);
             }
             len
@@ -547,5 +542,29 @@ mod grip_tests {
         let (s, end) = (e.start_parameter, e.end_parameter);
         assert!((s - (std::f64::consts::TAU - 1.5)).abs() < 1e-9, "{s}");
         assert!((end - s - 1.4).abs() < 1e-9, "{end}");
+    }
+
+    #[test]
+    fn mass_props_handles_degenerate_and_3d_tilted_ellipses() {
+        use crate::entities::traits::MassPropsCalc;
+        let mut zero = ell(0.0, 0.5);
+        zero.start_parameter = 0.0;
+        zero.end_parameter = std::f64::consts::FRAC_PI_2;
+        let mp_zero = zero.mass_props();
+        assert_eq!(mp_zero.area, 0.0);
+        assert_eq!(mp_zero.perimeter, 0.0);
+
+        let mut z_tilted = ell(0.0, 0.6);
+        z_tilted.major_axis.z = 5.0;
+        let mp_3d = z_tilted.mass_props();
+        let expected_area = std::f64::consts::PI * 5.0 * 3.0;
+        assert!((mp_3d.area - expected_area).abs() < 1e-9);
+        assert!(mp_3d.perimeter.is_finite() && mp_3d.perimeter > 0.0);
+
+        let mut quarter = ell(4.0, 0.5);
+        quarter.start_parameter = 0.0;
+        quarter.end_parameter = std::f64::consts::FRAC_PI_2;
+        let mp_q = quarter.mass_props();
+        assert!((mp_q.area - std::f64::consts::FRAC_PI_4 * 4.0 * 2.0).abs() < 1e-9);
     }
 }

@@ -505,6 +505,9 @@ impl P2LDistance {
         let dx = x2 - x1;
         let dy = y2 - y1;
         let d = (dx * dx + dy * dy).sqrt();
+        if !d.is_finite() || d <= f64::EPSILON {
+            return 0.0;
+        }
         let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
         area / d
     }
@@ -545,25 +548,27 @@ impl Constraint for P2LDistance {
             let dy = y2 - y1;
             let d2 = dx * dx + dy * dy;
             let d = d2.sqrt();
-            let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
+            if d.is_finite() && d > f64::EPSILON {
+                let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
 
-            if param == p0x {
-                deriv += (y1 - y2) / d;
-            }
-            if param == p0y {
-                deriv += (x2 - x1) / d;
-            }
-            if param == p1x {
-                deriv += ((y2 - y0) * d + (dx / d) * area) / d2;
-            }
-            if param == p1y {
-                deriv += ((x0 - x2) * d + (dy / d) * area) / d2;
-            }
-            if param == p2x {
-                deriv += ((y0 - y1) * d - (dx / d) * area) / d2;
-            }
-            if param == p2y {
-                deriv += ((x1 - x0) * d - (dy / d) * area) / d2;
+                if param == p0x {
+                    deriv += (y1 - y2) / d;
+                }
+                if param == p0y {
+                    deriv += (x2 - x1) / d;
+                }
+                if param == p1x {
+                    deriv += ((y2 - y0) * d + (dx / d) * area) / d2;
+                }
+                if param == p1y {
+                    deriv += ((x0 - x2) * d + (dy / d) * area) / d2;
+                }
+                if param == p2x {
+                    deriv += ((y0 - y1) * d - (dx / d) * area) / d2;
+                }
+                if param == p2y {
+                    deriv += ((x1 - x0) * d - (dy / d) * area) / d2;
+                }
             }
         }
         if param == self.distance {
@@ -648,6 +653,9 @@ impl Constraint for PointOnLine {
         let dx = x2 - x1;
         let dy = y2 - y1;
         let d = (dx * dx + dy * dy).sqrt();
+        if !d.is_finite() || d <= f64::EPSILON {
+            return 0.0;
+        }
         let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
         area / d
     }
@@ -666,6 +674,9 @@ impl Constraint for PointOnLine {
         let dy = y2 - y1;
         let d2 = dx * dx + dy * dy;
         let d = d2.sqrt();
+        if !d.is_finite() || d <= f64::EPSILON {
+            return 0.0;
+        }
         let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
         let mut deriv = 0.0;
         if param == p0x {
@@ -762,7 +773,12 @@ impl Parallel {
         let dy1 = store.get(l1.p1.y) - store.get(l1.p2.y);
         let dx2 = store.get(l2.p1.x) - store.get(l2.p2.x);
         let dy2 = store.get(l2.p1.y) - store.get(l2.p2.y);
-        1.0 / ((dx1 * dx1 + dy1 * dy1) * (dx2 * dx2 + dy2 * dy2)).sqrt()
+        let denom = ((dx1 * dx1 + dy1 * dy1) * (dx2 * dx2 + dy2 * dy2)).sqrt();
+        if denom.is_finite() && denom > f64::EPSILON {
+            1.0 / denom
+        } else {
+            1.0
+        }
     }
 }
 
@@ -1057,6 +1073,9 @@ impl Constraint for MidpointOnLine {
         let dx = x2 - x1;
         let dy = y2 - y1;
         let d = (dx * dx + dy * dy).sqrt();
+        if !d.is_finite() || d <= f64::EPSILON {
+            return 0.0;
+        }
         let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
         area / d
     }
@@ -1075,6 +1094,9 @@ impl Constraint for MidpointOnLine {
         let dy = y2 - y1;
         let d2 = dx * dx + dy * dy;
         let d = d2.sqrt();
+        if !d.is_finite() || d <= f64::EPSILON {
+            return 0.0;
+        }
         let area = -x0 * dy + y0 * dx + x1 * y2 - x2 * y1;
         let mut deriv = 0.0;
         if param == l1p1x {
@@ -1388,5 +1410,24 @@ mod tests {
         let c = EqualLineLength::new(l1, l2);
         assert!(c.error_value(&store).abs() < 1e-9);
         assert_grad_matches_finite_difference(&c, &mut store);
+    }
+
+    #[test]
+    fn zero_length_parallel_and_line_constraints_produce_finite_values() {
+        let mut store = ParamStore::new();
+        let zero1 = line(&mut store, 1.0, 1.0, 1.0, 1.0);
+        let l2 = line(&mut store, 0.0, 0.0, 5.0, 0.0);
+        let p = point(&mut store, 2.0, 3.0);
+        let par = Parallel::new(&store, zero1, l2);
+        assert_eq!(par.scale(), 1.0);
+        assert!(par.error_value(&store).is_finite());
+
+        let on_line = PointOnLine::new(p, zero1);
+        assert_eq!(on_line.error_value(&store), 0.0);
+        assert_eq!(on_line.grad_value(&store, p.x), 0.0);
+
+        let mid = MidpointOnLine::new(l2, zero1);
+        assert_eq!(mid.error_value(&store), 0.0);
+        assert_eq!(mid.grad_value(&store, zero1.p1.x), 0.0);
     }
 }

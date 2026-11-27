@@ -245,7 +245,7 @@ fn validate_ramp(ramp: &Ramp) -> Result<(), String> {
                 ));
             }
             let d = *degree as usize;
-            if !coeffs[..d].iter().all(|c| c.is_finite()) {
+            if !coeffs[..=d].iter().all(|c| c.is_finite()) {
                 return Err("a polynomial ramp coefficient is not finite".to_owned());
             }
         }
@@ -256,6 +256,13 @@ fn validate_ramp(ramp: &Ramp) -> Result<(), String> {
                 ));
             }
             let active = *count as usize;
+            if active > knots.len() {
+                return Err(format!(
+                    "a piecewise ramp declares {} knots but carries {}",
+                    active,
+                    knots.len()
+                ));
+            }
             let mut prev_xi = -1.0;
             for (xi, value) in &knots[..active] {
                 if !xi.is_finite() || !value.is_finite() {
@@ -388,6 +395,140 @@ struct Vitals {
     ramp: PreparedRamp,
 }
 
+/// Real roots of `a*x^2 + b*x + c = 0` strictly inside `(0, 1)`, sorted.
+fn quadratic_roots_unit(a: f64, b: f64, c: f64) -> Vec<f64> {
+    let mut out = Vec::new();
+    let scale = a.abs().max(b.abs()).max(c.abs()).max(1.0);
+    if a.abs() <= 1e-18 * scale {
+        if b.abs() > 1e-18 * scale {
+            let r = -c / b;
+            if r.is_finite() && r > 0.0 && r < 1.0 {
+                out.push(r);
+            }
+        }
+        return out;
+    }
+    let disc = b * b - 4.0 * a * c;
+    if !disc.is_finite() || disc < 0.0 {
+        return out;
+    }
+    let sqrt_d = disc.sqrt();
+    let q = -0.5 * (b + b.signum() * sqrt_d);
+    let candidates = [q / a, if q.abs() > 1e-30 { c / q } else { -b / a - q / a }];
+    for r in candidates {
+        if r.is_finite() && r > 0.0 && r < 1.0 {
+            out.push(r);
+        }
+    }
+    out.sort_by(|x, y| x.total_cmp(y));
+    out.dedup_by(|x, y| (*x - *y).abs() < 1e-12);
+    out
+}
+
+/// Area of `|linear_fn|` over a span of width `step` from `va` to `vb`.
+fn linear_abs_area(step: f64, va: f64, vb: f64) -> f64 {
+    if step <= 0.0 {
+        return 0.0;
+    }
+    if (va > 0.0 && vb < 0.0) || (va < 0.0 && vb > 0.0) {
+        let denom = va.abs() + vb.abs();
+        if denom > 0.0 {
+            0.5 * step * (va * va + vb * vb) / denom
+        } else {
+            0.0
+        }
+    } else {
+        0.5 * step * (va.abs() + vb.abs())
+    }
+}
+
+/// Exact total variation `∫_0^1 |ramp(xi)| dxi` so cancelling positive and
+/// negative curvature swings cannot hide a wildly oscillating law behind
+/// a near-zero net `integral(1.0)`.
+fn ramp_total_variation(ramp: &Ramp) -> f64 {
+    match ramp {
+        Ramp::Polynomial { degree, coeffs } => {
+            let d = (*degree).min(3) as usize;
+            let [c0, c1, c2, c3] = [
+                coeffs[0],
+                if d >= 1 { coeffs[1] } else { 0.0 },
+                if d >= 2 { coeffs[2] } else { 0.0 },
+                if d >= 3 { coeffs[3] } else { 0.0 },
+            ];
+            let mut splits = vec![0.0, 1.0];
+            match d {
+                0 => {}
+                1 => splits.extend(quadratic_roots_unit(0.0, c1, c0)),
+                2 => splits.extend(quadratic_roots_unit(c2, c1, c0)),
+                _ => {
+                    let mut brackets = vec![0.0];
+                    brackets.extend(quadratic_roots_unit(3.0 * c3, 2.0 * c2, c1));
+                    brackets.push(1.0);
+                    brackets.sort_by(|x, y| x.total_cmp(y));
+                    brackets.dedup_by(|x, y| (*x - *y).abs() < 1e-12);
+                    for pair in brackets.windows(2) {
+                        let (mut a, mut b) = (pair[0], pair[1]);
+                        let (mut fa, fb) = (ramp_eval(ramp, a), ramp_eval(ramp, b));
+                        if !fa.is_finite() || !fb.is_finite() {
+                            return f64::INFINITY;
+                        }
+                        if (fa > 0.0 && fb < 0.0) || (fa < 0.0 && fb > 0.0) {
+                            for _ in 0..52 {
+                                let mid = 0.5 * (a + b);
+                                let fm = ramp_eval(ramp, mid);
+                                if (fa > 0.0 && fm <= 0.0) || (fa < 0.0 && fm >= 0.0) {
+                                    b = mid;
+                                } else {
+                                    a = mid;
+                                    fa = fm;
+                                }
+                            }
+                            splits.push(0.5 * (a + b));
+                        }
+                    }
+                }
+            }
+            splits.sort_by(|x, y| x.total_cmp(y));
+            splits.dedup_by(|x, y| (*x - *y).abs() < 1e-12);
+            splits
+                .windows(2)
+                .map(|w| (ramp_integral(ramp, w[1]) - ramp_integral(ramp, w[0])).abs())
+                .sum()
+        }
+        Ramp::Piecewise { count, knots } => {
+            let active = (*count).clamp(1, knots.len() as u32) as usize;
+            let knots = &knots[..active];
+            if knots.len() == 1 {
+                return knots[0].1.abs();
+            }
+            let (x0, v0) = knots[0];
+            let mut total = v0.abs() * x0.clamp(0.0, 1.0);
+            for pair in knots.windows(2) {
+                let (xa, va) = pair[0];
+                let (xb, vb) = pair[1];
+                let lo = xa.clamp(0.0, 1.0);
+                let hi = xb.clamp(0.0, 1.0);
+                if hi > lo {
+                    total += linear_abs_area(hi - lo, va, vb);
+                }
+            }
+            let (xlast, vlast) = knots[knots.len() - 1];
+            total + vlast.abs() * (1.0 - xlast).clamp(0.0, 1.0)
+        }
+        Ramp::Sampled { n, values } => {
+            let count = (*n).clamp(1, values.len() as u32) as usize;
+            if count == 1 {
+                return values[0].abs();
+            }
+            let step = 1.0 / (count - 1) as f64;
+            values[..count]
+                .windows(2)
+                .map(|pair| linear_abs_area(step, pair[0], pair[1]))
+                .sum()
+        }
+    }
+}
+
 /// Validate one declared segment generically and derive the evaluation
 /// vitals. Refusals name the offending field; no species checks exist.
 fn validate_segment(plane: ParametricPlane, segment: &ParametricSegment) -> Result<Vitals, String> {
@@ -416,12 +557,11 @@ fn validate_segment(plane: ParametricPlane, segment: &ParametricSegment) -> Resu
         // The plan plane's bearing normalizes once at the segment boundary.
         ParametricPlane::Plan => {
             // The integrator's swing budget: the segment's total tangent
-            // deflection bounds the sub-interval count one-to-one; a law
-            // past the budget is a hang, not a curve — refuse here where
-            // every evaluation path funnels through (the audit, the
-            // sampling, the staging).
-            let swing = (def.length * ramp.integral(1.0)).abs();
-            if swing > MAX_GL_SUB_INTERVALS as f64 * PI * 0.5 {
+            // variation bounds the sub-interval count one-to-one; a law
+            // past the budget (or non-finite) is a hang, not a curve —
+            // refuse here where every evaluation path funnels through.
+            let swing = def.length * ramp_total_variation(&def.ramp);
+            if !swing.is_finite() || swing > MAX_GL_SUB_INTERVALS as f64 * PI * 0.5 {
                 return Err(format!(
                     "the plan law's tangent swing ({swing:.0} rad over this segment) exceeds the \
                      integrator's swing budget ({MAX_GL_SUB_INTERVALS} sub-intervals); refuse the \
@@ -486,11 +626,16 @@ const GL16_W: [f64; 16] = [
 /// integrand's total phase swing (one sub-interval per half-radian of
 /// deflection). Deterministic and allocation-light.
 fn integrate(mut f: impl FnMut(f64) -> f64, domain: f64, total_swing: f64) -> f64 {
-    if domain == 0.0 {
+    if !domain.is_finite() || domain == 0.0 {
         return 0.0;
     }
-    let mut sub_intervals = 1.0f64.max(total_swing.abs() / (PI * 0.5)).ceil() as usize;
-    sub_intervals = sub_intervals.max(1);
+    let raw_sub = if total_swing.is_finite() {
+        1.0f64.max(total_swing.abs() / (PI * 0.5)).ceil()
+    } else {
+        MAX_GL_SUB_INTERVALS as f64
+    };
+    let sub_intervals = (raw_sub.min(MAX_GL_SUB_INTERVALS as f64) as usize)
+        .clamp(1, MAX_GL_SUB_INTERVALS);
     let h = domain / sub_intervals as f64;
     let mut sum = 0.0;
     for i in 0..sub_intervals {
@@ -2179,6 +2324,49 @@ mod tests {
                     .any(|(name, _)| name == "PLUGIN_ALIGN_DISPLAY"),
                 "the dictionary entry survived"
             );
+        }
+    }
+
+    #[test]
+    fn validate_ramp_rejects_non_finite_leading_polynomial_coefficient() {
+        let deg0_nan = Ramp::Polynomial {
+            degree: 0,
+            coeffs: [f64::NAN, 0.0, 0.0, 0.0],
+        };
+        assert!(validate_ramp(&deg0_nan).is_err());
+
+        let deg3_inf = Ramp::Polynomial {
+            degree: 3,
+            coeffs: [0.0, 0.0, 0.0, f64::INFINITY],
+        };
+        assert!(validate_ramp(&deg3_inf).is_err());
+    }
+
+    #[test]
+    fn validate_segment_rejects_cancelling_high_swing_plan_polynomial() {
+        // integral(1.0) == 0.0 for (-1e7 + 2e7 * xi), yet |deflection| swings
+        // massively through [-5e8, 0] rad over length 100.
+        let segment = ParametricSegment {
+            start_point: [0.0, 0.0],
+            start_direction: 0.0,
+            def: CurveSegmentDef {
+                length: 100.0,
+                ramp: Ramp::Polynomial {
+                    degree: 1,
+                    coeffs: [-1.0e7, 2.0e7, 0.0, 0.0],
+                },
+                cross_slope: None,
+            },
+        };
+        let err = validate_segment(ParametricPlane::Plan, &segment).unwrap_err();
+        assert!(err.contains("swing budget"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn integrate_caps_sub_intervals_on_non_finite_or_huge_swing() {
+        for swing in [f64::NAN, f64::INFINITY, 1.0e30] {
+            let v = integrate(|_| 1.0, 2.0, swing);
+            assert!((v - 2.0).abs() < 1e-9);
         }
     }
 }

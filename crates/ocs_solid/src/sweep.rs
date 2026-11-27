@@ -218,9 +218,14 @@ fn chain_senses(pieces: &[Curve]) -> Option<Vec<bool>> {
 }
 
 fn chain_closed(pieces: &[Curve], senses: &[bool]) -> bool {
+    let (Some(first), Some(last), Some(&s_first), Some(&s_last)) =
+        (pieces.first(), pieces.last(), senses.first(), senses.last())
+    else {
+        return false;
+    };
     near2(
-        pieces[0].point_at(if senses[0] { 0.0 } else { 1.0 }),
-        pieces.last().unwrap().point_at(if *senses.last().unwrap() { 1.0 } else { 0.0 }),
+        first.point_at(if s_first { 0.0 } else { 1.0 }),
+        last.point_at(if s_last { 1.0 } else { 0.0 }),
     )
 }
 
@@ -474,7 +479,11 @@ fn conic_anchor(pieces: &[Curve]) -> Option<[f64; 2]> {
         middle -= spans[index];
         index += 1;
     }
-    let parameter = middle / spans[index];
+    let parameter = if spans.is_empty() || !spans[index].is_finite() || spans[index] <= 0.0 {
+        return None;
+    } else {
+        (middle / spans[index]).clamp(0.0, 1.0)
+    };
     Some(pieces[index].point_at(if senses[index] { parameter } else { 1.0 - parameter }))
 }
 
@@ -497,8 +506,11 @@ fn corners(pieces: &[Piece], closed: bool) -> Option<Vec<usize>> {
 }
 
 fn path_closed(pieces: &[Piece]) -> bool {
-    let start = pieces[0].point(0.0);
-    let end = pieces[pieces.len() - 1].point(1.0);
+    let (Some(first), Some(last)) = (pieces.first(), pieces.last()) else {
+        return false;
+    };
+    let start = first.point(0.0);
+    let end = last.point(1.0);
     let extent = pieces.iter().map(Piece::length).sum::<f64>();
     start.distance(end) <= extent.max(1.0) * 1e-9
 }
@@ -538,7 +550,7 @@ pub fn sweep_polyline_base(points: &[[f64; 3]], closed: bool) -> Option<[f64; 3]
     }
     let lengths = chain.windows(2).map(|pair| pair[0].distance(pair[1])).collect::<Vec<_>>();
     let total = lengths.iter().sum::<f64>();
-    if chain.len() < 2 || !total.is_finite() || total <= 1e-14 {
+    if chain.len() < 2 || lengths.is_empty() || !total.is_finite() || total <= 1e-14 {
         return None;
     }
     let along = |mut distance: f64| {
@@ -570,7 +582,10 @@ pub fn reversed_path_curves(curves: &[Curve]) -> Option<Vec<Curve>> {
         .rev()
         .map(|(curve, forward)| {
             let mut rational = RationalCurve2::from_curve(curve)?;
-            let (low, high) = (*rational.knots.first()?, *rational.knots.last()?);
+            let (&low, &high) = (rational.knots.first()?, rational.knots.last()?);
+            if !low.is_finite() || !high.is_finite() || !(high > low) {
+                return None;
+            }
             rational.knots = rational.knots.iter().map(|k| (k - low) / (high - low)).collect();
             let rational = if forward { rational.reversed() } else { rational };
             Some(Curve::Nurbs(NurbsCurve::new_strict(rational.degree, rational.points, rational.knots, rational.weights)?))
@@ -610,7 +625,13 @@ pub fn reversed(curve: &sweep::Curve) -> sweep::Curve {
             end: -start,
         },
         sweep::Curve::Nurbs { degree, points, knots } => {
-            let (low, high) = (knots[0], knots[knots.len() - 1]);
+            let Some((&low, &high)) = knots.first().zip(knots.last()) else {
+                return sweep::Curve::Nurbs {
+                    degree: *degree,
+                    points: points.iter().rev().copied().collect(),
+                    knots: Vec::new(),
+                };
+            };
             sweep::Curve::Nurbs {
                 degree: *degree,
                 points: points.iter().rev().copied().collect(),
@@ -673,6 +694,9 @@ pub fn nurbs3(curve: &NurbsCurve3) -> sweep::Curve {
 /// The wires of a profile on `plane`, each a chain of sweep curves run end to end, and whether
 /// each is closed.
 pub fn profile_loops(plane: &Plane, wires: &[Vec<Curve>]) -> Option<Vec<(Vec<sweep::Curve>, bool)>> {
+    if wires.is_empty() {
+        return None;
+    }
     wires
         .iter()
         .map(|wire| {
@@ -682,6 +706,9 @@ pub fn profile_loops(plane: &Plane, wires: &[Vec<Curve>]) -> Option<Vec<(Vec<swe
             let mut out = Vec::new();
             for (piece, forward) in pieces.iter().zip(senses) {
                 out.extend(plane_curves(plane, piece, forward)?);
+            }
+            if out.is_empty() {
+                return None;
             }
             Some((out, closed))
         })
@@ -758,8 +785,9 @@ pub fn sweep_path(profile_plane: Plane, wires: &[Vec<Curve>], path: SweepPath<'_
     );
     let loops = profile_loops(&placed_plane, wires).ok_or(Error::Argument)?;
     let cap = !options.surface && loops.iter().all(|(_, closed)| *closed);
-    let start = pieces[0].point(0.0);
-    let tangent = pieces[0].tangent(0.0).ok_or(Error::Argument)?;
+    let first_piece = pieces.first().ok_or(Error::Argument)?;
+    let start = first_piece.point(0.0);
+    let tangent = first_piece.tangent(0.0).ok_or(Error::Argument)?;
     let normal = Vec3::from(placed_plane.normal().ok_or(Error::Argument)?);
     let x = Vec3::from(placed_plane.x_axis).normalize().ok_or(Error::Argument)?;
     let frame = [start, x, normal.cross(x), normal];
@@ -784,8 +812,11 @@ fn swept_loops(
     options: SweepOptions,
     cap: bool,
 ) -> Result<Brep, Error> {
-    let mut body = swept(&loops[0].0, pieces, frame, tangent, options, cap)?;
-    for (hole, _) in &loops[1..] {
+    let Some((first, rest)) = loops.split_first() else {
+        return Err(Error::Argument);
+    };
+    let mut body = swept(&first.0, pieces, frame, tangent, options, cap)?;
+    for (hole, _) in rest {
         let cut = swept(hole, pieces, frame, tangent, options, cap)?;
         body = if cap {
             model::boolean(&body, &cut, BooleanOp::Subtract)?.ok_or(Error::Empty)?
@@ -867,8 +898,14 @@ fn controlled_pieces(pieces: &[Piece]) -> Option<Vec<sweep::controlled::Piece>> 
 /// profile placed at stations along the path, each turned by the path's rotation-minimising
 /// frame, twisted and scaled by how far along it is, and lofted through.
 fn stations(profile: &[sweep::Curve], pieces: &[Piece], frame: [Vec3; 4], tangent: Vec3, options: SweepOptions, cap: bool) -> Result<Brep, Error> {
+    if pieces.is_empty() {
+        return Err(Error::Argument);
+    }
     let lengths: Vec<f64> = pieces.iter().map(Piece::length).collect();
     let total: f64 = lengths.iter().sum();
+    if !total.is_finite() || total <= 1e-14 {
+        return Err(Error::Argument);
+    }
     const STATIONS: usize = 48;
     let at = |distance: f64| -> (Vec3, Vec3) {
         let mut d = distance;
@@ -877,7 +914,11 @@ fn stations(profile: &[sweep::Curve], pieces: &[Piece], frame: [Vec3; 4], tangen
             d -= lengths[index];
             index += 1;
         }
-        let t = (d / lengths[index]).clamp(0.0, 1.0);
+        let t = if lengths[index] > 0.0 {
+            (d / lengths[index]).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         (pieces[index].point(t), pieces[index].tangent(t).unwrap_or(tangent))
     };
     let [origin, x0, y0, _] = frame;
@@ -930,7 +971,7 @@ fn mitred(profile: &[sweep::Curve], pieces: &[Piece], frame: [Vec3; 4], closed: 
     };
     let mut result: Option<Brep> = None;
     let (mut x, mut y, mut n) = (x0, y0, n0);
-    let mut tangent = pieces[0].tangent(0.0).ok_or(Error::Argument)?;
+    let mut tangent = pieces.first().ok_or(Error::Argument)?.tangent(0.0).ok_or(Error::Argument)?;
     for (i, piece) in pieces.iter().enumerate() {
         let start_tangent = piece.tangent(0.0).ok_or(Error::Argument)?;
         // The section turned onto this piece across the corner before it.
@@ -1032,7 +1073,7 @@ fn mitred_lines(profile: &[sweep::Curve], pieces: &[Piece], normal: Vec3, cap: b
     }
     // Skinned about the path's start and moved back: far from the origin (a national grid)
     // the kernel's tolerances on the absolute coordinates make the skin crawl.
-    let shift = lines[0].0;
+    let shift = lines.first().ok_or(Error::Argument)?.0;
     let local: Vec<Vec<sweep::Curve>> = sections.iter().map(|s| s.iter().map(|c| translated(c, -shift)).collect()).collect();
     let body = sweep::loft(&local, 1, cap)?;
     body.transform(&model::affine([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], shift.to_array()))?;
@@ -1300,5 +1341,19 @@ mod tests {
             }
         }
         assert!(failed.is_empty(), "{}", failed.join("\n"));
+    }
+
+    #[test]
+    fn empty_sweep_inputs_are_rejected_without_panicking() {
+        assert!(profile_loops(&Plane::XY, &[]).is_none());
+        let empty_nurbs = sweep::Curve::Nurbs {
+            degree: 1,
+            points: vec![],
+            knots: vec![],
+        };
+        let rev = reversed(&empty_nurbs);
+        assert!(matches!(rev, sweep::Curve::Nurbs { knots, .. } if knots.is_empty()));
+        assert!(!path_closed(&[]));
+        assert!(!chain_closed(&[], &[]));
     }
 }

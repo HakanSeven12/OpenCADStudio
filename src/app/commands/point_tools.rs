@@ -48,6 +48,30 @@ fn style_name(a: &document::classes::arch::ArchObject) -> String {
     a.decode().strings.into_iter().next().filter(|s| !s.is_empty()).unwrap_or_else(|| "Standard".into())
 }
 
+/// The codes of the drawing's description keys with their formats: the
+/// key sets in the drawing's order, each set's keys as it lists them
+/// (alphabetical); a code a set before already gave is not repeated
+/// (measured on Raw Desc Matching). A key set keeps its name and
+/// description as texts and its keys as references; a key keeps an empty
+/// text, its code and its format.
+pub fn description_key_codes(doc: &document::Document) -> Vec<(String, String)> {
+    let mut sets: Vec<(&Handle, &document::classes::arch::ArchObject)> =
+        doc.objects.iter().filter_map(|(h, o)| arch(o).filter(|a| a.dxf_name == "AECC_POINT_DESCRIPTION_KEY_SET").map(|a| (h, a))).collect();
+    sets.sort_by_key(|(h, _)| h.value());
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (_, set) in sets {
+        for key in set.decode().handles {
+            let Some(k) = doc.objects.get(&Handle::new(key)).and_then(arch).filter(|a| a.dxf_name.starts_with("AECC_POINT_DESCRIPTION_KEY")) else { continue };
+            let texts = k.decode().strings;
+            let (Some(code), format) = (texts.get(1).filter(|c| !c.is_empty()), texts.get(2).cloned().unwrap_or_default()) else { continue };
+            if !out.iter().any(|(c, _)| c == code) {
+                out.push((code.clone(), format));
+            }
+        }
+    }
+    out
+}
+
 /// The drawing's point groups in the group node's order: name,
 /// description, members, and the point and label style handles.
 pub fn point_groups(doc: &document::Document) -> Vec<(String, String, Vec<u32>, u64, u64)> {
@@ -81,7 +105,25 @@ impl OpenCADStudio {
     pub(in crate::app) fn open_point_group_window(&mut self) {
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
-        let points: Vec<Point> = c3d::cogo_points(doc).iter().map(Point::of).collect();
+        let mut points: Vec<Point> = c3d::cogo_points(doc).iter().map(Point::of).collect();
+        // Grid coordinates only under a projected coordinate system, by
+        // the drawing's local-to-grid transformation.
+        if let Ok(Some(crs)) = crate::io::crs::document_crs(doc) {
+            if !crs.is_geographic() {
+                use crate::modules::civil::point_geodetic::{GeodeticDirectCommand, LocalGrid};
+                let c = GeodeticDirectCommand::new(crs, crate::io::crs::model_space_geo_data(doc).and_then(LocalGrid::of));
+                for p in &mut points {
+                    let g = c.grid(glam::DVec3::new(p.position[0], p.position[1], 0.0));
+                    p.grid = Some([g.x, g.y]);
+                }
+            }
+        }
+        let unit = match doc.header.insertion_units {
+            6 => "m",
+            2 | 21 => "'",
+            _ => "",
+        };
+        let codes = description_key_codes(doc).into_iter().map(|(c, f)| (c, f, false)).collect();
         let groups = point_groups(doc);
         let styles = |class: &str, want: &dyn Fn(&document::classes::arch::ArchObject) -> bool| -> Vec<(String, u64)> {
             let mut v: Vec<(String, u64)> = doc
@@ -101,6 +143,7 @@ impl OpenCADStudio {
         let point_style = index(&point_styles, all.map(|g| g.3));
         let label_style = index(&label_styles, all.map(|g| g.4));
         let name = self.next_group_name(i, groups.len());
+        let applied = (name.clone(), String::new());
         let groups = groups.into_iter().map(|(name, description, numbers, ..)| GroupRow { name, description, numbers, picked: false }).collect();
         self.point_tools.point_group = Some(PointGroupWindow {
             tab: PgTab::Information,
@@ -127,6 +170,10 @@ impl OpenCADStudio {
             list: Default::default(),
             error: None,
             written: None,
+            codes,
+            locked: false,
+            applied,
+            unit,
         });
         self.active_modal = Some(crate::app::ModalKind::PointGroup);
     }
@@ -149,7 +196,49 @@ impl OpenCADStudio {
         use crate::modules::civil::point_group_query::Rules;
         let Some(state) = self.point_tools.point_group.as_mut() else { return Task::none() };
         state.error = None;
+        // A locked group's window takes only its styles, the lock itself,
+        // its tabs and lists, and the buttons (measured: every other field
+        // turns off).
+        let editing = !matches!(
+            message,
+            PointGroupMsg::Tab(_)
+                | PointGroupMsg::PointStyle(_)
+                | PointGroupMsg::LabelStyle(_)
+                | PointGroupMsg::Locked(_)
+                | PointGroupMsg::ListFilter(_)
+                | PointGroupMsg::ListSort(_)
+                | PointGroupMsg::ListSwitch(_)
+                | PointGroupMsg::ListPick(_)
+                | PointGroupMsg::ListShow(_)
+                | PointGroupMsg::DismissError
+                | PointGroupMsg::Apply
+                | PointGroupMsg::Ok
+                | PointGroupMsg::Help
+        );
+        if state.locked && editing {
+            return Task::none();
+        }
         match message {
+            PointGroupMsg::Locked(on) => state.locked = on,
+            // Ticking a code appends it to the Include raw description rule
+            // (turned on); unticking takes it out unless it is the rule's
+            // only code (measured: "STA*, TR*" → "TR*", then "TR*" stays).
+            PointGroupMsg::RawCode(k, on) => {
+                let Some(code) = state.codes.get_mut(k) else { return Task::none() };
+                code.2 = on;
+                let code = code.0.clone();
+                let rule = state.include.get_mut(pq::Attr::Raw);
+                let mut items: Vec<String> = rule.text.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+                if on {
+                    items.push(code);
+                    rule.on = true;
+                } else if items.len() > 1 {
+                    if let Some(at) = items.iter().position(|t| *t == code) {
+                        items.remove(at);
+                    }
+                }
+                rule.text = items.join(", ");
+            }
             PointGroupMsg::Tab(tab) => {
                 // Include and Exclude are read as they are left.
                 let leaving = match state.tab {
@@ -383,7 +472,11 @@ impl OpenCADStudio {
     fn write_point_group(&mut self) -> bool {
         let i = self.active_tab;
         let Some(state) = self.point_tools.point_group.as_ref() else { return false };
-        let name = pq::clean_name(state.name.trim());
+        // A locked group keeps the name and description last written
+        // (measured: a name typed and then locked before Apply is not
+        // taken; the group refuses a new name or description).
+        let (name, description) = if state.locked { state.applied.clone() } else { (state.name.clone(), state.description.clone()) };
+        let name = pq::clean_name(name.trim());
         let refuse = |s: &mut Self, error: String| {
             if let Some(state) = s.point_tools.point_group.as_mut() {
                 state.error = Some(error);
@@ -423,11 +516,10 @@ impl OpenCADStudio {
             label_style: label.filter(|_| state.override_label),
             elevation,
             raw_description: state.override_raw.0.then(|| state.override_raw.1.clone()),
-            locked: false,
+            locked: state.locked,
             classification: c3d::PointGroupClassification::None,
         };
-        let any_override = overrides.point_style.is_some() || overrides.label_style.is_some() || elevation.is_some() || overrides.raw_description.is_some();
-        let description = state.description.clone();
+        let any_override = overrides.point_style.is_some() || overrides.label_style.is_some() || elevation.is_some() || overrides.raw_description.is_some() || state.locked;
         let written = state.written;
         let styles_picked = state.styles_picked;
         self.push_undo_snapshot(i, "CREATEPOINTGROUP");
@@ -454,6 +546,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.bump_geometry();
                 if let Some(state) = self.point_tools.point_group.as_mut() {
                     state.written = Some(h);
+                    state.applied = (name.clone(), description);
                     state.name = name;
                 }
                 true

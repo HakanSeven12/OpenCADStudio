@@ -3673,7 +3673,8 @@ impl OpenCADStudio {
             // call. Point Group Properties: "tab=<information|point_groups|
             // raw_desc_matching|include|exclude|query_builder|overrides|
             // point_list|summary>", "name=", "description=", "point_style=",
-            // "label_style=", "group=<k>:0|1", "include=<k>:<text>" /
+            // "label_style=", "locked=0|1", "raw_code=<k>:0|1" (Raw Desc
+            // Matching code k), "group=<k>:0|1", "include=<k>:<text>" /
             // "exclude=<k>:<text>" (rule k on with the text; k 0 numbers,
             // 1 elevations, 2 names, 3 raw, 4 full descriptions),
             // "include_off=<k>", "exclude_off=<k>", "include_all=0|1",
@@ -3713,6 +3714,8 @@ impl OpenCADStudio {
                         "description" => G::Description(value.into()),
                         "point_style" => G::PointStyle(value.into()),
                         "label_style" => G::LabelStyle(value.into()),
+                        "locked" => G::Locked(on(value)),
+                        "raw_code" => pair().map(|(k, v)| G::RawCode(k, on(&v))).ok_or_else(bad)?,
                         "group" => pair().map(|(k, v)| G::Group(k, on(&v))).ok_or_else(bad)?,
                         "include" | "exclude" => pair().map(|(k, v)| G::SetRule(key == "exclude", k, v)).ok_or_else(bad)?,
                         "include_off" | "exclude_off" => G::Rule(key == "exclude_off", value.parse().map_err(|_| bad())?, false),

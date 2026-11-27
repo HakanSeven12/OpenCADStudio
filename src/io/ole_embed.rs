@@ -22,9 +22,15 @@ use document::types::Vector3;
 /// presentation extractor looks here first; the body is the encoded raster
 /// behind a 4-byte little-endian length.
 const OLE10NATIVE: &str = "\u{1}Ole10Native";
-/// Leading header marker carried verbatim by the geometry envelope; readers
-/// use it to recognise the envelope around the compound file.
-const GEOMETRY_MARKER: u16 = 1;
+/// The frame header kind of an embedded object, as saved drawings hold it.
+const GEOMETRY_MARKER: u16 = 0x5580;
+/// The 26 header bytes after the corners for an embedded object, as the
+/// embedded frames of saved drawings hold them; the u32 at offset 16 is the
+/// item type (1, embedded). ponytail: the first u32 varies per frame and is
+/// not decoded, 0 here.
+const EMBEDDED_HEADER: [u8; 26] = [
+    0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+];
 /// Encoded formats the extractor recognises by magic and every DWG consumer
 /// can decode. Anything else is re-encoded as PNG before embedding.
 const PORTABLE_FORMATS: [image::ImageFormat; 3] = [
@@ -233,7 +239,9 @@ pub fn build_embedded_ole(
     ole.lower_right_corner = lower_right;
     ole.envelope = OleFrameEnvelope::Geometry {
         marker: GEOMETRY_MARKER,
-        extension_records: Vec::new(),
+        upper_right: Vector3::new(lower_right.x, upper_left.y, upper_left.z),
+        lower_left: Vector3::new(upper_left.x, lower_right.y, lower_right.z),
+        extension_records: BinaryRecord::split(&EMBEDDED_HEADER, 4096),
     };
     ole.storage = StructuredStoragePayload {
         leading_records: Vec::new(),

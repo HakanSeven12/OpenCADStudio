@@ -256,6 +256,9 @@ impl C2LDistance {
 
         let (area, darea) = v_line.cross_prod_z(&v_p1ct);
         let (length, dlength) = v_line.length_deriv();
+        if !length.is_finite() || length <= f64::EPSILON {
+            return (0.0, 0.0);
+        }
 
         let h = area / length;
         let dh = (darea - h * dlength) / length;
@@ -395,14 +398,25 @@ impl ArcLength {
     }
 
     fn normalized_angles(&self, store: &ParamStore) -> (f64, f64) {
-        let mut start = store.get(self.arc.start_angle);
-        let mut end = store.get(self.arc.end_angle);
-        while start < 0.0 {
-            start += std::f64::consts::TAU;
+        let start = store.get(self.arc.start_angle);
+        let end = store.get(self.arc.end_angle);
+        if !start.is_finite() || !end.is_finite() {
+            return (f64::NAN, f64::NAN);
         }
-        while end < start {
-            end += std::f64::consts::TAU;
-        }
+        let start = if start < 0.0 {
+            start.rem_euclid(std::f64::consts::TAU)
+        } else {
+            start
+        };
+        let end = if end < start {
+            let diff = end - start;
+            if !diff.is_finite() {
+                return (f64::NAN, f64::NAN);
+            }
+            start + diff.rem_euclid(std::f64::consts::TAU)
+        } else {
+            end
+        };
         (start, end)
     }
 }
@@ -607,5 +621,31 @@ mod tests {
         let constr = ArcLength::new(arc, d);
         assert!(constr.error_value(&store).abs() < 1e-9);
         assert_grad_matches_finite_difference(&constr, &mut store);
+    }
+
+    #[test]
+    fn arc_length_handles_negative_and_non_finite_angles_without_hanging() {
+        let mut store = ParamStore::new();
+        let c = circle(&mut store, 0.0, 0.0, 2.0);
+        let start_angle = store.add(-std::f64::consts::FRAC_PI_2, false);
+        let end_angle = store.add(0.0, false);
+        let arc = Arc {
+            circle: c,
+            start: point(&mut store, 0.0, -2.0),
+            end: point(&mut store, 2.0, 0.0),
+            start_angle,
+            end_angle,
+        };
+        let d = store.add(std::f64::consts::PI, false);
+        let constr = ArcLength::new(arc, d);
+        assert!(constr.error_value(&store).abs() < 1e-9);
+
+        for bad in [f64::NEG_INFINITY, f64::INFINITY, f64::NAN, -1e20] {
+            store.set(start_angle, bad);
+            let _ = constr.error_value(&store);
+        }
+        store.set(start_angle, 0.0);
+        store.set(end_angle, -1e20);
+        let _ = constr.error_value(&store);
     }
 }

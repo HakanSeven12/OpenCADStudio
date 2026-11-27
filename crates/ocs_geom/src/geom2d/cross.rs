@@ -105,7 +105,13 @@ fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 /// The parameter at `point` if it really lies on `curve`, else `None`.
 fn on_curve(curve: &Curve, point: [f64; 2], tolerance: Tolerance) -> Option<f64> {
+    if !point[0].is_finite() || !point[1].is_finite() {
+        return None;
+    }
     let t = curve.parameter_at(point);
+    if !t.is_finite() {
+        return None;
+    }
     // A parameter outside the curve's extent means the crossing is on its
     // extension, not on it. A ray is the case a plain "bounded or not" would
     // get wrong: it has to reject what lies behind its origin while accepting
@@ -116,7 +122,8 @@ fn on_curve(curve: &Curve, point: [f64; 2], tolerance: Tolerance) -> Option<f64>
     // Evaluating the parameter has to land back where we started. For a point
     // on an arc's circle but outside the arc, `parameter_at` clamps and this
     // is what catches it.
-    if distance(curve.point_at(t), point) > tolerance.linear() {
+    let dist = distance(curve.point_at(t), point);
+    if !dist.is_finite() || dist > tolerance.linear() {
         return None;
     }
     Some(match curve.extent() {
@@ -856,5 +863,12 @@ mod tests {
         });
         let hits = intersect(&ell, &arc, tol());
         assert_eq!(hits.len(), 2, "half-circle arc of radius 95 must cross upper half of skinny ellipse twice");
+    }
+
+    #[test]
+    fn on_curve_rejects_non_finite_points() {
+        let seg = segment([0.0, 0.0], [10.0, 0.0]);
+        assert!(on_curve(&seg, [f64::NAN, 0.0], tol()).is_none());
+        assert!(on_curve(&seg, [f64::INFINITY, 0.0], tol()).is_none());
     }
 }

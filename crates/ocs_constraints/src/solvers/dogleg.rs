@@ -64,8 +64,21 @@ pub fn solve_dl(sub: &SubSystem, store: &mut ParamStore) -> SolveStatus {
             break;
         }
 
-        let alpha = g.norm_squared() / (&jx * &g).norm_squared();
+        let jg_sq = (&jx * &g).norm_squared();
+        let alpha = if jg_sq > 0.0 && jg_sq.is_finite() {
+            g.norm_squared() / jg_sq
+        } else {
+            f64::NAN
+        };
+        if !alpha.is_finite() {
+            stop = 6;
+            break;
+        }
         let h_sd = &g * alpha;
+        if !h_sd.iter().all(|v| v.is_finite()) {
+            stop = 6;
+            break;
+        }
 
         // A lightly regularized normal equation gives the same
         // Gauss-Newton direction at drawing precision and is dramatically
@@ -91,8 +104,12 @@ pub fn solve_dl(sub: &SubSystem, store: &mut ParamStore) -> SolveStatus {
             }
         };
 
-        let rel_error = (&jx * &h_gn + &fx).norm() / fx.norm();
-        if rel_error > 1e15 {
+        let fx_norm = fx.norm();
+        if !fx_norm.is_finite() || fx_norm <= 0.0 {
+            break;
+        }
+        let rel_error = (&jx * &h_gn + &fx).norm() / fx_norm;
+        if !rel_error.is_finite() || rel_error > 1e15 {
             break; // stop stays 0 -> Failed, matching the C++'s bare `break;` here
         }
 
@@ -103,19 +120,38 @@ pub fn solve_dl(sub: &SubSystem, store: &mut ParamStore) -> SolveStatus {
                 stop = 5;
                 break;
             }
-        } else if alpha * g.norm() >= delta {
-            h_dl = &h_sd * (delta / (alpha * g.norm()));
         } else {
-            let b = &h_gn - &h_sd;
-            let bb = b.norm_squared();
-            let gb = h_sd.dot(&b).abs();
-            let c = (delta + h_sd.norm()) * (delta - h_sd.norm());
-            let beta = if gb > 0.0 {
-                c / (gb + (gb * gb + c * bb).sqrt())
+            let h_sd_norm = h_sd.norm();
+            if !h_sd_norm.is_finite() {
+                stop = 6;
+                break;
+            }
+            if h_sd_norm >= delta {
+                h_dl = &h_sd * (delta / h_sd_norm);
             } else {
-                ((gb * gb + c * bb).sqrt() - gb) / bb
-            };
-            h_dl = &h_sd + &b * beta;
+                let b = &h_gn - &h_sd;
+                let bb = b.norm_squared();
+                let gb = h_sd.dot(&b).abs();
+                let c = (delta + h_sd_norm) * (delta - h_sd_norm).max(0.0);
+                let disc = gb * gb + c * bb;
+                let disc_sqrt = if disc.is_finite() && disc >= 0.0 {
+                    disc.sqrt()
+                } else {
+                    0.0
+                };
+                let beta = if !bb.is_finite() || bb <= 0.0 {
+                    0.0
+                } else if gb > 0.0 {
+                    c / (gb + disc_sqrt)
+                } else {
+                    (disc_sqrt - gb) / bb
+                };
+                h_dl = &h_sd + &b * beta;
+            }
+        }
+        if !h_dl.iter().all(|v| v.is_finite()) {
+            stop = 6;
+            break;
         }
 
         let x_new = &x + &h_dl;
@@ -126,9 +162,16 @@ pub fn solve_dl(sub: &SubSystem, store: &mut ParamStore) -> SolveStatus {
 
         let dl_pred = err - 0.5 * (&fx + &jx * &h_dl).norm_squared();
         let df = err - err_new;
-        let rho = dl_pred / df;
+        let trial_finite = err_new.is_finite()
+            && fx_new.iter().all(|v| v.is_finite())
+            && jx_new.iter().all(|v| v.is_finite());
+        let rho = if trial_finite && df.is_finite() && dl_pred.is_finite() && dl_pred > 0.0 {
+            df / dl_pred
+        } else {
+            -1.0
+        };
 
-        if df > 0.0 && dl_pred > 0.0 {
+        if trial_finite && df > 0.0 && dl_pred > 0.0 {
             x = x_new;
             jx = jx_new;
             fx = fx_new;
@@ -171,6 +214,7 @@ mod tests {
     use super::*;
     use crate::constraints::point_line::P2PDistance;
     use crate::geo::Point;
+    use crate::util::ParamId;
     use std::rc::Rc;
 
     #[test]
@@ -248,5 +292,44 @@ mod tests {
         let sub = SubSystem::new(vec![], &[]);
         let mut store = store;
         assert_eq!(solve_dl(&sub, &mut store), SolveStatus::Success);
+    }
+
+    #[test]
+    fn zero_steepest_descent_curvature_fails_cleanly_and_reverts() {
+        // Equal-value constraint at a stationary saddle where J*g = 0: must
+        // exit cleanly without 0/0 NaN or infinite trust-region shrink loops.
+        struct StationaryConstraint(ParamId);
+        impl crate::constraints::Constraint for StationaryConstraint {
+            fn params(&self) -> Vec<ParamId> {
+                vec![self.0]
+            }
+            fn error_value(&self, _store: &ParamStore) -> f64 {
+                1.0
+            }
+            fn grad_value(&self, _store: &ParamStore, _param: ParamId) -> f64 {
+                0.0
+            }
+        }
+        let mut store = ParamStore::new();
+        let x = store.add(42.0, false);
+        let c: Rc<dyn crate::constraints::Constraint> = Rc::new(StationaryConstraint(x));
+        let sub = SubSystem::new(vec![c], &[x]);
+        assert_eq!(solve_dl(&sub, &mut store), SolveStatus::Failed);
+        assert_eq!(store.get(x), 42.0);
+    }
+
+    #[test]
+    fn nonlinear_triangle_converges_from_far_initial_guess() {
+        let mut store = ParamStore::new();
+        let a = Point::new(store.add(0.0, true), store.add(0.0, true));
+        let b = Point::new(store.add(10.0, true), store.add(0.0, true));
+        let c = Point::new(store.add(100.0, false), store.add(250.0, false));
+        let d1 = store.add(6.0, true);
+        let d2 = store.add(8.0, true);
+        let c1: Rc<dyn crate::constraints::Constraint> = Rc::new(P2PDistance::new(a, c, d1));
+        let c2: Rc<dyn crate::constraints::Constraint> = Rc::new(P2PDistance::new(b, c, d2));
+        let sub = SubSystem::new(vec![c1, c2], &[c.x, c.y]);
+        assert_eq!(solve_dl(&sub, &mut store), SolveStatus::Success);
+        assert!(sub.error(&store) < 1e-12);
     }
 }

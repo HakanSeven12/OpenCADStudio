@@ -136,7 +136,14 @@ fn clamped(
     weights: Vec<f64>,
 ) -> Option<(Vec<[f64; 3]>, Vec<f64>, Vec<f64>)> {
     let n = points.len();
-    if degree == 0 || weights.len() != n || knots.len() != n + degree + 1 {
+    if degree == 0 || n <= degree || weights.len() != n || knots.len() != n + degree + 1 {
+        return None;
+    }
+    if !knots.iter().all(|k| k.is_finite())
+        || !knots.windows(2).all(|w| w[0] <= w[1])
+        || !weights.iter().all(|w| w.is_finite() && *w > 0.0)
+        || !points.iter().flatten().all(|c| c.is_finite())
+    {
         return None;
     }
     let mut knots = knots;
@@ -150,7 +157,7 @@ fn clamped(
         return None;
     }
     let insert = |knots: &mut Vec<f64>, control: &mut Vec<[f64; 4]>, u: f64| {
-        let last = control.len() - 1;
+        let last = control.len().checked_sub(1)?;
         let span = (degree..=last).rev().find(|&k| knots[k] <= u)?;
         let mut updated = control[..=span - degree].to_vec();
         for i in span - degree + 1..=span {
@@ -170,18 +177,26 @@ fn clamped(
         Some(())
     };
     for u in [start, end] {
-        while knots.iter().filter(|&&k| k == u).count() < degree {
+        for _ in 0..degree {
+            if knots.iter().filter(|&&k| k == u).count() >= degree {
+                break;
+            }
             insert(&mut knots, &mut control, u)?;
         }
     }
     let first = knots.iter().position(|&k| k == start)?;
     let last = knots.iter().rposition(|&k| k == end)?;
+    if first > last {
+        return None;
+    }
+    let start_idx = first.checked_sub(1)?;
     let knots: Vec<f64> = std::iter::once(start)
         .chain(knots[first..=last].iter().copied())
         .chain(std::iter::once(end))
         .collect();
-    let count = knots.len() - degree - 1;
-    let control = control.get(first - 1..first - 1 + count)?;
+    let count = knots.len().checked_sub(degree + 1)?;
+    let end_idx = start_idx.checked_add(count)?;
+    let control = control.get(start_idx..end_idx)?;
     let points = control
         .iter()
         .map(|c| [c[0] / c[3], c[1] / c[3], c[2] / c[3]])
@@ -1578,6 +1593,18 @@ mod tests {
                 "t={t}: {p:?} vs {q:?}"
             );
         }
+    }
+
+    #[test]
+    fn clamped_rejects_already_clamped_and_malformed_knots_without_underflow() {
+        let points = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let weights = vec![1.0; 3];
+        // Already-clamped domain start sits at knots[0] == start, which used to panic with 0 - 1.
+        let clamped_knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        assert!(super::clamped(2, points.clone(), clamped_knots, weights.clone()).is_none());
+
+        let nan_knots = vec![0.0, f64::NAN, 0.5, 1.0, 1.0, 1.0];
+        assert!(super::clamped(2, points, nan_knots, weights).is_none());
     }
 
     use super::*;

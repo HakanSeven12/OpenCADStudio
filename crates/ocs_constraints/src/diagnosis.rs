@@ -41,12 +41,27 @@ pub fn diagnose(sub: &SubSystem, store: &ParamStore) -> Diagnosis {
     let psize = sub.p_size();
     let csize = sub.c_size();
 
-    let tolerance = jacobi.norm() * f64::EPSILON * (jacobi.nrows().max(jacobi.ncols()) as f64);
+    let finite_norm_sq: f64 = (0..csize)
+        .filter_map(|i| {
+            let row = jacobi.row(i);
+            row.iter().all(|v| v.is_finite()).then(|| row.norm_squared())
+        })
+        .sum();
+    let finite_norm = finite_norm_sq.sqrt();
+    let tolerance = if finite_norm.is_finite() {
+        finite_norm * f64::EPSILON * (jacobi.nrows().max(jacobi.ncols()) as f64)
+    } else {
+        0.0
+    };
     let mut basis: Vec<DVector<f64>> = Vec::with_capacity(csize.min(psize));
     let mut redundant: Vec<usize> = Vec::new();
 
     for i in 0..csize {
         let mut residual = jacobi.row(i).transpose().into_owned();
+        if !residual.iter().all(|v| v.is_finite()) {
+            redundant.push(i);
+            continue;
+        }
         // Re-orthogonalize once. The second pass keeps the incremental rank
         // stable for nearly dependent rows without rebuilding a decomposition
         // for every prefix of the matrix.
@@ -56,7 +71,7 @@ pub fn diagnose(sub: &SubSystem, store: &ParamStore) -> Diagnosis {
             }
         }
         let norm = residual.norm();
-        if norm <= tolerance {
+        if !norm.is_finite() || norm <= tolerance {
             redundant.push(i);
         } else {
             basis.push(residual / norm);
@@ -126,8 +141,12 @@ pub fn classify_redundant(
             let reduced_sub = SubSystem::new(reduced, sub.plist());
             let mut reduced_store = store.clone();
             let _ = crate::solvers::dogleg::solve_dl(&reduced_sub, &mut reduced_store);
-            let residual = sub.constraints()[index].error(&reduced_store).abs();
-            let kind = if residual < CONFLICT_TOLERANCE {
+            let residual = sub
+                .constraints()
+                .get(index)
+                .map(|c| c.error(&reduced_store).abs())
+                .unwrap_or(f64::NAN);
+            let kind = if residual.is_finite() && residual < CONFLICT_TOLERANCE {
                 RedundancyKind::Redundant
             } else {
                 RedundancyKind::Conflicting
@@ -246,5 +265,25 @@ mod tests {
             vec![(diag.redundant[0], RedundancyKind::Conflicting)],
             "two incompatible fixed targets on the same pair must classify as conflicting, not redundant"
         );
+    }
+
+    #[test]
+    fn non_finite_jacobian_row_does_not_poison_remaining_diagnosis() {
+        let mut store = ParamStore::new();
+        let a = Point::new(store.add(1.0, false), store.add(1.0, false));
+        let b = Point::new(store.add(1.0, false), store.add(1.0, false));
+        let len = store.add(2.0, true);
+        let p = store.add(3.0, false);
+        let q = store.add(3.0, false);
+        // Zero-length P2PDistance emits NaN gradient, while Equal(p, q) is healthy.
+        let deg: Rc<dyn Constraint> =
+            Rc::new(crate::constraints::point_line::P2PDistance::new(a, b, len));
+        let ok: Rc<dyn Constraint> = Rc::new(Equal::new(p, q, 1.0));
+        let dup: Rc<dyn Constraint> = Rc::new(Equal::new(p, q, 1.0));
+        let sub = SubSystem::new(vec![deg, ok, dup], &[a.x, a.y, b.x, b.y, p, q]);
+
+        let diag = diagnose(&sub, &store);
+        assert_eq!(diag.redundant, vec![0, 2]);
+        assert_eq!(diag.dof, 5);
     }
 }

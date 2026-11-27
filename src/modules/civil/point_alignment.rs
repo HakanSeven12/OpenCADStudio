@@ -67,6 +67,16 @@ fn number(text: &str) -> Option<f64> {
     text.trim().parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
+/// The mark the drawing's units put after a station or coordinate: `m`
+/// for meters, `'` for feet (measured: `0+50.00'` in a feet drawing).
+pub fn unit_mark(insertion_units: i16) -> &'static str {
+    match insertion_units {
+        6 => "m",
+        2 | 21 => "'",
+        _ => "",
+    }
+}
+
 /// A station as the reference writes it: hundreds, `+`, the rest with two
 /// decimals (`4+35.24`, `-0+50.00`).
 pub fn format_station(s: f64) -> String {
@@ -1110,9 +1120,8 @@ mod tests {
     }
 }
 
-/// The station of `p` on alignment `e`: its foot on the plan geometry,
-/// from the alignment's start station (raw, before station equations).
-pub(crate) fn station_on(e: &EntityType, p: [f64; 2]) -> Option<f64> {
+/// Alignment `e`'s plan geometry, its length and its start station.
+fn plan_of(e: &EntityType) -> Option<(Curve, f64, f64)> {
     let curve = crate::modules::civil::point_intersect::alignment_curve(e)?;
     let EntityType::Extended(x) = e else { return None };
     let ExtendedEntityData::Arch(data) = &x.data else { return None };
@@ -1120,6 +1129,18 @@ pub(crate) fn station_on(e: &EntityType, p: [f64; 2]) -> Option<f64> {
     let mut lw = LwPolyline::new();
     lw.vertices = pl.vertices.iter().map(|v| LwVertex::with_bulge(Vector2::new(v.position[0], v.position[1]), v.bulge)).collect();
     let length = entity_curve(&EntityType::LwPolyline(lw))?.length();
-    let travelled = crate::modules::civil::point_intersect::travelled_fraction(&curve, p) * length;
-    Some(data.alignment_start_station().unwrap_or(0.0) + travelled)
+    Some((curve, length, data.alignment_start_station().unwrap_or(0.0)))
+}
+
+/// The station of `p` on alignment `e`: its foot on the plan geometry,
+/// from the alignment's start station (raw, before station equations).
+pub(crate) fn station_on(e: &EntityType, p: [f64; 2]) -> Option<f64> {
+    let (curve, length, start) = plan_of(e)?;
+    Some(start + crate::modules::civil::point_intersect::travelled_fraction(&curve, p) * length)
+}
+
+/// Alignment `e`'s start and end stations (raw).
+pub(crate) fn station_range(e: &EntityType) -> Option<(f64, f64)> {
+    let (_, length, start) = plan_of(e)?;
+    Some((start, start + length))
 }

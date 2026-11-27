@@ -3689,6 +3689,7 @@ impl OpenCADStudio {
             // Create COGO Points (corridor): "range=entire|user",
             // "baseline=<name>", "start=", "end=", "group_name=",
             // "code=<k>:0|1", "pick_baseline", "pick_station=start|end",
+            // "drag=start|end:<0..1 along the range bar>",
             // "ok". Create Blocks from COGO Points:
             // "spatial=none|display|window", "pick_window", "group=<k>:0|1",
             // "existing=<block>", "new=<name>", "layer=<name>", "ok". The
@@ -3786,6 +3787,14 @@ impl OpenCADStudio {
                             (K::CorridorPoints, "code") => pair().map(|(k, v)| P::Code(k, v)).ok_or_else(bad)?,
                             (K::CorridorPoints, "pick_baseline") => P::PickBaseline,
                             (K::CorridorPoints, "pick_station") => P::PickStation(value == "end"),
+                            // A range bar handle dragged to a fraction along the bar.
+                            (K::CorridorPoints, "drag") => {
+                                let (which, t) = value.split_once(':').ok_or_else(bad)?;
+                                let t: f64 = t.parse().map_err(|_| bad())?;
+                                let end = which == "end";
+                                let s = self.point_tools.corridor.as_ref().and_then(|w| w.drag_handle(end, t));
+                                P::RangeDrag(end, s.ok_or_else(|| failure("disabled", "The range bar has no handles unless the range is specified"))?)
+                            }
                             (K::CorridorPoints, "ok") => P::CorridorOk,
                             (K::PointBlocks, "spatial") => P::Spatial(match value {
                                 "display" => Spatial::CurrentDisplay,

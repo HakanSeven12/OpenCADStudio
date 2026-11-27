@@ -138,7 +138,7 @@ pub fn remembered_notice(path: &str) -> String {
 /// The notice importing a page of `path` prints: the file is opened again
 /// with the password supplied for it whenever it cannot be read without one.
 pub fn reopened_notice(path: &str) -> Option<String> {
-    let bytes = super::pdf_raster::source_bytes(path)?;
+    let bytes = crate::media::pdf_source::source_bytes(path)?;
     let security = Security::read(&bytes)?;
     (!security.is_owner(&bytes, "")).then(|| remembered_notice(path))
 }
@@ -152,7 +152,7 @@ pub fn refused_notice(path: &str) -> String {
 /// What attaching (`owner` false) or importing (`owner` true) `path` needs
 /// before its pages are read.
 pub fn gate(path: &str, owner: bool) -> Gate {
-    let Some(bytes) = super::pdf_raster::source_bytes(path) else {
+    let Some(bytes) = crate::media::pdf_source::source_bytes(path) else {
         return Gate::Open;
     };
     let Some(security) = Security::read(&bytes) else {
@@ -203,7 +203,7 @@ pub fn gate(path: &str, owner: bool) -> Gate {
 /// Check a password typed for `stage`; `owner` as in [`gate`]. A document
 /// password is kept for the file (and for every file when `remember`).
 pub fn check(path: &str, stage: Stage, password: &str, remember: bool, owner: bool) -> Check {
-    let Some(bytes) = super::pdf_raster::source_bytes(path) else {
+    let Some(bytes) = crate::media::pdf_source::source_bytes(path) else {
         return Check::Wrong;
     };
     let Some(security) = Security::read(&bytes) else {
@@ -221,7 +221,7 @@ pub fn check(path: &str, stage: Stage, password: &str, remember: bool, owner: bo
         keep();
         lock().fresh = Some(path.to_string());
         // Pages read while the file was locked are read again.
-        super::pdf_raster::register_source(path, bytes);
+        crate::media::pdf_source::register_source(path, bytes);
         return Check::Unlocked;
     }
     if stage == Stage::Document && user {

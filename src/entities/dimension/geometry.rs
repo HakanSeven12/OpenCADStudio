@@ -262,10 +262,10 @@ pub(crate) fn resolve_pattern_by_handle(
             .map_or("Continuous", |layer| layer.line_type.as_str()),
         Some(name) => name,
         None => {
-            crate::scene::view::render::linetype_name_for_common_viewport(doc, common, viewport)
+            crate::display::linetype_style::linetype_name_for_common_viewport(doc, common, viewport)
         }
     };
-    crate::scene::view::render::resolve_pattern(&doc.line_types, name, scale)
+    crate::display::linetype_style::resolve_pattern(&doc.line_types, name, scale)
 }
 
 /// Split the combined ext-lines point list (NaN-separated segment pairs)

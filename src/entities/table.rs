@@ -1639,10 +1639,10 @@ pub(crate) fn block_cell_inserts(
                 let local_anchor = if has_block_bounds {
                     (block_min + block_max) * 0.5
                 } else {
-                    crate::scene::render_graph::block_base_point(document, &record.name)
+                    crate::entities::block_ref::block_base_point(document, &record.name)
                 };
                 let transformed_anchor =
-                    crate::scene::render_graph::insert_transform(document, &insert)
+                    crate::entities::block_ref::insert_transform(document, &insert)
                         .apply(local_anchor);
                 insert.insert_point = insert.insert_point
                     + Vector3::new(
@@ -1672,7 +1672,7 @@ pub(crate) fn block_cell_inserts(
                         AttributeEntity::from_definition(definition, Some(attribute.value.clone()));
                     document::Entity::apply_transform(
                         &mut entity,
-                        &crate::scene::render_graph::insert_transform(document, &insert),
+                        &crate::entities::block_ref::insert_transform(document, &insert),
                     );
                     entity.common.handle = table.common.handle;
                     insert.attributes.push(entity);
@@ -2812,7 +2812,7 @@ pub fn tessellate_table(
                                     run.bold,
                                     &run.text,
                                 );
-                            crate::scene::pipeline::text_gpu::push_glyph_vertices(
+                            crate::display::text_vertex::push_glyph_vertices(
                                 &mut text_verts,
                                 &quads,
                                 [stroke.origin[0], stroke.origin[1], to.z as f64],
@@ -2911,7 +2911,7 @@ pub fn tessellate_table(
         if !pts.is_empty() {
             let mut wire = mk(color, pts, vec![], lw);
             if let Some(line_type) = line_types.iter().find(|lt| lt.handle.value() == linetype) {
-                let (length, pattern) = crate::scene::view::render::resolve_pattern(
+                let (length, pattern) = crate::display::linetype_style::resolve_pattern(
                     line_types,
                     &line_type.name,
                     document.header.linetype_scale as f32,

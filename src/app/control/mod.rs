@@ -2038,7 +2038,7 @@ impl OpenCADStudio {
                 .cloned()
                 .or_else(|| {
                     let h = &tab.scene.document.header;
-                    crate::entities::solid3d::tessellate_volume(
+                    crate::scene::convert::solid3d_tess::tessellate_volume(
                         entity,
                         [1.; 4],
                         h.facet_resolution,

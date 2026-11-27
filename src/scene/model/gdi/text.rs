@@ -7,7 +7,7 @@
 
 use super::raster::Canvas;
 use super::{Dc, Font};
-use crate::scene::text::{sysfont, ttf_glyph};
+use crate::text::{sysfont, ttf_glyph};
 
 /// Per-face metrics needed to place metafile text: cap-height and ascent as
 /// fractions of the em. Falls back to typical Latin ratios when the face (or

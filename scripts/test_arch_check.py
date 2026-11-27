@@ -234,6 +234,13 @@ def ready(files):
     return {c["crate"]: (c["uses"], c["test_uses"]) for c in result["crates"] if c["uses"] or c["test_uses"]}
 
 
+def without_catalog():
+    """CRATES with `catalog` taken out of its crate, so a test has a module
+    placed in no planned crate."""
+    crates = [(n, l, [m for m in ms if m != "catalog"]) for n, l, ms in arch_check.CRATES]
+    return mock.patch.object(arch_check, "CRATES", crates)
+
+
 class Readiness(unittest.TestCase):
     def test_a_crate_may_use_its_own_crate_and_the_crates_below(self):
         self.assertEqual(ready({"entities/a.rs": "use crate::config::C;\nuse crate::text::T;\n",
@@ -249,9 +256,10 @@ class Readiness(unittest.TestCase):
                          {"ocs_ui": ({"ui -> app": {"src/ui/a.rs": 1}}, {})})
 
     def test_a_module_in_no_planned_crate_blocks_and_is_listed(self):
-        self.assertEqual(ready({"io/a.rs": "use crate::catalog::Linetype;\n"}),
-                         {"ocs_io": ({"io -> catalog": {"src/io/a.rs": 1}}, {})})
-        self.assertIn("catalog", arch_check.readiness(tree({}))["unplaced"])
+        with without_catalog():
+            self.assertEqual(ready({"io/a.rs": "use crate::catalog::Linetype;\n"}),
+                             {"ocs_io": ({"io -> catalog": {"src/io/a.rs": 1}}, {})})
+            self.assertIn("catalog", arch_check.readiness(tree({}))["unplaced"])
 
     def test_rendering_may_use_the_session_crate(self):
         self.assertTrue(arch_check.may_use("ocs_render", "ocs_session"))
@@ -325,6 +333,8 @@ class ReadinessCommand(unittest.TestCase):
         self.assertRegex(out, r"ocs_base\s+production: ready\s+tests: ready")
         self.assertRegex(out, r"ocs_io\s+production: 1 file\s+tests: ready")
         self.assertRegex(out, r"io -> scene\s+1")
+        with without_catalog():
+            code, out = run(["readiness"], root)
         self.assertIn("Modules in no planned crate (see CRATES): catalog", out)
         code, out = run(["readiness", "--markdown"], root)
         self.assertIn("| `ocs_session` | — | no modules yet | no modules yet |", out)

@@ -1,15 +1,14 @@
 pub mod gdi;
-pub mod hatch_patterns;
 pub mod image_model;
 pub mod loft_command_model;
 pub mod mass;
 pub mod material_model;
 pub mod mesh_model;
-pub use crate::display::{hatch_model, instance_model, point_residuals, wire_model};
+pub use crate::display::{hatch_model, hatch_patterns, instance_model, point_residuals, wire_model};
 pub use crate::entities::object;
 pub mod ole_pres;
 pub mod pdf_layers;
-pub mod pdf_password;
+pub use crate::media::pdf_password;
 pub mod pdf_raster;
 pub mod pdf_vector;
 pub mod point_cloud;

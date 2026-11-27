@@ -188,3 +188,17 @@ pub fn dxf_name(e: &EntityType) -> &'static str {
         _ => "ENTITY",
     }
 }
+
+/// A block name a user may assign: non-empty, no control characters, none of
+/// the symbol-table-reserved characters (`*` marks anonymous blocks, `|`
+/// xref-dependent ones; the rest are the DXF symbol-name exclusions).
+pub(crate) fn valid_block_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.chars().any(|c| {
+            c.is_control()
+                || matches!(
+                    c,
+                    '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | '|' | ',' | '=' | '`'
+                )
+        })
+}

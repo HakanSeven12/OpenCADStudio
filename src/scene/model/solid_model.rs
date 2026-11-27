@@ -6,6 +6,7 @@ use ocs_solid::model::{self, r, BooleanOp, Brep};
 use crate::scene::model::mesh_model::{MassProperties, MeshLodSet, MeshModel};
 use crate::scene::model::silhouette::SilhouetteSource;
 use crate::scene::model::wire_model::WireModel;
+pub use crate::display::solid_mesh::{tessellate, DisplayTolerance};
 
 /// The facet angle a display asks for by default (7.5°).
 pub const DEFAULT_ANGLE: f64 = std::f64::consts::PI / 24.0;
@@ -32,17 +33,6 @@ pub fn display_angle_for_resolution(value: f64) -> f64 {
     (DISPLAY_ANGLE / resolution(value).max(1.0).sqrt()).clamp(FINE_ANGLE, std::f64::consts::FRAC_PI_2)
 }
 
-/// What a display mesh shows: the facet angle, the chordal deflection, the isoline counts, and
-/// whether they are a surface's own U/V lines (`Some`, with whether planes get them too) or a
-/// solid's (`None`), spaced as the drawing's isoline setting spaces them.
-#[derive(Clone, Copy, Debug)]
-pub struct DisplayTolerance {
-    pub angle: f64,
-    pub chord: Option<f64>,
-    pub isolines: [usize; 2],
-    pub planar_isolines: Option<bool>,
-}
-
 impl DisplayTolerance {
     pub fn new(angle: f64) -> Self {
         Self {
@@ -65,18 +55,6 @@ impl DisplayTolerance {
         self.chord = chord.filter(|c| c.is_finite() && *c > 0.0);
         self
     }
-}
-
-/// The display mesh of `brep`.
-pub fn tessellate(brep: &Brep, tolerance: DisplayTolerance) -> Option<ocs_solid::display::RecordMesh> {
-    let display = ocs_solid::display::Display {
-        angle: tolerance.angle,
-        chord: tolerance.chord,
-        isolines: tolerance.isolines,
-        planar_isolines: tolerance.planar_isolines.unwrap_or(false),
-        solid_isolines: tolerance.planar_isolines.is_none(),
-    };
-    ocs_solid::display::mesh(brep, &display, model::size(brep)).ok()
 }
 
 /// A preview cage of `brep`: its wireframe edges, then `isolines` solid isolines.

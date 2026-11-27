@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use document::entities::{Underlay, UnderlayDefinition, UnderlayDisplayFlags, UnderlayType};
 
-use super::{model, sheet_without, Backdrop, Segment, Sheet};
+use crate::media::vector::{model, sheet_without, Backdrop, Segment, Sheet};
 use crate::scene::model::wire_model::WireModel;
 
 /// Wires for the underlay's content, named after the underlay so they draw
@@ -400,7 +400,7 @@ fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 #[cfg(test)]
 mod draw_order_tests {
-    use super::super::model::{Path, SheetImage, SubPath};
+    use crate::media::vector::model::{Path, SheetImage, SubPath};
     use super::*;
 
     const RED: [u8; 3] = [220, 0, 0];

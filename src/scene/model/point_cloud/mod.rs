@@ -1,3 +1,4 @@
+pub(crate) use crate::entities::point_cloud::{definition, resolve_source, sources};
 // Point cloud scans drawn as points: the scan files a PointCloudEx entity
 // names are decoded once per file version, and the points it shows (placed
 // in the drawing, crops applied, coloured) are kept per placement so a
@@ -7,7 +8,7 @@ mod rcp;
 mod rcs;
 
 use document::entities::{PointCloudExCrop, PointCloudExData};
-use document::objects::{ClassObjectData, ObjectType, PointCloudDefinition};
+use document::objects::{ClassObjectData, ObjectType};
 use document::types::{Transform, Vector3};
 use document::Document;
 use rustc_hash::FxHashMap;
@@ -417,28 +418,6 @@ fn euler([x, y, z]: [f64; 3]) -> [[f64; 3]; 3] {
     ]
 }
 
-/// The point cloud definition a PointCloudEx names.
-pub(crate) fn definition<'a>(
-    document: &'a Document,
-    data: &PointCloudExData,
-) -> Option<&'a PointCloudDefinition> {
-    match document.objects.get(&data.definition_handle)? {
-        ObjectType::ClassObject(object) => match &object.data {
-            ClassObjectData::PointCloudDefinitionEx(definition)
-            | ClassObjectData::PointCloudDefinition(definition) => Some(definition),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-type Sources = Mutex<FxHashMap<String, PathBuf>>;
-
-fn sources() -> &'static Sources {
-    static SOURCES: OnceLock<Sources> = OnceLock::new();
-    SOURCES.get_or_init(Default::default)
-}
-
 /// Where a stored (relative or moved) scan path was found for an opened
 /// drawing — the definition names the stored path.
 // ponytail: keyed by the stored path alone, like underlay sources; two open
@@ -447,34 +426,6 @@ pub(crate) fn register_source(stored: &str, resolved: PathBuf) {
     if let Ok(mut map) = sources().lock() {
         map.insert(stored.to_string(), resolved);
     }
-}
-
-/// The scan file a PointCloudEx shows, when it exists: the stored path as
-/// is, else where it was found next to the drawing, else relative to the
-/// working folder.
-pub(crate) fn resolve_source(document: &Document, data: &PointCloudExData) -> Option<PathBuf> {
-    // An unloaded cloud draws as a missing one: its box and saved path.
-    if definition(document, data).is_some_and(|def| !def.is_loaded) {
-        return None;
-    }
-    let stored = definition(document, data)?.source_filename.trim();
-    if stored.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(stored.replace('\\', "/"));
-    if path.is_absolute() && path.is_file() {
-        return Some(path);
-    }
-    if let Some(found) = sources()
-        .lock()
-        .ok()
-        .and_then(|map| map.get(stored).cloned())
-    {
-        if found.is_file() {
-            return Some(found);
-        }
-    }
-    path.is_file().then_some(path)
 }
 
 /// One drawn point: position as two f32 (high + low, like every other

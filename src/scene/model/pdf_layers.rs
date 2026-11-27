@@ -10,6 +10,7 @@ use std::sync::Arc;
 use hayro::hayro_syntax::object::{Array, Dict, Name, ObjectIdentifier};
 
 use super::pdf_raster::{register_derived_source, source_bytes};
+pub use crate::entities::underlay::{hidden_layers, DGN_OVERRIDE_PLACEHOLDER, LAYER_OVERRIDE_APP};
 
 /// An optional-content group (layer) of a PDF.
 #[derive(Clone, Debug, PartialEq)]
@@ -251,30 +252,6 @@ fn without_key(dict: &str, key: &str) -> Option<String> {
         }
     };
     Some(format!("{}{}", &dict[..start], &rest[lead + length..]))
-}
-
-/// Layer names an underlay has switched off: the strings of its
-/// `AdeskUnderlayLayerOverrideData` extended data, as the reference stores
-/// them.
-pub const LAYER_OVERRIDE_APP: &str = "AdeskUnderlayLayerOverrideData";
-
-/// The first string of a DGN underlay's layer overrides, before the names.
-pub const DGN_OVERRIDE_PLACEHOLDER: &str = "???DGN_Placeholder???";
-
-pub fn hidden_layers(u: &document::entities::Underlay) -> Vec<String> {
-    u.common
-        .extended_data
-        .records()
-        .iter()
-        .filter(|r| r.application_name.eq_ignore_ascii_case(LAYER_OVERRIDE_APP))
-        .flat_map(|r| r.values.iter())
-        .filter_map(|v| match v {
-            document::xdata::XDataValue::String(s) if s != DGN_OVERRIDE_PLACEHOLDER => {
-                Some(s.clone())
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// The source an underlay's page is read from, with its layer overrides.

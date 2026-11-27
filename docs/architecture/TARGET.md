@@ -8,9 +8,9 @@ This page is the plan. [`RULES.md`](RULES.md) is the rule that holds today; CI e
 
 | Crate | Layer | What it holds |
 | --- | --- | --- |
-| `ocs_base` | 0 | `par`, `perf`, `i18n`, `config`, `network`, `wildcard`, `xml_depth`, `schema_validation` |
+| `ocs_base` | 0 | `par`, `perf`, `i18n`, `config`, `network`, `wildcard`, `xml_depth`, `schema_validation`, `sys`, `sysinfo`, `paths`, `icon_assets` |
 | `ocs_geom`, `ocs_solid`, `ocs_constraints` | 0–1 | as today |
-| `ocs_model` | 1 | `entities`, `parametric`, `entity_creation`, `filter`, `calc`: the drawing model and its behaviour, with no GUI or GPU types |
+| `ocs_model` | 1 | `entities`, `display`, `text`, `parametric`, `filter`, `calc`, `catalog`, `media`: the drawing model and its behaviour, what it draws as and the libraries and files it reads, with no GUI or GPU types |
 | `ocs_io` | 2 | file formats; depends on the model, not on rendering |
 | `ocs_session` | 2 | one open drawing being edited: the document, selection, undo, visibility and isolation, and the document operations (copy and paste, block definitions) that `Scene` and `app` hold today |
 | `ocs_render` | 2 | tessellation, the render caches and the GPU pipeline; reads a session, never edits it |
@@ -25,7 +25,7 @@ This page is the plan. [`RULES.md`](RULES.md) is the rule that holds today; CI e
 Each step builds, passes the tests and lands on `main` on its own. A step that moves code changes no behaviour, keeps history (`git mv`) and re-exports the moved items from their old path so callers need not change in the same commit.
 
 1. **No new upward dependency.** Done: the `architecture` job fails a change that adds one, or that adds a module without a layer.
-2. **Remove the upward dependencies**, smallest pairs first; `entities -> scene` is the one that gates the first crate split. The types the model needs from `scene` (properties and grips in `scene::model::object`, transforms in `scene::view::transform`, the wire model, text shaping, the tessellation helpers) move down into the model layer.
+2. **Remove the upward dependencies.** Done below the tools: layers 0 to 3 use nothing above them, and `scene` no longer uses `io`. What is left is `ui -> app` (the views reach into the application's state) and one `modules -> ui` use. `python3 scripts/arch_check.py readiness` lists, per planned crate, what still keeps it from building alone, test code included.
 3. **Process-wide state into the session.** About 180 mutable statics (atomics, mutexes, `OnceLock`) and 66 `thread_local!` blocks hold per-session state today, such as a command's last-used values. A switch that is process-wide forces tests that touch it to run serially. They move into the session or the app state they belong to.
 4. **System variables from one table**: name, type, default, where the value is kept (drawing header or user profile), how it is read and set. `SETVAR`, the name lists, the settings file and the command reference are then derived from it instead of being edited in several files.
 5. **Split the crates bottom up**: `ocs_base`, `ocs_model`, `ocs_io`.

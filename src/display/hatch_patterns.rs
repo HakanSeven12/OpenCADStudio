@@ -7,7 +7,7 @@
 use std::sync::OnceLock;
 
 use crate::catalog::patterns::PatLineDef;
-use crate::scene::model::hatch_model::{HatchPattern, PatFamily};
+use crate::display::hatch_model::{HatchPattern, PatFamily};
 use document::entities::{HatchPattern as DxfPattern, HatchPatternLine};
 use document::types::Vector2;
 

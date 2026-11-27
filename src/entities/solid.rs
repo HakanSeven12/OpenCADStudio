@@ -132,9 +132,9 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
             extruded: false,
         });
     };
-    let mesh = crate::scene::model::solid_model::tessellate(
+    let mesh = crate::display::solid_mesh::tessellate(
         &body,
-        crate::scene::model::solid_model::DisplayTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE),
+        crate::display::solid_mesh::DisplayTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE),
     );
     let Some(mesh) = mesh.filter(|mesh| mesh.missing_faces.is_empty() && !mesh.triangles.is_empty()) else {
         return Some(SolidGeometry {

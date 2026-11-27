@@ -631,7 +631,7 @@ fn decode_lwpolyline(d: &[u8]) -> Option<(Vec<DVec3>, bool)> {
         }
     }
     let n = normal.normalize_or(DVec3::Z);
-    let ((ax, ay, az), (bx, by, bz)) = crate::scene::view::transform::ocs_axes((n.x, n.y, n.z));
+    let ((ax, ay, az), (bx, by, bz)) = crate::entities::transform::ocs_axes((n.x, n.y, n.z));
     let (ox, oy) = (DVec3::new(ax, ay, az), DVec3::new(bx, by, bz));
     let local = run
         .into_iter()

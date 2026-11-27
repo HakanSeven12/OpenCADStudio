@@ -1,6 +1,5 @@
 //! Cross-platform PDF underlay rasterisation.
 
-use std::collections::HashMap;
 use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -10,14 +9,10 @@ use hayro::hayro_syntax::Pdf;
 use hayro::vello_cpu::color::palette::css::{TRANSPARENT, WHITE};
 use hayro::{PixmapSettings, RenderCache, RenderSettings};
 use lru::LruCache;
-
-/// One rasterised PDF page. `dpi` ties its pixel size to its physical size.
-pub struct PdfPage {
-    pub pixels: Arc<Vec<u8>>,
-    pub width: u32,
-    pub height: u32,
-    pub dpi: f32,
-}
+pub use crate::media::pdf_source::{page_size_inches, register_source, PageAdjust, PdfPage};
+pub(crate) use crate::media::pdf_source::{
+    adjusted_cache, page_cache, source_bytes, source_cache, AdjustKey, BudgetedRasterCache, PageKey,
+};
 
 const RASTER_DPI: f32 = 150.0;
 
@@ -27,9 +22,6 @@ const RASTER_DPI: f32 = 150.0;
 /// dimensions saturate at 65 535, i.e. a 17 GB allocation (abort or a
 /// multi-minute freeze).
 const MAX_PRINT_RASTER_PIXELS: f64 = 268_435_456.0;
-
-/// Source path, page, DPI bits and whether the page background is transparent.
-type PageKey = (String, String, u32, bool);
 
 /// Per-cache byte budget for the derived rasters (page and adjusted caches
 /// each get one). Every zoom band a page is shown at adds a full-page RGBA
@@ -43,12 +35,6 @@ fn raster_cache_budget_bytes() -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(DEFAULT_MIB)
         .saturating_mul(1024 * 1024)
-}
-
-/// LRU memo with a byte budget, counted from each entry's reported cost.
-pub(crate) struct BudgetedRasterCache<K: std::hash::Hash + Eq, V> {
-    entries: LruCache<K, (V, usize)>,
-    bytes: usize,
 }
 
 impl<K: std::hash::Hash + Eq + Clone, V: Clone> BudgetedRasterCache<K, V> {
@@ -112,17 +98,6 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> BudgetedRasterCache<K, V> {
     }
 }
 
-fn page_cache() -> &'static Mutex<BudgetedRasterCache<PageKey, Option<Arc<PdfPage>>>> {
-    static CACHE: OnceLock<Mutex<BudgetedRasterCache<PageKey, Option<Arc<PdfPage>>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
-}
-
-fn source_cache() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
-    static SOURCES: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
-    SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 /// Bytes registered for exactly this PDF reference (the attach flow keys by
 /// the same path the underlay definition stores). The web ARCHIVE/ETRANSMIT
 /// packages the underlay into the transmittal; `None` means no PDF was
@@ -133,23 +108,6 @@ pub fn registered_source_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
         .unwrap_or_else(|error| error.into_inner())
         .get(path)
         .cloned()
-}
-
-/// Keep bytes selected through a file dialog. Browsers expose no reusable path,
-/// while native builds also benefit by avoiding a second disk read.
-pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
-    source_cache()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .insert(path.to_string(), bytes);
-    page_cache()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .retain(|(cached_path, _, _, _)| cached_path != path);
-    adjusted_cache()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .retain(|key| key.0 != path);
 }
 
 /// Register bytes under a derived source name (a layer override of a
@@ -232,7 +190,7 @@ pub fn rasterize_page_region(
 fn region_uncached(path: &str, page: &str, region: [f64; 4], dpi: f32) -> Option<Arc<PdfPage>> {
     use hayro::hayro_syntax::page::Rotation;
     let bytes = source_bytes(path)?;
-    if super::pdf_password::is_encrypted(&bytes) {
+    if crate::media::pdf_password::is_encrypted(&bytes) {
         return None;
     }
     let index = page.trim().parse::<usize>().unwrap_or(1).max(1) - 1;
@@ -339,7 +297,7 @@ pub fn rasterize_page_at_dpi_uncached(path: &str, page: &str, dpi: f32) -> Optio
 
 fn rasterize_uncached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
     let bytes = source_bytes(path)?;
-    let pdf = super::pdf_password::open(path, bytes).ok()?;
+    let pdf = crate::media::pdf_password::open(path, bytes).ok()?;
     let page_no = page.trim().parse::<usize>().unwrap_or(1).max(1);
     raster_pdf_page(&pdf, page_no - 1, dpi, transparent)
 }
@@ -475,19 +433,8 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
 /// Number of pages in a PDF source.
 pub fn page_count(path: &str) -> Option<usize> {
     let bytes = source_bytes(path)?;
-    let pdf = super::pdf_password::open(path, bytes).ok()?;
+    let pdf = crate::media::pdf_password::open(path, bytes).ok()?;
     Some(pdf.pages().len())
-}
-
-/// Size of a 1-based page in inches (its rendered width and height at 72
-/// points per inch). An underlay is one drawing unit per page inch.
-pub fn page_size_inches(path: &str, page: &str) -> Option<(f64, f64)> {
-    let bytes = source_bytes(path)?;
-    let pdf = super::pdf_password::open(path, bytes).ok()?;
-    let page_no = page.trim().parse::<usize>().ok()?;
-    let page = pdf.pages().get(page_no.checked_sub(1)?)?;
-    let (w, h) = page.render_dimensions();
-    Some((w as f64 / 72.0, h as f64 / 72.0))
 }
 
 /// Drawing units per page inch a page imports at: the X ratio of the
@@ -498,7 +445,7 @@ pub fn page_size_inches(path: &str, page: &str) -> Option<(f64, f64)> {
 pub fn page_units_per_inch(path: &str, page: &str) -> Option<f64> {
     use hayro::hayro_syntax::object::{Array, Dict, Number};
     let bytes = source_bytes(path)?;
-    let pdf = super::pdf_password::open(path, bytes).ok()?;
+    let pdf = crate::media::pdf_password::open(path, bytes).ok()?;
     let page_no = page.trim().parse::<usize>().ok()?;
     let page = pdf.pages().get(page_no.checked_sub(1)?)?;
     let positive = |v: f64| (v.is_finite() && v > 0.0).then_some(v);
@@ -523,34 +470,6 @@ pub fn page_units_per_inch(path: &str, page: &str) -> Option<f64> {
         .and_then(|n| positive(n.as_f64()))
         .unwrap_or(1.0);
     Some(measured.unwrap_or(1.0) * user_unit)
-}
-
-/// Display adjustments of an underlay page, applied to its display raster.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PageAdjust {
-    /// 0..=100; 100 keeps the colours, lower values pull their lightness
-    /// towards `contrast_pivot` (hue and saturation kept).
-    pub contrast: u8,
-    /// The lightness contrast 0 leaves every colour at, in thousandths:
-    /// measured 500 for PDF and 243 for DWF; a DGN model's follows its
-    /// colours.
-    pub contrast_pivot: u16,
-    pub monochrome: bool,
-    /// Lighten dark, unsaturated content on a dark background (black lines
-    /// and text become white), keeping coloured content.
-    pub adjust_for_background: bool,
-    pub dark_background: bool,
-    /// A fade blended into the colours before the contrast (a DGN
-    /// model's): the background and the share, 0..=100, of the way each
-    /// colour is taken to it.
-    pub fade_before_contrast: Option<([u8; 3], u8)>,
-}
-
-type AdjustKey = (String, String, PageAdjust);
-
-fn adjusted_cache() -> &'static Mutex<BudgetedRasterCache<AdjustKey, Arc<Vec<u8>>>> {
-    static CACHE: OnceLock<Mutex<BudgetedRasterCache<AdjustKey, Arc<Vec<u8>>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
 }
 
 /// One colour (0..=1 channels) with the underlay's contrast / monochrome /
@@ -729,26 +648,6 @@ pub fn rasterize_preview_pages(
         })
         .collect();
     (pages, total)
-}
-
-pub(crate) fn source_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
-    if let Some(bytes) = source_cache()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .get(path)
-        .cloned()
-    {
-        return Some(bytes);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::fs::read(path).ok().map(Arc::new)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        None
-    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

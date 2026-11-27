@@ -57,6 +57,7 @@ pub mod mcp;
 pub mod mcp_intent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mcp_ops;
+pub mod media;
 pub mod modules;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod network;

@@ -5,6 +5,7 @@ use glam::{DMat3, DVec2, DVec3};
 
 use crate::snap::DimensionAssociationSource;
 use crate::snap::SnapType;
+pub use crate::entities::viewport::MeasurementScale;
 
 /// Planar orthographic mapping between a layout viewport's paper rectangle and
 /// the model plane it displays. Handles pan (`model_target` / `paper_center`),
@@ -181,14 +182,6 @@ impl AcceptedSnap {
         self.paper_point = paper_point;
         self
     }
-}
-
-/// Length dimensions store raw distances in their owning space. The displayed
-/// value uses `user_lfac * viewport_compensation`; angular dimensions are exempt.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MeasurementScale {
-    pub user_lfac: f64,
-    pub viewport_compensation: f64,
 }
 
 impl MeasurementScale {

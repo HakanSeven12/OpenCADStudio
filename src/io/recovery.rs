@@ -4,6 +4,7 @@ use crate::io::xref::{XrefInfo, XrefStatus};
 use crate::scene::OpenTimings;
 #[cfg(not(target_arch = "wasm32"))]
 use sha2::{Digest, Sha256};
+pub use crate::catalog::plot_style::hex_digest;
 
 const REPORT_SCHEMA_VERSION: u16 = 2;
 
@@ -453,17 +454,6 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
 #[cfg(target_arch = "wasm32")]
 pub fn sha256_file(_path: &Path) -> Result<String, String> {
     Err("filesystem hashing is unavailable on this target".to_string())
-}
-
-/// `bytes` as lowercase hexadecimal, two digits a byte.
-pub fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
-    let bytes = bytes.as_ref();
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write;
-        let _ = write!(output, "{byte:02x}");
-    }
-    output
 }
 
 fn report_id(source_sha256: Option<&str>, created_unix_seconds: u64) -> String {

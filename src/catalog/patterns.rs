@@ -58,7 +58,7 @@ pub(crate) fn user_definitions(folder: &str, ext: &str) -> String {
     let dirs = crate::config::config_dir()
         .map(|dir| dir.join(folder))
         .into_iter()
-        .chain(crate::io::font_repo::support_folder());
+        .chain(crate::text::font_repo::support_folder());
     dirs.flat_map(|dir| {
         let mut paths: Vec<_> = std::fs::read_dir(dir)
             .into_iter()

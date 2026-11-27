@@ -68,7 +68,7 @@ pub(crate) fn resolved_dimension_style(
     // (#1917)
     if !matches!(dimension, Dimension::Arc(_)) {
         style.annotative =
-            crate::scene::annotative::object_is_annotative(document, &dimension.base().common);
+            crate::entities::annotative::object_is_annotative(document, &dimension.base().common);
     }
     // An annotative dimension sizes its features by the annotation scale; the
     // DIMSCALE it still stores is inert.
@@ -84,7 +84,7 @@ pub(crate) fn resolved_dimension_style(
         style.dimlfac = match calculated_dimlfac(dimension) {
             Some(calculated) if calculated.abs() < 1e-12 => 1.0,
             Some(calculated) => calculated.abs(),
-            None => crate::scene::viewport_ref::MeasurementScale::user_lfac_for_space(
+            None => crate::entities::viewport::MeasurementScale::user_lfac_for_space(
                 style.dimlfac,
                 dimension_in_paper_space(dimension, document),
             ),

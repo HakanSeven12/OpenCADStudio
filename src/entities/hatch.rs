@@ -637,9 +637,9 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                         h.pattern = document::entities::HatchPattern::new("_USER");
                     }
                     HatchPatternType::Predefined => {
-                        if let Some(entry) = crate::scene::model::hatch_patterns::find("ANSI31") {
+                        if let Some(entry) = crate::display::hatch_patterns::find("ANSI31") {
                             let mut pattern =
-                                crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
+                                crate::display::hatch_patterns::build_dxf_pattern(entry);
                             scale_pattern_geometry(&mut pattern, h.pattern_scale);
                             rotate_pattern_geometry(&mut pattern, h.pattern_angle);
                             translate_pattern_geometry(&mut pattern, old_origin.x, old_origin.y);
@@ -824,10 +824,10 @@ fn set_predefined_pattern(h: &mut Hatch, name: &str) {
         h.gradient_color.enabled = false;
         return;
     }
-    let Some(entry) = crate::scene::model::hatch_patterns::find(name) else {
+    let Some(entry) = crate::display::hatch_patterns::find(name) else {
         return;
     };
-    let mut pattern = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
+    let mut pattern = crate::display::hatch_patterns::build_dxf_pattern(entry);
     scale_pattern_geometry(&mut pattern, h.pattern_scale.max(1.0e-6));
     rotate_pattern_geometry(&mut pattern, h.pattern_angle);
     let origin = h.pattern_origin();

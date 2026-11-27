@@ -1789,7 +1789,7 @@ fn tessellate_sub_local(
     // before casting to f32 — same precision-preservation trick used for
     // top-level entities, applied per-defn.
     let wires_out = if let EntityType::Dimension(dimension) = sub {
-        use crate::entities::dimension::DimensionTess;
+        use crate::scene::convert::dimension_tess::DimensionTess;
         // Block-definition members never carry the reference-only
         // designation (it targets top-level geometry — see the API v9
         // known-limit note), so the block cache tessellates with an empty set.

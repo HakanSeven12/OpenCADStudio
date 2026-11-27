@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use super::model::{
-    arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SheetImage, SubPath, Text,
-    CAP_PER_EM,
+    arc_cubics, paths_bounds, CAP_PER_EM, Path, PathBuilder, Segment, Sheet, SheetImage, SubPath,
+    Text,
 };
 
 /// The package's files, with `\` separators turned into `/`.

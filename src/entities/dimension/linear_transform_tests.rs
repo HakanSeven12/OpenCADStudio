@@ -1,8 +1,7 @@
 // Tests for linear_transform.
 use super::*;
-use crate::t;
+use crate::scene::convert::dimension_tess::DimensionTess;
 
-use super::*;
 use std::f64::consts::FRAC_PI_2;
 
 /// A horizontal linear dimension measuring 10 units along X.

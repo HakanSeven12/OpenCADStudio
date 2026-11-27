@@ -32,7 +32,7 @@ impl PickedPlotStyle {
             } else {
                 IfccadPlotStyleTableKind::Ctb
             },
-            sha256: Some(crate::io::recovery::hex_digest(Sha256::digest(&bytes))),
+            sha256: Some(hex_digest(Sha256::digest(&bytes))),
         };
         Ok(Self {
             table,
@@ -387,7 +387,7 @@ pub(crate) fn resolve_external_table(
         found_name = true;
         let bytes = std::fs::read(path)
             .map_err(|error| format!("Cannot read plot style table {name:?}: {error}"))?;
-        if sha256.is_some_and(|expected| crate::io::recovery::hex_digest(Sha256::digest(&bytes)) != expected) {
+        if sha256.is_some_and(|expected| hex_digest(Sha256::digest(&bytes)) != expected) {
             continue;
         }
         if contents.as_ref().is_some_and(|previous| *previous != bytes) {
@@ -634,7 +634,7 @@ impl PlotStyleTableExt for PlotStyleTable {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn drawing_table_path(name: &str, base: Option<&Path>) -> Option<PathBuf> {
     let base = base?;
-    if let Some(path) = crate::io::resolve_image_file(name, Some(base)) {
+    if let Some(path) = crate::paths::resolve_image_file(name, Some(base)) {
         return Some(PathBuf::from(path));
     }
     let file_name = name.rsplit(['/', '\\']).next()?;
@@ -683,6 +683,17 @@ fn screening(name: &str, percent: u8) -> PlotStyleTable {
         entry.screening = percent;
     }
     table
+}
+
+/// `bytes` as lowercase hexadecimal, two digits a byte.
+pub fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    let bytes = bytes.as_ref();
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
 }
 
 #[cfg(test)]

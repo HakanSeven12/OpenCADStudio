@@ -1,8 +1,11 @@
-use document::entities::acis::{SabReader, SatDocument};
+use document::entities::acis::SatDocument;
 use document::entities::{Body, Region, Solid3D, Surface};
 use ocs_solid::model::Brep;
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
+pub(crate) use crate::entities::solid3d::{acis_document, acis_record, parse_acis};
+pub use crate::entities::solid3d::region_record;
+use document::EntityType;
 
 fn tessellate_acis(
     sat: &SatDocument,
@@ -24,115 +27,14 @@ fn tessellate_acis(
     )
 }
 
-pub(crate) fn finalize_mesh(
-    name: String,
-    verts: Vec<[f64; 3]>,
-    normals: Vec<[f32; 3]>,
-    indices: Vec<u32>,
-    triangle_material_handles: Vec<Option<document::Handle>>,
-    triangle_colors: Vec<Option<[f32; 4]>>,
-    color: [f32; 4],
-    xform: Option<([f64; 9], [f64; 3], f64)>,
-) -> MeshModel {
-    let mut verts_high = Vec::with_capacity(verts.len());
-    let mut verts_low = Vec::with_capacity(verts.len());
-    for [x, y, z] in verts {
-        let [x, y, z] = match xform {
-            Some((matrix, translation, scale)) => [
-                scale * (x * matrix[0] + y * matrix[3] + z * matrix[6]) + translation[0],
-                scale * (x * matrix[1] + y * matrix[4] + z * matrix[7]) + translation[1],
-                scale * (x * matrix[2] + y * matrix[5] + z * matrix[8]) + translation[2],
-            ],
-            None => [x, y, z],
-        };
-        let high = [x as f32, y as f32, z as f32];
-        verts_high.push(high);
-        verts_low.push([
-            (x - high[0] as f64) as f32,
-            (y - high[1] as f64) as f32,
-            (z - high[2] as f64) as f32,
-        ]);
-    }
-    let normals = match xform {
-        Some((matrix, _, _)) => normals
-            .iter()
-            .map(|normal| {
-                let [x, y, z] = [normal[0] as f64, normal[1] as f64, normal[2] as f64];
-                let transformed = [
-                    x * matrix[0] + y * matrix[3] + z * matrix[6],
-                    x * matrix[1] + y * matrix[4] + z * matrix[7],
-                    x * matrix[2] + y * matrix[5] + z * matrix[8],
-                ];
-                let length = (transformed[0] * transformed[0]
-                    + transformed[1] * transformed[1]
-                    + transformed[2] * transformed[2])
-                    .sqrt();
-                if length > 1e-9 {
-                    [
-                        (transformed[0] / length) as f32,
-                        (transformed[1] / length) as f32,
-                        (transformed[2] / length) as f32,
-                    ]
-                } else {
-                    *normal
-                }
-            })
-            .collect(),
-        None => normals,
-    };
-    MeshModel {
-        name,
-        verts: verts_high,
-        verts_low,
-        normals,
-        indices,
-        triangle_material_handles,
-        triangle_colors,
-        color,
-        selected: false,
-    }
-}
-
-fn parse_acis(
-    sat_fn: impl FnOnce() -> Option<SatDocument>,
-    is_binary: bool,
-    sab_data: &[u8],
-) -> Option<SatDocument> {
-    sat_fn().or_else(|| {
-        (is_binary && !sab_data.is_empty())
-            .then(|| SabReader::read(sab_data).ok())
-            .flatten()
-    })
-}
-
 /// A 3DSOLID's ACIS data as a Solidcore record.
 pub fn solid_record(solid: &Solid3D) -> Option<Brep> {
     acis_record(&solid.acis_data)
 }
 
-/// A REGION's ACIS data as a Solidcore record.
-pub fn region_record(region: &Region) -> Option<Brep> {
-    acis_record(&region.acis_data)
-}
-
 /// A SURFACE's ACIS data as a Solidcore record.
 pub fn surface_record(surface: &Surface) -> Option<Brep> {
     acis_record(&surface.acis_data)
-}
-
-/// An object's ACIS data as a document, from its text or its binary form.
-pub(crate) fn acis_document(acis: &document::entities::AcisData) -> Option<SatDocument> {
-    parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)
-}
-
-/// ACIS data holding one body, read whole, as a Solidcore record (placed by its transform).
-pub(crate) fn acis_record(acis: &document::entities::AcisData) -> Option<Brep> {
-    let sat = acis_document(acis)?;
-    let (mut bodies, loss) = ocs_solid::lift(&sat);
-    if !loss.is_empty() || bodies.len() != 1 {
-        return None;
-    }
-    bodies.pop().map(|body| body.brep)
 }
 
 fn remap_acis_material_bindings(set: &mut MeshLodSet, acis: &document::entities::AcisData) {
@@ -268,4 +170,107 @@ pub fn tessellate_solid3d(
         None,
         &solid.acis_data,
     )
+}
+
+pub(crate) fn finalize_mesh(
+    name: String,
+    verts: Vec<[f64; 3]>,
+    normals: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+    triangle_material_handles: Vec<Option<document::Handle>>,
+    triangle_colors: Vec<Option<[f32; 4]>>,
+    color: [f32; 4],
+    xform: Option<([f64; 9], [f64; 3], f64)>,
+) -> MeshModel {
+    let mut verts_high = Vec::with_capacity(verts.len());
+    let mut verts_low = Vec::with_capacity(verts.len());
+    for [x, y, z] in verts {
+        let [x, y, z] = match xform {
+            Some((matrix, translation, scale)) => [
+                scale * (x * matrix[0] + y * matrix[3] + z * matrix[6]) + translation[0],
+                scale * (x * matrix[1] + y * matrix[4] + z * matrix[7]) + translation[1],
+                scale * (x * matrix[2] + y * matrix[5] + z * matrix[8]) + translation[2],
+            ],
+            None => [x, y, z],
+        };
+        let high = [x as f32, y as f32, z as f32];
+        verts_high.push(high);
+        verts_low.push([
+            (x - high[0] as f64) as f32,
+            (y - high[1] as f64) as f32,
+            (z - high[2] as f64) as f32,
+        ]);
+    }
+    let normals = match xform {
+        Some((matrix, _, _)) => normals
+            .iter()
+            .map(|normal| {
+                let [x, y, z] = [normal[0] as f64, normal[1] as f64, normal[2] as f64];
+                let transformed = [
+                    x * matrix[0] + y * matrix[3] + z * matrix[6],
+                    x * matrix[1] + y * matrix[4] + z * matrix[7],
+                    x * matrix[2] + y * matrix[5] + z * matrix[8],
+                ];
+                let length = (transformed[0] * transformed[0]
+                    + transformed[1] * transformed[1]
+                    + transformed[2] * transformed[2])
+                    .sqrt();
+                if length > 1e-9 {
+                    [
+                        (transformed[0] / length) as f32,
+                        (transformed[1] / length) as f32,
+                        (transformed[2] / length) as f32,
+                    ]
+                } else {
+                    *normal
+                }
+            })
+            .collect(),
+        None => normals,
+    };
+    MeshModel {
+        name,
+        verts: verts_high,
+        verts_low,
+        normals,
+        indices,
+        triangle_material_handles,
+        triangle_colors,
+        color,
+        selected: false,
+    }
+}
+
+/// Build material-aware shaded geometry for every standard 3-D solid/surface
+/// and mesh family, returning `None` when decoded geometry is unusable.
+pub fn tessellate_volume(
+    e: &EntityType,
+    color: [f32; 4],
+    facet_res: f64,
+    chordal_deflection: Option<f64>,
+    isolines: usize,
+) -> Option<MeshLodSet> {
+    match e {
+        EntityType::Solid3D(s) => {
+            tessellate_solid3d(s, color, facet_res, chordal_deflection, isolines)
+        }
+        EntityType::Region(r) => {
+            tessellate_region(r, color, facet_res, chordal_deflection, isolines)
+        }
+        EntityType::Body(b) => {
+            tessellate_body(b, color, facet_res, chordal_deflection, isolines)
+        }
+        EntityType::Surface(s) => tessellate_surface(
+            s,
+            color,
+            facet_res,
+            chordal_deflection,
+            crate::entities::solid3d::surface_isoline_counts(s),
+            crate::entities::solid3d::surface_property_state(s).isolines,
+        ),
+        EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_) => {
+            crate::scene::convert::mesh_tess::tessellate_shaded_mesh(e, color)
+        }
+        _ => None,
+    }
 }

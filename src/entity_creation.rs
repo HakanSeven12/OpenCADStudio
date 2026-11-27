@@ -171,8 +171,8 @@ mod tests {
             "pattern_scale": 2,
             "pattern_angle_deg": 30,
         }));
-        let entry = crate::scene::model::hatch_patterns::find("ANSI31").unwrap();
-        let mut expected = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
+        let entry = crate::display::hatch_patterns::find("ANSI31").unwrap();
+        let mut expected = crate::display::hatch_patterns::build_dxf_pattern(entry);
         crate::entities::hatch::scale_pattern_geometry(&mut expected, 2.0);
         crate::entities::hatch::rotate_pattern_geometry(&mut expected, 30f64.to_radians());
         assert!(!hatch.is_solid);
@@ -1067,7 +1067,7 @@ pub(crate) fn build_entity(
             if spec["solid"].as_bool().unwrap_or(false) {
                 hatch.is_solid = true;
             } else {
-                use crate::scene::model::hatch_patterns;
+                use crate::display::hatch_patterns;
                 let name = spec["pattern"].as_str().unwrap_or("ANSI31");
                 let entry = hatch_patterns::find(name).ok_or_else(|| {
                     failure_at(

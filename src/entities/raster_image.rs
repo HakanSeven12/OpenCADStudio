@@ -5,25 +5,23 @@ use crate::entities::common::{
     center_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_angle_deg, parse_f64,
     ro_prop as ro, square_grip,
 };
-use crate::entities::text_support::{resolve_text_style, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::display::render_entity::{GlyphRun, RenderEntity, RenderObject, TextStroke};
+use crate::display::render_entity::{RenderEntity, RenderObject};
 use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::display::wire_model::SnapHint;
-use crate::text::lff;
 
 // ── Shared geometry helpers ───────────────────────────────────────────────────
 
 /// The four world-space corners of an image/wipeout (the codec's
 /// `corners()`) as plain arrays, counter-clockwise from the origin:
 /// origin, +U·W, +U·W+V·H, +V·H.
-fn world_corners(corners: [document::types::Vector3; 4]) -> [[f64; 3]; 4] {
+pub(crate) fn world_corners(corners: [document::types::Vector3; 4]) -> [[f64; 3]; 4] {
     corners.map(|c| [c.x, c.y, c.z])
 }
 
 /// Rectangle border + X diagonals — used as a placeholder for images.
-fn image_wire(corners: [[f64; 3]; 4], with_x: bool) -> Vec<[f64; 3]> {
+pub(crate) fn image_wire(corners: [[f64; 3]; 4], with_x: bool) -> Vec<[f64; 3]> {
     let [p0, p1, p2, p3] = corners;
     let mut pts = vec![p0, p1, p2, p3, p0];
     if with_x {
@@ -87,171 +85,13 @@ pub(crate) fn image_world_to_clip(img: &RasterImage, p: [f64; 3]) -> document::t
     document::types::Vector2::new(a - 0.5, img.size.y - b - 0.5)
 }
 
-fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
+pub(crate) fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
     let dot = *vx * ax + *vy * ay;
     *vx = 2.0 * dot * ax / len2 - *vx;
     *vy = 2.0 * dot * ay / len2 - *vy;
 }
 
 // ── RasterImage ───────────────────────────────────────────────────────────────
-
-impl RenderConvertible for RasterImage {
-    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
-        let corners = world_corners(self.corners());
-
-        // Helper: pixel-space → world-space point.
-        let ox = self.insertion_point.x;
-        let oy = self.insertion_point.y;
-        let oz = self.insertion_point.z;
-        let px_to_world = |px: f64, py: f64| -> [f64; 3] {
-            [
-                ox + self.u_vector.x * px + self.v_vector.x * py,
-                oy + self.u_vector.y * px + self.v_vector.y * py,
-                oz + self.u_vector.z * px + self.v_vector.z * py,
-            ]
-        };
-
-        // Diagonals are the BROKEN-reference placeholder; a resolvable image
-        // draws its pixels inside the frame, so the X would scribble over it.
-        // One probe for the whole conversion: the outline below and the
-        // placeholder branch further down must agree on a single answer.
-        let path = self.file_path.trim();
-        let resolvable =
-            path.is_empty() || crate::scene::model::image_model::resolve_image(path).is_some();
-        // Outline: the clip boundary, or — when it hides its inside — the
-        // frame with the boundary as a hole. Must match the raster's own clip
-        // triangulation in `ImageModel` so outline and pixels align.
-        let pts = match image_clip_polygon(self) {
-            Some(poly) => {
-                let mut ring: Vec<[f64; 3]> =
-                    poly.iter().map(|p| px_to_world(p[0], p[1])).collect();
-                ring.push(ring[0]);
-                if self.clip_boundary.clip_mode == document::entities::ClipMode::Inside {
-                    let mut frame = image_wire(corners, false);
-                    frame.push([f64::NAN; 3]);
-                    frame.extend(ring);
-                    frame
-                } else {
-                    ring
-                }
-            }
-            None => image_wire(corners, !resolvable),
-        };
-
-        // A raster OCS can display renders its pixels (built separately) inside
-        // this frame — just draw the frame/clip outline. A reference it cannot
-        // resolve (an offline/broken URL, a missing or renamed file) gets the
-        // usual broken-reference treatment: the frame plus the saved path drawn
-        // as text, so the user sees WHICH reference is unresolved instead of an
-        // empty box. `resolve_image` is memoised and shared with the raster
-        // loader, so a URL that fetches online is treated as resolvable (no
-        // placeholder — the image shows) while an offline one falls back to the
-        // path text, and neither is fetched twice. The scene's text-cache
-        // classifier runs the same probe, so erasing this placeholder drops its
-        // glyphs from the text buffer instead of leaving them on screen.
-        if resolvable {
-            return Some(RenderEntity {
-                // Picked on its frame only (shown or hidden), like the other
-                // framed objects: a click inside the picture selects nothing.
-                pick_tris: vec![],
-                object: RenderObject::Lines(pts),
-                snap_pts: vec![],
-                tangent_geoms: vec![],
-                key_vertices: corners.to_vec(),
-                fill_tris: vec![],
-            });
-        }
-
-        // ── Unresolved reference: frame outline + path text, image colour ──
-        let ins = [self.insertion_point.x, self.insertion_point.y];
-        // Boundary → run-less stroke groups (local to `ins`), split on the
-        // NaN gaps the wire uses to separate disjoint segments.
-        let mut boundary: Vec<Vec<[f32; 2]>> = Vec::new();
-        let mut seg: Vec<[f32; 2]> = Vec::new();
-        for p in &pts {
-            if p[0].is_nan() {
-                if seg.len() >= 2 {
-                    boundary.push(std::mem::take(&mut seg));
-                } else {
-                    seg.clear();
-                }
-            } else {
-                seg.push([(p[0] - ins[0]) as f32, (p[1] - ins[1]) as f32]);
-            }
-        }
-        if seg.len() >= 2 {
-            boundary.push(seg);
-        }
-
-        let mut groups: Vec<TextStroke> = vec![TextStroke {
-            strokes: boundary,
-            origin: ins,
-            color: None,
-            fill_tris: vec![],
-            plane: None,
-            run: None,
-        }];
-
-        // Place the path text centred in the frame, sized to span ~90% of the
-        // frame width (capped so it also fits vertically).
-        let c0 = corners[0];
-        let c2 = corners[2];
-        let uw = [corners[1][0] - c0[0], corners[1][1] - c0[1]];
-        let vh = [corners[3][0] - c0[0], corners[3][1] - c0[1]];
-        let frame_w = (uw[0] * uw[0] + uw[1] * uw[1]).sqrt();
-        let frame_h = (vh[0] * vh[0] + vh[1] * vh[1]).sqrt();
-        if frame_w > 1e-9 && frame_h > 1e-9 {
-            let u_hat = [uw[0] / frame_w, uw[1] / frame_w];
-            let v_hat = [vh[0] / frame_h, vh[1] / frame_h];
-            let rotation = (u_hat[1] as f32).atan2(u_hat[0] as f32);
-            let font = resolve_text_style("", document).font_name;
-            // advance at height 1.0 → width per unit height.
-            let adv = text_local_bounds(&font, path, 1.0, 1.0, 0.0)
-                .map(|b| b.advance)
-                .filter(|a| *a > 1e-3)
-                .unwrap_or(0.6 * path.chars().count().max(1) as f32);
-            let height = ((frame_w as f32 * 0.9) / adv)
-                .min(frame_h as f32 * 0.5)
-                .max(frame_h as f32 * 0.02);
-            let text_w = (adv * height) as f64;
-            let center = [(c0[0] + c2[0]) * 0.5, (c0[1] + c2[1]) * 0.5];
-            // Shift the baseline-left origin so the run is centred both ways.
-            let origin = [
-                center[0] - u_hat[0] * text_w * 0.5 - v_hat[0] * height as f64 * 0.35,
-                center[1] - u_hat[1] * text_w * 0.5 - v_hat[1] * height as f64 * 0.35,
-            ];
-            let (strokes, fill_tris) =
-                lff::tessellate_text_ex([0.0, 0.0], height, rotation, 1.0, 0.0, &font, path);
-            groups.push(TextStroke {
-                strokes,
-                origin,
-                color: None,
-                fill_tris,
-                plane: None,
-                run: Some(GlyphRun {
-                    text: path.to_string(),
-                    font,
-                    height,
-                    rotation,
-                    width_factor: 1.0,
-                    oblique: 0.0,
-                    tracking: 1.0,
-                    bold: false,
-                    aci: None,
-                }),
-            });
-        }
-
-        Some(RenderEntity {
-            pick_tris: vec![],
-            object: RenderObject::Text(groups),
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            key_vertices: corners.to_vec(),
-            fill_tris: vec![],
-        })
-    }
-}
 
 impl Grippable for RasterImage {
     fn grips(&self) -> Vec<GripDef> {
@@ -463,7 +303,7 @@ pub(crate) fn wipeout_masks(wipeout: &Wipeout) -> bool {
         && !wipeout.flags.contains(Flags::TRANSPARENCY_ON)
 }
 
-fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
+pub(crate) fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
     wipeout.clipping_enabled
         && wipeout.clip_boundary_vertices.len() >= 3
         && matches!(
@@ -472,7 +312,7 @@ fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
         )
 }
 
-fn wipeout_plane(wipeout: &Wipeout) -> ocs_geom::space::Plane {
+pub(crate) fn wipeout_plane(wipeout: &Wipeout) -> ocs_geom::space::Plane {
     ocs_geom::space::Plane::from_axes(
         [
             wipeout.insertion_point.x,
@@ -496,7 +336,7 @@ pub(crate) fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
     }
 }
 
-fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<document::types::Vector2> {
+pub(crate) fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<document::types::Vector2> {
     let [x, y] = wipeout_plane(wipeout).project(world)?;
     Some(document::types::Vector2::new(
         x - wipeout.size.x * 0.5,

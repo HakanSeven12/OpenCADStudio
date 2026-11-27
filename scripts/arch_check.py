@@ -47,9 +47,9 @@ LAYERS = {
     "network": 0, "schema_validation": 0, "xml_depth": 0, "wildcard": 0, "paths": 0, "icon_assets": 0,
     # 1 drawing model and geometry behaviour
     "entities": 1, "display": 1, "text": 1, "parametric": 1,
-    "filter": 1, "calc": 1,
+    "filter": 1, "calc": 1, "catalog": 1, "media": 1,
     # 2 file formats and rendering
-    "io": 2, "catalog": 2, "scene": 2, "snap": 2, "gpu_backend": 2, "ifc_plan": 2,
+    "io": 2, "scene": 2, "snap": 2, "gpu_backend": 2, "ifc_plan": 2,
     # 3 the tool contract
     "command": 3, "plugin_catalog": 3,
     # 4 features: tools and ribbon tabs
@@ -78,11 +78,12 @@ ALLOWED = {("ui", "app"): {"Message"}}
 CRATES = [
     ("ocs_base", 0, ["par", "perf", "i18n", "config", "network", "wildcard", "xml_depth",
                      "schema_validation", "sys", "sysinfo", "paths", "icon_assets"]),
-    ("ocs_model", 1, ["entities", "parametric", "entity_creation", "filter", "calc", "display", "text"]),
+    ("ocs_model", 1, ["entities", "parametric", "filter", "calc", "display", "text", "catalog",
+                      "media"]),
     ("ocs_io", 2, ["io", "ifc_plan"]),
     ("ocs_session", 2, []),  # made by splitting `Scene` (TARGET.md, step 6)
     ("ocs_render", 2, ["scene", "gpu_backend", "snap"]),
-    ("ocs_commands", 3, ["command", "plugin_catalog", "modules"]),
+    ("ocs_commands", 3, ["command", "plugin_catalog", "modules", "entity_creation"]),
     ("ocs_ui", 5, ["ui", "input"]),
 ]
 

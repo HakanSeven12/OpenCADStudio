@@ -11,8 +11,8 @@ Where the layers are going (crates, and the order of the work) is in [`TARGET.md
 | Layer | Modules | What lives here |
 | --- | --- | --- |
 | 0 foundations | `par`, `perf`, `sys`, `sysinfo`, `i18n`, `config`, `network`, `schema_validation`, `xml_depth`, `wildcard`, `paths`, `icon_assets` | Helpers with no knowledge of CAD or of the app |
-| 1 drawing model | `entities`, `display`, `text`, `parametric`, `filter`, `calc` | Entities and their geometry behaviour |
-| 2 files and rendering | `io`, `catalog`, `scene`, `snap`, `gpu_backend`, `ifc_plan` | Reading and writing files; turning the model into pictures |
+| 1 drawing model | `entities`, `display`, `text`, `parametric`, `filter`, `calc`, `catalog`, `media` | Entities and their geometry behaviour |
+| 2 files and rendering | `io`, `scene`, `snap`, `gpu_backend`, `ifc_plan` | Reading and writing files; turning the model into pictures |
 | 3 tool contract | `command`, `plugin_catalog` | What a command or an add-on package is |
 | 4 tools | `modules`, `entity_creation` | The commands and ribbon tabs themselves |
 | 5 presentation | `ui`, `input` | Windows, widgets, input handling |
@@ -23,7 +23,7 @@ The rule of thumb: code that many things depend on sits low and changes rarely; 
 ## Exceptions and choices
 
 - **`ui` may use `app::Message`.** iced views return the application's message type, so every view names it. Anything else `ui` takes from `app` still counts.
-- **`scene` must not use `io`**, although both are layer 2. Rendering should not depend on file formats; the two would otherwise grow into a cycle. The libraries both of them read (linetypes, patterns, plot styles, paper sizes, visual styles, coordinate systems) are in `catalog`, which either may use.
+- **`scene` must not use `io`**, although both are layer 2. Rendering should not depend on file formats; the two would otherwise grow into a cycle. The libraries both of them read (linetypes, patterns, plot styles, paper sizes, visual styles, coordinate systems) are in `catalog` (layer 1), which both of them use.
 - **`network`, `schema_validation`, `xml_depth` and `gpu_backend` sit low** because they depend on almost nothing: `network` is a shared HTTP agent, `schema_validation` a small validator, `xml_depth` the nesting check the XML readers in `io`, `scene` and `ui` run before parsing, and `gpu_backend` depends only on `sys` and `config`.
 - **`plugin` is part of the app shell.** The plugin host drives the application (`app::plugin_host`) and merges plugin tabs with the core ones, so it sits with `app`; what a plugin may call is `ocs_plugin_api`.
 - **`entity_creation` sits with the tools.** It builds entities from the creation contracts MCP and the automation API send, with the commands' own builders; only the front doors use it.

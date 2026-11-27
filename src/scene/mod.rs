@@ -1,3 +1,4 @@
+pub(crate) use crate::entities::names::valid_block_name;
 // Scene modules grouped by role:
 //   convert — DXF/ACIS entities → solids & tessellated geometry
 //   text    — LFF stroke + TrueType font engines and shaping
@@ -27,7 +28,7 @@ pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
 pub mod block_visibility;
-pub mod bounds;
+pub use crate::entities::bounds;
 pub(crate) mod bricscad_parameters;
 pub mod cache;
 pub mod compare;
@@ -178,7 +179,7 @@ pub(crate) use boundary::{drawn_hatch_path, new_hatch_paths, HatchLoopSource};
 // other tessellation code); re-exported here so this root and sibling topic
 // modules (each does `use super::*`) keep referencing them unqualified.
 pub(crate) use convert::tess::{
-    entity_aabb, entity_world_aabb_f64, is_unindexable_entity, tessellate_entity_dim_text,
+    entity_world_aabb_f64, is_unindexable_entity, tessellate_entity_dim_text,
 };
 
 /// Keep construction-history curves in the same per-entity tessellation memo
@@ -1613,20 +1614,6 @@ pub(crate) fn wire_gpu_patch_enabled() -> bool {
     true
 }
 
-/// A block name a user may assign: non-empty, no control characters, none of
-/// the symbol-table-reserved characters (`*` marks anonymous blocks, `|`
-/// xref-dependent ones; the rest are the DXF symbol-name exclusions).
-pub(crate) fn valid_block_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.chars().any(|c| {
-            c.is_control()
-                || matches!(
-                    c,
-                    '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | '|' | ',' | '=' | '`'
-                )
-        })
-}
-
 /// `raw` made fit to name a table entry (a block, layer, style or view):
 /// characters [`valid_block_name`] refuses become `_`, the name is cut to
 /// 255 characters, and `fallback` stands in when nothing is left. For names
@@ -1940,7 +1927,7 @@ pub(crate) fn build_derived_caches_impl(
                 material_base_dir,
             );
             let top_level = layout_blocks.contains(&e.common().owner_handle);
-            let result = crate::entities::solid3d::tessellate_volume(
+            let result = crate::scene::convert::solid3d_tess::tessellate_volume(
                 e,
                 color,
                 facet_res,

@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 
 use super::model::{
-    arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By, DgnCollector,
-    DgnColor, DgnElement, DgnGeom, DgnImport, Path, PathBuilder, Segment, Sheet, SubPath, Text,
-    DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET,
+    arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By,
+    DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET, DgnCollector, DgnColor, DgnElement, DgnGeom,
+    DgnImport, Path, PathBuilder, Segment, Sheet, SubPath, Text,
 };
 
 /// A 32-bit integer stored as two little-endian words, high word first.

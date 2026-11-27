@@ -83,7 +83,7 @@ pub(crate) fn baked_dimension_geometry(
     );
     geometry.origin = origin;
     if !style.is_some_and(|style| style.dimse1) {
-        if let Some(points) = crate::scene::dimension_assoc::radial_extension_points(
+        if let Some(points) = crate::entities::dimension::radial_source::radial_extension_points(
             document,
             dimension.base().common.handle,
             style.map(|style| style.dimexo * scale).unwrap_or(0.0),

@@ -1,6 +1,6 @@
 //! PRESSPULL selection and curve-only previews. Geometry operations go through Solidcore.
 
-use document::entities::{AcisData, EmbeddedEntity, Region, Wire};
+use document::entities::{AcisData, Region, Wire};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
@@ -9,9 +9,10 @@ use ocs_geom::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, 
 use ocs_geom::space::Plane;
 use rustc_hash::FxHashMap;
 
-use super::{sweep_model, wire_model::WireModel};
+use super::wire_model::WireModel;
 use crate::entities::transform::WorkingPlane;
 use crate::scene::{boundary_faces, exact_hatch_paths, ring_source_handles, BoundarySource, Scene};
+pub use crate::entities::profile::profile_geometry;
 
 const BOUNDARY_TOLERANCE: f64 = 1e-6;
 
@@ -35,33 +36,6 @@ pub struct PresspullTarget {
     pub kind: PresspullTargetKind,
     pub anchor: DVec3,
     pub direction: DVec3,
-}
-
-/// Extract exact embedded REGION loops before falling back to polygonal entities.
-/// In particular, preview and final extrusion must not approximate REGION arcs
-/// from their display wires or discard holes.
-pub fn profile_geometry(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>, bool)> {
-    if matches!(entity, EntityType::Ray(_) | EntityType::XLine(_)) {
-        return None;
-    }
-    let embedded = match entity {
-        EntityType::Region(region) => Some((
-            EmbeddedEntity::Region(region.clone()),
-            glam::DMat4::IDENTITY.to_cols_array(),
-        )),
-        _ => sweep_model::embedded_revolve_profile(entity),
-    };
-    if let Some((entity, transform)) = embedded {
-        if let Ok(geometry) = ocs_solid::sweep_profile_geometry(&entity, transform) {
-            return Some(geometry);
-        }
-        // Exact modeler data is authoritative, not a hint to replace by chords.
-        if matches!(entity, EmbeddedEntity::Region(ref region) if region.acis_data.has_data()) {
-            return None;
-        }
-    }
-    let (profile, closed) = sweep_model::extrusion_profile_of(entity)?;
-    Some((profile.plane, vec![profile.pieces], closed))
 }
 
 /// Builds the final solid or surface without discarding exact REGION loops.

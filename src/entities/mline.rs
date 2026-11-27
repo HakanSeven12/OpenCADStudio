@@ -510,7 +510,7 @@ pub(crate) fn element_linetype_name<'a>(
     viewport: Option<document::Handle>,
 ) -> &'a str {
     if element.is_empty() || element.eq_ignore_ascii_case("bylayer") {
-        crate::scene::view::render::layer_linetype_name_for_viewport(document, layer, viewport)
+        crate::display::linetype_style::layer_linetype_name_for_viewport(document, layer, viewport)
     } else {
         element
     }

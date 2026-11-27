@@ -8,6 +8,7 @@ use document::EntityType;
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
 use crate::scene::model::sweep_model::ExtrudeMode;
 use crate::scene::model::sweep_model::SweepOptions;
+pub(crate) use crate::entities::profile::arbitrary_x;
 
 /// A 3D polyline profile or path as the reference records it: a wire body.
 fn embedded_sweep_profile(
@@ -982,16 +983,6 @@ pub fn region_edge_curves(entity: &EntityType) -> Option<Vec<Vec<AssocCurve>>> {
 /// or the entity's own curve.
 pub fn assoc_source_supported(entity: &EntityType) -> bool {
     region_edge_curves(entity).is_some() || assoc_edge_curve(entity).is_some()
-}
-
-/// The arbitrary-axis X direction of an entity normal.
-pub(crate) fn arbitrary_x(normal: glam::DVec3) -> glam::DVec3 {
-    let world = if normal.x.abs() < 1.0 / 64.0 && normal.y.abs() < 1.0 / 64.0 {
-        glam::DVec3::Y
-    } else {
-        glam::DVec3::Z
-    };
-    world.cross(normal).normalize()
 }
 
 /// The scale and twist expressions a swept surface is linked to.

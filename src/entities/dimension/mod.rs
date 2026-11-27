@@ -12,9 +12,8 @@ use crate::entities::common::{
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::entities::transform::EntityTransform;
 use crate::display::tess_util::aci_to_rgba;
-use crate::scene::convert::tessellate::{
-    add_polyline, add_segment, append_arrow, arrow_from_block_with_deferred_hatch, normalized_or,
-    ArrowKind, DimGeom,
+use crate::display::dim_geom::{
+    add_polyline, add_segment, append_arrow, normalized_or, ArrowKind, DimGeom,
 };
 use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::display::wire_model::{SnapHint, TangentGeom, WireModel};
@@ -60,6 +59,7 @@ fn dimension_definition_point(dim: &Dimension) -> document::types::Vector3 {
 
 mod baked;
 pub mod build;
+pub(crate) mod radial_source;
 mod format;
 mod geometry;
 mod grips;
@@ -67,7 +67,6 @@ mod ocs;
 mod props;
 mod style;
 mod style_props;
-mod tess;
 mod text_layout;
 
 pub(crate) use self::baked::*;
@@ -78,7 +77,6 @@ pub(crate) use self::props::*;
 pub(crate) use self::style::*;
 pub(crate) use self::style_props::*;
 pub use self::style_props::style_sections;
-pub use self::tess::DimensionTess;
 pub(crate) use self::text_layout::*;
 
 #[cfg(test)]
@@ -121,4 +119,15 @@ pub(crate) fn as_dimension_mut(
         document::EntityType::Dimension(dimension) => Some(dimension),
         _ => None,
     }
+}
+
+/// The layer the reference keeps dynamic dimensions on; an annotational
+/// dimensional constraint sits on an ordinary layer instead.
+pub(crate) const DYNAMIC_DIMENSION_LAYER: &str = "*ADSK_CONSTRAINTS";
+
+/// Whether `layer` holds dynamic dimensions. Drawings from the first
+/// parametric release keep them on `*LayerNameForDynamicConstraint`.
+pub(crate) fn is_dynamic_dimension_layer(layer: &str) -> bool {
+    layer.eq_ignore_ascii_case(DYNAMIC_DIMENSION_LAYER)
+        || layer.eq_ignore_ascii_case("*LayerNameForDynamicConstraint")
 }

@@ -12,20 +12,18 @@ use document::entities::{Underlay, UnderlayDisplayFlags};
 use glam::DVec3;
 
 use crate::entities::common::{center_grip, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::display::render_entity::{RenderEntity, RenderObject};
 use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::display::wire_model::SnapHint;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn v3(v: &document::types::Vector3) -> [f64; 3] {
+pub(crate) fn v3(v: &document::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
 /// Small cross marker at the insertion point (used when the page is unknown).
-fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
+pub(crate) fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
     let [ox, oy, oz] = origin;
     vec![
         [ox - size, oy, oz],
@@ -65,10 +63,10 @@ pub(crate) fn page_of(def: &document::entities::UnderlayDefinition) -> &str {
 pub(crate) fn definition_rect(def: &document::entities::UnderlayDefinition) -> Option<[f64; 4]> {
     match def.underlay_type {
         document::entities::UnderlayType::Pdf => {
-            crate::scene::model::pdf_raster::page_size_inches(&def.file_path, page_of(def))
+            crate::media::pdf_source::page_size_inches(&def.file_path, page_of(def))
                 .map(|(w, h)| [0.0, 0.0, w, h])
         }
-        kind => crate::scene::model::underlay_vector::sheet(kind, &def.file_path, page_of(def))
+        kind => crate::media::vector::sheet(kind, &def.file_path, page_of(def))
             .map(|sheet| sheet.rect),
     }
 }
@@ -126,7 +124,7 @@ pub(crate) fn is_clipped(u: &Underlay) -> bool {
 }
 
 /// Page frame in world space (CCW from the insertion).
-fn page_quad(u: &Underlay, document: &document::Document) -> Option<[[f64; 3]; 4]> {
+pub(crate) fn page_quad(u: &Underlay, document: &document::Document) -> Option<[[f64; 3]; 4]> {
     let [x0, y0, x1, y1] = page_rect(u, document)?;
     Some([
         local_to_world(u, [x0, y0]),
@@ -138,7 +136,7 @@ fn page_quad(u: &Underlay, document: &document::Document) -> Option<[[f64; 3]; 4
 
 /// Local-space extent of what is shown: the clip polygon's box when clipped
 /// to its inside, else the page.
-fn shown_local_extent(u: &Underlay, document: &document::Document) -> Option<(f64, f64)> {
+pub(crate) fn shown_local_extent(u: &Underlay, document: &document::Document) -> Option<(f64, f64)> {
     if is_clipped(u) && !u.clip_inverted {
         let clip = clip_polygon_local(u);
         let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -194,7 +192,7 @@ pub(crate) fn plain_number(value: f64) -> String {
     }
 }
 
-fn number_row(label: &str, field: &'static str, value: f64) -> Property {
+pub(crate) fn number_row(label: &str, field: &'static str, value: f64) -> Property {
     Property {
         label: label.into(),
         field,
@@ -202,7 +200,7 @@ fn number_row(label: &str, field: &'static str, value: f64) -> Property {
     }
 }
 
-fn yes_no(label: &str, field: &'static str, flag: bool) -> Property {
+pub(crate) fn yes_no(label: &str, field: &'static str, flag: bool) -> Property {
     Property {
         label: label.into(),
         field,
@@ -214,7 +212,7 @@ fn yes_no(label: &str, field: &'static str, flag: bool) -> Property {
 }
 
 /// A Yes/No list value (localized label, the English word, or a toggle).
-fn parse_flag(value: &str, current: bool) -> bool {
+pub(crate) fn parse_flag(value: &str, current: bool) -> bool {
     let v = value.trim();
     if v == "toggle" {
         return !current;
@@ -259,79 +257,6 @@ pub(crate) fn size_to_scale(
 }
 
 // ── RenderConvertible ──────────────────────────────────────────────────────────
-
-impl RenderConvertible for Underlay {
-    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
-        let origin = v3(&self.insertion_point);
-        let insertion_snap = (
-            DVec3::new(
-                self.insertion_point.x,
-                self.insertion_point.y,
-                self.insertion_point.z,
-            ),
-            SnapHint::Insertion,
-        );
-        let quad = page_quad(self, document);
-        let clip: Vec<[f64; 3]> = if is_clipped(self) {
-            clip_polygon_local(self)
-                .into_iter()
-                .map(|p| local_to_world(self, p))
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        // The outline is the clip boundary when clipped (plus the page frame
-        // for an outside clip), else the page frame.
-        let mut pts: Vec<[f64; 3]> = Vec::new();
-        let ring = |poly: &[[f64; 3]], pts: &mut Vec<[f64; 3]>| {
-            if !pts.is_empty() {
-                pts.push([f64::NAN; 3]);
-            }
-            pts.extend_from_slice(poly);
-            pts.push(poly[0]);
-        };
-        if !clip.is_empty() {
-            ring(&clip, &mut pts);
-            if self.clip_inverted {
-                if let Some(q) = quad {
-                    ring(&q, &mut pts);
-                }
-            }
-        } else if let Some(q) = quad {
-            ring(&q, &mut pts);
-        }
-        if pts.is_empty() {
-            return Some(RenderEntity {
-                pick_tris: Vec::new(),
-                object: RenderObject::Lines(cross_wire(origin, 1.0)),
-                snap_pts: vec![insertion_snap],
-                tangent_geoms: vec![],
-                key_vertices: vec![origin],
-                fill_tris: vec![],
-            });
-        }
-
-        // Picked on its frame only; the page itself selects nothing.
-        let key_ring: Vec<[f64; 3]> = if !clip.is_empty() && !self.clip_inverted {
-            clip.clone()
-        } else {
-            quad.map(|q| q.to_vec()).unwrap_or_default()
-        };
-        let mut snap_pts = vec![insertion_snap];
-        snap_pts.extend(crate::scene::model::pdf_vector::underlay_snap_points(
-            self, document,
-        ));
-        Some(RenderEntity {
-            pick_tris: vec![],
-            object: RenderObject::Lines(pts),
-            snap_pts,
-            tangent_geoms: vec![],
-            key_vertices: key_ring,
-            fill_tris: vec![],
-        })
-    }
-}
 
 // ── Grippable ─────────────────────────────────────────────────────────────────
 
@@ -458,7 +383,7 @@ impl PropertyEditable for Underlay {
                     ro(
                         t!("Layer display overrides").as_ref(),
                         "ul_layers",
-                        if crate::scene::model::pdf_layers::hidden_layers(self).is_empty() {
+                        if crate::entities::underlay::hidden_layers(self).is_empty() {
                             t!("None").into_owned()
                         } else {
                             t!("Applied").into_owned()
@@ -598,4 +523,28 @@ impl Transformable for Underlay {
             }
         }
     }
+}
+
+/// Layer names an underlay has switched off: the strings of its
+/// `AdeskUnderlayLayerOverrideData` extended data, as the reference stores
+/// them.
+pub const LAYER_OVERRIDE_APP: &str = "AdeskUnderlayLayerOverrideData";
+
+/// The first string of a DGN underlay's layer overrides, before the names.
+pub const DGN_OVERRIDE_PLACEHOLDER: &str = "???DGN_Placeholder???";
+
+pub fn hidden_layers(u: &document::entities::Underlay) -> Vec<String> {
+    u.common
+        .extended_data
+        .records()
+        .iter()
+        .filter(|r| r.application_name.eq_ignore_ascii_case(LAYER_OVERRIDE_APP))
+        .flat_map(|r| r.values.iter())
+        .filter_map(|v| match v {
+            document::xdata::XDataValue::String(s) if s != DGN_OVERRIDE_PLACEHOLDER => {
+                Some(s.clone())
+            }
+            _ => None,
+        })
+        .collect()
 }

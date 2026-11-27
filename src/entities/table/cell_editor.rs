@@ -33,17 +33,17 @@ pub(crate) fn cell_picture(
         });
     let up = resolved_flow_up(table, style);
     let sign = if up { 1.0 } else { -1.0 };
-    let block_use = crate::scene::render_graph::entity_render_block_uses(
+    let block_use = crate::entities::block_ref::entity_render_block_uses(
         doc,
         &EntityType::Table(Box::new(table.clone())),
         1.0,
     )
     .into_iter()
-    .find(|u| u.active && u.role == crate::scene::render_graph::BlockRole::TablePicture);
+    .find(|u| u.active && u.role == crate::entities::block_ref::BlockRole::TablePicture);
     let block_name = block_use.as_ref().map(|u| u.insert.block_name.clone());
     let transform = block_use
         .as_ref()
-        .map(|u| crate::scene::render_graph::insert_transform(doc, &u.insert))
+        .map(|u| crate::entities::block_ref::insert_transform(doc, &u.insert))
         .unwrap_or_else(|| {
             let mut insert = document::entities::Insert::new("", table.insertion_point);
             insert.normal = table.normal;

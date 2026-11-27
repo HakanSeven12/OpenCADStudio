@@ -111,7 +111,7 @@ fn definition(
         return Err(SkipReason::NoPattern);
     }
     let name = &linetype.name;
-    if name.trim() != name || !crate::scene::valid_block_name(name) {
+    if name.trim() != name || !crate::entities::names::valid_block_name(name) {
         return Err(SkipReason::InvalidName);
     }
     let description = linetype.description.trim();

@@ -4,6 +4,7 @@ use super::named_parameters::DrivingValue;
 use document::types::{Handle, Vector3};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+pub(crate) use crate::entities::dimension::{is_dynamic_dimension_layer, DYNAMIC_DIMENSION_LAYER};
 
 /// One endpoint a constraint attaches to: an entity plus which sub-element
 /// of it.
@@ -431,17 +432,6 @@ pub const DYNAMIC_DIMENSION_GLYPH: &str = "\u{1F512}";
 
 /// The on-screen text height of a dynamic dimension, in pixels.
 pub const DYNAMIC_DIMENSION_TEXT_PX: f32 = 12.0;
-
-/// The layer the reference keeps dynamic dimensions on; an annotational
-/// dimensional constraint sits on an ordinary layer instead.
-pub(crate) const DYNAMIC_DIMENSION_LAYER: &str = "*ADSK_CONSTRAINTS";
-
-/// Whether `layer` holds dynamic dimensions. Drawings from the first
-/// parametric release keep them on `*LayerNameForDynamicConstraint`.
-pub(crate) fn is_dynamic_dimension_layer(layer: &str) -> bool {
-    layer.eq_ignore_ascii_case(DYNAMIC_DIMENSION_LAYER)
-        || layer.eq_ignore_ascii_case("*LayerNameForDynamicConstraint")
-}
 
 /// The text a dynamic dimension shows: CONSTRAINTNAMEFORMAT 0 = name,
 /// 1 = value, 2 = name=value, the value with its trailing zeros dropped

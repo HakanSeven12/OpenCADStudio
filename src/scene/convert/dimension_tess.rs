@@ -1,6 +1,14 @@
 // Dimension tessellation.
 
-use super::*;
+use crate::display::dim_geom::{add_polyline, add_segment, ArrowKind};
+use crate::display::tess_util::aci_to_rgba;
+use crate::display::wire_model::WireModel;
+use crate::entities::dimension::*;
+use crate::scene::convert::tessellate::arrow_from_block_with_deferred_hatch;
+use document::entities::Dimension;
+use document::types::{Color as AcadColor, Vector3};
+use document::{Document, Handle};
+use glam::Vec3;
 
 pub trait DimensionTess {
     #[allow(clippy::too_many_arguments)]

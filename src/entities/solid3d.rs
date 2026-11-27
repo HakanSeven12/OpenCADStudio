@@ -12,6 +12,9 @@ use crate::t;
 use document::entities::{Body, Region, Solid3D, Surface};
 use document::xdata::{ExtendedDataRecord, XDataValue};
 use ocs_geom::space::polygon;
+use document::SabReader;
+use document::SatDocument;
+use ocs_solid::model::Brep;
 
 /// Shared transform for the ACIS volume entities. Translate / rotate / scale
 /// delegate to document (which composes the move into the solid's ACIS
@@ -289,7 +292,7 @@ pub(crate) fn region_mass_props(region: &Region) -> crate::entities::traits::Mas
     // plane (Green's theorem over each sampled chain); the loops close, so
     // the chains' moments sum to the region's.
     let centroid = (|| {
-        let (plane, loops, true) = crate::scene::model::presspull_model::profile_geometry(
+        let (plane, loops, true) = crate::entities::profile::profile_geometry(
             &EntityType::Region(region.clone()),
         )?
         else {
@@ -341,7 +344,7 @@ pub(crate) fn region_mass_props(region: &Region) -> crate::entities::traits::Mas
 /// Measure decoded planar curves in a unit frame, retaining legacy wire-only input.
 fn region_area_perimeter(region: &Region) -> (f64, f64) {
     let exact = (|| {
-        let (plane, loops, true) = crate::scene::model::presspull_model::profile_geometry(
+        let (plane, loops, true) = crate::entities::profile::profile_geometry(
             &EntityType::Region(region.clone()),
         )?
         else {
@@ -978,8 +981,6 @@ impl PropertyEditable for Surface {
 //
 // These entity types share ACIS data and a point of reference.
 
-use crate::scene::convert::solid3d_tess;
-use crate::scene::model::mesh_model::MeshLodSet;
 use document::{types::Vector3, EntityType};
 
 const DISPLAY_DEFLECTION_COEFFICIENT: f64 = 2.5e-4;
@@ -1018,38 +1019,36 @@ pub fn point_of_reference(e: &EntityType) -> Option<&Vector3> {
     }
 }
 
-/// Build material-aware shaded geometry for every standard 3-D solid/surface
-/// and mesh family, returning `None` when decoded geometry is unusable.
-pub fn tessellate_volume(
-    e: &EntityType,
-    color: [f32; 4],
-    facet_res: f64,
-    chordal_deflection: Option<f64>,
-    isolines: usize,
-) -> Option<MeshLodSet> {
-    match e {
-        EntityType::Solid3D(s) => {
-            solid3d_tess::tessellate_solid3d(s, color, facet_res, chordal_deflection, isolines)
-        }
-        EntityType::Region(r) => {
-            solid3d_tess::tessellate_region(r, color, facet_res, chordal_deflection, isolines)
-        }
-        EntityType::Body(b) => {
-            solid3d_tess::tessellate_body(b, color, facet_res, chordal_deflection, isolines)
-        }
-        EntityType::Surface(s) => solid3d_tess::tessellate_surface(
-            s,
-            color,
-            facet_res,
-            chordal_deflection,
-            surface_isoline_counts(s),
-            surface_property_state(s).isolines,
-        ),
-        EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_) => {
-            crate::entities::mesh::tessellate_shaded_mesh(e, color)
-        }
-        _ => None,
+pub(crate) fn parse_acis(
+    sat_fn: impl FnOnce() -> Option<SatDocument>,
+    is_binary: bool,
+    sab_data: &[u8],
+) -> Option<SatDocument> {
+    sat_fn().or_else(|| {
+        (is_binary && !sab_data.is_empty())
+            .then(|| SabReader::read(sab_data).ok())
+            .flatten()
+    })
+}
+
+/// A REGION's ACIS data as a Solidcore record.
+pub fn region_record(region: &Region) -> Option<Brep> {
+    acis_record(&region.acis_data)
+}
+
+/// An object's ACIS data as a document, from its text or its binary form.
+pub(crate) fn acis_document(acis: &document::entities::AcisData) -> Option<SatDocument> {
+    parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)
+}
+
+/// ACIS data holding one body, read whole, as a Solidcore record (placed by its transform).
+pub(crate) fn acis_record(acis: &document::entities::AcisData) -> Option<Brep> {
+    let sat = acis_document(acis)?;
+    let (mut bodies, loss) = ocs_solid::lift(&sat);
+    if !loss.is_empty() || bodies.len() != 1 {
+        return None;
     }
+    bodies.pop().map(|body| body.brep)
 }
 
 #[cfg(test)]

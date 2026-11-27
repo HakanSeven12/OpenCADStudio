@@ -578,6 +578,14 @@ pub fn vp_effective_scale(custom_scale: f64, view_height: f64, vp_height: f64) -
     1.0
 }
 
+/// Length dimensions store raw distances in their owning space. The displayed
+/// value uses `user_lfac * viewport_compensation`; angular dimensions are exempt.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeasurementScale {
+    pub user_lfac: f64,
+    pub viewport_compensation: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

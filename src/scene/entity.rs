@@ -497,7 +497,7 @@ impl Scene {
                 | EntityType::PolyfaceMesh(_)
         ) {
             let color = self.render_style(&entity).0;
-            crate::entities::solid3d::tessellate_volume(
+            crate::scene::convert::solid3d_tess::tessellate_volume(
                 &entity,
                 color,
                 facet_res,
@@ -904,7 +904,7 @@ impl Scene {
                 | EntityType::PolyfaceMesh(_)
         ) {
             let color = self.render_style(&entity).0;
-            crate::entities::solid3d::tessellate_volume(
+            crate::scene::convert::solid3d_tess::tessellate_volume(
                 &entity,
                 color,
                 facet_res,
@@ -1189,7 +1189,7 @@ impl Scene {
         let built: Vec<(Handle, MeshLodSet, bool)> = entries
             .into_par_iter()
             .filter_map(|(handle, entity, color, top_level)| {
-                crate::entities::solid3d::tessellate_volume(
+                crate::scene::convert::solid3d_tess::tessellate_volume(
                     entity.as_ref(),
                     color,
                     facet_res,
@@ -3847,7 +3847,7 @@ impl Scene {
         let built: Vec<(Handle, MeshLodSet, bool)> = entries
             .into_par_iter()
             .filter_map(|(handle, entity, color, top_level)| {
-                crate::entities::solid3d::tessellate_volume(
+                crate::scene::convert::solid3d_tess::tessellate_volume(
                     &entity,
                     color,
                     facet_res,

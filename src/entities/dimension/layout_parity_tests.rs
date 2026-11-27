@@ -1,8 +1,7 @@
 // Tests for layout_parity.
 use super::*;
-use crate::t;
+use crate::scene::convert::dimension_tess::DimensionTess;
 
-use super::*;
 
 /// A document whose Standard style has imperial sizes and horizontal text.
 fn document() -> Document {

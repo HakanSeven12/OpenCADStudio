@@ -14,8 +14,8 @@ use document::entities::{EntityType, ExtendedEntityData};
 use document::types::Handle;
 
 use crate::display::render_entity::{RenderEntity, RenderObject};
-use crate::scene::convert::proxy_graphics::{
-    Decoded, ProxyColor, ProxyPolyline, ProxyStyle, ProxyText, LT_BYBLOCK, LT_BYLAYER,
+use crate::display::proxy_graphics::{
+    Decoded, LT_BYBLOCK, LT_BYLAYER, ProxyColor, ProxyPolyline, ProxyStyle, ProxyText,
 };
 use document::types::Vector2;
 
@@ -62,7 +62,7 @@ pub(crate) fn render(data: &ArchEntityData, handle: u64, document: &document::Do
     let cached = document
         .get_entity(Handle::new(handle))
         .and_then(|e| e.common().graphic_data.as_deref())
-        .is_some_and(crate::scene::convert::tess::civil_drawn_cache);
+        .is_some_and(crate::entities::bounds::civil_drawn_cache);
     if cached {
         return None;
     }

@@ -8,34 +8,8 @@ use document::{
     types::{Transform, Vector3},
     Document, Handle,
 };
+pub(crate) use crate::entities::insert::block_base_point_parameter as parameter;
 
-pub(crate) fn parameter(
-    document: &Document,
-    definition: Handle,
-) -> Option<(Handle, &BlockBasePointParameter)> {
-    let ObjectType::Dictionary(dictionary) = document
-        .objects
-        .get(&authoring::definition_dictionary(document, definition)?)?
-    else {
-        return None;
-    };
-    let graph = dictionary.get("ACAD_ENHANCEDBLOCK")?;
-    let ObjectType::DynamicBlock(object) = document.objects.get(&graph)? else {
-        return None;
-    };
-    let DynamicBlockData::EvaluationGraph(data) = &object.data else {
-        return None;
-    };
-    data.nodes
-        .iter()
-        .find_map(|node| match document.objects.get(&node.expression) {
-            Some(ObjectType::DynamicBlock(object)) if object.owner == graph => match &object.data {
-                DynamicBlockData::BasePointParameter(p) => Some((object.handle, p)),
-                _ => None,
-            },
-            _ => None,
-        })
-}
 pub(crate) fn placement_error(document: &Document, definition: Handle) -> Option<&'static str> {
     authoring::graph(document, definition).err()
 }

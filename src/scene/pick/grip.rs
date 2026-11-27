@@ -5,6 +5,7 @@ use glam::{DVec3, Mat4, Vec2};
 use iced::{Point, Rectangle};
 
 use crate::scene::model::object::{GripDef, GripShape};
+pub use crate::entities::extended::gizmo_axis;
 
 /// Pixel radius for grip hit-detection.
 pub const GRIP_THRESHOLD_PX: f32 = 8.0;
@@ -31,10 +32,6 @@ fn marker_screen_position(mut point: Point, shape: GripShape) -> Point {
 
 /// Screen length of a move-gizmo arrow.
 pub const GIZMO_AXIS_PX: f32 = 72.0;
-
-pub fn gizmo_axis(k: u8) -> DVec3 {
-    [DVec3::X, DVec3::Y, DVec3::Z][k as usize % 3]
-}
 
 pub fn gizmo_plane_axes(k: u8) -> (u8, u8) {
     [(0, 1), (1, 2), (2, 0)][k as usize % 3]

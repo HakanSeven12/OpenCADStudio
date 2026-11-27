@@ -16,6 +16,7 @@ use crate::entities::object::{
     GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection, PropValue, Property,
 };
 use crate::display::wire_model::SnapHint;
+use glam::DVec3;
 
 const NAN: [f64; 3] = [f64::NAN; 3];
 const SECTION_SLICE_APP: &str = "IsSlice";
@@ -561,8 +562,8 @@ fn point_cloud_clip_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
 /// found: then the box shows, with the saved path written across it.
 fn point_cloud_ex_lines(data: &PointCloudExData, document: &document::Document) -> Vec<[f64; 3]> {
     let mut points = point_cloud_ex_box(data);
-    if crate::scene::model::point_cloud::resolve_source(document, data).is_none() {
-        let saved = crate::scene::model::point_cloud::definition(document, data)
+    if crate::entities::point_cloud::resolve_source(document, data).is_none() {
+        let saved = crate::entities::point_cloud::definition(document, data)
             .map(|definition| definition.source_filename.clone())
             .unwrap_or_default();
         append_missing_cloud_label(&mut points, data, &saved);
@@ -2288,7 +2289,7 @@ pub(crate) fn point_cloud_gizmo_grips(data: &PointCloudExData) -> Vec<GripDef> {
             is_midpoint: true,
             shape: GripShape::GizmoAxis(k),
             dir: None,
-            axis: Some(crate::scene::pick::grip::gizmo_axis(k)),
+            axis: Some(crate::entities::extended::gizmo_axis(k)),
         })
         .chain((0..3u8).map(|k| GripDef {
             id: 4 + k as usize,
@@ -2767,6 +2768,10 @@ impl Transformable for ExtendedEntity {
     fn apply_transform(&mut self, transform: &EntityTransform) {
         apply_transform(self, transform);
     }
+}
+
+pub fn gizmo_axis(k: u8) -> DVec3 {
+    [DVec3::X, DVec3::Y, DVec3::Z][k as usize % 3]
 }
 
 #[cfg(test)]

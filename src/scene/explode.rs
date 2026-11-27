@@ -38,6 +38,7 @@ use document::{Document, EntityType, Handle};
 use crate::entities::transform::WorkingPlane;
 use crate::entities::curve::lwpolyline_world_xy;
 use glam::DVec3;
+pub(crate) use crate::entities::annotative::annotative_picture_scale;
 
 // ── Geometry helpers ────────────────────────────────────────────────────────
 
@@ -542,7 +543,8 @@ pub fn apply_explode_replacements(
 }
 
 fn explode_leader(leader: &document::entities::Leader, doc: &Document) -> Vec<EntityType> {
-    use crate::entities::{dim_override as dov, leader::LeaderTess};
+    use crate::entities::dim_override as dov;
+    use crate::scene::convert::leader_tess::LeaderTess;
     let style = doc.dim_styles.iter().find(|s| {
         s.name.eq_ignore_ascii_case(&leader.dimension_style)
             || (leader.dimension_style.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
@@ -568,14 +570,11 @@ fn explode_multileader(
     anno_scale: f32,
 ) -> Vec<EntityType> {
     use crate::entities::multileader::{
-        active_vertical_attachment, block_content_insert, mleader_v_anchor, MultiLeaderTess,
+        active_vertical_attachment, block_content_insert, mleader_v_anchor,
     };
+    use crate::scene::convert::multileader_tess::MultiLeaderTess;
     use crate::entities::text_support::MTextVAnchor;
-    use document::entities::{
-        mtext::{AttachmentPoint, DrawingDirection},
-        multileader::TextAttachmentPointType,
-        LeaderContentType,
-    };
+    use document::entities::{mtext::{AttachmentPoint, DrawingDirection}, LeaderContentType};
     // Match color_or_inherit: ByLayer/ByBlock inherit the host's colour.
     let common_for = |color: document::types::Color| {
         let mut common = dim_common(&ml.common, 0, -1);
@@ -1890,36 +1889,6 @@ struct DimMetrics {
     dimltex2: Handle,
     arrow1: crate::scene::convert::tessellate::ArrowKind,
     arrow2: crate::scene::convert::tessellate::ArrowKind,
-}
-
-/// Resolve style metrics used by saved dimension geometry.
-/// The size multiplier of an annotative dimension's picture: the model units
-/// per paper unit of the scale it is drawn at: the current annotation scale
-/// when the dimension has it or has no scales, else the first of its scales. The saved picture
-/// is what a reader shows for that scale, so it can't be drawn at 1:1.
-pub(crate) fn annotative_picture_scale(dim: &Dimension, doc: &Document) -> f64 {
-    let memberships =
-        crate::scene::annotative::object_scale_memberships(doc, dim.base().common.handle);
-    let current = &doc.header.current_annotation_scale;
-    let chosen = memberships
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(current))
-        .or_else(|| memberships.first());
-    let factor = |handle: &Handle| match doc.objects.get(handle) {
-        // The scale's own ratio, whatever the drawing units: annotation
-        // sizes are in drawing units (#2354).
-        Some(document::objects::ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
-        _ => None,
-    };
-    // Without scales of its own, a dimension annotative by its style draws at
-    // the current one.
-    let handle = chosen
-        .map(|(_, handle)| *handle)
-        .or_else(|| crate::scene::annotative::scale_handle_by_name(doc, current));
-    handle
-        .and_then(|handle| factor(&handle))
-        .filter(|f| f.is_finite() && *f > 0.0)
-        .unwrap_or(1.0)
 }
 
 fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {

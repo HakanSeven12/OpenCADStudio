@@ -1,6 +1,9 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::super::*;
 use crate::scene::model::wire_model::DashClosure;
+pub(crate) use crate::entities::bounds::{
+    civil_drawn_cache, entity_aabb_in, entity_bounds, entity_bounds_in,
+};
 
 /// Dim an already-bg-adapted colour toward the background when the entity's
 /// layer is locked, so locked objects read as non-editable (they stay visible
@@ -1467,7 +1470,7 @@ fn tessellate_entity_inner(
 
     if let EntityType::Dimension(dim) = e {
         let aabb = entity_aabb_in(document, e);
-        use crate::entities::dimension::DimensionTess;
+        use crate::scene::convert::dimension_tess::DimensionTess;
         let mut wires = dim.tessellate(
             document,
             h,
@@ -1498,7 +1501,7 @@ fn tessellate_entity_inner(
 
     if let EntityType::MultiLeader(ml) = e {
         let aabb = entity_aabb_in(document, e);
-        use crate::entities::multileader::MultiLeaderTess;
+        use crate::scene::convert::multileader_tess::MultiLeaderTess;
         let mut wires = ml.tessellate(
             document,
             h,
@@ -1696,7 +1699,7 @@ fn tessellate_entity_inner(
         let is_xref = expanded.is_xref;
         let mut wires = expanded.wires;
 
-        crate::entities::insert::append_insert_attribute_wires(
+        crate::scene::convert::insert_tess::append_insert_attribute_wires(
             &mut wires,
             document,
             ins,
@@ -2313,97 +2316,6 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     w.aabb = out;
 }
 
-pub(crate) fn entity_bounds(e: &document::EntityType) -> ([f64; 3], [f64; 3]) {
-    if let document::EntityType::Region(region) = e {
-        if region.wires.is_empty() {
-            if let Some(bounds) = super::solid3d_tess::region_record(region)
-                .and_then(|body| ocs_solid::model::aabb(&body))
-            {
-                return (bounds.min, bounds.max);
-            }
-        }
-    }
-    if let document::EntityType::Line(line) = e {
-        if let Some(association) =
-            document::entities::CenterMarkAssociation::read(&line.common.extended_data)
-        {
-            return crate::scene::centermark::mark_bounds(&association);
-        }
-    }
-    if let document::EntityType::Solid(solid) = e {
-        if let Some(bounds) = crate::entities::solid::wcs_bounds(solid) {
-            return (bounds.min, bounds.max);
-        }
-    }
-    if let document::EntityType::Spline(spline) = e {
-        if let Some(bounds) = crate::entities::spline::fit_geometry_bounds(spline) {
-            return (bounds.min, bounds.max);
-        }
-    }
-    if let document::EntityType::Ellipse(ellipse) = e {
-        if let Some(bounds) = ellipse_bounds(ellipse) {
-            return bounds;
-        }
-    }
-    let bounds = e.as_entity().bounding_box();
-    (
-        [bounds.min.x, bounds.min.y, bounds.min.z],
-        [bounds.max.x, bounds.max.y, bounds.max.z],
-    )
-}
-
-/// Tight WCS box of an ellipse or elliptical arc: the swept endpoints plus
-/// every axis-extreme parameter inside the sweep. The generic
-/// `bounding_box()` uses the major radius on both axes.
-fn ellipse_bounds(el: &document::entities::Ellipse) -> Option<([f64; 3], [f64; 3])> {
-    let (c, a, n) = (el.center, el.major_axis, el.normal);
-    let r = el.minor_axis_ratio;
-    // A stored normal need not be unit length; the minor axis must be.
-    let len = (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
-    if !(len > 0.0) {
-        return None;
-    }
-    let n = document::types::Vector3::new(n.x / len, n.y / len, n.z / len);
-    // Minor axis = normal x major, scaled by the ratio.
-    let b = [
-        (n.y * a.z - n.z * a.y) * r,
-        (n.z * a.x - n.x * a.z) * r,
-        (n.x * a.y - n.y * a.x) * r,
-    ];
-    let a = [a.x, a.y, a.z];
-    if !(a.iter().chain(b.iter()).all(|v| v.is_finite())) || a == [0.0; 3] {
-        return None;
-    }
-    let tau = std::f64::consts::TAU;
-    let start = el.start_parameter;
-    let mut sweep = (el.end_parameter - start).rem_euclid(tau);
-    if sweep <= 1e-12 {
-        sweep = tau;
-    }
-    let mut params = vec![start, start + sweep];
-    for k in 0..3 {
-        // d/dt (a cos t + b sin t) = 0  ->  t = atan2(b, a) (+ pi)
-        let t0 = b[k].atan2(a[k]);
-        for t in [t0, t0 + std::f64::consts::PI] {
-            let off = (t - start).rem_euclid(tau);
-            if off <= sweep {
-                params.push(start + off);
-            }
-        }
-    }
-    let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-    let cc = [c.x, c.y, c.z];
-    for t in params {
-        let (ct, st) = (t.cos(), t.sin());
-        for k in 0..3 {
-            let v = cc[k] + a[k] * ct + b[k] * st;
-            min[k] = min[k].min(v);
-            max[k] = max[k].max(v);
-        }
-    }
-    Some((min, max))
-}
-
 #[cfg(test)]
 mod ellipse_bounds_tests {
     use super::*;
@@ -2432,57 +2344,6 @@ mod ellipse_bounds_tests {
         assert!(min[0].abs() < 1e-9 && (max[0] - 10.0).abs() < 1e-9);
         assert!(min[1].abs() < 1e-9 && (max[1] - 3.0).abs() < 1e-9);
     }
-}
-
-/// [`entity_bounds`] with the document, for entities whose extent is not
-/// stored on the entity: an underlay spans its page (or its clip), and a block
-/// reference spans what its definition draws once the reference transform is
-/// applied to it.
-pub(crate) fn entity_bounds_in(
-    document: &document::Document,
-    e: &document::EntityType,
-) -> ([f64; 3], [f64; 3]) {
-    if let document::EntityType::Underlay(underlay) = e {
-        if let Some(bounds) = crate::entities::underlay::world_bounds(underlay, document) {
-            return bounds;
-        }
-    }
-    if let document::EntityType::Insert(insert) = e {
-        if let Some(bounds) = crate::scene::bounds::insert_world_bounds(document, insert) {
-            return (
-                [bounds.min.x, bounds.min.y, bounds.min.z],
-                [bounds.max.x, bounds.max.y, bounds.max.z],
-            );
-        }
-    }
-    entity_bounds(e)
-}
-
-/// [`entity_aabb`] with the document (see [`entity_bounds_in`]).
-pub(crate) fn entity_aabb_in(document: &document::Document, e: &document::EntityType) -> [f32; 4] {
-    if let document::EntityType::Underlay(underlay) = e {
-        if let Some((min, max)) = crate::entities::underlay::world_bounds(underlay, document) {
-            return [min[0] as f32, min[1] as f32, max[0] as f32, max[1] as f32];
-        }
-    }
-    entity_aabb(e)
-}
-
-pub(crate) fn entity_aabb(e: &document::EntityType) -> [f32; 4] {
-    let (min, max) = entity_bounds(e);
-    let min_x = min[0] as f32;
-    let min_y = min[1] as f32;
-    let max_x = max[0] as f32;
-    let max_y = max[1] as f32;
-    // The all-zero box is bounding_box()'s Default — returned by entities with
-    // no usable box (unimplemented) — so treat it as UNBOUNDED (never
-    // pre-rejected). A genuinely zero-size box *away* from the origin (e.g. a
-    // POINT) is a valid, cullable position: keep it, otherwise point-heavy
-    // drawings fill the always-checked set and stall hit-testing.
-    if min_x == 0.0 && min_y == 0.0 && max_x == 0.0 && max_y == 0.0 {
-        return WireModel::UNBOUNDED_AABB;
-    }
-    [min_x, min_y, max_x, max_y]
 }
 
 /// AABB of `e` in WCS f64 (no world_offset subtraction). `None` for
@@ -2563,11 +2424,6 @@ pub(crate) fn proxy_preview(
     }
     blob.map(|blob| convert::proxy_graphics::decode(&blob))
         .filter(|dec| !dec.is_empty())
-}
-
-pub(crate) fn civil_drawn_cache(blob: &[u8]) -> bool {
-    // An 8-byte header, then records of `u32 size, u32 type, payload`.
-    blob.get(12..16).is_some_and(|t| u32::from_le_bytes([t[0], t[1], t[2], t[3]]) != 36)
 }
 
 #[cfg(test)]

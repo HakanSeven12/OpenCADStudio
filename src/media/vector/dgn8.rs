@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::io::Read;
 
 use super::model::{
-    arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By, DgnCollector,
-    DgnColor, DgnDimLook, DgnDimStyle, DgnElement, DgnGeom, DgnImport, DgnReference, Path,
-    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET,
+    arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By,
+    DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET, DgnCollector, DgnColor, DgnDimLook, DgnDimStyle,
+    DgnElement, DgnGeom, DgnImport, DgnReference, Path, PathBuilder, Segment, Sheet, SubPath, Text,
 };
 
 // ── Compound file ───────────────────────────────────────────────────────────
@@ -462,7 +462,7 @@ fn font_table(nm: &[&[u8]]) -> Vec<(u8, u8, String)> {
 fn font_file(font: Option<(u8, &String)>) -> String {
     match font {
         Some((2, name)) => format!("{name}.shx"),
-        Some((4, name)) => crate::scene::text::sysfont::face_file(name, false, false)
+        Some((4, name)) => crate::text::sysfont::face_file(name, false, false)
             .unwrap_or_else(|| format!("{}.ttf", name.to_lowercase())),
         _ => "txt.shx".to_string(),
     }

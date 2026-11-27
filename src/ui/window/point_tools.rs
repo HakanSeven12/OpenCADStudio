@@ -21,6 +21,8 @@ pub struct CorridorPointsWindow {
     /// The stations each baseline gives each code a point at.
     pub stations: Vec<Vec<Vec<f64>>>,
     pub baseline: usize,
+    /// The drawing's unit mark after a station (`'` or `m`).
+    pub mark: &'static str,
     /// The user specified range is on (otherwise the entire corridor).
     pub user_range: bool,
     pub start: String,
@@ -188,12 +190,19 @@ fn footer<'a>(help: &'static str, ok: Message) -> Element<'a, Message> {
 
 static PICK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
 
-/// A station as typed: `0+60.00` or `60`.
+/// A station as typed: `0+60.00`, `0+60.00'`, `0+60.00m` or `60`.
 pub fn parse_station(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let s = s.strip_suffix(|c| c == '\'' || c == 'm').unwrap_or(s);
     s.trim().replace('+', "").parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 impl CorridorPointsWindow {
+    /// A station as the window writes it: with the drawing's unit mark.
+    pub fn station_text(&self, s: f64) -> String {
+        format!("{}{}", crate::modules::civil::point_alignment::format_station(s), self.mark)
+    }
+
     /// The station range the points are taken from: the typed one, or
     /// none when the whole corridor is taken (or a station does not read).
     pub fn range(&self) -> Option<(f64, f64)> {
@@ -202,6 +211,15 @@ impl CorridorPointsWindow {
         }
         let (a, b) = (parse_station(&self.start)?, parse_station(&self.end)?);
         Some((a.min(b), a.max(b)))
+    }
+
+    /// The station a range bar handle (`end` or start) dragged to `t` along
+    /// the bar (0 its start, 1 its end) is let go at, as the bar drops it;
+    /// none when the range is not the user's (the bar has no handles).
+    pub fn drag_handle(&self, end: bool, t: f64) -> Option<f64> {
+        let (lo, hi) = self.baselines.get(self.baseline).map_or((0.0, 0.0), |b| (b.1, b.2));
+        let bar = RangeBar { lo, hi, taken: self.range().unwrap_or((lo, hi)), enabled: self.user_range };
+        bar.enabled.then(|| bar.dropped(end, bar.station_along(t)))
     }
 
     /// The points code `c` gives: the user range's baseline within the
@@ -267,8 +285,17 @@ impl RangeBar {
     }
 
     fn station_at(&self, x: f32, width: f32) -> f64 {
-        let t = f64::from((x - HANDLE) / (width - 2.0 * HANDLE).max(1.0)).clamp(0.0, 1.0);
-        ((self.lo + t * (self.hi - self.lo)) * 100.0).round() / 100.0
+        self.station_along(f64::from((x - HANDLE) / (width - 2.0 * HANDLE).max(1.0)))
+    }
+
+    /// The station `t` (0 at the start, 1 at the end) along the bar, to 0.01.
+    fn station_along(&self, t: f64) -> f64 {
+        ((self.lo + t.clamp(0.0, 1.0) * (self.hi - self.lo)) * 100.0).round() / 100.0
+    }
+
+    /// Where a handle let go at `s` lands: it does not pass the other.
+    fn dropped(&self, end: bool, s: f64) -> f64 {
+        if end { s.max(self.taken.0) } else { s.min(self.taken.1) }
     }
 
     /// The taken range with a dragged handle where it is.
@@ -303,16 +330,12 @@ impl canvas::Program<Message> for RangeBar {
             }
             iced::Event::Mouse(Event::CursorMoved { position }) => {
                 let (end, _) = state.drag?;
-                let s = self.station_at(x(*position), bounds.width);
-                // A handle does not pass the other.
-                let s = if end { s.max(self.taken.0) } else { s.min(self.taken.1) };
-                state.drag = Some((end, s));
+                state.drag = Some((end, self.dropped(end, self.station_at(x(*position), bounds.width))));
                 Some(canvas::Action::request_redraw().and_capture())
             }
             iced::Event::Mouse(Event::ButtonReleased(Button::Left)) => {
                 let (end, s) = state.drag.take()?;
-                let s = if end { s.max(self.taken.0) } else { s.min(self.taken.1) };
-                Some(canvas::Action::publish(msg(PointToolMsg::RangeDrag(end, s))).and_capture())
+                Some(canvas::Action::publish(msg(PointToolMsg::RangeDrag(end, self.dropped(end, s)))).and_capture())
             }
             _ => None,
         }
@@ -349,12 +372,12 @@ impl canvas::Program<Message> for RangeBar {
     }
 }
 
-fn range_bar<'a>(lo: f64, hi: f64, taken: (f64, f64), enabled: bool) -> Element<'a, Message> {
+fn range_bar<'a>(state: &CorridorPointsWindow, lo: f64, hi: f64, taken: (f64, f64), enabled: bool) -> Element<'a, Message> {
     let bar = canvas(RangeBar { lo, hi, taken, enabled }).width(Fill).height(Length::Fixed(2.0 * HANDLE + 2.0));
     let stations = row![
-        small(crate::modules::civil::point_alignment::format_station(lo)).style(muted_style),
+        small(state.station_text(lo)).style(muted_style),
         Space::new().width(Fill),
-        small(crate::modules::civil::point_alignment::format_station(hi)).style(muted_style),
+        small(state.station_text(hi)).style(muted_style),
     ];
     column![bar, stations].spacing(4).into()
 }
@@ -396,7 +419,7 @@ pub fn view_corridor<'a>(state: &'a CorridorPointsWindow, sizing: crate::ui::mod
             ]
             .spacing(8)
             .align_y(iced::Center),
-            range_bar(lo, hi, taken, on),
+            range_bar(state, lo, hi, taken, on),
             row![
                 small(t!("Start station")).style(muted_style),
                 container(field(&state.start, on, |s| msg(PointToolMsg::Start(s)))).width(Length::Fixed(130.0)),

@@ -630,7 +630,13 @@ impl OpenCADStudio {
                     .and_then(arch_entity)
                     .and_then(|a| a.alignment_name())
                     .unwrap_or_else(|| format!("Baseline ({})", k + 1));
-                (name, if lo.is_finite() { lo } else { 0.0 }, if hi.is_finite() { hi } else { 0.0 }, alignment.unwrap_or(0))
+                // Measured: the baseline's range is its alignment's start to
+                // end station, wider than the corridor's regions on it.
+                let (lo, hi) = alignment
+                    .and_then(|h| doc.get_entity(Handle::new(h)))
+                    .and_then(crate::modules::civil::point_alignment::station_range)
+                    .unwrap_or((if lo.is_finite() { lo } else { 0.0 }, if hi.is_finite() { hi } else { 0.0 }));
+                (name, lo, hi, alignment.unwrap_or(0))
             })
             .collect::<Vec<_>>();
         // The stations each baseline gives each code a point at; two runs
@@ -652,17 +658,19 @@ impl OpenCADStudio {
             })
             .collect();
         let groups = point_groups(doc).len();
+        let mark = crate::modules::civil::point_alignment::unit_mark(doc.header.insertion_units);
         let group_name = self.next_group_name(i, groups);
         let (start, end) = baselines.first().map_or((0.0, 0.0), |b| (b.1, b.2));
-        use crate::modules::civil::point_alignment::format_station;
+        let text = |s: f64| format!("{}{mark}", crate::modules::civil::point_alignment::format_station(s));
         self.point_tools.corridor = Some(CorridorPointsWindow {
             corridor,
             baselines,
             stations,
             baseline: 0,
+            mark,
             user_range: false,
-            start: format_station(start),
-            end: format_station(end),
+            start: text(start),
+            end: text(end),
             group_name,
             codes,
             error: None,
@@ -684,8 +692,8 @@ impl OpenCADStudio {
                 match w.baselines.iter().position(|b| Some(b.3) == picked) {
                     Some(k) => {
                         w.baseline = k;
-                        w.start = crate::modules::civil::point_alignment::format_station(w.baselines[k].1);
-                        w.end = crate::modules::civil::point_alignment::format_station(w.baselines[k].2);
+                        w.start = w.station_text(w.baselines[k].1);
+                        w.end = w.station_text(w.baselines[k].2);
                     }
                     None => w.error = Some(crate::t!("The alignment picked is not a baseline of this corridor.").into_owned()),
                 }
@@ -693,7 +701,7 @@ impl OpenCADStudio {
             ["cancel"] => self.command_line.push_output(&crate::t!("*Cancel*")),
             [which, s] => {
                 if let Ok(s) = s.parse::<f64>() {
-                    let text = crate::modules::civil::point_alignment::format_station(s);
+                    let text = w.station_text(s);
                     if which.eq_ignore_ascii_case("end") {
                         w.end = text;
                     } else {
@@ -706,9 +714,10 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::CorridorPoints);
     }
 
-    /// OK: a COGO point at every corridor station of each code picked, in
-    /// code order (measured: all of the first code's points, then the
-    /// next's), described by the code; then the point group holding them.
+    /// OK: a COGO point at every corridor station of each code picked,
+    /// baseline by baseline and in code order within a baseline (measured:
+    /// all of the first code's points, then the next's), described by the
+    /// code; then the point group holding them.
     fn corridor_points_ok(&mut self) {
         let i = self.active_tab;
         let Some(state) = self.point_tools.corridor.clone() else { return };
@@ -731,12 +740,13 @@ impl OpenCADStudio {
         let Some(data) = doc.get_entity(state.corridor).and_then(arch_entity) else { return };
         let lines = data.corridor_baselines();
         let mut points: Vec<(document::types::Vector3, String)> = Vec::new();
-        for (c, (code, on)) in state.codes.iter().enumerate() {
-            if !on {
+        // Measured: baseline by baseline, each baseline's codes in order.
+        for (b, groups) in lines.iter().enumerate() {
+            if state.user_range && b != state.baseline {
                 continue;
             }
-            for (b, groups) in lines.iter().enumerate() {
-                if state.user_range && b != state.baseline {
+            for (c, (code, on)) in state.codes.iter().enumerate() {
+                if !on {
                     continue;
                 }
                 for run in groups.get(c).into_iter().flatten() {
@@ -1113,8 +1123,8 @@ impl OpenCADStudio {
                 if let Some(w) = corridor {
                     if let Some(k) = w.baselines.iter().position(|b| b.0 == name) {
                         w.baseline = k;
-                        w.start = crate::modules::civil::point_alignment::format_station(w.baselines[k].1);
-                        w.end = crate::modules::civil::point_alignment::format_station(w.baselines[k].2);
+                        w.start = w.station_text(w.baselines[k].1);
+                        w.end = w.station_text(w.baselines[k].2);
                     }
                 }
             }
@@ -1142,7 +1152,7 @@ impl OpenCADStudio {
             // A handle of the range bar let go at a station.
             PointToolMsg::RangeDrag(end, s) => {
                 if let Some(w) = corridor {
-                    let text = crate::modules::civil::point_alignment::format_station(s);
+                    let text = w.station_text(s);
                     if end {
                         w.end = text;
                     } else {

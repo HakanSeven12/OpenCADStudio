@@ -6,7 +6,7 @@
 //! seams, every use's pcurve, the face domains, tolerances, regions and the canonical order, so
 //! the file's own pcurves are not read. What a record cannot hold is listed in [`Loss`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::{FRAC_1_SQRT_2, TAU};
 
 use document::entities::acis::types::{
@@ -138,22 +138,41 @@ fn lift_one(document: &SatDocument, source: &SatBody<'_>, at: Option<u32>, loss:
     // every one holds the next.
     let mut lumps: Vec<Vec<Vec<(u32, bool)>>> = Vec::new();
     let mut lump_pointer = source.lump();
+    let mut seen_lumps = HashSet::new();
+    let mut lumps_walked = 0usize;
     while let Some(record) = resolve(document, lump_pointer) {
+        if !seen_lumps.insert(record.index) || lumps_walked > document.record_count() {
+            note_broken(&mut reader.loss, record);
+            break;
+        }
+        lumps_walked += 1;
         let Some(lump) = SatLump::from_record(record) else {
             note_broken(&mut reader.loss, record);
             break;
         };
         let mut shells = Vec::new();
         let mut shell_pointer = lump.shell();
+        let mut seen_shells = HashSet::new();
+        let mut shells_walked = 0usize;
         while let Some(record) = resolve(document, shell_pointer) {
+            if !seen_shells.insert(record.index) || shells_walked > document.record_count() {
+                note_broken(&mut reader.loss, record);
+                break;
+            }
+            shells_walked += 1;
             let Some(shell) = SatShell::from_record(record) else {
                 note_broken(&mut reader.loss, record);
                 break;
             };
             let mut faces = Vec::new();
             let mut face_pointer = shell.face();
-            let mut walked = 0;
+            let mut seen_faces = HashSet::new();
+            let mut walked = 0usize;
             while let Some(record) = resolve(document, face_pointer) {
+                if !seen_faces.insert(record.index) || walked > document.record_count() {
+                    note_broken(&mut reader.loss, record);
+                    break;
+                }
                 let Some(face) = SatFace::from_record(record) else {
                     note_broken(&mut reader.loss, record);
                     break;
@@ -163,9 +182,6 @@ fn lift_one(document: &SatDocument, source: &SatBody<'_>, at: Option<u32>, loss:
                 }
                 face_pointer = face.next_face();
                 walked += 1;
-                if walked > document.record_count() {
-                    break;
-                }
             }
             if !faces.is_empty() {
                 shells.push(faces);
@@ -380,7 +396,16 @@ impl Reader<'_> {
         let mut loops: Vec<Vec<(u32, bool)>> = Vec::new();
         let mut vertex_loops: Vec<u32> = Vec::new();
         let mut loop_pointer = source.first_loop();
+        let mut seen_loops = HashSet::new();
+        let mut loops_walked = 0usize;
         while let Some(loop_record) = resolve(self.document, loop_pointer) {
+            if !seen_loops.insert(loop_record.index)
+                || loops_walked > self.document.record_count()
+            {
+                note_broken(&mut self.loss, loop_record);
+                break;
+            }
+            loops_walked += 1;
             let Some(ring) = SatLoop::from_record(loop_record) else {
                 note_broken(&mut self.loss, loop_record);
                 break;
@@ -389,11 +414,16 @@ impl Reader<'_> {
             let mut pointer = first;
             let mut uses = Vec::new();
             let mut lone_vertex = None;
-            let mut walked = 0;
+            let mut seen_coedges = HashSet::new();
+            let mut walked = 0usize;
             loop {
                 let Some(coedge_record) = resolve(self.document, pointer) else {
                     break;
                 };
+                if !seen_coedges.insert(coedge_record.index) {
+                    note_broken(&mut self.loss, coedge_record);
+                    break;
+                }
                 let Some(coedge) = SatCoedge::from_record(coedge_record) else {
                     note_broken(&mut self.loss, coedge_record);
                     return None;
@@ -413,6 +443,9 @@ impl Reader<'_> {
                 pointer = coedge.next();
                 walked += 1;
                 if pointer == first || pointer.is_null() || walked > self.document.record_count() {
+                    if walked > self.document.record_count() {
+                        note_broken(&mut self.loss, coedge_record);
+                    }
                     break;
                 }
             }
@@ -1021,4 +1054,76 @@ pub fn lift_wire(document: &SatDocument) -> Option<Vec<WireSpan>> {
         pointer = coedge.next();
     }
     (!spans.is_empty()).then_some(spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::entities::acis::types::SatToken;
+
+    #[test]
+    fn cyclic_lump_shell_and_loop_pointers_terminate_with_broken_records() {
+        let mut sat = SatDocument::new();
+        let ptr = |id: i32| SatToken::Pointer(SatPointer::new(id));
+        let push = |doc: &mut SatDocument, kind: &str, mut toks: Vec<SatToken>| -> i32 {
+            let mut all = vec![ptr(-1)];
+            all.append(&mut toks);
+            doc.add_record(SatRecord {
+                index: -1,
+                entity_type: kind.to_string(),
+                sub_type: None,
+                attribute: SatPointer::new(-1),
+                subtype_id: -1,
+                tokens: all,
+                raw_text: None,
+            })
+        };
+
+        let body_id = push(&mut sat, "body", Vec::new());
+        let lump_id = push(&mut sat, "lump", Vec::new());
+        let shell_id = push(&mut sat, "shell", Vec::new());
+        let face_id = push(&mut sat, "face", Vec::new());
+        let loop_id = push(&mut sat, "loop", Vec::new());
+
+        if let Some(r) = sat.record_mut(body_id as usize) {
+            r.tokens = vec![ptr(-1), ptr(lump_id), ptr(-1), ptr(-1)];
+        }
+        if let Some(r) = sat.record_mut(lump_id as usize) {
+            // Cyclic next_lump -> lump_id
+            r.tokens = vec![ptr(-1), ptr(lump_id), ptr(shell_id), ptr(body_id)];
+        }
+        if let Some(r) = sat.record_mut(shell_id as usize) {
+            // Cyclic next_shell -> shell_id
+            r.tokens = vec![
+                ptr(-1),
+                ptr(shell_id),
+                ptr(-1),
+                ptr(face_id),
+                ptr(-1),
+                ptr(lump_id),
+            ];
+        }
+        if let Some(r) = sat.record_mut(face_id as usize) {
+            r.tokens = vec![
+                ptr(-1),
+                ptr(-1),
+                ptr(loop_id),
+                ptr(shell_id),
+                ptr(-1),
+                ptr(-1),
+            ];
+        }
+        if let Some(r) = sat.record_mut(loop_id as usize) {
+            // Cyclic next_loop -> loop_id
+            r.tokens = vec![ptr(-1), ptr(loop_id), ptr(-1), ptr(face_id)];
+        }
+
+        let parsed = SatDocument::parse(&sat.to_sat_string()).unwrap();
+        let (lifted, loss) = lift(&parsed);
+        assert!(lifted.is_empty());
+        assert!(
+            !loss.broken.is_empty(),
+            "cyclic SAT records must be flagged in loss.broken"
+        );
+    }
 }

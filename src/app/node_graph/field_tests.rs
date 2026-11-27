@@ -1466,3 +1466,78 @@ fn a_name_is_saved_only_when_set() {
     assert_eq!(loaded.ui[&range].name.as_deref(), Some("Stations"));
     assert_eq!(loaded.ui[&plain].name, None);
 }
+
+#[test]
+fn node_graph_mutations_capture_undo_before_mutating_and_unwind_restores_engine() {
+    use std::panic::AssertUnwindSafe;
+
+    let mut rig = Rig::new();
+    let num = rig.op("Number", Point::new(40.0, 40.0));
+    let pt = rig.op("Point", Point::new(320.0, 40.0));
+    rig.link(num, "value", pt, "x");
+    assert_eq!(rig.app.tabs[rig.i].graph.engine.links.len(), 1);
+
+    // 1. InPress detaches an existing link before Released; Undo must restore the link.
+    let _ = rig.app.on_graph(GraphMsg::InPress(port(pt, "x")));
+    let _ = rig.app.on_graph(GraphMsg::Released);
+    assert!(rig.app.tabs[rig.i].graph.engine.links.is_empty());
+    rig.app.undo_active_tab();
+    assert_eq!(
+        rig.app.tabs[rig.i].graph.engine.links.len(),
+        1,
+        "undo after detaching a link via InPress + Released must restore it"
+    );
+
+    // 2. NodeDelete removes the node inside graph_step; Undo must restore both nodes.
+    let _ = rig.app.on_graph(GraphMsg::NodeDelete(pt));
+    assert_eq!(rig.app.tabs[rig.i].graph.engine.nodes.len(), 1);
+    rig.app.undo_active_tab();
+    assert_eq!(
+        rig.app.tabs[rig.i].graph.engine.nodes.len(),
+        2,
+        "undo after NodeDelete must restore the deleted node"
+    );
+
+    // 3. graph_set records pre-mutation param value; Undo must restore prior value.
+    let _ = rig.app.graph_set(rig.i, port(num, "value"), Value::from(42.0));
+    assert_eq!(
+        rig.app.tabs[rig.i].graph.engine.node(num).unwrap().params.get("value"),
+        Some(&Value::from(42.0))
+    );
+    rig.app.undo_active_tab();
+    assert_ne!(
+        rig.app.tabs[rig.i].graph.engine.node(num).unwrap().params.get("value"),
+        Some(&Value::from(42.0))
+    );
+
+    // 4. PaletteRelease adds a node inside graph_step; Undo must remove it.
+    let spec = graph::LIBRARY
+        .iter()
+        .chain(ops::LIBRARY)
+        .find(|spec| spec.name == "Number")
+        .unwrap();
+    rig.app.tabs[rig.i].graph.drag = Some(crate::ui::node_graph::Drag::Palette(
+        PaletteItem::Op(spec),
+    ));
+    let _ = rig.app.on_graph(GraphMsg::PaletteRelease);
+    assert_eq!(rig.app.tabs[rig.i].graph.engine.nodes.len(), 3);
+    rig.app.undo_active_tab();
+    assert_eq!(
+        rig.app.tabs[rig.i].graph.engine.nodes.len(),
+        2,
+        "undo after PaletteRelease must remove the dropped node"
+    );
+
+    // 5. Panic during graph_evaluate must clear graph_undo_open and preserve engine.
+    let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let _ = rig.app.graph_evaluate(rig.i, |_| panic!("synthetic graph panic"));
+    }));
+    assert!(caught.is_err());
+    assert!(!rig.app.graph_undo_open);
+    assert_eq!(rig.app.tabs[rig.i].graph.engine.nodes.len(), 2);
+
+    // 6. take_back_failed_command also clears an abandoned graph_undo_open flag.
+    rig.app.graph_undo_open = true;
+    let _ = rig.app.take_back_failed_command(None);
+    assert!(!rig.app.graph_undo_open);
+}

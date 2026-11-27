@@ -153,8 +153,8 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 
 # The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
 # layer did not advance the index offset, so every later mesh in that layer
@@ -163,22 +163,25 @@ iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c
 # event loop no longer spins on a stale redraw deadline (#3418); upstream
 # bc9182e6/be79a169 (fix-strict-gles): no arrays in the triangle gradient
 # shader, which strict GLES drivers and WebGL on Mali rejected (#2608, #3587).
-# Drop when iced is bumped past all of them.
+# Fork-only (#3549): only the windows that got input repaint at once, the
+# others once the input pauses, so a second window no longer takes the main
+# window's WM_PAINTs on Windows.
+# Drop the upstream picks when iced is bumped past them.
 [patch."https://github.com/iced-rs/iced.git"]
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
-iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

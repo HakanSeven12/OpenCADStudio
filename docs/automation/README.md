@@ -1058,10 +1058,13 @@ its object `handle`.
 {"protocol":1,"op":"selection_set_load","request_id":"s-2","document_id":1,"name":"frame-set","select":false}
 ```
 
-Named handle sets are **session-scoped** by design (like a held
-`SelectionSet` object id, they live while the session lives). `save` stores
-and returns the handle list; `load` recalls it and, with `"select":true`
-(the default), also makes the entities the current selection
+Named sets are saved in the drawing (dictionary `OCS_NAMED_SELECTIONS`), so
+they open with the file; they are the sets the `NAMEDSEL` command saves and
+recalls. `save` keeps the handles of objects that are in the drawing, in one
+undo step, and returns them (`count`); a name that exists already (without
+case) is replaced. A bad name is `invalid_value`, and no live handle is
+`entity_absent`. `load` finds the name without case and, with
+`"select":true` (the default), also makes the entities the current selection
 (`result.selected` counts). Unknown names are `selection_set_missing`.
 
 ### `user_select` — ask the person at the screen to pick entities

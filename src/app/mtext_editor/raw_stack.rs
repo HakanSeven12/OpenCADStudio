@@ -329,6 +329,13 @@ impl OpenCADStudio {
     /// The characters around it and the stack's own formatting are certified.
     fn raw_stack(&mut self, range: Range<usize>, data: StackingData) -> bool {
         let before = self.mtext_editor.as_ref().map(|ed| ed.content.text());
+        // A stack made from text takes the stack text size, as AutoStack's
+        // does; a stack replaced keeps its own.
+        let fresh_size = self
+            .mtext_editor
+            .as_ref()
+            .is_some_and(|ed| ed.selected_stack().is_none())
+            .then(|| super::prefs::prefs().stack_size);
         self.edit_raw(|ed, index| {
             let cells = doc_to_cells(&ed.doc);
             let selected = cells.get(range.clone()).ok_or(EditError::InvalidRange)?;
@@ -349,7 +356,10 @@ impl OpenCADStudio {
             if !(kept && stacked) {
                 return Err(EditError::ProjectionMismatch);
             }
-            Ok(edit)
+            match fresh_size {
+                Some(percent) => super::raw_tools::size_stack(edit, range.start, percent, None),
+                None => Ok(edit),
+            }
         });
         self.select_after_edit(before, range.start)
     }
@@ -400,7 +410,10 @@ impl OpenCADStudio {
     /// Turn the selected one-sided stack back into its plain text.
     fn raw_unstack(&mut self, range: Range<usize>, text: String) {
         let before = self.mtext_editor.as_ref().map(|ed| ed.content.text());
-        self.edit_raw(|_, index| index.replace(range.clone(), &text));
+        self.edit_raw(|_, index| {
+            let bare = super::raw_tools::unsize_stack(index.raw, range.start)?;
+            SourceIndex::new(&bare).replace(range.clone(), &text)
+        });
         self.select_after_edit(before, range.start);
     }
 

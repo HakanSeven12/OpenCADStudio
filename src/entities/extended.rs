@@ -1697,8 +1697,38 @@ fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: docume
             }
             props
         }
-        CivilKind::Parcel => data.face_name().map(named).unwrap_or_default(),
+        // A TIN surface's name ("EG" in the tutorials' Surface-2.dwg, the
+        // empty shell included).
+        CivilKind::TinSurface => data
+            .surface_name()
+            .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name)])
+            .unwrap_or_default(),
+        // A parcel's number and where its area label sits. The name itself
+        // needs the document (a stored name, else the style's name
+        // template) and is read in `crate::entities::civil::properties`.
+        CivilKind::Parcel => {
+            let mut props = Vec::new();
+            if let Some((number, _)) = data.parcel_face() {
+                props.push(ro_prop(t!("Number").as_ref(), "ext_civil_number", number.to_string()));
+            }
+            if let Some(at) = data.parcel_label() {
+                props.push(ro_prop(
+                    t!("Label Location").as_ref(),
+                    "ext_civil_label_location",
+                    format!("{:.3}, {:.3}", at.x, at.y),
+                ));
+            }
+            props
+        }
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => data.feature_line_name().map(named).unwrap_or_default(),
+        // The network's own name is its third text.
+        CivilKind::Other if data.dxf_name == "AECC_NETWORK" => data
+            .decode()
+            .strings
+            .get(2)
+            .filter(|name| !name.is_empty())
+            .map(|name| vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name.clone())])
+            .unwrap_or_default(),
         CivilKind::SampleLineGroup => data
             .sample_lines()
             .map(|lines| {

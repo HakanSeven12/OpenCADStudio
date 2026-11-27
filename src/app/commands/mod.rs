@@ -41,7 +41,11 @@ mod geometry_cleanup_tests;
 mod ifc_plan;
 #[cfg(test)]
 mod layer_variable_tests;
+mod named_selections;
+#[cfg(test)]
+mod named_selections_tests;
 pub(in crate::app) use dgn_import::read_reference_drawings;
+pub(in crate::app) use named_selections::NamedSelectionSaveError;
 mod dim;
 mod dim_cmd;
 mod dim_inspect;
@@ -628,6 +632,7 @@ impl OpenCADStudio {
         // Remove or a fixed Window sense must not quietly still be in force
         // when the next command asks for objects. (#596)
         self.select_remove_mode = false;
+        self.selection_named_set_pending = false;
         crate::modules::draw::select::set_remove_mode(false);
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
@@ -843,6 +848,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_fileops(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_named_selections(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_layers(cmd, i) {

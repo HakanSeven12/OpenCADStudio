@@ -631,7 +631,7 @@ pub(super) struct OpenCADStudio {
     /// Bumped on every tab hover change, so a stale rest is ignored.
     doc_tab_hover_gen: u64,
     tab_counter: usize,
-    ribbon: Ribbon,
+    pub(crate) ribbon: Ribbon,
     /// Recently opened files, newest first — backs the Start page panel.
     recent_files: Vec<std::path::PathBuf>,
     /// Decoded DWG preview thumbnails for the Start page, keyed by path.
@@ -1222,6 +1222,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) selection_undoing: bool,
     /// Group at a Select objects: prompt is waiting for the group's name.
     pub(crate) selection_group_pending: bool,
+    /// Named at a Select objects: prompt is waiting for the selection set's name.
+    pub(crate) selection_named_set_pending: bool,
     /// The selection step being reported came from Group (a named group):
     /// its count carries no group total.
     pub(crate) selection_group_named: bool,
@@ -3173,6 +3175,7 @@ impl OpenCADStudio {
             selection_undo: (0, Vec::new()),
             selection_undoing: false,
             selection_group_pending: false,
+            selection_named_set_pending: false,
             selection_group_named: false,
             last_pick_groups: 0,
             last_entered_point: None,

@@ -106,6 +106,8 @@ fn entry_aabb2<T>(entry: &Entry3<T>) -> [f64; 4] {
 #[derive(Default)]
 struct SpatialBvh2 {
     bvh: parry2d_f64::partitioning::Bvh,
+    /// Entry index of each BVH leaf (leaves are numbered `0..n`).
+    ids: Vec<u32>,
 }
 
 impl SpatialBvh2 {
@@ -117,15 +119,19 @@ impl SpatialBvh2 {
         if order.is_empty() {
             return Self::default();
         }
-        let leaves = order.into_iter().map(|idx| {
+        // Leaves are numbered 0..n and mapped back to entry indices on query:
+        // parry's `Bvh::from_iter` only builds one- and two-leaf trees whose
+        // leaf ids are 0 / 0 and 1 (other ids panic with "key not present").
+        let leaves = order.iter().enumerate().map(|(leaf, &idx)| {
             let aabb = entry_aabb2(&entries[idx as usize]);
             (
-                idx as usize,
+                leaf,
                 Aabb::new(Vector::new(aabb[0], aabb[1]), Vector::new(aabb[2], aabb[3])),
             )
         });
         Self {
             bvh: Bvh::from_iter(BvhBuildStrategy::Binned, leaves),
+            ids: order,
         }
     }
 
@@ -140,7 +146,11 @@ impl SpatialBvh2 {
             Vector::new(query[0], query[1]),
             Vector::new(query[2], query[3]),
         );
-        out.extend(self.bvh.intersect_aabb(&query_aabb));
+        out.extend(
+            self.bvh
+                .intersect_aabb(&query_aabb)
+                .map(|leaf| self.ids[leaf as usize]),
+        );
     }
 }
 
@@ -3148,6 +3158,37 @@ impl ScreenRectFrustum {
 
 fn aabb_overlaps(a: [f64; 4], b: [f64; 4]) -> bool {
     a[2] >= b[0] && a[0] <= b[2] && a[3] >= b[1] && a[1] <= b[3]
+}
+
+#[cfg(test)]
+mod spatial_bvh2_tests {
+    use super::*;
+
+    fn entry(x: f64, value: u32) -> Entry3<u32> {
+        Entry3::new([x, 0.0, 0.0, x + 1.0, 1.0, 0.0], value)
+    }
+
+    fn hits(bvh: &SpatialBvh2, entries: &[Entry3<u32>], query: [f64; 4]) -> Vec<u32> {
+        let mut out = Vec::new();
+        bvh.query(entries, query, &mut out);
+        out.sort_unstable();
+        out
+    }
+
+    /// One or two oversized entries that are not the first entries used to
+    /// panic inside parry ("key not present"), e.g. a single large table in a
+    /// drawing that otherwise holds only an xref.
+    #[test]
+    fn one_or_two_leaves_with_any_entry_index() {
+        let entries: Vec<_> = (0..5).map(|i| entry(f64::from(i) * 10.0, i)).collect();
+        let one = SpatialBvh2::build(&entries, vec![3]);
+        assert_eq!(hits(&one, &entries, [-100.0, -1.0, 100.0, 2.0]), vec![3]);
+        let two = SpatialBvh2::build(&entries, vec![2, 4]);
+        assert_eq!(hits(&two, &entries, [-100.0, -1.0, 100.0, 2.0]), vec![2, 4]);
+        assert_eq!(hits(&two, &entries, [39.5, 0.2, 40.5, 0.8]), vec![4]);
+        let three = SpatialBvh2::build(&entries, vec![1, 2, 4]);
+        assert_eq!(hits(&three, &entries, [9.5, 0.2, 10.5, 0.8]), vec![1]);
+    }
 }
 
 #[cfg(test)]

@@ -244,3 +244,122 @@ fn a_new_command_starts_a_new_cycle() {
     move_to(&mut app, at);
     assert_at(&app, P, "the new command");
 }
+
+/// The far endpoints in the order Tab shows them: nearest to P first.
+fn far_endpoints() -> [DVec3; 2] {
+    if P_FAR.distance(P) < Q_FAR.distance(P) {
+        [P_FAR, Q_FAR]
+    } else {
+        [Q_FAR, P_FAR]
+    }
+}
+
+#[test]
+fn shift_tab_steps_back_through_the_snaps_and_wraps_to_the_last() {
+    let mut app = two_lines_app(&[SnapType::Endpoint]);
+    let at = near_p(&app);
+    move_to(&mut app, at);
+    let [far1, far2] = far_endpoints();
+
+    // Tab order: P, Q, far1, far2. Shift+Tab goes the other way, and at
+    // the first snap it goes to the last one.
+    let steps = [
+        (Message::DynTabNext, Q, "Tab"),
+        (Message::DynTabNext, far1, "Tab"),
+        (Message::DynTabPrev, Q, "Shift+Tab"),
+        (Message::DynTabPrev, P, "Shift+Tab to the first"),
+        (Message::DynTabPrev, far2, "Shift+Tab to the last"),
+        (Message::DynTabPrev, far1, "Shift+Tab"),
+        (Message::DynTabNext, far2, "Tab"),
+        (Message::DynTabNext, P, "Tab to the first"),
+    ];
+    for (step, (message, expected, name)) in steps.into_iter().enumerate() {
+        let _ = app.update(message);
+        assert_at(&app, expected, &format!("step {}: {name}", step + 1));
+    }
+    assert_eq!(app.tabs[app.active_tab].dyn_active, 0, "the field stays");
+}
+
+#[test]
+fn the_shift_tab_key_shows_the_last_snap_and_a_click_takes_it() {
+    let mut app = two_lines_app(&[SnapType::Endpoint]);
+    let at = near_p(&app);
+    move_to(&mut app, at);
+    let task = app.update_root(Message::ShortcutPressed("SHIFT+TAB".into()));
+    app.drive_headless_task(task).unwrap();
+    let last = far_endpoints()[1];
+    assert_at(&app, last, "Shift+Tab");
+
+    let _ = app.update(Message::ViewportLeftPressAt(at));
+    let _ = app.update(Message::ViewportLeftRelease);
+    assert!((app.last_point.expect("a point") - last).length() < 1e-6);
+    assert_eq!(app.snapper.cycle_len(), 0);
+}
+
+#[test]
+fn shift_tab_keeps_the_snap_when_a_value_is_typed() {
+    let mut app = two_lines_app(&[SnapType::Endpoint]);
+    let at = near_p(&app);
+    move_to(&mut app, at);
+    let _ = app.update(Message::CommandAppendChar("5".into()));
+
+    let _ = app.update(Message::DynTabPrev);
+    assert_at(&app, P, "the snap stays");
+    assert_eq!(app.snapper.cycle_len(), 0);
+}
+
+#[test]
+fn shift_tab_leaves_a_snap_it_cannot_step_past() {
+    let mut app = two_lines_app(&[SnapType::Midpoint]);
+    let mid = (P + P_FAR) / 2.0;
+    let at = screen(&app, mid);
+    move_to(&mut app, at);
+    let (kind, world) = snapped(&app);
+    assert_eq!(kind, SnapType::Midpoint);
+
+    let _ = app.update(Message::DynTabPrev);
+    assert_eq!(snapped(&app), (kind, world), "the snap stays");
+    assert_eq!(app.snapper.cycle_len(), 0);
+}
+
+#[test]
+fn shift_tab_steps_past_a_bounded_number_of_snaps() {
+    use crate::app::update::viewport_snap::MAX_CYCLE_STEPS;
+    use document::{entities::LwPolyline, types::Vector2};
+    // A polyline from P with more vertices than the bound: each one is an
+    // endpoint snap of the object under the cursor.
+    let mut app = two_lines_app(&[SnapType::Endpoint]);
+    let i = app.active_tab;
+    let vertices = (0..2 * MAX_CYCLE_STEPS)
+        .map(|k| Vector2::new(P.x + 0.4 * k as f64, P.y - 0.3 * (k % 2) as f64))
+        .collect();
+    app.tabs[i]
+        .scene
+        .add_entity(EntityType::LwPolyline(LwPolyline::from_points(vertices)));
+    let at = near_p(&app);
+    move_to(&mut app, at);
+    assert_at(&app, P, "the nearest endpoint first");
+
+    let _ = app.update(Message::DynTabPrev);
+    assert_eq!(app.snapper.cycle_len(), MAX_CYCLE_STEPS - 1);
+    assert_ne!(snapped(&app).1, P, "a snap past the first one shows");
+}
+
+#[test]
+fn shift_tab_moves_up_the_suggestions_when_they_show() {
+    use crate::command::CommandSuggestion;
+    let mut app = two_lines_app(&[SnapType::Endpoint]);
+    let at = near_p(&app);
+    move_to(&mut app, at);
+    app.command_line
+        .set_contextual_suggestions(["A", "B", "C"].map(CommandSuggestion::plain).into());
+
+    let _ = app.update(Message::DynTabPrev);
+    assert_eq!(
+        app.command_line.autocomplete_cursor,
+        Some(2),
+        "the last row"
+    );
+    assert_at(&app, P, "the snap stays");
+    assert_eq!(app.snapper.cycle_len(), 0);
+}

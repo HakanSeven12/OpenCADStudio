@@ -902,6 +902,7 @@ impl super::OpenCADStudio {
             self.tabs[self.active_tab].scene.set_mtext_editor_hidden(Some(h));
         }
         self.mtext_editor = Some(state);
+        self.refresh_selected_grips();
         // Open centred at the editor's natural size: it renders through the
         // shared modal frame, which `modal_offset` positions and `modal_resize`
         // grows (both draggable, so reset on open).
@@ -1441,6 +1442,9 @@ impl super::OpenCADStudio {
         let tab_id = self.mtext_editor.as_mut().and_then(|ed| ed.hidden_source_tab.take());
         if let Some(tab) = tab_id.and_then(|id| self.tabs.iter_mut().find(|tab| tab.id == id)) {
             tab.scene.set_mtext_editor_hidden(None);
+        }
+        if tab_id.is_some() {
+            self.refresh_selected_grips();
         }
     }
 

@@ -511,7 +511,7 @@ any database record via JSON Pointer paths, with compare-and-set support;
 | Op | Fields | Notes |
 |---|---|---|
 | `group_create` | `name`, `handles` | Named group over existing entities; result reports the group's own object `handle` |
-| `selection_set_save` | `name`, `handles` | Stores a named handle set for the session |
+| `selection_set_save` | `name`, `handles` | Saves a named set in the drawing (the sets of `NAMEDSEL`), one undo step |
 | `selection_set_load` | `name`, optional `"select":true` (default) | Recalls the set; with `select` it also becomes the current selection (`result.selected`) |
 
 REST: `POST /groups`, `POST /selection-sets`, `GET /selection-sets/{name}[?select=true]`.

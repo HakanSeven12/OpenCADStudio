@@ -566,8 +566,83 @@ fn preview_grid<'a>(rows: &'a [Vec<String>]) -> Element<'a, Message> {
         .into()
 }
 
-/// The Insert Table dialog's sample: a title, a header and data rows.
-struct InsertTablePreview;
+/// Most columns and rows the dialog's sample draws; more are shown as "…".
+const PREVIEW_MAX_COLUMNS: usize = 8;
+const PREVIEW_MAX_ROWS: usize = 10;
+
+/// One row of the Insert Table sample.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreviewRow {
+    label: String,
+    /// The row is one merged cell across the table (the title row).
+    spans_all_columns: bool,
+}
+
+/// What the Insert Table sample draws: the columns and rows the typed
+/// counts and row styles will give the table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreviewLayout {
+    columns: usize,
+    /// More columns than drawn: the last drawn column shows "…".
+    more_columns: bool,
+    rows: Vec<PreviewRow>,
+}
+
+/// A count typed in the dialog; anything unusable counts as one.
+fn preview_count(text: &str) -> usize {
+    text.trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|n| *n > 0)
+        .unwrap_or(1)
+}
+
+/// The sample for the dialog's state. A new table has the first row, the
+/// second row, then `data_rows` rows of the other-row style, like the table
+/// the command places.
+fn insert_table_preview_layout(state: &TableInsertState) -> PreviewLayout {
+    let columns = preview_count(&state.columns);
+    let data_rows = preview_count(&state.data_rows);
+    let label = |name: &str| -> String {
+        if name.eq_ignore_ascii_case("Title") {
+            t!("Title").into_owned()
+        } else if name.eq_ignore_ascii_case("Header") {
+            t!("Header").into_owned()
+        } else if name.eq_ignore_ascii_case("Data") {
+            t!("Data").into_owned()
+        } else {
+            name.to_string()
+        }
+    };
+    let row = |name: &str| PreviewRow {
+        label: label(name),
+        spans_all_columns: name.eq_ignore_ascii_case("Title"),
+    };
+    let mut rows = vec![row(&state.first_row_style), row(&state.second_row_style)];
+    rows.extend(std::iter::repeat_n(
+        row(&state.other_row_style),
+        data_rows.min(PREVIEW_MAX_ROWS),
+    ));
+    if data_rows.saturating_add(2) > PREVIEW_MAX_ROWS {
+        rows.truncate(PREVIEW_MAX_ROWS);
+        if let Some(last) = rows.last_mut() {
+            *last = PreviewRow {
+                label: "\u{2026}".into(),
+                spans_all_columns: false,
+            };
+        }
+    }
+    PreviewLayout {
+        columns: columns.min(PREVIEW_MAX_COLUMNS),
+        more_columns: columns > PREVIEW_MAX_COLUMNS,
+        rows,
+    }
+}
+
+/// The Insert Table dialog's sample of the table to be placed.
+struct InsertTablePreview {
+    layout: PreviewLayout,
+}
 
 impl iced::widget::canvas::Program<Message> for InsertTablePreview {
     type State = ();
@@ -590,9 +665,10 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
         );
         let (left, top) = (12.0, 8.0);
         let (width, height) = (bounds.width - 24.0, bounds.height - 16.0);
-        let rows = 6usize;
+        let rows = self.layout.rows.len().max(1);
+        let columns = self.layout.columns.max(1);
         let row_h = height / rows as f32;
-        let col_w = width / 3.0;
+        let col_w = width / columns as f32;
         let stroke = Stroke::default()
             .with_color(ink.scale_alpha(0.8))
             .with_width(1.0);
@@ -603,14 +679,19 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
                 stroke,
             );
         }
-        for k in 0..=3 {
-            let x = left + k as f32 * col_w;
-            // The title row spans the table.
-            let y0 = if k == 0 || k == 3 { top } else { top + row_h };
-            frame.stroke(
-                &Path::line(Point::new(x, y0), Point::new(x, top + height)),
-                stroke,
-            );
+        for (r, row) in self.layout.rows.iter().enumerate() {
+            let y0 = top + r as f32 * row_h;
+            for k in 0..=columns {
+                // A merged row has no inner column lines.
+                if row.spans_all_columns && k != 0 && k != columns {
+                    continue;
+                }
+                let x = left + k as f32 * col_w;
+                frame.stroke(
+                    &Path::line(Point::new(x, y0), Point::new(x, y0 + row_h)),
+                    stroke,
+                );
+            }
         }
         let label = |frame: &mut Frame, content: String, x: f32, y: f32, size: f32| {
             frame.fill_text(Text {
@@ -623,21 +704,23 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
                 ..Default::default()
             });
         };
-        label(
-            &mut frame,
-            t!("Title").into_owned(),
-            left + width / 2.0,
-            top + row_h / 2.0,
-            13.0,
-        );
-        for row in 1..rows {
-            let content = if row == 1 { t!("Header") } else { t!("Data") }.into_owned();
-            for column in 0..3 {
+        for (r, row) in self.layout.rows.iter().enumerate() {
+            let y = top + (r as f32 + 0.5) * row_h;
+            if row.spans_all_columns {
+                label(&mut frame, row.label.clone(), left + width / 2.0, y, 13.0);
+                continue;
+            }
+            for column in 0..columns {
+                let content = if self.layout.more_columns && column + 1 == columns {
+                    "\u{2026}".to_string()
+                } else {
+                    row.label.clone()
+                };
                 label(
                     &mut frame,
-                    content.clone(),
+                    content,
                     left + (column as f32 + 0.5) * col_w,
-                    top + (row as f32 + 0.5) * row_h,
+                    y,
                     11.0,
                 );
             }
@@ -820,10 +903,12 @@ pub fn table_insert_view<'a>(
     // Left: what the table starts from and its sample; right: how it is
     // placed and sized, and the row styles.
     let preview: Element<'a, Message> = if state.preview {
-        iced::widget::canvas(InsertTablePreview)
-            .width(Fill)
-            .height(Fill)
-            .into()
+        iced::widget::canvas(InsertTablePreview {
+            layout: insert_table_preview_layout(state),
+        })
+        .width(Fill)
+        .height(Fill)
+        .into()
     } else {
         Space::new().height(Fill).into()
     };
@@ -1705,4 +1790,66 @@ pub fn data_extraction_unsaved_view(
     .padding([12, 14])
     .width(sizing.width)
     .into()
+}
+
+#[cfg(test)]
+mod insert_table_preview_tests {
+    use super::*;
+
+    fn state(columns: &str, data_rows: &str, styles: [&str; 3]) -> TableInsertState {
+        TableInsertState {
+            columns: columns.into(),
+            data_rows: data_rows.into(),
+            first_row_style: styles[0].into(),
+            second_row_style: styles[1].into(),
+            other_row_style: styles[2].into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn preview_follows_typed_columns_rows_and_styles() {
+        let layout = insert_table_preview_layout(&state("5", "1", ["Data", "Data", "Data"]));
+        assert_eq!(layout.columns, 5);
+        assert!(!layout.more_columns);
+        assert_eq!(layout.rows.len(), 3);
+        for row in &layout.rows {
+            assert_eq!(row.label, t!("Data").into_owned());
+            assert!(!row.spans_all_columns);
+        }
+        let layout = insert_table_preview_layout(&state("2", "4", ["Title", "Header", "Data"]));
+        assert_eq!(layout.columns, 2);
+        assert_eq!(layout.rows.len(), 6);
+    }
+
+    #[test]
+    fn default_preview_has_a_merged_title_row() {
+        let layout = insert_table_preview_layout(&TableInsertState::default());
+        assert_eq!(layout.columns, 5);
+        assert_eq!(layout.rows.len(), 3);
+        assert!(layout.rows[0].spans_all_columns);
+        assert_eq!(layout.rows[0].label, t!("Title").into_owned());
+        assert_eq!(layout.rows[1].label, t!("Header").into_owned());
+        assert!(!layout.rows[1].spans_all_columns);
+        assert_eq!(layout.rows[2].label, t!("Data").into_owned());
+    }
+
+    #[test]
+    fn huge_counts_are_capped_with_an_ellipsis() {
+        let layout = insert_table_preview_layout(&state("50", "200", ["Title", "Header", "Data"]));
+        assert_eq!(layout.columns, PREVIEW_MAX_COLUMNS);
+        assert!(layout.more_columns);
+        assert_eq!(layout.rows.len(), PREVIEW_MAX_ROWS);
+        assert_eq!(layout.rows.last().unwrap().label, "\u{2026}");
+    }
+
+    #[test]
+    fn unusable_counts_never_panic_or_give_no_columns() {
+        for text in ["", "abc", "0", "-3"] {
+            let layout =
+                insert_table_preview_layout(&state(text, text, ["Title", "Header", "Data"]));
+            assert!(layout.columns >= 1);
+            assert!(layout.rows.len() >= 3);
+        }
+    }
 }

@@ -1044,7 +1044,7 @@ pub static GROUP_CREATE: OpDef = OpDef {
 
 pub static SELECTION_SET_SAVE: OpDef = OpDef {
     name: "selection_set_save",
-    doc: "Save an entity handle set under a name for later recall.",
+    doc: "Save an entity handle set under a name in the drawing, as NAMEDSEL does (one undo step).",
     batchable: true,
     params: &[
         req("name", Ty::Str, "Selection set name."),
@@ -1056,7 +1056,7 @@ pub static SELECTION_SET_SAVE: OpDef = OpDef {
 
 pub static SELECTION_SET_LOAD: OpDef = OpDef {
     name: "selection_set_load",
-    doc: "Recall a previously saved selection set by name.",
+    doc: "Recall a selection set saved in the drawing, by name without case.",
     batchable: true,
     params: &[
         req("name", Ty::Str, "Selection set name."),

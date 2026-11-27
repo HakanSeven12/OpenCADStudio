@@ -237,6 +237,25 @@ pub fn build_mesh_triangle_bvh(mesh: &MeshModel) -> parry3d_f64::partitioning::B
             let maxs = a.max(b).max(c);
             Some((tri_idx, Aabb::new(mins, maxs)))
         });
+    triangle_bvh_from_leaves(leaves.collect())
+}
+
+/// BVH whose leaf ids are the triangle indices. parry's `Bvh::from_iter`
+/// only builds one- and two-leaf trees whose ids are 0 / 0 and 1 (other ids
+/// panic with "key not present" – e.g. when non-finite triangles were
+/// skipped), so such tiny trees are built leaf by leaf.
+fn triangle_bvh_from_leaves(
+    leaves: Vec<(usize, parry3d_f64::bounding_volume::Aabb)>,
+) -> parry3d_f64::partitioning::Bvh {
+    use parry3d_f64::partitioning::{Bvh, BvhBuildStrategy};
+
+    if leaves.len() <= 2 && leaves.iter().enumerate().any(|(i, (id, _))| i != *id) {
+        let mut bvh = Bvh::new();
+        for (id, aabb) in leaves {
+            bvh.insert(aabb, id as u32);
+        }
+        return bvh;
+    }
     Bvh::from_iter(BvhBuildStrategy::Binned, leaves)
 }
 
@@ -627,6 +646,36 @@ pub fn solid_edge_segments(
         out = out.into_iter().step_by(step).collect();
     }
     out
+}
+
+#[cfg(test)]
+mod triangle_bvh_tests {
+    use super::triangle_bvh_from_leaves;
+    use parry3d_f64::bounding_volume::Aabb;
+    use parry3d_f64::math::Vector;
+
+    fn aabb(x: f64) -> Aabb {
+        Aabb::new(Vector::new(x, 0.0, 0.0), Vector::new(x + 1.0, 1.0, 1.0))
+    }
+
+    fn hits(leaves: Vec<(usize, Aabb)>, query: Aabb) -> Vec<u32> {
+        let bvh = triangle_bvh_from_leaves(leaves);
+        let mut out: Vec<u32> = bvh.intersect_aabb(&query).collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// One or two remaining triangles with ids other than 0 / 0 and 1 used to
+    /// panic inside parry ("key not present").
+    #[test]
+    fn one_or_two_leaves_keep_their_triangle_ids() {
+        let all = Aabb::new(Vector::new(-100.0, -1.0, -1.0), Vector::new(100.0, 2.0, 2.0));
+        assert_eq!(hits(vec![(2, aabb(20.0))], all), vec![2]);
+        assert_eq!(hits(vec![(1, aabb(10.0)), (3, aabb(30.0))], all), vec![1, 3]);
+        assert_eq!(hits(vec![(0, aabb(0.0)), (1, aabb(10.0))], all), vec![0, 1]);
+        let near = Aabb::new(Vector::new(29.5, 0.2, 0.2), Vector::new(30.5, 0.8, 0.8));
+        assert_eq!(hits(vec![(1, aabb(10.0)), (3, aabb(30.0))], near), vec![3]);
+    }
 }
 
 #[cfg(test)]

@@ -163,6 +163,25 @@ fn empty_cell_commit_and_escape_have_different_effects() {
 }
 
 #[test]
+fn alt_enter_breaks_the_line_in_the_cell_and_enter_still_moves_down() {
+    let (mut app, handle) = fixture("a");
+    start(&mut app, handle);
+    app.mtext_select_all();
+    let _ = app.update(Message::CommandAppendChar("a".into()));
+    let _ = app.update(Message::ShortcutPressed("ALT+ENTER".into()));
+    let cell = app.table_cell_editor.as_ref().expect("Alt+Enter keeps the cell editor open");
+    assert_eq!((cell.row, cell.column), (0, 0), "Alt+Enter must not leave the cell");
+    let _ = app.update(Message::CommandAppendChar("b".into()));
+    let _ = app.update(Message::ShortcutPressed("SHIFT+ENTER".into()));
+    let _ = app.update(Message::CommandAppendChar("c".into()));
+    assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), r"a\Pb\Pc");
+    let _ = app.update(Message::ShortcutPressed("ENTER".into()));
+    assert_eq!(source(&app, handle), r"a\Pb\Pc");
+    let cell = app.table_cell_editor.as_ref().unwrap();
+    assert_eq!((cell.row, cell.column), (1, 0), "plain Enter still moves down");
+}
+
+#[test]
 fn tab_enter_and_arrows_move_the_editor_and_highlight() {
     let (mut app, handle) = fixture("first");
     start(&mut app, handle);
@@ -1358,4 +1377,81 @@ fn exploded_array_tables_keep_their_own_formulas() {
     edit(&mut app, DVec3::new(210.0, -5.0, 0.0), "20");
     assert_eq!(sum(&app, tables[0]), "12", "first item follows its own A1");
     assert_eq!(sum(&app, tables[1]), "22", "second item follows its own A1");
+}
+
+/// A cell as a template file keeps it: a decimal value with a format and no
+/// source text of its own.
+#[test]
+fn a_decimal_cell_without_source_text_opens_with_its_value() {
+    use document::entities::table::{CellValueType, ValueUnitType};
+    let (mut app, handle) = fixture("x");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        let value = &mut table.cell_mut(0, 0).unwrap().contents[0].value;
+        value.value_type = CellValueType::Double;
+        value.unit_type = ValueUnitType::NoUnits;
+        value.numeric_value = 9.1;
+        value.format = "%zs8".into();
+        value.formatted_value = "9.1".into();
+        value.text.clear();
+    }
+    start(&mut app, handle);
+    assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "9.1");
+}
+
+/// The same cell holding a field: Properties shows the field's value, and
+/// the editor must open with it, with no regeneration of the table first.
+#[test]
+fn a_field_cell_without_source_text_opens_with_its_value() {
+    let (mut app, handle) = fixture("x");
+    {
+        let i = app.active_tab;
+        let document = &mut app.tabs[i].scene.document;
+        document
+            .set_table_cell_field(
+                handle,
+                0,
+                0,
+                r"%<\_FldIdx 0>%",
+                vec![document::fields::NewField::new(r"\AcVar userr1", "9.1")],
+            )
+            .expect("field");
+        let Some(EntityType::Table(table)) = document.get_entity_mut(handle) else {
+            panic!("table")
+        };
+        let value = &mut table.cell_mut(0, 0).unwrap().contents[0].value;
+        value.text.clear();
+        value.formatted_value.clear();
+    }
+    start(&mut app, handle);
+    assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "9.1");
+}
+
+/// The cell editor draws the table's lines as preview wires; a middle-button
+/// pan must not take them away with the rubber band.
+#[test]
+fn the_table_lines_stay_drawn_while_the_view_is_panned_in_a_cell_edit() {
+    let (mut app, handle) = fixture("x");
+    start(&mut app, handle);
+    let i = app.active_tab;
+    let lines = |app: &OpenCADStudio| {
+        app.tabs[app.active_tab]
+            .scene
+            .shown_rubber_band()
+            .1
+            .len()
+    };
+    let shown = lines(&app);
+    assert!(shown > 0, "the edited table's lines are drawn");
+    // A pan starts where the pointer last moved.
+    app.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(iced::Point::new(400.0, 300.0));
+    let _ = app.update(Message::ViewportMiddlePress);
+    assert!(!app.tabs[i].scene.drawing_feedback_shown());
+    assert_eq!(lines(&app), shown, "a pan keeps the table's lines");
+    let _ = app.update(Message::ViewportMiddleRelease);
+    assert_eq!(lines(&app), shown);
 }

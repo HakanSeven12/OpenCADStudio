@@ -3331,8 +3331,10 @@ impl OpenCADStudio {
                 }
                 if self.command_line.has_contextual_suggestions() {
                     self.command_line.autocomplete_prev();
+                    return self.focus_cmd_input();
                 }
-                self.focus_cmd_input()
+                let moved = self.cycle_object_snap_back();
+                Task::batch([moved, self.focus_cmd_input()])
             }
 
             Message::SplitModelViewport(horizontal) => {
@@ -10704,6 +10706,9 @@ impl OpenCADStudio {
                 if self.mtext_navigation_key(&key) {
                     return Task::none();
                 }
+                if self.table_cell_line_break(&key) {
+                    return Task::none();
+                }
                 if let Some(task) = self.layer_manager_key(&key) {
                     return task;
                 }
@@ -10751,7 +10756,7 @@ impl OpenCADStudio {
                 let selected = (!self.ribbon.custom_panels().is_empty()).then_some(0);
                 self.ribbon_customize = Some(crate::ui::window::ribbon_customize::State {
                     selected,
-                    draft: String::new(),
+                    ..Default::default()
                 });
                 self.active_modal = Some(crate::app::ModalKind::RibbonCustomize);
                 Task::none()

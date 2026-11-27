@@ -46,11 +46,12 @@ pub(crate) enum Resume {
         line: String,
         finish: bool,
         chain: bool,
+        script_restricted: bool,
     },
     /// The next row of `script_queue`.
     ScriptRow,
-    /// The rest of a plugin's script, this line first.
-    Lines(VecDeque<String>),
+    /// The rest of a plugin's script, this line first (`(lines, script_restricted)`).
+    Lines(VecDeque<String>, bool),
     /// A plugin file or folder dialog's answer, dispatched as typed.
     Direct(String),
 }
@@ -139,7 +140,8 @@ impl OpenCADStudio {
                     line,
                     finish,
                     chain,
-                } => self.run_command_line_impl(&line, finish, chain),
+                    script_restricted,
+                } => self.run_command_line_impl(&line, finish, chain, script_restricted),
                 Resume::ScriptRow => match self.script_queue.pop_front() {
                     Some(line) => {
                         self.script_running = true;
@@ -148,7 +150,7 @@ impl OpenCADStudio {
                     }
                     None => Task::done(Message::ScriptPump),
                 },
-                Resume::Lines(lines) => self.run_script_lines(lines),
+                Resume::Lines(lines, restricted) => self.run_script_lines(lines, restricted),
                 Resume::Direct(line) => self.dispatch_plugin_answer(&line, true),
             });
             // A path that did not reach a plugin command leaves nothing behind.
@@ -200,14 +202,33 @@ impl OpenCADStudio {
     /// The lines of a plugin's script, each answering what the one before
     /// left open; before a line that starts a plugin command the window draws
     /// a frame, and the rest of the script waits with it.
-    pub(super) fn run_script_lines(&mut self, mut lines: VecDeque<String>) -> Task<Message> {
+    pub(super) fn run_script_lines(
+        &mut self,
+        mut lines: VecDeque<String>,
+        restricted: bool,
+    ) -> Task<Message> {
         while let Some(line) = lines.front().cloned() {
             let line = line.trim().to_string();
             if line.is_empty() {
                 lines.pop_front();
                 continue;
             }
-            if let Some(task) = self.defer_plugin_row(&line, || Resume::Lines(lines.clone())) {
+            if restricted {
+                if !self.script_commands {
+                    let err = "running commands from a script is turned off (SCRIPTCOMMANDS = 0); turn it on at the command line with SCRIPTCOMMANDS 1";
+                    self.script_command_rejected = Some(err.to_owned());
+                    self.command_line.push_error(err);
+                    break;
+                }
+                if let Err(err) = self.check_script_command_allowed(&line) {
+                    self.script_command_rejected = Some(err.clone());
+                    self.command_line.push_error(&err);
+                    break;
+                }
+            }
+            if let Some(task) =
+                self.defer_plugin_row(&line, || Resume::Lines(lines.clone(), restricted))
+            {
                 return task;
             }
             lines.pop_front();
@@ -216,15 +237,22 @@ impl OpenCADStudio {
             // runs to the end here, and what it starts does not wait.
             let beside = self.plugin_frame_drawn && !self.plugin_frame_pass;
             let pass = std::mem::replace(&mut self.plugin_frame_pass, !beside);
-            let task = self.run_command_line_streaming(&line, true);
+            let task = if restricted {
+                self.run_script_command_line(&line, true, true)
+            } else {
+                self.run_command_line_streaming(&line, true)
+            };
             if beside && self.plugin_running() {
                 self.plugin_frame_pass = pass;
                 self.plugin_frame_drawn = false;
-                self.plugin_run_then(lines);
+                self.plugin_run_then(lines, restricted);
                 return task;
             }
             let _ = self.drive_headless_task(task);
             self.plugin_frame_pass = pass;
+            if restricted && self.script_command_rejected.take().is_some() {
+                break;
+            }
         }
         // A line that did not reach a plugin command leaves nothing behind.
         self.plugin_frame_drawn = false;
@@ -351,15 +379,15 @@ mod tests {
         let lines: VecDeque<String> = ["REGEN", "EX_NOTE working", "EX_RUN ALL"]
             .map(str::to_string)
             .into();
-        let _ = app.run_script_lines(lines);
+        let _ = app.run_script_lines(lines, false);
         let frame = app.plugin_frame.as_ref().expect("waits before EX_NOTE");
         assert_eq!(frame.label, "EX_NOTE");
-        assert!(matches!(&frame.resumes[..], [Resume::Lines(rest)] if rest.len() == 2));
+        assert!(matches!(&frame.resumes[..], [Resume::Lines(rest, _)] if rest.len() == 2));
         // After the frame EX_NOTE runs, then EX_RUN waits for one of its own.
         let _ = app.resume_plugin_frame();
         let frame = app.plugin_frame.as_ref().expect("waits before EX_RUN");
         assert_eq!(frame.label, "EX_RUN");
-        assert!(matches!(&frame.resumes[..], [Resume::Lines(rest)] if rest.len() == 1));
+        assert!(matches!(&frame.resumes[..], [Resume::Lines(rest, _)] if rest.len() == 1));
         let _ = app.resume_plugin_frame();
         assert!(app.plugin_frame.is_none());
         clear();
@@ -382,7 +410,7 @@ mod tests {
         // A line driven where it is made defers nothing at all.
         let lines: VecDeque<String> = ["EX_RUN ALL"].map(str::to_string).into();
         app.plugin_frame_pass = true;
-        let _ = app.run_script_lines(lines);
+        let _ = app.run_script_lines(lines, false);
         assert!(app.plugin_frame.is_none());
         app.plugin_frame_pass = false;
         clear();

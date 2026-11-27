@@ -56,7 +56,7 @@ pub(crate) struct PluginRun {
     /// An interactive command the plugin started meanwhile (command id).
     interactive: Option<u64>,
     /// Lines of a plugin script that come after this command.
-    then: Option<VecDeque<String>>,
+    then: Option<(VecDeque<String>, bool)>,
 }
 
 /// The command word of a line.
@@ -174,9 +174,9 @@ impl OpenCADStudio {
 
     /// The lines of a plugin script after the command that started running:
     /// they run once it ends.
-    pub(super) fn plugin_run_then(&mut self, lines: VecDeque<String>) {
+    pub(super) fn plugin_run_then(&mut self, lines: VecDeque<String>, restricted: bool) {
         if let Some(run) = self.plugin_run.as_mut() {
-            run.then = Some(lines);
+            run.then = Some((lines, restricted));
         }
     }
 
@@ -292,7 +292,7 @@ impl OpenCADStudio {
             None => Task::none(),
         };
         match run.then {
-            Some(lines) => Task::batch([task, self.run_script_lines(lines)]),
+            Some((lines, restricted)) => Task::batch([task, self.run_script_lines(lines, restricted)]),
             None => task,
         }
     }
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn the_lines_after_the_command_run_once_it_ends() {
         let mut app = app_running("EX_RUN");
-        app.plugin_run_then(VecDeque::from(["CIRCLE 0,0 5".to_string()]));
+        app.plugin_run_then(VecDeque::from(["CIRCLE 0,0 5".to_string()]), false);
         let before = app.tabs[app.active_tab].scene.document.entities().count();
         let tab = app.active_tab;
         let _ = app.finish_plugin_run(tab, Some(true));

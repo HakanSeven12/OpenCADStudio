@@ -74,8 +74,11 @@ pub fn popover<'a>(
     if let Some(footer) = footer {
         content = content.push(hline()).push(footer);
     }
+    // Inset by the outline, so the head's and footer's own backgrounds do
+    // not paint over it.
     let framed = container(content)
         .width(Length::Fixed(km::FORM_W))
+        .padding(km::line())
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(chrome::surface(theme))),
             text_color: Some(chrome::text(theme)),

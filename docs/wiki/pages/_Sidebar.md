@@ -43,6 +43,7 @@
 - [Measuring and Inquiry](Measuring-and-Inquiry)
 - [Customization](Customization)
 - [Automation and Plugins](Automation-and-Plugins)
+- [Translating](Translating)
 
 **Reference**
 - [Command Reference](Command-Reference)

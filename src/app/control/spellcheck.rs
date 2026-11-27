@@ -160,6 +160,31 @@ fn normalize_language_tag(input: Option<&str>) -> String {
     }
 }
 
+/// Validate and normalize a Hunspell dictionary tag to `[A-Za-z0-9_]{1,32}`
+/// (rejecting empty values, leading `-` flags, path traversal, and control chars).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sanitize_hunspell_lang(lang: &str) -> Option<String> {
+    if lang.is_empty() || lang.len() > 32 || lang.starts_with('-') {
+        return None;
+    }
+    if !lang
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    Some(lang.replace('-', "_"))
+}
+
+/// Strip control characters (`\r`, `\n`, `\0`, etc.) from a word before sending
+/// it over the line-oriented Hunspell pipe protocol.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sanitize_hunspell_word(word: &str) -> Option<String> {
+    let cleaned: String = word.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = cleaned.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 // ============================================================================
 // Windows Backend: Win32 Spell Checking API (ISpellChecker via COM)
 // ============================================================================
@@ -280,11 +305,12 @@ pub(crate) mod windows_impl {
     }
 
     unsafe fn from_wide_ptr(ptr: *mut u16) -> String {
+        const MAX_WIDE_LEN: usize = 4096;
         if ptr.is_null() {
             return String::new();
         }
         let mut len = 0;
-        while *ptr.add(len) != 0 {
+        while len < MAX_WIDE_LEN && *ptr.add(len) != 0 {
             len += 1;
         }
         let slice = std::slice::from_raw_parts(ptr, len);
@@ -298,19 +324,23 @@ pub(crate) mod windows_impl {
         language: String,
     }
 
-    // The spell-checker factory is free-threaded (registry ThreadingModel
-    // "Free") and we initialise the MTA, so the checker can be called from any
-    // thread and its DLL stays loaded for the life of the process.
-    unsafe impl Send for WindowsSpeller {}
-    unsafe impl Sync for WindowsSpeller {}
-
     impl WindowsSpeller {
         pub fn new(lang_tag: &str) -> Option<Self> {
+            const COINIT_MULTITHREADED: u32 = 0;
+            const S_OK: HRESULT = 0;
+            const S_FALSE: HRESULT = 1;
+            const RPC_E_CHANGED_MODE: HRESULT = 0x8001_0106u32 as i32;
+            // SAFETY: COM initialization, factory creation, and interface cleanup
+            // follow Windows COM lifetime rules; every non-null interface pointer
+            // is checked and released on all paths.
             unsafe {
-                // COINIT_MULTITHREADED: an STA would be torn down when this
+                // COINIT_MULTITHREADED (0): an STA would be torn down when this
                 // thread exits, unloading the DLL while other threads still
                 // hold checkers.
-                CoInitializeEx(std::ptr::null(), 2);
+                let hr_init = CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED);
+                if hr_init != S_OK && hr_init != S_FALSE && hr_init != RPC_E_CHANGED_MODE {
+                    return None;
+                }
 
                 let mut factory_obj: *mut c_void = std::ptr::null_mut();
                 let hr = CoCreateInstance(
@@ -483,45 +513,61 @@ pub(crate) mod windows_impl {
 #[cfg(target_os = "macos")]
 pub(crate) mod macos_impl {
     use objc2::msg_send;
+    use objc2::rc::{autoreleasepool, Retained};
     use objc2::runtime::{AnyClass, AnyObject};
     use objc2_foundation::NSString;
 
     pub struct MacSpeller {
-        checker: *mut AnyObject,
+        checker: Retained<AnyObject>,
         language: String,
     }
 
-    unsafe impl Send for MacSpeller {}
-    unsafe impl Sync for MacSpeller {}
+    fn as_nsstring(obj: *mut AnyObject, ns_string_cls: Option<&AnyClass>) -> Option<String> {
+        let cls = ns_string_cls?;
+        if obj.is_null() {
+            return None;
+        }
+        // SAFETY: `obj` is non-null inside an active autorelease pool; we verify
+        // its runtime Objective-C class via `isKindOfClass:` before casting.
+        let is_str: bool = unsafe { msg_send![obj, isKindOfClass: cls] };
+        if !is_str {
+            return None;
+        }
+        // SAFETY: Checked `isKindOfClass: NSString` above.
+        let ns: &NSString = unsafe { &*(obj.cast::<NSString>()) };
+        Some(ns.to_string())
+    }
 
     impl MacSpeller {
         pub fn new(lang_tag: &str) -> Option<Self> {
-            unsafe {
+            autoreleasepool(|_| {
                 let cls = AnyClass::get("NSSpellChecker")?;
-                let checker: *mut AnyObject = msg_send![cls, sharedSpellChecker];
-                if checker.is_null() {
+                // SAFETY: `sharedSpellChecker` returns the singleton `NSSpellChecker`
+                // object (or null), retained via `Retained::retain` below.
+                let checker_raw: *mut AnyObject = unsafe { msg_send![cls, sharedSpellChecker] };
+                if checker_raw.is_null() {
                     return None;
                 }
+                // SAFETY: `checker_raw` is a non-null Objective-C object inside the pool.
+                let checker = unsafe { Retained::retain(checker_raw) }?;
 
                 let ns_lang = NSString::from_str(lang_tag);
-                let ok: bool = msg_send![checker, setLanguage: &*ns_lang];
+                // SAFETY: `checker` is a retained `NSSpellChecker` and `ns_lang` is valid.
+                let ok: bool = unsafe { msg_send![&*checker, setLanguage: &*ns_lang] };
                 let actual_lang = if ok {
                     lang_tag.to_string()
                 } else {
-                    let cur_lang: *mut AnyObject = msg_send![checker, language];
-                    if !cur_lang.is_null() {
-                        let cur: &NSString = &*(cur_lang as *const NSString);
-                        cur.to_string()
-                    } else {
-                        lang_tag.to_string()
-                    }
+                    // SAFETY: `checker` returns an `NSString*` or null for `language`.
+                    let cur_lang: *mut AnyObject = unsafe { msg_send![&*checker, language] };
+                    as_nsstring(cur_lang, AnyClass::get("NSString"))
+                        .unwrap_or_else(|| lang_tag.to_string())
                 };
 
                 Some(Self {
                     checker,
                     language: actual_lang,
                 })
-            }
+            })
         }
 
         pub fn language(&self) -> &str {
@@ -529,24 +575,27 @@ pub(crate) mod macos_impl {
         }
 
         pub fn check_word(&self, word: &str, want_suggestions: bool) -> (bool, Vec<String>) {
-            if self.checker.is_null() || word.is_empty() {
+            if word.is_empty() {
                 return (true, Vec::new());
             }
 
-            unsafe {
+            autoreleasepool(|_| {
                 let is_all_caps =
                     word.chars().any(char::is_alphabetic) && word == word.to_uppercase();
 
                 let ns_word = NSString::from_str(word);
-                let range: objc2_foundation::NSRange = msg_send![
-                    self.checker,
-                    checkSpellingOfString: &*ns_word,
-                    startingAt: 0isize,
-                    language: std::ptr::null::<AnyObject>(),
-                    wrap: false,
-                    inSpellDocumentWithTag: 0isize,
-                    wordCount: std::ptr::null_mut::<isize>()
-                ];
+                // SAFETY: `self.checker` is a retained `NSSpellChecker`; `ns_word` is valid.
+                let range: objc2_foundation::NSRange = unsafe {
+                    msg_send![
+                        &*self.checker,
+                        checkSpellingOfString: &*ns_word,
+                        startingAt: 0isize,
+                        language: std::ptr::null::<AnyObject>(),
+                        wrap: false,
+                        inSpellDocumentWithTag: 0isize,
+                        wordCount: std::ptr::null_mut::<isize>()
+                    ]
+                };
 
                 let mut is_misspelled = range.length > 0;
 
@@ -554,15 +603,18 @@ pub(crate) mod macos_impl {
                 if !is_misspelled && is_all_caps {
                     let lower = word.to_lowercase();
                     let ns_lower = NSString::from_str(&lower);
-                    let range_lower: objc2_foundation::NSRange = msg_send![
-                        self.checker,
-                        checkSpellingOfString: &*ns_lower,
-                        startingAt: 0isize,
-                        language: std::ptr::null::<AnyObject>(),
-                        wrap: false,
-                        inSpellDocumentWithTag: 0isize,
-                        wordCount: std::ptr::null_mut::<isize>()
-                    ];
+                    // SAFETY: Same retained `NSSpellChecker` receiver and valid `NSString`.
+                    let range_lower: objc2_foundation::NSRange = unsafe {
+                        msg_send![
+                            &*self.checker,
+                            checkSpellingOfString: &*ns_lower,
+                            startingAt: 0isize,
+                            language: std::ptr::null::<AnyObject>(),
+                            wrap: false,
+                            inSpellDocumentWithTag: 0isize,
+                            wordCount: std::ptr::null_mut::<isize>()
+                        ]
+                    };
                     if range_lower.length > 0 {
                         is_misspelled = true;
                     }
@@ -581,20 +633,25 @@ pub(crate) mod macos_impl {
                         location: 0,
                         length: word_len,
                     };
-                    let arr: *mut AnyObject = msg_send![
-                        self.checker,
-                        guessesForWordRange: r,
-                        inString: &*ns_target,
-                        language: std::ptr::null::<AnyObject>(),
-                        inSpellDocumentWithTag: 0isize
-                    ];
+                    // SAFETY: `guessesForWordRange:inString:...` returns an `NSArray*`
+                    // of `NSString*` objects scoped to the enclosing autorelease pool.
+                    let arr: *mut AnyObject = unsafe {
+                        msg_send![
+                            &*self.checker,
+                            guessesForWordRange: r,
+                            inString: &*ns_target,
+                            language: std::ptr::null::<AnyObject>(),
+                            inSpellDocumentWithTag: 0isize
+                        ]
+                    };
                     if !arr.is_null() {
-                        let count: usize = msg_send![arr, count];
+                        let ns_string_cls = AnyClass::get("NSString");
+                        // SAFETY: `arr` is non-null `NSArray` scoped to the pool.
+                        let count: usize = unsafe { msg_send![arr, count] };
                         for i in 0..count.min(5) {
-                            let item: *mut AnyObject = msg_send![arr, objectAtIndex: i];
-                            if !item.is_null() {
-                                let ns_item: &NSString = &*(item as *const NSString);
-                                let mut s = ns_item.to_string();
+                            // SAFETY: `i < count`.
+                            let item: *mut AnyObject = unsafe { msg_send![arr, objectAtIndex: i] };
+                            if let Some(mut s) = as_nsstring(item, ns_string_cls) {
                                 if is_all_caps {
                                     s = s.to_uppercase();
                                 }
@@ -605,7 +662,7 @@ pub(crate) mod macos_impl {
                 }
 
                 (!is_misspelled, suggestions)
-            }
+            })
         }
     }
 }
@@ -636,15 +693,16 @@ pub(crate) mod linux_impl {
 
     impl LinuxSpeller {
         pub fn new(lang_tag: &str) -> Option<Self> {
+            let safe_lang = super::sanitize_hunspell_lang(lang_tag)?;
             let mut words = HashSet::new();
             let mut found_any = false;
 
-            // Search system directories for .dic or wordlist files matching the requested language
-            let short_lang = lang_tag.split('-').next().unwrap_or(lang_tag);
+            // Search system directories for .dic or wordlist files matching the validated language tag
+            let short_lang = safe_lang.split('_').next().unwrap_or(&safe_lang);
             let candidates = [
-                format!("{}.dic", lang_tag.replace('-', "_")),
-                format!("{}.dic", lang_tag),
-                format!("{}.dic", short_lang),
+                format!("{safe_lang}.dic"),
+                format!("{lang_tag}.dic"),
+                format!("{short_lang}.dic"),
                 "words".to_string(),
                 short_lang.to_string(),
             ];
@@ -677,7 +735,7 @@ pub(crate) mod linux_impl {
 
             Some(Self {
                 words,
-                language: lang_tag.to_string(),
+                language: safe_lang,
                 has_cli_tool: has_cli,
             })
         }
@@ -752,7 +810,8 @@ pub(crate) mod linux_impl {
         use std::io::Write;
         use std::process::{Command, Stdio};
 
-        let lang_param = lang.replace('-', "_");
+        let lang_param = super::sanitize_hunspell_lang(lang)?;
+        let clean_word = super::sanitize_hunspell_word(word)?;
         let mut child = Command::new("hunspell")
             .arg("-d")
             .arg(&lang_param)
@@ -764,7 +823,7 @@ pub(crate) mod linux_impl {
             .ok()?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = writeln!(stdin, "^{word}");
+            let _ = writeln!(stdin, "^{clean_word}");
         }
 
         let output = child.wait_with_output().ok()?;
@@ -833,5 +892,39 @@ mod tests {
             handle.join().expect("speller thread panicked");
         }
         assert_eq!(completed.load(Ordering::Relaxed), ROUNDS);
+    }
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::{sanitize_hunspell_lang, sanitize_hunspell_word};
+
+    #[test]
+    fn hunspell_lang_allows_bcp47_and_blocks_traversal_and_flags() {
+        assert_eq!(sanitize_hunspell_lang("en-US").as_deref(), Some("en_US"));
+        assert_eq!(sanitize_hunspell_lang("tr_TR").as_deref(), Some("tr_TR"));
+        assert_eq!(sanitize_hunspell_lang("C").as_deref(), Some("C"));
+
+        assert_eq!(sanitize_hunspell_lang(""), None);
+        assert_eq!(sanitize_hunspell_lang("-d"), None);
+        assert_eq!(sanitize_hunspell_lang("--version"), None);
+        assert_eq!(sanitize_hunspell_lang("../../etc/passwd"), None);
+        assert_eq!(sanitize_hunspell_lang("en US"), None);
+        assert_eq!(sanitize_hunspell_lang("en\0US"), None);
+        assert_eq!(sanitize_hunspell_lang("en\nUS"), None);
+        assert_eq!(sanitize_hunspell_lang(&"a".repeat(33)), None);
+        let max_valid = "a".repeat(32);
+        assert_eq!(sanitize_hunspell_lang(&max_valid), Some(max_valid));
+    }
+
+    #[test]
+    fn hunspell_word_strips_newlines_and_control_bytes() {
+        assert_eq!(sanitize_hunspell_word("house").as_deref(), Some("house"));
+        assert_eq!(
+            sanitize_hunspell_word("foo\n*inject\r\0").as_deref(),
+            Some("foo*inject")
+        );
+        assert_eq!(sanitize_hunspell_word("\r\n\0 "), None);
+        assert_eq!(sanitize_hunspell_word(""), None);
     }
 }

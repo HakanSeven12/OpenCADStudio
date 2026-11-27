@@ -1310,6 +1310,36 @@ impl super::OpenCADStudio {
         true
     }
 
+    /// Tab and the formatting keys in the editor: Tab types a tab (makes a
+    /// list item, or in a table cell goes to the next cell), Ctrl+B / Ctrl+I / Ctrl+U toggle bold, italic and
+    /// underline. `None` when the editor is closed or the key is another one.
+    pub(in crate::app) fn mtext_editing_key(
+        &mut self,
+        key: &str,
+    ) -> Option<iced::Task<crate::app::Message>> {
+        if !self.mtext_editor.as_ref().is_some_and(|ed| ed.show_preview) {
+            return None;
+        }
+        if key == "TAB" {
+            // In a table cell Tab moves on to the next cell.
+            if self.table_cell_editor.is_some() {
+                return None;
+            }
+            if let Some(task) = self.table_cell_tab(true) {
+                return Some(task);
+            }
+            self.mtext_type("\t");
+            return Some(iced::Task::none());
+        }
+        let fmt = match key.strip_prefix(super::shortcuts::ACCEL)?.strip_prefix('+')? {
+            "B" => MTextFmt::Bold,
+            "I" => MTextFmt::Italic,
+            "U" => MTextFmt::Underline,
+            _ => return None,
+        };
+        Some(self.update(crate::app::Message::MTextFmt(fmt)))
+    }
+
     /// Visible-character count of the current text.
     pub(super) fn mtext_vis_count(&self) -> usize {
         self.mtext_editor

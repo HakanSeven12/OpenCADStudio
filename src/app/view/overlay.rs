@@ -118,6 +118,9 @@ struct MTextPreview {
     content_h: f32,
     /// The box-width ruler above the text; absent on a turned preview.
     ruler: Option<BoxRuler>,
+    /// The caret paragraph's tab stops on the ruler: kind (`L`, `C`, `R`,
+    /// `D`) and distance from the box's left edge, in layout units.
+    tabs: Vec<(char, f32)>,
     /// The text's rotation (cos, sin). Strokes and glyph boxes are laid out
     /// upright; the preview turns them only when drawing, and turns pointer
     /// positions back, so caret and selection stay in the layout frame.
@@ -503,6 +506,11 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                             p.move_to(point);
                             p.line_to(point + normal * if i % 5 == 0 { 7.0 } else { 3.5 });
                         }
+                        let span = (ruler.right - ruler.left).max(f32::EPSILON);
+                        for &(kind, at) in self.tabs.iter().filter(|(_, at)| *at <= span) {
+                            let base = a + edge * (at / span) + normal * 13.0;
+                            tab_mark(p, kind, base, normal * 6.0, along * 4.0);
+                        }
                     });
                     frame.stroke(
                         &ruler_line,
@@ -629,6 +637,17 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                     p.move_to(iced::Point::new(x, 4.0));
                     p.line_to(iced::Point::new(x, MTEXT_RULER_H - 4.0));
                 }
+                for &(kind, at) in &self.tabs {
+                    let x = map(ruler.left + at, 0.0).x;
+                    let base = iced::Point::new(x, MTEXT_RULER_H - 2.0);
+                    tab_mark(
+                        p,
+                        kind,
+                        base,
+                        iced::Vector::new(0.0, -6.0),
+                        iced::Vector::new(4.0, 0.0),
+                    );
+                }
             });
             frame.stroke(&rule, Stroke::default().with_color(color).with_width(1.0));
             let x = map(ruler.handle(), 0.0).x;
@@ -723,6 +742,51 @@ fn ed_fields(ed: &super::super::mtext_editor::MTextEditorState) -> Vec<(usize, u
     }
 }
 
+/// The caret paragraph's tab stops, for the ruler.
+fn ed_tabs(ed: &super::super::mtext_editor::MTextEditorState) -> Vec<(char, f32)> {
+    use document::entities::mtext_format::TabStop;
+    let h = ed.height_value();
+    ed.caret_paragraph_props()
+        .tab_stops
+        .iter()
+        .map(|tab| {
+            let kind = match tab {
+                TabStop::Left(_) => 'L',
+                TabStop::Center(_) => 'C',
+                TabStop::Right(_) => 'R',
+                TabStop::Decimal(_) | TabStop::DecimalWithCharacter { .. } => 'D',
+            };
+            (kind, (tab.position() * h) as f32)
+        })
+        .collect()
+}
+
+/// A tab-stop mark at `base`: a stem along `up` with a foot along `along`
+/// on the side the text runs from it (both sides for centre and decimal,
+/// which adds a dot).
+fn tab_mark(
+    p: &mut iced::widget::canvas::path::Builder,
+    kind: char,
+    base: iced::Point,
+    up: iced::Vector,
+    along: iced::Vector,
+) {
+    p.move_to(base);
+    p.line_to(base + up);
+    let (back, ahead) = match kind {
+        'L' => (0.0, 1.0),
+        'R' => (1.0, 0.0),
+        _ => (1.0, 1.0),
+    };
+    p.move_to(base - along * back);
+    p.line_to(base + along * ahead);
+    if kind == 'D' {
+        let dot = base + up * 0.5 + along * 0.6;
+        p.move_to(dot);
+        p.line_to(dot + along * 0.3);
+    }
+}
+
 /// The selection fill set with Text Highlight Color.
 fn ed_highlight() -> Option<Color> {
     crate::app::mtext_prefs::prefs()
@@ -791,6 +855,7 @@ pub(super) fn table_cell_editor_overlay(
         scale: 1.0,
         content_h: size.1,
         ruler: None,
+        tabs: Vec::new(),
         rotation: (angle.cos(), angle.sin()),
         cell: Some(cell),
         inplace: false,
@@ -884,6 +949,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
                 growth,
             }
         }),
+        tabs: ed_tabs(ed),
         rotation: (angle.cos(), angle.sin()),
         cell: Some(cell),
         inplace: true,
@@ -1434,6 +1500,7 @@ fn mtext_editor_content<'a>(
             scale,
             content_h,
             ruler,
+            tabs: ed_tabs(ed),
             rotation,
             cell: None,
             inplace: false,
@@ -3229,6 +3296,7 @@ mod cell_editor_wheel_tests {
             scale: 1.0,
             content_h: 600.0,
             ruler: None,
+            tabs: Vec::new(),
             rotation: (1.0, 0.0),
             cell: Some(cell),
             inplace,

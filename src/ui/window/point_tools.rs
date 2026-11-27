@@ -49,8 +49,12 @@ pub struct PointBlocksWindow {
     pub window: Option<([f64; 2], [f64; 2])>,
     /// The current display when the command started: two corners.
     pub display: Option<([f64; 2], [f64; 2])>,
-    /// Point group names and whether each is selected.
+    /// Point group names in the drawing's order and whether each is
+    /// selected.
     pub groups: Vec<(String, bool)>,
+    /// The group picker while it is open: names, descriptions and the
+    /// rows selected in it.
+    pub picker: Option<Vec<(String, String, bool)>>,
     /// The drawing's blocks that hold a POINT attribute definition.
     pub blocks: Vec<String>,
     pub use_existing: bool,
@@ -115,6 +119,11 @@ pub enum PointToolMsg {
     Spatial(Spatial),
     PickWindow,
     BlockGroup(usize, bool),
+    /// The group picker: open it, a row clicked on or off, OK, Cancel.
+    PickGroups,
+    PickerRow(usize, bool),
+    PickerOk,
+    PickerCancel,
     UseExisting(bool),
     Existing(String),
     NewName(String),
@@ -504,10 +513,51 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         .spacing(6)
         .align_y(iced::Center),
     );
-    let mut groups = column![].spacing(4);
-    for (k, (name, on)) in state.groups.iter().enumerate() {
-        groups = groups.push(checkbox(*on).label(name.clone()).size(14).text_size(11).on_toggle(move |v| msg(PointToolMsg::BlockGroup(k, v))));
-    }
+    let groups: Element<'a, Message> = match &state.picker {
+        // The picker: the drawing's groups in their order, several rows
+        // selectable.
+        Some(rows) => {
+            let mut list = column![].spacing(2);
+            for (k, (name, description, on)) in rows.iter().enumerate() {
+                list = list.push(
+                    button(row![small(name.clone()).width(Length::Fixed(200.0)), small(description.clone()).style(muted_style)].spacing(8))
+                        .on_press(msg(PointToolMsg::PickerRow(k, !on)))
+                        .style(button_style(*on))
+                        .padding([3, 8])
+                        .width(Fill),
+                );
+            }
+            // The list and its buttons take the room of the selected list.
+            column![
+                scrollable(list).height(Length::Fixed(86.0)),
+                row![
+                    small(t!("Click rows to select the point groups.")).style(muted_style),
+                    Space::new().width(Fill),
+                    button(small(t!("Cancel"))).on_press(msg(PointToolMsg::PickerCancel)).style(button_style(false)).padding([4, 10]),
+                    button(small(t!("OK"))).on_press(msg(PointToolMsg::PickerOk)).style(button_style(true)).padding([4, 10]),
+                ]
+                .spacing(6)
+                .align_y(iced::Center),
+            ]
+            .spacing(6)
+            .into()
+        }
+        // The groups selected, read only, by name.
+        None => {
+            let mut picked: Vec<&String> = state.groups.iter().filter(|g| g.1).map(|g| &g.0).collect();
+            picked.sort_by_key(|n| n.to_lowercase());
+            let mut list = column![].spacing(2);
+            for name in picked {
+                list = list.push(small(name.clone()));
+            }
+            row![
+                container(scrollable(list)).padding(6).height(Length::Fixed(120.0)).width(Fill).style(crate::ui::window::pdf_dialogs::well_style),
+                pick_button(Some(msg(PointToolMsg::PickGroups))),
+            ]
+            .spacing(8)
+            .into()
+        }
+    };
     let output = card(
         t!("Block output").into_owned(),
         column![
@@ -538,7 +588,7 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         ]
         .spacing(8),
     );
-    let mut col = column![spatial, card(t!("Selected point groups:").into_owned(), scrollable(groups).height(Length::Fixed(120.0))), output].spacing(10);
+    let mut col = column![spatial, card(t!("Selected point groups:").into_owned(), groups), output].spacing(10);
     if let Some(band) = error_band(&state.error) {
         col = col.push(band);
     }

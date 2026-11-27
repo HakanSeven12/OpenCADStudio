@@ -637,6 +637,10 @@ pub struct LegacyJob {
     /// "Apply to all": the resolution, its offset or sequence start, and
     /// the next sequence number.
     pub all: Option<(Resolution, u32, u32)>,
+    /// The Sequence from value the next question shows: the last number a
+    /// sequence gave (measured: 300 and 301 given, the next question shows
+    /// 301), 100 before any.
+    pub sequence: u32,
 }
 
 /// Create Blocks from COGO Points under way.
@@ -896,7 +900,22 @@ impl OpenCADStudio {
     pub(in crate::app) fn open_point_blocks(&mut self) {
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
-        let groups = point_groups(doc).into_iter().map(|g| (g.0.clone(), g.0 == "_All Points")).collect();
+        // The groups in the drawing's draw order, top first.
+        let mut listed = point_groups(doc);
+        let order = |name: &str| {
+            doc.objects
+                .values()
+                .filter_map(arch)
+                .filter(|o| o.dxf_name == "AECC_POINT_PG")
+                .find(|o| {
+                    let d = o.decode();
+                    if name == "_All Points" { d.strings.iter().any(|s| s == "AeccImpAllPointsPG") } else { d.strings.first().map(String::as_str) == Some(name) }
+                })
+                .and_then(|o| o.point_group_draw_order())
+                .unwrap_or(0)
+        };
+        listed.sort_by_key(|g| std::cmp::Reverse(order(&g.0)));
+        let groups = listed.into_iter().map(|g| (g.0.clone(), g.0 == "_All Points")).collect();
         let mut blocks: Vec<String> = doc
             .block_records
             .iter()
@@ -912,6 +931,7 @@ impl OpenCADStudio {
             window: None,
             display: None,
             groups,
+            picker: None,
             blocks,
             use_existing: false,
             existing: 0,
@@ -960,15 +980,27 @@ impl OpenCADStudio {
             (_, w) => w,
         };
         let doc = &self.tabs[i].scene.document;
-        let all = state.groups.iter().any(|(n, on)| *on && n == "_All Points");
-        let picked: Vec<u32> = point_groups(doc).into_iter().filter(|g| state.groups.iter().any(|(n, on)| *on && *n == g.0)).flat_map(|g| g.2).collect();
-        let mut points: Vec<c3d::CogoPoint> = c3d::cogo_points(doc).into_iter().filter(|p| all || picked.contains(&p.number)).collect();
+        // Group by group in name order (ordinal: "G2" before "_All
+        // Points"), each group's points by number, a point once (measured:
+        // G2 and _All Points gave 4, 5, 6, then 1, 2, 3, 7…).
+        let mut picked: Vec<(String, Vec<u32>)> = point_groups(doc).into_iter().filter(|g| state.groups.iter().any(|(n, on)| *on && *n == g.0)).map(|g| (g.0, g.2)).collect();
+        picked.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut order: Vec<u32> = Vec::new();
+        for (_, mut numbers) in picked {
+            numbers.sort_unstable();
+            for n in numbers {
+                if !order.contains(&n) {
+                    order.push(n);
+                }
+            }
+        }
+        let mut points: Vec<c3d::CogoPoint> = c3d::cogo_points(doc).into_iter().filter(|p| order.contains(&p.number)).collect();
         points.retain(|p| match (state.spatial, window) {
             (Spatial::Window, Some((lo, hi))) => (lo[0]..=hi[0]).contains(&p.position.x) && (lo[1]..=hi[1]).contains(&p.position.y),
             (Spatial::CurrentDisplay, _) => self.typed_point_in_view(i, glam::DVec3::new(p.position.x, p.position.y, 0.0)),
             _ => true,
         });
-        points.sort_by_key(|p| p.number);
+        points.sort_by_key(|p| order.iter().position(|n| *n == p.number));
         self.point_tools.blocks = None;
         self.close_active_modal();
         self.push_undo_snapshot(i, "CREATEBLOCKSFROMPOINTS");
@@ -1045,7 +1077,9 @@ impl OpenCADStudio {
             let value = match def.tag.to_uppercase().as_str() {
                 "ELEV" => format!("{z:.3}"),
                 "POINT" => p.number.to_string(),
-                "DESC" => p.description.clone().unwrap_or_default(),
+                // The full description (measured: TREE OAK under the key
+                // format "$0 KEY" gives DESC "TREE KEY").
+                "DESC" => p.full_description().unwrap_or_default(),
                 _ => def.default_value.clone(),
             };
             let mut a = document::entities::AttributeEntity::from_definition(&def, Some(value));
@@ -1097,7 +1131,7 @@ impl OpenCADStudio {
         }
         queue.sort_by_key(|l| l.insert.value());
         self.push_undo_snapshot(i, "REPLACELEGACYPOINTBLOCKS");
-        self.point_tools.legacy_job = Some(LegacyJob { queue: queue.into(), all: None });
+        self.point_tools.legacy_job = Some(LegacyJob { queue: queue.into(), all: None, sequence: 100 });
         self.run_legacy_job();
     }
 
@@ -1111,25 +1145,43 @@ impl OpenCADStudio {
             let all = job.all;
             let taken = cogo_point_entity(&self.tabs[i].scene.document, item.number).is_some();
             if taken && all.is_none() {
-                self.point_tools.duplicate = Some(DuplicatePointWindow {
-                    number: item.number,
-                    resolution: Resolution::UseNext,
-                    offset: "1".into(),
-                    sequence: "100".into(),
-                    apply_all: true,
-                });
-                self.active_modal = Some(crate::app::ModalKind::DuplicatePoint);
+                self.ask_duplicate(item.number);
                 return;
             }
             if let Some(job) = self.point_tools.legacy_job.as_mut() {
                 job.queue.pop_front();
             }
             match (taken, all) {
-                (true, Some((r, value, _))) => self.settle_legacy(i, &item, r, value),
+                (true, Some((r, value, _))) => {
+                    if !self.settle_legacy(i, &item, r, value) {
+                        // The offset number is taken too: asked again.
+                        if let Some(job) = self.point_tools.legacy_job.as_mut() {
+                            job.queue.push_front(item.clone());
+                            job.all = None;
+                        }
+                        self.ask_duplicate(item.number);
+                        return;
+                    }
+                }
                 _ => self.write_legacy(i, &item, Some(item.number)),
             }
         }
         self.point_tools.legacy_job = None;
+    }
+
+    /// Duplicate Point Number for `number`; every question starts at Use
+    /// next point number with an offset of 1 (measured: also when asked
+    /// again), the sequence at the last number a sequence gave.
+    fn ask_duplicate(&mut self, number: u32) {
+        let sequence = self.point_tools.legacy_job.as_ref().map_or(100, |j| j.sequence);
+        self.point_tools.duplicate = Some(DuplicatePointWindow {
+            number,
+            resolution: Resolution::UseNext,
+            offset: "1".into(),
+            sequence: sequence.to_string(),
+            apply_all: true,
+        });
+        self.active_modal = Some(crate::app::ModalKind::DuplicatePoint);
     }
 
     /// A legacy block's COGO point, numbered `number` (`None`: the next free
@@ -1138,7 +1190,13 @@ impl OpenCADStudio {
         let layer = point_layer(&self.tabs[i].scene.document, self.tabs[i].active_layer.clone());
         let scene = &mut self.tabs[i].scene;
         let at = document::types::Vector3::new(item.position[0], item.position[1], item.position[2]);
-        match c3d::add_cogo_point(&mut scene.document, number, at, item.description.as_deref(), None, Some(&layer)) {
+        // Without a number, the drawing's next point number (measured: 12
+        // after 1-11 and 100, not 101).
+        let made = match number {
+            Some(n) => c3d::add_cogo_point(&mut scene.document, Some(n), at, item.description.as_deref(), None, Some(&layer)),
+            None => c3d::create_cogo_point(&mut scene.document, at, item.description.as_deref(), Some(&layer)).map(|(h, _)| h),
+        };
+        match made {
             Ok(h) => {
                 scene.bump_entities(&[(h, crate::scene::ChangeKind::Added)]);
                 scene.erase_entities(&[item.insert]);
@@ -1149,43 +1207,52 @@ impl OpenCADStudio {
     }
 
     /// A taken number settled as `r` (`value`: the offset or the sequence's
-    /// next number).
-    fn settle_legacy(&mut self, i: usize, item: &Legacy, r: Resolution, value: u32) {
+    /// next number); false when the offset number is taken too.
+    fn settle_legacy(&mut self, i: usize, item: &Legacy, r: Resolution, value: u32) -> bool {
         let doc = &self.tabs[i].scene.document;
         let used: Vec<u32> = c3d::cogo_points(doc).iter().map(|p| p.number).collect();
         match r {
             Resolution::UseNext => self.write_legacy(i, item, None),
+            // The number plus the offset (measured: 9 + 50 gives 59; 1 + 1
+            // with 2 in use asks again).
             Resolution::AddOffset => {
-                let step = value.max(1);
-                let mut n = item.number.saturating_add(step);
-                while used.contains(&n) {
-                    n = n.saturating_add(step);
+                let n = item.number.saturating_add(value.max(1));
+                if used.contains(&n) {
+                    return false;
                 }
                 self.write_legacy(i, item, Some(n));
             }
+            // From the value on, the next number free; applied to all, the
+            // numbers run on (measured: 300, 301).
             Resolution::SequenceFrom => {
                 let mut n = value.max(1);
                 while used.contains(&n) {
                     n += 1;
                 }
-                if let Some((_, v, _)) = self.point_tools.legacy_job.as_mut().and_then(|j| j.all.as_mut()) {
-                    *v = n + 1;
+                if let Some(job) = self.point_tools.legacy_job.as_mut() {
+                    job.sequence = n;
+                    if let Some((_, v, _)) = job.all.as_mut() {
+                        *v = n + 1;
+                    }
                 }
                 self.write_legacy(i, item, Some(n));
             }
-            Resolution::Overwrite | Resolution::Merge => {
-                let Some(h) = cogo_point_entity(doc, item.number) else { return self.write_legacy(i, item, None) };
-                let old = c3d::cogo_points(doc).into_iter().find(|p| p.number == item.number);
-                let mut at = document::types::Vector3::new(item.position[0], item.position[1], item.position[2]);
-                let mut description = item.description.clone();
-                // Merge fills in only what the existing point lacks.
-                if let (Resolution::Merge, Some(old)) = (r, old) {
-                    let z = if crate::entities::civil::has_elevation(old.position.z) { old.position.z } else { at.z };
-                    at = document::types::Vector3::new(old.position.x, old.position.y, z);
-                    description = old.description.clone().filter(|d| !d.is_empty()).or(description);
-                }
+            // Merge keeps the existing point as it is (measured: a point
+            // without a description stays without one) and drops the block.
+            Resolution::Merge => {
+                self.tabs[i].scene.erase_entities(&[item.insert]);
+                self.tabs[i].dirty = true;
+            }
+            // Overwrite gives the point the block's position, elevation and
+            // description.
+            Resolution::Overwrite => {
+                let Some(h) = cogo_point_entity(doc, item.number) else {
+                    self.write_legacy(i, item, None);
+                    return true;
+                };
+                let at = document::types::Vector3::new(item.position[0], item.position[1], item.position[2]);
                 let scene = &mut self.tabs[i].scene;
-                match c3d::set_cogo_point(&mut scene.document, h, item.number, at, description.as_deref()) {
+                match c3d::set_cogo_point(&mut scene.document, h, item.number, at, item.description.as_deref()) {
                     Ok(()) => {
                         scene.bump_entities(&[(h, crate::scene::ChangeKind::Modified)]);
                         scene.erase_entities(&[item.insert]);
@@ -1195,6 +1262,7 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
             }
         }
+        true
     }
 
     pub(in crate::app) fn on_point_tool(&mut self, message: PointToolMsg) -> Task<Message> {
@@ -1288,6 +1356,34 @@ impl OpenCADStudio {
                     g.1 = on;
                 }
             }
+            PointToolMsg::PickGroups => {
+                let descriptions: Vec<(String, String)> = point_groups(&self.tabs[i].scene.document).into_iter().map(|g| (g.0, g.1)).collect();
+                if let Some(w) = self.point_tools.blocks.as_mut() {
+                    w.picker = Some(
+                        w.groups
+                            .iter()
+                            .map(|(n, on)| (n.clone(), descriptions.iter().find(|d| d.0 == *n).map(|d| d.1.clone()).unwrap_or_default(), *on))
+                            .collect(),
+                    );
+                }
+            }
+            PointToolMsg::PickerRow(k, on) => {
+                if let Some(row) = self.point_tools.blocks.as_mut().and_then(|w| w.picker.as_mut()).and_then(|p| p.get_mut(k)) {
+                    row.2 = on;
+                }
+            }
+            PointToolMsg::PickerOk => {
+                if let Some(w) = self.point_tools.blocks.as_mut() {
+                    if let Some(rows) = w.picker.take() {
+                        w.groups = rows.into_iter().map(|(n, _, on)| (n, on)).collect();
+                    }
+                }
+            }
+            PointToolMsg::PickerCancel => {
+                if let Some(w) = self.point_tools.blocks.as_mut() {
+                    w.picker = None;
+                }
+            }
             PointToolMsg::UseExisting(on) => {
                 if let Some(w) = self.point_tools.blocks.as_mut() {
                     // With no block to use, only a new one can be made.
@@ -1354,7 +1450,15 @@ impl OpenCADStudio {
                     job.all = Some((w.resolution, value, value));
                 }
                 if let Some(item) = item {
-                    self.settle_legacy(i, &item, w.resolution, value);
+                    if !self.settle_legacy(i, &item, w.resolution, value) {
+                        // The offset number is taken too: asked again.
+                        if let Some(job) = self.point_tools.legacy_job.as_mut() {
+                            job.queue.push_front(item.clone());
+                            job.all = None;
+                        }
+                        self.ask_duplicate(item.number);
+                        return Task::none();
+                    }
                 }
                 self.run_legacy_job();
             }

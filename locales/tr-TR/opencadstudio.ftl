@@ -11097,6 +11097,7 @@ civil-cmd =
     .points-blocks-new = Yeni blok yap
     .points-blocks-layer = Blok katmanı
     .points-blocks-groups = Seçili nokta grupları:
+    .points-blocks-pick-rows = Nokta gruplarını seçmek için satırlara tıklayın.
     .points-blocks-dup-title = Yinelenen Nokta Numaralı Nokta Blokları Bulundu
     .points-blocks-dup = COGO noktaları dönüştürülürken aynı nokta numaralı (__ocs_fmt_0__) bir blok bulundu. Şu seçeneklerden birini seçebilirsiniz:
     .points-blocks-dup-skip = Atla - var olan bloğu tutar, yenisini yok sayar

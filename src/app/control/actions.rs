@@ -3692,6 +3692,7 @@ impl OpenCADStudio {
             // "drag=start|end:<0..1 along the range bar>",
             // "ok". Create Blocks from COGO Points:
             // "spatial=none|display|window", "pick_window", "group=<k>:0|1",
+            // "pick_groups", "picker=<k>:0|1", "picker_ok", "picker_cancel",
             // "existing=<block>", "new=<name>", "layer=<name>", "ok". The
             // duplicate block question: "skip", "overwrite", "cancel".
             // Duplicate Point Number: "resolution=<label>", "offset=",
@@ -3803,6 +3804,10 @@ impl OpenCADStudio {
                             }),
                             (K::PointBlocks, "pick_window") => P::PickWindow,
                             (K::PointBlocks, "group") => pair().map(|(k, v)| P::BlockGroup(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "pick_groups") => P::PickGroups,
+                            (K::PointBlocks, "picker") => pair().map(|(k, v)| P::PickerRow(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "picker_ok") => P::PickerOk,
+                            (K::PointBlocks, "picker_cancel") => P::PickerCancel,
                             (K::PointBlocks, "existing") => {
                                 let _ = self.on_point_tool(P::UseExisting(true));
                                 P::Existing(value.into())

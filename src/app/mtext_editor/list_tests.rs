@@ -199,3 +199,27 @@ fn a_typed_marker_and_tab_make_an_item_that_two_enters_leave() {
     }
     assert_eq!(raw(&app), r"\pxi-3,l4,t4;1.	a\P\pi0,l0,tz;\Pb");
 }
+
+#[test]
+fn the_editor_frame_grows_to_an_unbreakable_word_wider_than_the_box() {
+    let mut app = app(r"{\H3;asdaasdasdasd\P}");
+    app.mtext_editor.as_mut().unwrap().rect_width = 2.0;
+    let ed = ed(&app);
+    let word_right = ed
+        .glyph_boxes
+        .iter()
+        .map(|b| b.local[2])
+        .fold(f32::MIN, f32::max);
+    assert!(
+        word_right > 4.0,
+        "the word is wider than the box: {word_right}"
+    );
+    assert!(
+        ed.frame_width() >= f64::from(word_right) - 1e-3,
+        "frame {} must contain the word ending at {word_right}",
+        ed.frame_width()
+    );
+    // A box wider than the text keeps its defined width.
+    app.mtext_editor.as_mut().unwrap().rect_width = 500.0;
+    assert_eq!(self::ed(&app).frame_width(), 500.0);
+}

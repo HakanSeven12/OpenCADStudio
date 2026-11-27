@@ -247,11 +247,25 @@ pub struct Point {
     pub position: [f64; 3],
     pub name: Option<String>,
     pub raw: Option<String>,
+    /// The format of the description key that matched the point.
+    pub format: Option<String>,
+    /// The raw description in that format (the raw one without a key).
+    pub full: Option<String>,
+    /// Grid easting and northing, when the drawing has a coordinate system.
+    pub grid: Option<[f64; 2]>,
 }
 
 impl Point {
     pub fn of(p: &CogoPoint) -> Point {
-        Point { number: p.number, position: [p.position.x, p.position.y, p.position.z], name: p.name.clone(), raw: p.description.clone() }
+        Point {
+            number: p.number,
+            position: [p.position.x, p.position.y, p.position.z],
+            name: p.name.clone(),
+            raw: p.description.clone(),
+            format: p.description_format.clone(),
+            full: p.full_description(),
+            grid: None,
+        }
     }
 
     pub fn has_elevation(&self) -> bool {
@@ -294,6 +308,7 @@ impl Term {
             Term::Compare(attr, _, Value::Pattern(pattern)) => {
                 let text = match attr {
                     Attr::Name => p.name.as_deref(),
+                    Attr::Full => p.full.as_deref(),
                     _ => p.raw.as_deref(),
                 };
                 match (attr, text) {
@@ -671,7 +686,7 @@ mod tests {
     use super::*;
 
     fn pts() -> Vec<Point> {
-        let p = |n, z: f64, d: &str| Point { number: n, position: [0.0, 0.0, z], name: None, raw: Some(d.into()) };
+        let p = |n, z: f64, d: &str| Point { number: n, position: [0.0, 0.0, z], name: None, raw: Some(d.into()), format: None, full: Some(d.into()), grid: None };
         vec![p(1, 10.0, "TREE"), p(2, 20.0, "TREE2"), p(3, 30.0, "POLE"), p(4, NO_ELEVATION, "MH"), p(5, 15.0, "tree")]
     }
 

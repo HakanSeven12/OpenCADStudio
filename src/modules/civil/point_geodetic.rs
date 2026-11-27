@@ -118,7 +118,7 @@ impl GeodeticDirectCommand {
     }
 
     /// The grid coordinate of a local one.
-    fn grid(&self, at: DVec3) -> DVec3 {
+    pub fn grid(&self, at: DVec3) -> DVec3 {
         match self.transform {
             Some((t, k)) => (t.grid + DVec2::from_angle(t.rotation).rotate(at.truncate() - t.local) * k).extend(0.0),
             None => DVec3::new(at.x, at.y, 0.0),

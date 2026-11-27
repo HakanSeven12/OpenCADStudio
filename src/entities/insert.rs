@@ -443,7 +443,7 @@ pub(crate) fn append_insert_attribute_wires(
                 attr_entity.apply_transform(&Transform::from_translation(delta));
             }
             let attr = attr_entity.common();
-            let (sub_color, sub_plen, sub_pat, sub_lw_px, sub_aci) =
+            let (sub_color, sub_plen, sub_pat, sub_lw_px, own_aci) =
                 render::render_style_for_block_sub(
                     document,
                     &attr_entity,
@@ -453,6 +453,20 @@ pub(crate) fn append_insert_attribute_wires(
                     ins_lw_px,
                     ins_layer,
                 );
+            // A ByBlock attribute plots by the insert's ACI, a ByLayer one on
+            // layer 0 by the insert layer's, so a CTB maps it like the block's
+            // own children (#3747).
+            let has_book_color = render::has_resolved_book_color_common(document, attr);
+            let sub_aci = if !has_book_color && attr.color == document::types::Color::ByBlock {
+                render::render_style_for_common_viewport(document, &ins.common, None).4
+            } else if !has_book_color
+                && render::is_effective_layer_zero(&attr.layer)
+                && attr.color == document::types::Color::ByLayer
+            {
+                crate::scene::render_graph::layer_aci(document, &ins.common.layer)
+            } else {
+                own_aci
+            };
             let sub_color = render::adapt_to_bg(sub_color, bg_color);
             let sub_color = if is_xref && !sel {
                 block_cache::xref_fade(sub_color, bg_color)

@@ -371,12 +371,15 @@ pub(crate) fn hatch_pattern_picker_content<'a>(
             .width(Length::Fill)
             .into()
     };
-    container(column![search, results].spacing(7))
-        .style(container::bordered_box)
-        .padding(8)
-        .width(PATTERN_PICKER_W)
-        .height(Length::Fixed(PATTERN_PICKER_H))
-        .into()
+    // Opaque: over the scroll bar and the gaps between cards the picker has
+    // no cursor of its own, and the drawing under it would take the pointer.
+    iced::widget::opaque(
+        container(column![search, results].spacing(7))
+            .style(container::bordered_box)
+            .padding(8)
+            .width(PATTERN_PICKER_W)
+            .height(Length::Fixed(PATTERN_PICKER_H)),
+    )
 }
 
 /// All standard CAD lineweight options for the combobox.
@@ -2709,6 +2712,61 @@ mod tests {
             &mut messages,
         );
         messages
+    }
+
+    /// The hatch pattern picker keeps the pointer where it has no cursor of
+    /// its own (its frame, the scroll bar, the gaps between cards): the
+    /// drawing under the popup must not take it.
+    #[test]
+    fn the_hatch_pattern_picker_keeps_the_pointer_off_the_drawing() {
+        use iced::futures::executor::block_on;
+        use iced_test::core::{renderer::Headless, shell, window};
+        use iced_test::runtime::user_interface::{Cache, State, UserInterface};
+
+        let _guard = crate::headless_ui_lock();
+        let mut renderer = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .expect("headless renderer");
+        let picker = super::hatch_pattern_picker_content(
+            "",
+            0,
+            "ANSI31",
+            super::PatternPickerMessages {
+                search_id: "test-hatch-pattern-search",
+                on_search: crate::app::Message::PropHatchPatternSearchChanged,
+                on_confirm: crate::app::Message::PropHatchPatternConfirm,
+                on_focus: crate::app::Message::PropHatchPatternFocus,
+                on_changed: crate::app::Message::PropHatchPatternChanged,
+            },
+        );
+        let mut ui = UserInterface::build(
+            picker,
+            iced::Size::new(super::PATTERN_PICKER_W, super::PATTERN_PICKER_H),
+            Cache::default(),
+            &mut renderer,
+        );
+        // On the frame's padding, beside the cards.
+        let at = iced::Point::new(2.0, super::PATTERN_PICKER_H / 2.0);
+        let mut messages = Vec::new();
+        let (state, _) = ui.update(
+            &window::Headless,
+            &shell::Waker::noop(),
+            &[iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: at,
+            })],
+            iced::mouse::Cursor::Available(at),
+            &mut renderer,
+            &mut messages,
+        );
+        let State::Updated {
+            mouse_interaction, ..
+        } = state
+        else {
+            panic!("the picker should update in place");
+        };
+        assert_ne!(mouse_interaction, iced::mouse::Interaction::None);
     }
 
     fn commits(messages: &[crate::app::Message]) -> Vec<(&'static str, &str)> {

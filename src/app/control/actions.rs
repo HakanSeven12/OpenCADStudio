@@ -3673,7 +3673,8 @@ impl OpenCADStudio {
             // call. Point Group Properties: "tab=<information|point_groups|
             // raw_desc_matching|include|exclude|query_builder|overrides|
             // point_list|summary>", "name=", "description=", "point_style=",
-            // "label_style=", "group=<k>:0|1", "include=<k>:<text>" /
+            // "label_style=", "locked=0|1", "raw_code=<k>:0|1" (Raw Desc
+            // Matching code k), "group=<k>:0|1", "include=<k>:<text>" /
             // "exclude=<k>:<text>" (rule k on with the text; k 0 numbers,
             // 1 elevations, 2 names, 3 raw, 4 full descriptions),
             // "include_off=<k>", "exclude_off=<k>", "include_all=0|1",
@@ -3688,8 +3689,10 @@ impl OpenCADStudio {
             // Create COGO Points (corridor): "range=entire|user",
             // "baseline=<name>", "start=", "end=", "group_name=",
             // "code=<k>:0|1", "pick_baseline", "pick_station=start|end",
+            // "drag=start|end:<0..1 along the range bar>",
             // "ok". Create Blocks from COGO Points:
             // "spatial=none|display|window", "pick_window", "group=<k>:0|1",
+            // "pick_groups", "picker=<k>:0|1", "picker_ok", "picker_cancel",
             // "existing=<block>", "new=<name>", "layer=<name>", "ok". The
             // duplicate block question: "skip", "overwrite", "cancel".
             // Duplicate Point Number: "resolution=<label>", "offset=",
@@ -3712,6 +3715,8 @@ impl OpenCADStudio {
                         "description" => G::Description(value.into()),
                         "point_style" => G::PointStyle(value.into()),
                         "label_style" => G::LabelStyle(value.into()),
+                        "locked" => G::Locked(on(value)),
+                        "raw_code" => pair().map(|(k, v)| G::RawCode(k, on(&v))).ok_or_else(bad)?,
                         "group" => pair().map(|(k, v)| G::Group(k, on(&v))).ok_or_else(bad)?,
                         "include" | "exclude" => pair().map(|(k, v)| G::SetRule(key == "exclude", k, v)).ok_or_else(bad)?,
                         "include_off" | "exclude_off" => G::Rule(key == "exclude_off", value.parse().map_err(|_| bad())?, false),
@@ -3783,6 +3788,14 @@ impl OpenCADStudio {
                             (K::CorridorPoints, "code") => pair().map(|(k, v)| P::Code(k, v)).ok_or_else(bad)?,
                             (K::CorridorPoints, "pick_baseline") => P::PickBaseline,
                             (K::CorridorPoints, "pick_station") => P::PickStation(value == "end"),
+                            // A range bar handle dragged to a fraction along the bar.
+                            (K::CorridorPoints, "drag") => {
+                                let (which, t) = value.split_once(':').ok_or_else(bad)?;
+                                let t: f64 = t.parse().map_err(|_| bad())?;
+                                let end = which == "end";
+                                let s = self.point_tools.corridor.as_ref().and_then(|w| w.drag_handle(end, t));
+                                P::RangeDrag(end, s.ok_or_else(|| failure("disabled", "The range bar has no handles unless the range is specified"))?)
+                            }
                             (K::CorridorPoints, "ok") => P::CorridorOk,
                             (K::PointBlocks, "spatial") => P::Spatial(match value {
                                 "display" => Spatial::CurrentDisplay,
@@ -3791,6 +3804,10 @@ impl OpenCADStudio {
                             }),
                             (K::PointBlocks, "pick_window") => P::PickWindow,
                             (K::PointBlocks, "group") => pair().map(|(k, v)| P::BlockGroup(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "pick_groups") => P::PickGroups,
+                            (K::PointBlocks, "picker") => pair().map(|(k, v)| P::PickerRow(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "picker_ok") => P::PickerOk,
+                            (K::PointBlocks, "picker_cancel") => P::PickerCancel,
                             (K::PointBlocks, "existing") => {
                                 let _ = self.on_point_tool(P::UseExisting(true));
                                 P::Existing(value.into())

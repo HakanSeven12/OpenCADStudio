@@ -1007,11 +1007,7 @@ impl OpenCADStudio {
         match c3d::create_cogo_point(doc, Vector3::new(at.x, at.y, z), description.as_deref(), Some(&layer)) {
             Ok((point, _)) => {
                 // Coordinates as the drawing's units show them: 4 places, m or '.
-                let unit = match doc.header.insertion_units {
-                    6 => "m",
-                    2 | 21 => "'",
-                    _ => "",
-                };
+                let unit = crate::modules::civil::point_alignment::unit_mark(doc.header.insertion_units);
                 let (n, e) = (format!("{:.4}{unit}", at.y), format!("{:.4}{unit}", at.x));
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_entities(&[(point, ChangeKind::Added)]);

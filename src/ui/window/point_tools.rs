@@ -21,6 +21,8 @@ pub struct CorridorPointsWindow {
     /// The stations each baseline gives each code a point at.
     pub stations: Vec<Vec<Vec<f64>>>,
     pub baseline: usize,
+    /// The drawing's unit mark after a station (`'` or `m`).
+    pub mark: &'static str,
     /// The user specified range is on (otherwise the entire corridor).
     pub user_range: bool,
     pub start: String,
@@ -47,8 +49,12 @@ pub struct PointBlocksWindow {
     pub window: Option<([f64; 2], [f64; 2])>,
     /// The current display when the command started: two corners.
     pub display: Option<([f64; 2], [f64; 2])>,
-    /// Point group names and whether each is selected.
+    /// Point group names in the drawing's order and whether each is
+    /// selected.
     pub groups: Vec<(String, bool)>,
+    /// The group picker while it is open: names, descriptions and the
+    /// rows selected in it.
+    pub picker: Option<Vec<(String, String, bool)>>,
     /// The drawing's blocks that hold a POINT attribute definition.
     pub blocks: Vec<String>,
     pub use_existing: bool,
@@ -113,6 +119,11 @@ pub enum PointToolMsg {
     Spatial(Spatial),
     PickWindow,
     BlockGroup(usize, bool),
+    /// The group picker: open it, a row clicked on or off, OK, Cancel.
+    PickGroups,
+    PickerRow(usize, bool),
+    PickerOk,
+    PickerCancel,
     UseExisting(bool),
     Existing(String),
     NewName(String),
@@ -188,12 +199,19 @@ fn footer<'a>(help: &'static str, ok: Message) -> Element<'a, Message> {
 
 static PICK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
 
-/// A station as typed: `0+60.00` or `60`.
+/// A station as typed: `0+60.00`, `0+60.00'`, `0+60.00m` or `60`.
 pub fn parse_station(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let s = s.strip_suffix(|c| c == '\'' || c == 'm').unwrap_or(s);
     s.trim().replace('+', "").parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 impl CorridorPointsWindow {
+    /// A station as the window writes it: with the drawing's unit mark.
+    pub fn station_text(&self, s: f64) -> String {
+        format!("{}{}", crate::modules::civil::point_alignment::format_station(s), self.mark)
+    }
+
     /// The station range the points are taken from: the typed one, or
     /// none when the whole corridor is taken (or a station does not read).
     pub fn range(&self) -> Option<(f64, f64)> {
@@ -202,6 +220,15 @@ impl CorridorPointsWindow {
         }
         let (a, b) = (parse_station(&self.start)?, parse_station(&self.end)?);
         Some((a.min(b), a.max(b)))
+    }
+
+    /// The station a range bar handle (`end` or start) dragged to `t` along
+    /// the bar (0 its start, 1 its end) is let go at, as the bar drops it;
+    /// none when the range is not the user's (the bar has no handles).
+    pub fn drag_handle(&self, end: bool, t: f64) -> Option<f64> {
+        let (lo, hi) = self.baselines.get(self.baseline).map_or((0.0, 0.0), |b| (b.1, b.2));
+        let bar = RangeBar { lo, hi, taken: self.range().unwrap_or((lo, hi)), enabled: self.user_range };
+        bar.enabled.then(|| bar.dropped(end, bar.station_along(t)))
     }
 
     /// The points code `c` gives: the user range's baseline within the
@@ -267,8 +294,17 @@ impl RangeBar {
     }
 
     fn station_at(&self, x: f32, width: f32) -> f64 {
-        let t = f64::from((x - HANDLE) / (width - 2.0 * HANDLE).max(1.0)).clamp(0.0, 1.0);
-        ((self.lo + t * (self.hi - self.lo)) * 100.0).round() / 100.0
+        self.station_along(f64::from((x - HANDLE) / (width - 2.0 * HANDLE).max(1.0)))
+    }
+
+    /// The station `t` (0 at the start, 1 at the end) along the bar, to 0.01.
+    fn station_along(&self, t: f64) -> f64 {
+        ((self.lo + t.clamp(0.0, 1.0) * (self.hi - self.lo)) * 100.0).round() / 100.0
+    }
+
+    /// Where a handle let go at `s` lands: it does not pass the other.
+    fn dropped(&self, end: bool, s: f64) -> f64 {
+        if end { s.max(self.taken.0) } else { s.min(self.taken.1) }
     }
 
     /// The taken range with a dragged handle where it is.
@@ -303,16 +339,12 @@ impl canvas::Program<Message> for RangeBar {
             }
             iced::Event::Mouse(Event::CursorMoved { position }) => {
                 let (end, _) = state.drag?;
-                let s = self.station_at(x(*position), bounds.width);
-                // A handle does not pass the other.
-                let s = if end { s.max(self.taken.0) } else { s.min(self.taken.1) };
-                state.drag = Some((end, s));
+                state.drag = Some((end, self.dropped(end, self.station_at(x(*position), bounds.width))));
                 Some(canvas::Action::request_redraw().and_capture())
             }
             iced::Event::Mouse(Event::ButtonReleased(Button::Left)) => {
                 let (end, s) = state.drag.take()?;
-                let s = if end { s.max(self.taken.0) } else { s.min(self.taken.1) };
-                Some(canvas::Action::publish(msg(PointToolMsg::RangeDrag(end, s))).and_capture())
+                Some(canvas::Action::publish(msg(PointToolMsg::RangeDrag(end, self.dropped(end, s)))).and_capture())
             }
             _ => None,
         }
@@ -349,12 +381,12 @@ impl canvas::Program<Message> for RangeBar {
     }
 }
 
-fn range_bar<'a>(lo: f64, hi: f64, taken: (f64, f64), enabled: bool) -> Element<'a, Message> {
+fn range_bar<'a>(state: &CorridorPointsWindow, lo: f64, hi: f64, taken: (f64, f64), enabled: bool) -> Element<'a, Message> {
     let bar = canvas(RangeBar { lo, hi, taken, enabled }).width(Fill).height(Length::Fixed(2.0 * HANDLE + 2.0));
     let stations = row![
-        small(crate::modules::civil::point_alignment::format_station(lo)).style(muted_style),
+        small(state.station_text(lo)).style(muted_style),
         Space::new().width(Fill),
-        small(crate::modules::civil::point_alignment::format_station(hi)).style(muted_style),
+        small(state.station_text(hi)).style(muted_style),
     ];
     column![bar, stations].spacing(4).into()
 }
@@ -396,7 +428,7 @@ pub fn view_corridor<'a>(state: &'a CorridorPointsWindow, sizing: crate::ui::mod
             ]
             .spacing(8)
             .align_y(iced::Center),
-            range_bar(lo, hi, taken, on),
+            range_bar(state, lo, hi, taken, on),
             row![
                 small(t!("Start station")).style(muted_style),
                 container(field(&state.start, on, |s| msg(PointToolMsg::Start(s)))).width(Length::Fixed(130.0)),
@@ -481,10 +513,51 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         .spacing(6)
         .align_y(iced::Center),
     );
-    let mut groups = column![].spacing(4);
-    for (k, (name, on)) in state.groups.iter().enumerate() {
-        groups = groups.push(checkbox(*on).label(name.clone()).size(14).text_size(11).on_toggle(move |v| msg(PointToolMsg::BlockGroup(k, v))));
-    }
+    let groups: Element<'a, Message> = match &state.picker {
+        // The picker: the drawing's groups in their order, several rows
+        // selectable.
+        Some(rows) => {
+            let mut list = column![].spacing(2);
+            for (k, (name, description, on)) in rows.iter().enumerate() {
+                list = list.push(
+                    button(row![small(name.clone()).width(Length::Fixed(200.0)), small(description.clone()).style(muted_style)].spacing(8))
+                        .on_press(msg(PointToolMsg::PickerRow(k, !on)))
+                        .style(button_style(*on))
+                        .padding([3, 8])
+                        .width(Fill),
+                );
+            }
+            // The list and its buttons take the room of the selected list.
+            column![
+                scrollable(list).height(Length::Fixed(86.0)),
+                row![
+                    small(t!("Click rows to select the point groups.")).style(muted_style),
+                    Space::new().width(Fill),
+                    button(small(t!("Cancel"))).on_press(msg(PointToolMsg::PickerCancel)).style(button_style(false)).padding([4, 10]),
+                    button(small(t!("OK"))).on_press(msg(PointToolMsg::PickerOk)).style(button_style(true)).padding([4, 10]),
+                ]
+                .spacing(6)
+                .align_y(iced::Center),
+            ]
+            .spacing(6)
+            .into()
+        }
+        // The groups selected, read only, by name.
+        None => {
+            let mut picked: Vec<&String> = state.groups.iter().filter(|g| g.1).map(|g| &g.0).collect();
+            picked.sort_by_key(|n| n.to_lowercase());
+            let mut list = column![].spacing(2);
+            for name in picked {
+                list = list.push(small(name.clone()));
+            }
+            row![
+                container(scrollable(list)).padding(6).height(Length::Fixed(120.0)).width(Fill).style(crate::ui::window::pdf_dialogs::well_style),
+                pick_button(Some(msg(PointToolMsg::PickGroups))),
+            ]
+            .spacing(8)
+            .into()
+        }
+    };
     let output = card(
         t!("Block output").into_owned(),
         column![
@@ -515,7 +588,7 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         ]
         .spacing(8),
     );
-    let mut col = column![spatial, card(t!("Selected point groups:").into_owned(), scrollable(groups).height(Length::Fixed(120.0))), output].spacing(10);
+    let mut col = column![spatial, card(t!("Selected point groups:").into_owned(), groups), output].spacing(10);
     if let Some(band) = error_band(&state.error) {
         col = col.push(band);
     }

@@ -524,11 +524,18 @@ fn ring_arc_runs(ring: &[glam::DVec2]) -> Vec<(usize, usize)> {
             start += 1;
             continue;
         };
+        // Chords sampled off one arc are all about one length; a long side
+        // between two rounded corners is straight, however well it fits a
+        // circle through the corners' end points (#3749).
+        let step = ring[start].distance(ring[start + 1]);
         let mut end = start;
         while end + 1 < ring.len() {
             let next = ring[end + 1];
             let turn = (ring[end] - center).angle_to(next - center);
-            if (next.distance(center) - radius).abs()
+            let chord = ring[end].distance(next);
+            if chord > 4.0 * step
+                || 4.0 * chord < step
+                || (next.distance(center) - radius).abs()
                 > radius.min(ring[start].distance(next)) * 1.0e-3
                 || turn * sweep <= 0.0
                 || turn.abs() > MAX_STEP
@@ -700,5 +707,26 @@ mod tests {
             .map(DVec2::from)
             .collect::<Vec<_>>();
         assert!(super::ring_arc_runs(&bowed).is_empty());
+        // A rectangle with corners rounded in 7.5° chords: each long side
+        // stays a chord, not an arc through two corners that bows out
+        // (#3749).
+        let mut rounded = Vec::new();
+        let corners = [
+            ([29.5, 0.5], -90.0),
+            ([29.5, 24.5], 0.0),
+            ([0.5, 24.5], 90.0),
+            ([0.5, 0.5], 180.0),
+        ];
+        for (corner, from) in corners {
+            for step in 0..=12 {
+                let angle = f64::to_radians(from + 7.5 * step as f64);
+                rounded.push(DVec2::from(corner) + 0.5 * DVec2::from_angle(angle));
+            }
+        }
+        rounded.push(rounded[0]);
+        assert_eq!(super::ring_arc_runs(&rounded).len(), 4);
+        assert!(super::curved_ring(&rounded)
+            .iter()
+            .all(|(p, _)| (-0.01..=30.01).contains(&p.x) && (-0.01..=25.01).contains(&p.y)));
     }
 }

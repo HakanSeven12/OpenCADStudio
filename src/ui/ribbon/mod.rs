@@ -3181,7 +3181,9 @@ impl Default for Ribbon {
 #[cfg(test)]
 mod tests {
     use super::widgets::is_active_tool;
-    use super::{panel_measure_key_at, CollapseMode, Ribbon, RibbonLayout, StyleContext};
+    use super::{
+        panel_measure_key_at, CollapseMode, QatPosition, Ribbon, RibbonLayout, StyleContext,
+    };
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
 

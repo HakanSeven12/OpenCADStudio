@@ -206,7 +206,7 @@ impl BlockStyle {
     }
 }
 
-fn layer_aci(document: &Document, layer: &str) -> u8 {
+pub(crate) fn layer_aci(document: &Document, layer: &str) -> u8 {
     document
         .layers
         .get(layer)

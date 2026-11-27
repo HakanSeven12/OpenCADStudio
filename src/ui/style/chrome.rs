@@ -112,6 +112,17 @@ pub fn danger(theme: &Theme) -> Color {
     theme.palette().danger.base.color
 }
 
+/// A caution: a choice that does not hold for now.
+pub fn warning(theme: &Theme) -> Color {
+    theme.palette().warning.base.color
+}
+
+/// Whether the theme is a dark one (light text on a dark background).
+pub fn is_dark(theme: &Theme) -> bool {
+    let c = theme.palette().background.base.color;
+    0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.5
+}
+
 /// A good outcome: a live connection, a step that worked.
 pub fn success(theme: &Theme) -> Color {
     theme.palette().success.base.color

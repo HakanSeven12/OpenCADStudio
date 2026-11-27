@@ -209,3 +209,57 @@ pub const CHOICE_TILE_H: f32 = 30.0;
 pub const CHOICE_ICON: f32 = 20.0;
 /// Gap between the choice tiles, and between a tile's icon and label.
 pub const CHOICE_GAP: f32 = 4.0;
+
+// ── Windows: popovers and dialogs (`kit::form`, mockup B) ─────────────────
+
+/// Width of a popover.
+pub const FORM_W: f32 = 290.0;
+/// Height of a row, a section bar and a choice field.
+pub const FORM_ROW_H: f32 = 18.0;
+/// Room above a section bar.
+pub const FORM_SECTION_GAP: f32 = 3.0;
+/// Where a row's label (and a section's) starts.
+pub const FORM_LABEL_X: f32 = 4.0;
+/// Size of a check box.
+pub const FORM_CHECK: f32 = 12.0;
+/// Gap from a check box to its label.
+pub const FORM_CHECK_GAP: f32 = 5.0;
+/// Where a label after a check box starts: a hint lines up with it.
+pub const FORM_CHECK_LABEL_X: f32 = FORM_LABEL_X + FORM_CHECK + FORM_CHECK_GAP;
+/// A popover's title from its left edge.
+pub const FORM_TITLE_X: f32 = 8.0;
+/// Side of the close button in a popover's head.
+pub const FORM_CLOSE: f32 = 19.0;
+/// Padding of a popover's body: top, right, bottom, left.
+pub const FORM_BODY_PAD_TOP: f32 = 4.0;
+pub const FORM_BODY_PAD_RIGHT: f32 = 10.0;
+pub const FORM_BODY_PAD_BOTTOM: f32 = 8.0;
+pub const FORM_BODY_PAD_LEFT: f32 = 8.0;
+/// A popover's drop shadow: offset down, blur and opacity.
+pub const FORM_SHADOW_Y: f32 = 3.0;
+pub const FORM_SHADOW_BLUR: f32 = 10.0;
+pub const FORM_SHADOW_ALPHA: f32 = 0.35;
+/// Text inset in a choice field, and the size of its caret.
+pub const FORM_SELECT_TEXT_X: f32 = 2.0;
+pub const FORM_CARET: f32 = 9.0;
+/// Choice tiles: height, gap between them, inner padding, room above and
+/// below the row, the icon box and its gap to the label.
+pub const FORM_TILE_H: f32 = 30.0;
+pub const FORM_TILE_GAP: f32 = 4.0;
+pub const FORM_TILE_PAD: f32 = 4.0;
+pub const FORM_TILES_TOP: f32 = 4.0;
+pub const FORM_TILES_BOTTOM: f32 = 2.0;
+pub const FORM_TILE_ICON_W: f32 = 30.0;
+pub const FORM_TILE_ICON_H: f32 = 20.0;
+pub const FORM_TILE_ICON_GAP: f32 = 6.0;
+/// The chosen tile's accent fill: its opacity on a dark and a light theme.
+pub const FORM_TILE_FILL_DARK: f32 = 0.16;
+pub const FORM_TILE_FILL_LIGHT: f32 = 0.10;
+/// A footer's padding: top and bottom, right, left.
+pub const FORM_FOOTER_PAD_Y: f32 = 3.0;
+pub const FORM_FOOTER_PAD_RIGHT: f32 = 10.0;
+pub const FORM_FOOTER_PAD_LEFT: f32 = 8.0;
+/// A text button: height, side padding and corner radius.
+pub const FORM_BUTTON_H: f32 = 22.0;
+pub const FORM_BUTTON_PAD_X: f32 = 8.0;
+pub const FORM_BUTTON_RADIUS: f32 = 2.0;

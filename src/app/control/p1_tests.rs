@@ -5016,3 +5016,132 @@ fn xref_placement_all_owners_refresh_graphics_grips_history_and_offline_save() {
         compare(drawn(doc, owner.handle), expected);
     }
 }
+
+#[test]
+fn read_only_blocks_wblock_node_graph_save_and_allows_plot() {
+    let mut app = OpenCADStudio::new_headless(true);
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"CIRCLE 5,5 3"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let wblock_out = std::env::temp_dir().join(format!("ocs_ro_wb_{}.dxf", std::process::id()));
+    let _ = std::fs::remove_file(&wblock_out);
+    let wb_escaped = wblock_out.to_string_lossy().replace('\\', "\\\\");
+    let wb_resp = mutate(
+        &mut app,
+        &format!(
+            r#"{{"protocol":1,"op":"wblock","request_id":"ro-wb","document_id":{{doc}},"path":"{wb_escaped}","handles":["{handle}"]}}"#
+        ),
+    );
+    assert_eq!(wb_resp["ok"], false, "{wb_resp}");
+    assert_eq!(wb_resp["code"], "read_only", "{wb_resp}");
+    assert!(!wblock_out.exists(), "wblock must not create files in read-only mode");
+
+    let ocg_out = std::env::temp_dir().join(format!("ocs_ro_ng_{}.ocg", std::process::id()));
+    let _ = std::fs::remove_file(&ocg_out);
+    let ocg_escaped = ocg_out.to_string_lossy().replace('\\', "\\\\");
+    let ng_resp = mutate(
+        &mut app,
+        &format!(
+            r#"{{"protocol":1,"op":"node_graph","request_id":"ro-ng","document_id":{{doc}},"action":"save","path":"{ocg_escaped}"}}"#
+        ),
+    );
+    assert_eq!(ng_resp["ok"], false, "{ng_resp}");
+    assert_eq!(ng_resp["code"], "read_only", "{ng_resp}");
+    assert!(!ocg_out.exists(), "node_graph save must not create .ocg in read-only mode");
+
+    // GUI and command-line write entry points are also blocked under --read-only.
+    let err_before = app.command_line.error_revision;
+    let _ = app.update(crate::app::Message::WblockSave("*".to_string()));
+    assert_ne!(app.command_line.error_revision, err_before);
+
+    let err_before = app.command_line.error_revision;
+    let _ = app.on_wblock_save_result_some("*".to_string(), wblock_out.clone());
+    assert_ne!(app.command_line.error_revision, err_before);
+    assert!(!wblock_out.exists());
+
+    let err_before = app.command_line.error_revision;
+    let _ = app.dispatch_command("WBLOCK");
+    assert_ne!(app.command_line.error_revision, err_before);
+    assert!(app.wblock.is_none());
+
+    let err_before = app.command_line.error_revision;
+    let _ = app.on_graph(crate::ui::node_graph::GraphMsg::Save);
+    assert_ne!(app.command_line.error_revision, err_before);
+
+    // Maintainer Decision #3: PDF/SVG plot exports remain allowed in --read-only.
+    let pdf_out = std::env::temp_dir().join(format!("ocs_ro_plot_{}.pdf", std::process::id()));
+    let _ = std::fs::remove_file(&pdf_out);
+    let pdf_escaped = pdf_out.to_string_lossy().replace('\\', "\\\\");
+    let plot_resp = mutate(
+        &mut app,
+        &format!(
+            r#"{{"protocol":1,"op":"plot","request_id":"ro-plot","document_id":{{doc}},"path":"{pdf_escaped}"}}"#
+        ),
+    );
+    assert_eq!(plot_resp["ok"], true, "{plot_resp}");
+    assert!(pdf_out.is_file());
+    let _ = std::fs::remove_file(&pdf_out);
+}
+
+#[test]
+fn wblock_requires_overwrite_when_destination_exists() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"CIRCLE 0,0 2"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let out = std::env::temp_dir().join(format!("ocs_wb_overwrite_{}.dxf", std::process::id()));
+    std::fs::write(&out, b"keep").unwrap();
+    let escaped = out.to_string_lossy().replace('\\', "\\\\");
+
+    let refused = mutate(
+        &mut app,
+        &format!(
+            r#"{{"protocol":1,"op":"wblock","request_id":"wb-ow-1","document_id":{{doc}},"path":"{escaped}","handles":["{handle}"]}}"#
+        ),
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["code"], "destination_exists", "{refused}");
+    assert_eq!(std::fs::read(&out).unwrap(), b"keep");
+
+    let allowed = mutate(
+        &mut app,
+        &format!(
+            r#"{{"protocol":1,"op":"wblock","request_id":"wb-ow-2","document_id":{{doc}},"path":"{escaped}","overwrite":true,"handles":["{handle}"]}}"#
+        ),
+    );
+    assert_eq!(allowed["ok"], true, "{allowed}");
+    assert_ne!(std::fs::read(&out).unwrap(), b"keep");
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn legacy_automation_op_blocks_mutations_when_disabled() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.control.enabled = false;
+
+    for req_line in [
+        r#"{"op":"run","cmd":"CIRCLE 0,0 1"}"#,
+        r#"{"op":"new"}"#,
+        r#"{"op":"undo"}"#,
+        r#"{"op":"select","clear":true}"#,
+        r#"{"op":"text_replace","find":"a","replace":"b"}"#,
+    ] {
+        let resp = app.automation_op(req_line);
+        assert_eq!(resp["ok"], false, "{req_line}: {resp}");
+        assert_eq!(resp["code"], "disabled", "{req_line}: {resp}");
+    }
+
+    let read_resp = app.automation_op(r#"{"op":"layers"}"#);
+    assert_eq!(read_resp["ok"], true, "{read_resp}");
+}

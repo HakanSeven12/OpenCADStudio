@@ -43,7 +43,7 @@ impl OpenCADStudio {
         self.ole_edits
             .retain(|(t, h, ..)| !(*t == tab && *h == handle));
         self.ole_edits.push((tab, handle, path.clone(), seen));
-        Some(crate::sys::open_url(&path.to_string_lossy(), self.main_window))
+        Some(crate::sys::open_local_path(&path, self.main_window))
     }
 
     /// Every second while documents are open for editing: a file saved since

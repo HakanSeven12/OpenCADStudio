@@ -12,6 +12,19 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
         unit: i16,
     ) -> Task<Message> {
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
+            #[cfg(target_arch = "wasm32")]
+            if crate::io::host_bridge::is_embed_mode() {
+                crate::io::host_bridge::emit_error(
+                    "read_only",
+                    "Read-only session: saving is disabled.",
+                );
+            }
+            return Task::none();
+        }
         let mut path = path;
         if path.extension().is_none() {
             path.set_extension("dwg");
@@ -151,6 +164,19 @@ impl OpenCADStudio {
         block_name: String,
         path: std::path::PathBuf,
     ) -> Task<Message> {
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
+            #[cfg(target_arch = "wasm32")]
+            if crate::io::host_bridge::is_embed_mode() {
+                crate::io::host_bridge::emit_error(
+                    "read_only",
+                    "Read-only session: saving is disabled.",
+                );
+            }
+            return Task::none();
+        }
         let i = self.active_tab;
         let document = self.tabs[i].document_for_save();
         let handles: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
@@ -240,6 +266,18 @@ impl OpenCADStudio {
     /// writer ran.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn saveall_web(&mut self) -> Task<Message> {
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
+            if crate::io::host_bridge::is_embed_mode() {
+                crate::io::host_bridge::emit_error(
+                    "read_only",
+                    "Read-only session: saving is disabled.",
+                );
+            }
+            return Task::none();
+        }
         // Collect per-document alpha consent before capturing or writing any batch output.
         if let Some(tab_id) = self.tabs.iter().enumerate().find_map(|(i, tab)| {
             let ext = tab.current_path.as_ref()?.extension()?.to_str()?;
@@ -2011,6 +2049,19 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_save_dialog_confirm(&mut self) -> Task<Message> {
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
+            #[cfg(target_arch = "wasm32")]
+            if crate::io::host_bridge::is_embed_mode() {
+                crate::io::host_bridge::emit_error(
+                    "read_only",
+                    "Read-only session: saving is disabled.",
+                );
+            }
+            return self.close_save_dialog_window();
+        }
         let (ext, version) = crate::io::parse_save_format(&self.save_dialog_format);
         // Warn before a lossy Save-As that would drop unsupported
         // (AEC / application) objects kept only as verbatim

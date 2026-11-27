@@ -362,7 +362,7 @@ impl OpenCADStudio {
                             self.command_line.push_info(
                                 crate::t!("Copied selected text to clipboard.").as_ref(),
                             );
-                            Some(iced::clipboard::write(text).discard())
+                            Some(crate::sys::clipboard_write(text))
                         }
                         None => Some(Task::none()),
                     };
@@ -1083,6 +1083,12 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::XAttachPick));
             }
             "WBLOCK" | "WB" => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 let handles: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -1120,6 +1126,12 @@ impl OpenCADStudio {
                 || cmd.starts_with("WBLOCK ")
                 || cmd.starts_with("WB ") =>
             {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 let rest = if let Some(r) = cmd.strip_prefix("-WBLOCK") {
                     r.trim()
                 } else if let Some(r) = cmd.strip_prefix("-WB") {

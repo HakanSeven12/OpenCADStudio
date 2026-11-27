@@ -143,6 +143,12 @@ impl OpenCADStudio {
                 return Some(Task::none());
             }
             "SAVEAS" if self.file_prompts_on_command_line() => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 let doc = &self.tabs[i].scene.document;
                 let is_dxf = crate::io::source_is_dxf(self.tabs[i].current_path.as_deref(), doc);
                 let format = if is_dxf {
@@ -165,6 +171,12 @@ impl OpenCADStudio {
             "SAVEAS" => return Some(Task::done(Message::SaveAs)),
             // DXFOUT: Save As with the DXF format already chosen.
             "DXFOUT" => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 if self.file_prompts_on_command_line() {
                     let path = self.tabs[i]
                         .current_path
@@ -797,14 +809,14 @@ impl OpenCADStudio {
                 _ => (String::new(), rest.to_string()),
             },
         };
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
+            return Task::none();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if self.read_only {
-                self.command_line.push_error(
-                    crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
-                );
-                return Task::none();
-            }
             let mut path = std::path::PathBuf::from(path.trim().trim_matches('"'));
             let dxf = format.eq_ignore_ascii_case("DXF");
             let version = crate::io::parse_target_version(&format)

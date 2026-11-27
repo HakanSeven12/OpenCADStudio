@@ -795,6 +795,12 @@ impl OpenCADStudio {
             // The last evaluation's edits stay in the drawing as they are.
             GraphMsg::New => self.tabs[i].graph = Default::default(),
             GraphMsg::Save => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Task::none();
+                }
                 let bytes = self.graph_file_bytes(i);
                 return Task::perform(
                     async move {

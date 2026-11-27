@@ -3375,9 +3375,13 @@ bg={bg_ms:.1}ms n={view_count}"
             // the cursor position (canvas-relative) anchors the menu under
             // the cursor instead of drifting into window-relative space.
             if !tab.is_start {
-                let (ctx_pos, highlighted) = {
+                let (ctx_pos, highlighted, placed) = {
                     let sel = tab.scene.selection.borrow();
-                    (sel.menu.open_at, sel.menu.ui.highlighted)
+                    (
+                        sel.menu.open_at,
+                        sel.menu.ui.highlighted,
+                        sel.menu.placed.clone(),
+                    )
                 };
                 if let Some(p) = ctx_pos {
                     if let Some(draft) = &self.context_menu_editing {
@@ -3396,6 +3400,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             command_line_inset,
                             &menu,
                             highlighted,
+                            placed,
                         ));
                     }
                 }

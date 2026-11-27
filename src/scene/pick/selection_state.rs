@@ -145,6 +145,25 @@ pub struct SelectionMenu {
     pub quad: Option<QuadUi>,
     /// The open menu is POPMENU's: only the user's own commands.
     pub user: bool,
+    /// Where the open menu was first fitted on screen. Later layouts keep it
+    /// there instead of fitting it again, so the menu does not move under the
+    /// pointer when the command line's notifications fade or a submenu opens.
+    pub placed: MenuPlacement,
+}
+
+/// The top-left corner an open popup was first fitted at; shared between the
+/// menu state and the overlay that lays the popup out.
+#[derive(Clone, Default)]
+pub struct MenuPlacement(std::sync::Arc<std::sync::Mutex<Option<Point>>>);
+
+impl MenuPlacement {
+    pub fn get(&self) -> Option<Point> {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set(&self, at: Option<Point>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = at;
+    }
 }
 
 impl SelectionMenu {
@@ -156,6 +175,7 @@ impl SelectionMenu {
         self.ui = ContextMenuUi::default();
         self.quad = None;
         self.user = false;
+        self.placed.set(None);
     }
 
     /// Close the context menu (no-op when it is not open). A disruptive
@@ -166,6 +186,7 @@ impl SelectionMenu {
         self.ui = ContextMenuUi::default();
         self.quad = None;
         self.user = false;
+        self.placed.set(None);
     }
 }
 

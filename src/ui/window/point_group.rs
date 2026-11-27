@@ -385,6 +385,10 @@ pub enum ListCol {
     LabelStyle,
     Layer,
     Project,
+    XyScale,
+    ZScale,
+    MarkerRotation,
+    LabelRotation,
 }
 
 impl ListCol {
@@ -408,13 +412,17 @@ impl ListCol {
             ListCol::LabelStyle => "Point Label Style",
             ListCol::Layer => "Point Layer",
             ListCol::Project => "Project Version",
+            ListCol::XyScale => "X-Y Scale",
+            ListCol::ZScale => "Z Scale",
+            ListCol::MarkerRotation => "Marker Rotation",
+            ListCol::LabelRotation => "Label Rotation",
         }
     }
 
     /// The column a script names: its title in lower case, spaces as `_`.
     pub fn of(name: &str) -> Option<ListCol> {
         use ListCol::*;
-        [Number, Easting, Northing, Elevation, Name, Raw, Full, Format, GridEasting, GridNorthing, Longitude, Latitude, ScaleFactor, Convergence, Style, LabelStyle, Layer, Project]
+        [Number, Easting, Northing, Elevation, Name, Raw, Full, Format, GridEasting, GridNorthing, Longitude, Latitude, ScaleFactor, Convergence, Style, LabelStyle, Layer, Project, XyScale, ZScale, MarkerRotation, LabelRotation]
             .into_iter()
             .find(|c| c.title().to_lowercase().replace(' ', "_") == name)
     }
@@ -473,6 +481,12 @@ impl ListCol {
             ListCol::LabelStyle => p.label.clone(),
             ListCol::Layer => p.layer.clone(),
             ListCol::Project => String::new(),
+            // Empty at the default (scale 1, rotation 0); rotations in
+            // degrees as `30.0000 (d)` (measured).
+            ListCol::XyScale => p.overrides.xy_scale.map(|v| format!("{v:.3}")).unwrap_or_default(),
+            ListCol::ZScale => p.overrides.z_scale.map(|v| format!("{v:.3}")).unwrap_or_default(),
+            ListCol::MarkerRotation => p.overrides.rotation.map(degrees).unwrap_or_default(),
+            ListCol::LabelRotation => p.overrides.label_rotation.map(degrees).unwrap_or_default(),
         }
     }
 
@@ -487,6 +501,10 @@ impl ListCol {
             ListCol::Latitude => p.geo.map_or(f64::NEG_INFINITY, |g| g.latitude),
             ListCol::ScaleFactor => p.geo.map_or(f64::NEG_INFINITY, |g| g.scale),
             ListCol::Convergence => p.geo.map_or(f64::NEG_INFINITY, |g| g.convergence),
+            ListCol::XyScale => p.overrides.xy_scale.unwrap_or(1.0),
+            ListCol::ZScale => p.overrides.z_scale.unwrap_or(1.0),
+            ListCol::MarkerRotation => p.overrides.rotation.unwrap_or(0.0),
+            ListCol::LabelRotation => p.overrides.label_rotation.unwrap_or(0.0),
             _ => p.position[2],
         }
     }
@@ -544,6 +562,10 @@ impl PointListView {
             (self.styles, ListCol::LabelStyle),
             (self.styles, ListCol::Layer),
             (self.styles, ListCol::Project),
+            (self.styles, ListCol::XyScale),
+            (self.styles, ListCol::ZScale),
+            (self.styles, ListCol::MarkerRotation),
+            (self.styles, ListCol::LabelRotation),
         ];
         c.extend(optional.into_iter().filter(|o| o.0).map(|o| o.1));
         c
@@ -790,4 +812,9 @@ pub fn view<'a>(state: &'a PointGroupWindow, sizing: crate::ui::modal::ModalSizi
         .align_y(iced::Center),
     );
     col.padding([10, 12]).width(sizing.width).into()
+}
+
+/// A rotation in radians as the Point List shows it: `30.0000 (d)`.
+fn degrees(radians: f64) -> String {
+    format!("{:.4} (d)", radians.to_degrees())
 }

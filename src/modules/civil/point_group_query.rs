@@ -17,7 +17,7 @@
 //! stores a single rule as the reference does and the rest as a custom
 //! query.
 
-use document::classes::civil::{CogoPoint, Comparison, PointAttribute, PointQuery, QueryConstant, QueryExpression, NO_ELEVATION};
+use document::classes::civil::{CogoPoint, Comparison, PointOverrides, PointAttribute, PointQuery, QueryConstant, QueryExpression, NO_ELEVATION};
 
 /// A point attribute a rule or a Query Builder row compares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +258,8 @@ pub struct Point {
     pub style: String,
     pub label: String,
     pub layer: String,
+    /// The point's own marker scales and marker and label rotations.
+    pub overrides: PointOverrides,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -282,6 +284,7 @@ impl Point {
             style: String::new(),
             label: String::new(),
             layer: String::new(),
+            overrides: p.overrides,
         }
     }
 
@@ -703,7 +706,7 @@ mod tests {
     use super::*;
 
     fn pts() -> Vec<Point> {
-        let p = |n, z: f64, d: &str| Point { number: n, position: [0.0, 0.0, z], name: None, raw: Some(d.into()), format: None, full: Some(d.into()), geo: None, style: String::new(), label: String::new(), layer: String::new() };
+        let p = |n, z: f64, d: &str| Point { number: n, position: [0.0, 0.0, z], name: None, raw: Some(d.into()), format: None, full: Some(d.into()), geo: None, style: String::new(), label: String::new(), layer: String::new(), overrides: PointOverrides::default() };
         vec![p(1, 10.0, "TREE"), p(2, 20.0, "TREE2"), p(3, 30.0, "POLE"), p(4, NO_ELEVATION, "MH"), p(5, 15.0, "tree")]
     }
 

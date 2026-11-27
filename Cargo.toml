@@ -196,6 +196,11 @@ iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026
 iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7e0b63026af00a35f9e79d7f87d52645ad9f3a5b" }
 
+# The pinned codec plus the points' own marker scales and rotations
+# (hakanaktt/acadrust#714); drop once the document crate pins a codec past it.
+[patch."https://github.com/hakanaktt/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "752e4e10f513c4e48a758eac262c5c7df135a52c" }
+
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

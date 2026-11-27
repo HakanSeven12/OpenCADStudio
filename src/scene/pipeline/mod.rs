@@ -65,7 +65,7 @@ pub use wire_gpu::{BlockWireGpu, WireGpu};
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::image_model::ImageModel;
 use crate::scene::model::mesh_model::MeshLodSet;
-use crate::scene::model::wire_model::WireModel;
+use crate::display::wire_model::WireModel;
 
 /// Worst-case raster depth bias (in 24-bit quanta, toward the camera) block
 /// text is required to clear. The wipeout pipeline currently carries no bias
@@ -287,8 +287,10 @@ pub struct Pipeline {
     /// Group-1 layout for the text pipeline (atlas texture + sampler).
     text_atlas_bgl: wgpu::BindGroupLayout,
     /// GPU glyph atlas (texture + sampler + bind group). Rebuilt when the shared
-    /// CPU atlas grows (new glyphs baked). `None` until the first text upload.
+    /// CPU atlas revision advances (new glyphs baked, growth, or reset). `None`
+    /// until the first text upload.
     text_atlas_gpu: Option<text_gpu::TextAtlasGpu>,
+    text_atlas_revision: u64,
     /// Glyph-quad vertices for the frame, split at whole glyph boundaries.
     text_gpu: Vec<text_gpu::TextGpu>,
     block_text_gpu: Vec<text_gpu::BlockTextGpu>,
@@ -1585,15 +1587,16 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         }
         // Ensure the glyph atlas exists / is current even when the base text
         // pass didn't run this frame (e.g. the dragged text is the only text).
-        if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
-            if self.text_atlas_gpu.is_none() || atlas.is_dirty() {
+        if let Ok(atlas) = crate::text::sdf_atlas::text_atlas().lock() {
+            let revision = atlas.revision();
+            if self.text_atlas_gpu.is_none() || self.text_atlas_revision != revision {
                 self.text_atlas_gpu = Some(text_gpu::TextAtlasGpu::upload(
                     device,
                     queue,
                     &atlas,
                     &self.text_atlas_bgl,
                 ));
-                atlas.clear_dirty();
+                self.text_atlas_revision = revision;
             }
         }
         self.text_preview_gpu = text_gpu::upload_vertices(device, queue, verts);
@@ -2561,15 +2564,16 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
-        if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
-            if self.text_atlas_gpu.is_none() || atlas.is_dirty() {
+        if let Ok(atlas) = crate::text::sdf_atlas::text_atlas().lock() {
+            let revision = atlas.revision();
+            if self.text_atlas_gpu.is_none() || self.text_atlas_revision != revision {
                 self.text_atlas_gpu = Some(text_gpu::TextAtlasGpu::upload(
                     device,
                     queue,
                     &atlas,
                     &self.text_atlas_bgl,
                 ));
-                atlas.clear_dirty();
+                self.text_atlas_revision = revision;
             }
         }
         let atlas_ms = perf_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
@@ -4243,6 +4247,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         }
 
         self.text_atlas_gpu = None;
+        self.text_atlas_revision = 0;
         self.text_gpu.clear();
         self.block_text_gpu.clear();
         self.block_text_highlight_gpu.clear();
@@ -4261,8 +4266,13 @@ analytic={:.1} regular={:.1} blocks={:.1}",
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
         // Record the requested render size every frame (the blit UV scale reads
         // it); only reallocate the textures when the *rounded* size changes.
-        self.depth_texture_size = size;
-        let alloc = Size::new(round_up_tex(size.width), round_up_tex(size.height));
+        let max_dim = device.limits().max_texture_dimension_2d.max(1);
+        let clamped = Size::new(size.width.clamp(1, max_dim), size.height.clamp(1, max_dim));
+        self.depth_texture_size = clamped;
+        let alloc = Size::new(
+            round_up_tex(clamped.width, max_dim),
+            round_up_tex(clamped.height, max_dim),
+        );
         if self.alloc_size != alloc {
             let size = alloc;
             self.wire_highlight_target = None;
@@ -4329,9 +4339,12 @@ analytic={:.1} regular={:.1} blocks={:.1}",
 /// Round a texture dimension up to a coarse grid so a live divider drag
 /// doesn't recreate the depth / MSAA / resolve textures on every frame. See
 /// `alloc_size` — this is the mitigation for the Windows-Firefox freeze (#191).
-fn round_up_tex(n: u32) -> u32 {
+fn round_up_tex(n: u32, max_dim: u32) -> u32 {
     const GRID: u32 = 128;
-    n.max(1).div_ceil(GRID) * GRID
+    n.max(1)
+        .div_ceil(GRID)
+        .saturating_mul(GRID)
+        .min(max_dim.max(1))
 }
 
 /// `true` when the world-XY AABB projects entirely outside the
@@ -5375,3 +5388,15 @@ pub(crate) fn analytic_patch_enabled() -> bool {
 
 #[cfg(test)]
 mod msaa_sample_tests;
+
+#[cfg(test)]
+mod depth_limit_tests {
+    #[test]
+    fn round_up_tex_clamps_to_device_limit_without_overflow() {
+        assert_eq!(super::round_up_tex(1, 8192), 128);
+        assert_eq!(super::round_up_tex(129, 8192), 256);
+        assert_eq!(super::round_up_tex(8192, 8192), 8192);
+        assert_eq!(super::round_up_tex(9000, 8192), 8192);
+        assert_eq!(super::round_up_tex(u32::MAX, 8192), 8192);
+    }
+}

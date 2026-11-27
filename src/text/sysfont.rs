@@ -732,6 +732,9 @@ pub fn register_font_file(file_name: &str, bytes: &[u8]) -> Option<(String, usiz
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::text::ttf_glyph::register_shaper_font_bytes(bytes.to_vec());
+    crate::text::ttf_glyph::clear_fallback_cache();
     Some((family, faces))
 }
 
@@ -791,7 +794,7 @@ pub(crate) fn load_drawing_fonts(base: Option<&std::path::Path>, doc: &document:
         let mut db = sys.db.lock().unwrap_or_else(|e| e.into_inner());
         let before: std::collections::HashSet<fontdb::ID> =
             db.faces().map(|face| face.id).collect();
-        for dir in dirs {
+        for dir in &dirs {
             db.load_fonts_dir(dir);
         }
         let added: Vec<(String, std::path::PathBuf, FileFace)> = db
@@ -838,6 +841,7 @@ pub(crate) fn load_drawing_fonts(base: Option<&std::path::Path>, doc: &document:
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
+    crate::text::ttf_glyph::register_shaper_font_dirs(&dirs);
     crate::text::ttf_glyph::clear_fallback_cache();
 }
 

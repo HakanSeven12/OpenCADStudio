@@ -154,6 +154,7 @@ fn check_family(
     let pz = xz.y - oz;
 
     let perp_step = fam.perp_step * scale;
+    if abs(perp_step) <= 1e-12 { return false; }
 
     let perp   = -px * sin_a + pz * cos_a;
     let k      = round(perp / perp_step);
@@ -177,6 +178,7 @@ fn check_family(
 
     let along_step = fam.along_step * scale;
     let period     = fam.period * scale;
+    if abs(period) <= 1e-12 { return d <= half_line; }
     let along      = px * cos_a + pz * sin_a;
     let t          = along - k * along_step;
     let t_mod      = ((t % period) + period) % period;
@@ -195,7 +197,7 @@ fn check_family(
             let owx = -dtv * cos_a + dperp * sin_a;
             let owy = -dtv * sin_a - dperp * cos_a;
             let dot_half = width_px * 0.5;
-            if abs(owx / wpx) <= dot_half && abs(owy / wpy) <= dot_half { return true; }
+            if abs(owx) <= dot_half * wpx && abs(owy) <= dot_half * wpy { return true; }
         }
     }
     return false;
@@ -223,6 +225,9 @@ fn dither_threshold(frag: vec2<f32>) -> f32 {
 
 // Share of the area one family's lines cover on screen — see hatch.wgsl.
 fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
+    if u.world_per_pixel <= 1e-12 {
+        return 0.0;
+    }
     let spacing_px = abs(fam.perp_step) * scale / u.world_per_pixel;
     let width_px = select(1.0, display_lineweight(fam.line_width), u.lwdisplay_enable > 0.5);
     var along = 1.0;
@@ -240,7 +245,7 @@ fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
         }
         along = clamp(lit / period, 0.0, 1.0);
     }
-    return clamp(width_px / spacing_px, 0.0, 1.0) * along;
+    return select(1.0, clamp(width_px / spacing_px, 0.0, 1.0), spacing_px > 1e-12) * along;
 }
 
 @fragment fn fs_main(v: VOut) -> @location(0) vec4<f32> {
@@ -255,7 +260,8 @@ fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
         return shown(h.color);
     } else if base_mode == 2u {
         let proj = v.xz.x * h.grad_cos + v.xz.y * h.grad_sin;
-        var t    = clamp((proj - h.grad_min) / h.grad_range, 0.0, 1.0);
+        let grad_range = select(h.grad_range, 1.0, abs(h.grad_range) <= 1e-12);
+        var t    = clamp((proj - h.grad_min) / grad_range, 0.0, 1.0);
         // Shape profile: cylinder mirrors around the middle, curved eases in.
         if gk == 1u {
             t = 1.0 - abs(2.0 * t - 1.0);
@@ -269,7 +275,8 @@ fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
     } else if base_mode == 3u {
         // Radial gradient: centre is (grad_cos, grad_sin), radius is grad_range.
         let d = length(v.xz - vec2<f32>(h.grad_cos, h.grad_sin));
-        var t = clamp(d / h.grad_range, 0.0, 1.0);
+        let grad_range = select(h.grad_range, 1.0, abs(h.grad_range) <= 1e-12);
+        var t = clamp(d / grad_range, 0.0, 1.0);
         if gk == 3u {
             t = sqrt(t);
         }

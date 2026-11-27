@@ -1981,6 +1981,7 @@ impl Pipeline {
             block_text_highlight_pipeline,
             text_atlas_bgl,
             text_atlas_gpu: None,
+            text_atlas_revision: 0,
             text_gpu: Vec::new(),
             block_text_gpu: Vec::new(),
             block_text_highlight_gpu: Vec::new(),

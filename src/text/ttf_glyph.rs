@@ -738,27 +738,30 @@ fn face_key(data: &[u8], index: u32) -> Option<FaceKey> {
     })
 }
 
-/// Copy each font file once per process, however many glyphs come from it.
+/// Copy each font file once per process, bounded by LRU capacity.
 #[cfg(not(target_arch = "wasm32"))]
 fn blob_for(data: &[u8], index: u32) -> Option<Arc<FontBlob>> {
-    static BLOBS: OnceLock<Mutex<HashMap<FaceKey, Arc<FontBlob>>>> = OnceLock::new();
+    const MAX_FONT_BLOBS: usize = 128;
+    static BLOBS: OnceLock<Mutex<LruCache<FaceKey, Arc<FontBlob>>>> = OnceLock::new();
     let key = face_key(data, index)?;
     let mut blobs = BLOBS
-        .get_or_init(|| Mutex::new(HashMap::default()))
+        .get_or_init(|| {
+            Mutex::new(LruCache::new(
+                NonZeroUsize::new(MAX_FONT_BLOBS).unwrap_or(NonZeroUsize::MIN),
+            ))
+        })
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    Some(
-        blobs
-            .entry(key)
-            .or_insert_with(|| {
-                Arc::new(FontBlob {
-                    data: data.to_vec(),
-                    index,
-                    id: (key.len, key.index, key.checksum_adjustment),
-                })
-            })
-            .clone(),
-    )
+    if let Some(existing) = blobs.get(&key) {
+        return Some(Arc::clone(existing));
+    }
+    let blob = Arc::new(FontBlob {
+        data: data.to_vec(),
+        index,
+        id: (key.len, key.index, key.checksum_adjustment),
+    });
+    blobs.put(key, Arc::clone(&blob));
+    Some(blob)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1255,6 +1258,72 @@ mod shape_cache_tests {
 #[allow(dead_code)]
 const SHAPE_FS: f32 = 1000.0;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn pending_shaper_bytes() -> &'static Mutex<Vec<Vec<u8>>> {
+    static PENDING: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pending_shaper_dirs() -> &'static Mutex<Vec<std::path::PathBuf>> {
+    static PENDING: OnceLock<Mutex<Vec<std::path::PathBuf>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn font_system_cell() -> &'static OnceLock<Mutex<cosmic_text::FontSystem>> {
+    static FS: OnceLock<Mutex<cosmic_text::FontSystem>> = OnceLock::new();
+    &FS
+}
+
+/// Register dynamically loaded font bytes with the desktop shaper's database.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn register_shaper_font_bytes(bytes: Vec<u8>) {
+    if let Some(fs) = font_system_cell().get() {
+        fs.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .db_mut()
+            .load_font_data(bytes);
+    } else {
+        let mut pending = pending_shaper_bytes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if pending.len() < 64 {
+            pending.push(bytes);
+        }
+    }
+}
+
+/// Register drawing-relative font directories with the desktop shaper's database.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn register_shaper_font_dirs(dirs: &[std::path::PathBuf]) {
+    if dirs.is_empty() {
+        return;
+    }
+    if let Some(fs) = font_system_cell().get() {
+        let mut guard = fs.lock().unwrap_or_else(|e| e.into_inner());
+        let db = guard.db_mut();
+        for dir in dirs {
+            db.load_fonts_dir(dir);
+        }
+    } else {
+        let mut pending = pending_shaper_dirs()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for dir in dirs {
+            if pending.len() < 64 && !pending.contains(dir) {
+                pending.push(dir.clone());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn shape_scratch() -> &'static Mutex<Option<(cosmic_text::Buffer, String)>> {
+    static SHAPE_SCRATCH: OnceLock<Mutex<Option<(cosmic_text::Buffer, String)>>> = OnceLock::new();
+    SHAPE_SCRATCH.get_or_init(|| Mutex::new(None))
+}
+
 /// Shared cosmic-text layout engine, loaded once with the system fonts. Held
 /// behind a mutex because `set_text`/`shape` need `&mut FontSystem`.
 ///
@@ -1263,8 +1332,28 @@ const SHAPE_FS: f32 = 1000.0;
 /// disabled there instead (LFF stroke fonts still render).
 #[cfg(not(target_arch = "wasm32"))]
 fn font_system() -> &'static Mutex<cosmic_text::FontSystem> {
-    static FS: OnceLock<Mutex<cosmic_text::FontSystem>> = OnceLock::new();
-    FS.get_or_init(|| Mutex::new(cosmic_text::FontSystem::new()))
+    font_system_cell().get_or_init(|| {
+        let mut fs = cosmic_text::FontSystem::new();
+        let queued_bytes = {
+            let mut guard = pending_shaper_bytes()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *guard)
+        };
+        let queued_dirs = {
+            let mut guard = pending_shaper_dirs()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *guard)
+        };
+        for bytes in queued_bytes {
+            fs.db_mut().load_font_data(bytes);
+        }
+        for dir in queued_dirs {
+            fs.db_mut().load_fonts_dir(dir);
+        }
+        Mutex::new(fs)
+    })
 }
 
 /// Lay out and shape `text` in `family` with cosmic-text — ligatures, Arabic
@@ -1377,17 +1466,14 @@ pub fn clear_fallback_cache() {
         .unwrap_or_else(|e| e.into_inner())
         .clear();
     #[cfg(not(target_arch = "wasm32"))]
-    glyph_topology_cache()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
-    // Web only: the per-family outline cache can also hold stale `None`s —
-    // the family only became resolvable when the font joined the sysfont
-    // database (`register_web_font`). On desktop the font set never changes,
-    // so the cache is kept.
-    #[cfg(target_arch = "wasm32")]
+    {
+        glyph_topology_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        *shape_scratch().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
     cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
-    #[cfg(target_arch = "wasm32")]
     crate::text::sdf_atlas::reset_font_entries();
 }
 
@@ -1703,9 +1789,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
         attrs
     }
     .font_features(unkerned());
-    static SHAPE_SCRATCH: OnceLock<Mutex<Option<(Buffer, String)>>> = OnceLock::new();
-    let mut scratch_guard = SHAPE_SCRATCH
-        .get_or_init(|| Mutex::new(None))
+    let mut scratch_guard = shape_scratch()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let (buf, marked) = scratch_guard.get_or_insert_with(|| {
@@ -2135,5 +2219,15 @@ mod tests {
                 "msjh '{ch}' changed"
             );
         }
+    }
+
+    #[test]
+    fn clear_fallback_cache_resets_atlas_and_outline_caches() {
+        let before = crate::text::sdf_atlas::generation();
+        clear_fallback_cache();
+        assert!(
+            crate::text::sdf_atlas::generation() > before,
+            "clear_fallback_cache must advance sdf_atlas generation"
+        );
     }
 }

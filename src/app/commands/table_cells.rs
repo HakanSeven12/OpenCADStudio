@@ -10,17 +10,21 @@ use document::entities::Table;
 use iced::Task;
 
 /// A blank cell carrying `cell`'s own style and state, not its content.
-/// A text cell's format stays (its text height among it): without it the
-/// blank cell is measured at the table style's height and its row grows.
+/// A text or field cell's format stays (its text height among it), as
+/// empty text: without it the blank cell is measured at the table style's
+/// height and its row grows. A field (a formula column's sum) is not copied.
 fn blank_like(cell: &TableCell) -> TableCell {
+    use document::entities::table::TableCellContentType as Kind;
     let mut blank = TableCell::new();
     blank.style = cell.style.clone();
     blank.state = cell.state;
     if let Some(content) = cell.contents.first().filter(|content| {
-        content.block_handle.is_none()
-            && content.content_type == document::entities::table::TableCellContentType::Value
+        content.block_handle.is_none() && matches!(content.content_type, Kind::Value | Kind::Field)
     }) {
-        blank.contents = vec![content.clone()];
+        let mut content = content.clone();
+        content.content_type = Kind::Value;
+        content.field_handle = None;
+        blank.contents = vec![content];
         blank.set_text("");
     }
     blank
@@ -2071,6 +2075,105 @@ mod tests {
             after.iter().all(|h| (h - before[0]).abs() < 1e-9),
             "rows {before:?} became {after:?}"
         );
+    }
+
+    /// A column inserted beside another changes nothing but the width it
+    /// adds: its own width is its neighbour's, the other columns, the row
+    /// heights and the text heights stay. Its cells next to a field (a
+    /// formula row's sum, as tables read from files hold them) keep the
+    /// field's format as empty text: dropped, they were measured at the
+    /// table style's taller text and that row grew.
+    #[test]
+    fn an_inserted_column_only_adds_its_neighbours_width() {
+        use document::entities::table::{CellStylePropertyFlags as P, TableCellContentType};
+        for (cmd, pick, source, at) in [
+            ("_TCELLCOLLEFT", 2, 2, 2),
+            ("_TCELLCOLRIGHT", 1, 1, 2),
+        ] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let mut style = document::objects::TableStyle::standard();
+            for role in [
+                &mut style.title_row_style,
+                &mut style.header_row_style,
+                &mut style.data_row_style,
+            ] {
+                role.text_height = 2.5;
+            }
+            let document = &mut app.tabs[i].scene.document;
+            let style_handle = document.allocate_handle();
+            let field = document.allocate_handle();
+            document.objects.insert(
+                style_handle,
+                document::objects::ObjectType::TableStyle(style),
+            );
+            // a title, a header and data in columns 1, 2 and 3 wide; the last
+            // row's cells hold fields
+            let mut t = Table::new(Vector3::ZERO, 4, 3);
+            t.table_style_handle = Some(style_handle);
+            for (c, column) in t.columns.iter_mut().enumerate() {
+                column.width = (c + 1) as f64;
+            }
+            for r in 0..4 {
+                for c in 0..3 {
+                    t.set_cell_text(r, c, &format!("{r}{c}"));
+                }
+            }
+            for (r, row) in t.rows.iter_mut().enumerate() {
+                row.height = 1.0;
+                for cell in &mut row.cells {
+                    let content = &mut cell.contents[0];
+                    content.text_height = 0.5;
+                    content.format_property_flags |= P::TEXT_HEIGHT.bits() as i32;
+                    if r == 3 {
+                        content.content_type = TableCellContentType::Field;
+                        content.field_handle = Some(field);
+                    }
+                }
+            }
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let widths = |t: &Table| t.columns.iter().map(|c| c.width).collect::<Vec<_>>();
+            let heights = |t: &Table| t.rows.iter().map(|r| r.height).collect::<Vec<_>>();
+            let (widths_before, heights_before) = (widths(&t), heights(&t));
+            let handle = app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Table(Box::new(t)));
+            app.tabs[i]
+                .scene
+                .select_table_cells(crate::scene::TableCellSelection {
+                    table: handle,
+                    anchor: (2, pick),
+                    end: (2, pick),
+                });
+            let _ = app.dispatch_table_cells(cmd, i);
+            let Some(document::EntityType::Table(t)) =
+                app.tabs[i].scene.document.get_entity(handle)
+            else {
+                panic!("{cmd}: the table must stay");
+            };
+            let mut t = (**t).clone();
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let mut expected = widths_before.clone();
+            expected.insert(at, widths_before[source]);
+            assert_eq!(widths(&t), expected, "{cmd} at {pick}: column widths");
+            let total = |w: &[f64]| w.iter().sum::<f64>();
+            assert_eq!(
+                total(&widths(&t)),
+                total(&widths_before) + widths_before[source],
+                "{cmd} at {pick}: table width"
+            );
+            assert_eq!(heights(&t), heights_before, "{cmd} at {pick}: row heights");
+            for r in 0..4 {
+                let new_cell = t.cell(r, at).unwrap();
+                assert_eq!(new_cell.text_value(), "");
+                assert_eq!(
+                    new_cell.contents.first().map(|c| (c.text_height, c.field_handle)),
+                    Some((0.5, None)),
+                    "{cmd} at {pick}: text height of the new cell in row {r}"
+                );
+            }
+        }
     }
 
     #[test]

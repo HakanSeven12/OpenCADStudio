@@ -2157,23 +2157,55 @@ impl OpenCADStudio {
         task
     }
 
-    fn handle_script(&mut self, script: String) -> Task<Message> {
+    pub(in crate::app) fn is_valid_py_resume_script(script: &str) -> bool {
+        let mut lines = script.lines().map(str::trim).filter(|line| !line.is_empty());
+        let Some(line) = lines.next() else {
+            return false;
+        };
+        if lines.next().is_some() {
+            return false;
+        }
+        let Some(rest) = line.strip_prefix("PY_RESUME ") else {
+            return false;
+        };
+        let Some((token, path)) = rest.trim().split_once(char::is_whitespace) else {
+            return false;
+        };
+        token.parse::<u64>().is_ok() && !path.trim().is_empty()
+    }
+
+    pub(in crate::app) fn handle_script(&mut self, script: String) -> Task<Message> {
         let i = self.active_tab;
         // A plugin command's script starts from an empty selection.
-        if self.tabs[i]
+        let from_plugin = self.tabs[i]
             .active_cmd
             .as_ref()
-            .is_some_and(|c| c.name() == "PLUGIN")
-        {
+            .is_some_and(|c| c.name() == "PLUGIN");
+        if from_plugin {
             self.tabs[i].scene.deselect_all();
         }
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
+        let restricted = from_plugin && !Self::is_valid_py_resume_script(&script);
+        if restricted {
+            if !self.script_commands {
+                self.command_line.push_error(
+                    "running commands from a script is turned off (SCRIPTCOMMANDS = 0); turn it on at the command line with SCRIPTCOMMANDS 1",
+                );
+                return Task::none();
+            }
+            for line in script.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                if let Err(err) = self.check_script_command_allowed(line) {
+                    self.command_line.push_error(&err);
+                    return Task::none();
+                }
+            }
+        }
         // Each line answers the prompts the previous one left open; a line
         // that starts a plugin command first lets the window draw (#3650).
-        self.run_script_lines(script.lines().map(str::to_string).collect())
+        self.run_script_lines(script.lines().map(str::to_string).collect(), restricted)
     }
 
     fn handle_measurement(&mut self, msg: String) {

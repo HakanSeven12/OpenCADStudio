@@ -27,21 +27,133 @@ mod ocs {
 
     use crate::host_ctx;
 
+    fn canonical_dir_if_exists(path: &std::path::Path) -> Option<std::path::PathBuf> {
+        std::fs::canonicalize(path)
+            .ok()
+            .filter(|resolved| resolved.is_dir())
+    }
+
+    fn sandboxed_output_roots(host: &dyn ocs_plugin_api::host::HostApi) -> Vec<std::path::PathBuf> {
+        let mut roots = Vec::new();
+        if let Some(doc_path) = host.document_path(host.tab_id()) {
+            if let Some(dir) = doc_path.parent().and_then(canonical_dir_if_exists) {
+                roots.push(dir);
+            }
+        }
+        if let Some(script_path) = host_ctx::script_path() {
+            if let Some(dir) = std::path::Path::new(&script_path)
+                .parent()
+                .and_then(canonical_dir_if_exists)
+            {
+                if !roots.contains(&dir) {
+                    roots.push(dir);
+                }
+            }
+        }
+        if let Some(dir) = std::env::var_os("OCS_PYTHON_OUTPUT_DIR")
+            .filter(|value| !value.is_empty())
+            .and_then(|value| canonical_dir_if_exists(std::path::Path::new(&value)))
+        {
+            if !roots.contains(&dir) {
+                roots.push(dir);
+            }
+        }
+        roots
+    }
+
+    pub(super) fn validate_sandboxed_output_path(
+        raw: &str,
+        roots: &[std::path::PathBuf],
+    ) -> Result<std::path::PathBuf, String> {
+        if raw.is_empty() || raw.contains('\0') {
+            return Err("output path must not be empty".to_owned());
+        }
+        let path = std::path::Path::new(raw);
+        if path
+            .components()
+            .any(|comp| matches!(comp, std::path::Component::ParentDir))
+        {
+            return Err(format!("output path {raw:?} must not contain '..'"));
+        }
+        let Some(file_name) = path.file_name() else {
+            return Err(format!("output path {raw:?} must name a file"));
+        };
+        let mut name_comps = std::path::Path::new(file_name).components();
+        if !matches!(
+            (name_comps.next(), name_comps.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        ) {
+            return Err(format!("output path {raw:?} must name a normal file"));
+        }
+        if roots.is_empty() {
+            return Err(
+                "output path refused: save the drawing, run via PY_RUN, or set OCS_PYTHON_OUTPUT_DIR"
+                    .to_owned(),
+            );
+        }
+        let parent_canon = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => {
+                if path.is_relative() {
+                    roots
+                        .iter()
+                        .filter_map(|root| {
+                            let canon = std::fs::canonicalize(root.join(parent)).ok()?;
+                            canon.starts_with(root).then_some(canon)
+                        })
+                        .next()
+                        .ok_or_else(|| {
+                            format!(
+                                "output directory for {raw:?} does not exist or escapes allowed output roots"
+                            )
+                        })?
+                } else {
+                    let canon = std::fs::canonicalize(parent).map_err(|error| {
+                        format!(
+                            "output directory for {raw:?} does not exist or cannot be resolved: {error}"
+                        )
+                    })?;
+                    if !roots.iter().any(|root| canon.starts_with(root)) {
+                        return Err(format!(
+                            "output path {raw:?} escapes the active drawing, script, or configured output directory"
+                        ));
+                    }
+                    canon
+                }
+            }
+            _ if path.is_relative() => roots[0].clone(),
+            _ => {
+                return Err(format!("output path {raw:?} has no valid parent directory"));
+            }
+        };
+        let target = parent_canon.join(file_name);
+        if let Ok(meta) = std::fs::symlink_metadata(&target) {
+            if meta.file_type().is_symlink() {
+                return Err(format!("refusing to follow symlink output path {raw:?}"));
+            }
+        }
+        Ok(target)
+    }
+
     /// Write one new UTF-8 report file. The caller must provide an explicit
-    /// path; existing files are never overwritten and parent directories are
-    /// not created.
+    /// path inside the active drawing, script, or configured output directory;
+    /// existing files are never overwritten and parent directories are not created.
     #[pyfunction]
     fn write_new_text_file(path: String, content: String, vm: &VirtualMachine) -> PyResult<()> {
-        if host_ctx::with_host(|_| ()).is_none() {
+        if !host_ctx::is_active() {
             return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
         }
         if path.is_empty() {
             return Err(vm.new_value_error("report path must not be empty".to_owned()));
         }
+        let roots = host_ctx::with_host(|host| sandboxed_output_roots(host))
+            .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
+        let safe_path = validate_sandboxed_output_path(&path, &roots).map_err(|error| {
+            vm.new_runtime_error(format!("cannot create report {path}: {error}"))
+        })?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&path)
+            .open(&safe_path)
             .map_err(|error| {
                 vm.new_runtime_error(format!("cannot create report {path}: {error}"))
             })?;
@@ -1968,18 +2080,24 @@ mod ocs {
         output_path: String,
         vm: &VirtualMachine,
     ) -> PyResult<usize> {
+        if !host_ctx::is_active() {
+            return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
+        }
         let path = std::path::Path::new(&output_path);
         if path
             .extension()
             .is_none_or(|extension| !extension.eq_ignore_ascii_case("dwg"))
             || path.file_name().is_none()
-            || path.parent().is_none_or(|parent| !parent.is_dir())
         {
             return Err(vm.new_value_error(
-                "ocs.export_layer_dwg: output must be a .dwg file in an existing directory"
+                "ocs.export_layer_dwg: output must be a .dwg file in an existing allowed directory"
                     .to_owned(),
             ));
         }
+        let roots = host_ctx::with_host(|host| sandboxed_output_roots(host))
+            .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
+        let safe_path = validate_sandboxed_output_path(&output_path, &roots)
+            .map_err(|error| vm.new_value_error(format!("ocs.export_layer_dwg: {error}")))?;
         let prepared = host_ctx::with_host(|host| {
             let source = host.document();
             source.layers.get(&layer_name)?;
@@ -2027,7 +2145,7 @@ mod ocs {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(path)
+            .open(&safe_path)
             .map_err(|error| {
                 vm.new_runtime_error(format!(
                     "ocs.export_layer_dwg: cannot create {output_path:?}: {error}"
@@ -2035,7 +2153,7 @@ mod ocs {
             })?;
         if let Err(error) = document::DwgWriter::write_to_writer(&mut file, &snapshot) {
             drop(file);
-            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(&safe_path);
             return Err(
                 vm.new_runtime_error(format!("ocs.export_layer_dwg: DWG write failed: {error}"))
             );
@@ -2048,27 +2166,55 @@ mod ocs {
     /// untouched. No source drawing changes are made.
     #[pyfunction]
     fn export_layer_dwgs(exports: Vec<Vec<String>>, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
-        let mut paths = std::collections::HashSet::new();
-        if exports
-            .iter()
-            .any(|row| row.len() != 2 || !paths.insert(row[1].clone()))
-        {
-            return Err(vm.new_value_error(
-                "ocs.export_layer_dwgs: expected unique [layer, path] pairs".to_owned(),
-            ));
+        if !host_ctx::is_active() {
+            return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
         }
-        let mut created = Vec::with_capacity(exports.len());
-        let mut counts = Vec::with_capacity(exports.len());
-        for row in exports {
-            match export_layer_dwg(row[0].clone(), row[1].clone(), vm) {
+        let roots = host_ctx::with_host(|host| sandboxed_output_roots(host))
+            .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
+        let mut paths = std::collections::HashSet::new();
+        let mut planned = Vec::with_capacity(exports.len());
+        for row in &exports {
+            if row.len() != 2 {
+                return Err(vm.new_value_error(
+                    "ocs.export_layer_dwgs: expected unique [layer, path] pairs".to_owned(),
+                ));
+            }
+            let raw = std::path::Path::new(&row[1]);
+            if raw
+                .extension()
+                .is_none_or(|extension| !extension.eq_ignore_ascii_case("dwg"))
+                || raw.file_name().is_none()
+            {
+                return Err(vm.new_value_error(
+                    "ocs.export_layer_dwg: output must be a .dwg file in an existing allowed directory"
+                        .to_owned(),
+                ));
+            }
+            let safe_path = validate_sandboxed_output_path(&row[1], &roots)
+                .map_err(|error| vm.new_value_error(format!("ocs.export_layer_dwg: {error}")))?;
+            if !paths.insert(safe_path.clone()) {
+                return Err(vm.new_value_error(
+                    "ocs.export_layer_dwgs: expected unique [layer, path] pairs".to_owned(),
+                ));
+            }
+            planned.push((row[0].clone(), row[1].clone(), safe_path));
+        }
+        let mut created = Vec::with_capacity(planned.len());
+        let mut counts = Vec::with_capacity(planned.len());
+        for (layer, raw_path, safe_path) in planned {
+            match export_layer_dwg(layer, raw_path, vm) {
                 Ok(count) => {
-                    created.push(row[1].clone());
+                    created.push(safe_path);
                     counts.push(count);
                 }
                 Err(error) => {
                     let failed_cleanup: Vec<String> = created
                         .into_iter()
-                        .filter(|path| std::fs::remove_file(path).is_err())
+                        .filter_map(|path| {
+                            std::fs::remove_file(&path)
+                                .err()
+                                .map(|_| path.to_string_lossy().into_owned())
+                        })
                         .collect();
                     if !failed_cleanup.is_empty() {
                         return Err(vm.new_runtime_error(format!(
@@ -4733,29 +4879,34 @@ mod ocs {
     /// exist or isn't a supported kind.
     #[pyfunction]
     fn update(handle: u64, entity: PyObjectRef, vm: &VirtualMachine) -> PyResult<()> {
+        if !host_ctx::is_active() {
+            return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
+        }
         let dict = entity.try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;
-        let changed = host_ctx::with_host(|host| -> PyResult<bool> {
-            let Some(existing) = host.document().get_entity(Handle::new(handle)).cloned() else {
-                return Ok(false);
-            };
-            #[allow(unused_mut)]
-            let mut updated = apply_dict_to_entity(&existing, &dict, vm)?;
+        let Some(existing) =
+            host_ctx::with_host(|host| host.document().get_entity(Handle::new(handle)).cloned())
+                .ok_or_else(|| {
+                    vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
+                })?
+        else {
+            return Err(vm.new_runtime_error(format!("ocs.update: entity {handle} does not exist")));
+        };
+        #[allow(unused_mut)]
+        let mut updated = apply_dict_to_entity(&existing, &dict, vm)?;
+        let changed = host_ctx::with_host(|host| -> Result<bool, String> {
             #[cfg(feature = "experimental-host-model")]
             {
                 ocs_plugin_api::entity_coverage::bind_canvas_entity_references(
                     host.document(),
                     &mut updated,
-                )
-                .map_err(|error| vm.new_value_error(error))?;
-                ocs_plugin_api::entity_coverage::validate_entity_mutation(&existing, &updated)
-                    .map_err(|error| vm.new_value_error(error))?;
+                )?;
+                ocs_plugin_api::entity_coverage::validate_entity_mutation(&existing, &updated)?;
             }
             host_ctx::ensure_undo_started(host);
             Ok(host.update_entity(updated))
         })
-        .ok_or_else(|| {
-            vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
-        })??;
+        .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?
+        .map_err(|error| vm.new_value_error(error))?;
         if !changed {
             return Err(vm.new_runtime_error(format!("ocs.update: entity {handle} does not exist")));
         }
@@ -4783,30 +4934,40 @@ mod ocs {
     #[cfg(feature = "experimental-host-model")]
     #[pyfunction]
     fn update_many(label: String, updates: Vec<PyObjectRef>, vm: &VirtualMachine) -> PyResult<()> {
-        let result = host_ctx::with_host(|host| -> PyResult<Result<(), String>> {
-            let mut entities = Vec::with_capacity(updates.len());
-            for patch in updates {
-                let dict = patch.try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;
-                let handle = dict.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
-                let existing = host
-                    .document()
-                    .get_entity(Handle::new(handle))
-                    .cloned()
-                    .ok_or_else(|| {
-                        vm.new_runtime_error(format!("entity {handle} does not exist"))
-                    })?;
-                let changed = if entity_to_dict(vm, &existing).is_ok() {
-                    apply_dict_to_entity(&existing, &dict, vm)?
-                } else {
-                    apply_layer_only_patch(&existing, &dict, vm)?
-                };
-                entities.push(changed);
-            }
-            Ok(host.update_entities_transaction(&label, entities))
+        if !host_ctx::is_active() {
+            return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
+        }
+        let mut parsed = Vec::with_capacity(updates.len());
+        let mut handles = Vec::with_capacity(updates.len());
+        for patch in updates {
+            let dict = patch.try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;
+            let handle = dict.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
+            handles.push(handle);
+            parsed.push((handle, dict));
+        }
+        let snapshots = host_ctx::with_host(|host| {
+            handles
+                .iter()
+                .map(|&h| host.document().get_entity(Handle::new(h)).cloned())
+                .collect::<Vec<_>>()
         })
-        .ok_or_else(|| {
-            vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
-        })??;
+        .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
+        let mut entities = Vec::with_capacity(parsed.len());
+        for ((handle, dict), existing_opt) in parsed.into_iter().zip(snapshots) {
+            let existing = existing_opt.ok_or_else(|| {
+                vm.new_runtime_error(format!("entity {handle} does not exist"))
+            })?;
+            let changed = if entity_to_dict(vm, &existing).is_ok() {
+                apply_dict_to_entity(&existing, &dict, vm)?
+            } else {
+                apply_layer_only_patch(&existing, &dict, vm)?
+            };
+            entities.push(changed);
+        }
+        let result = host_ctx::with_host(|host| host.update_entities_transaction(&label, entities))
+            .ok_or_else(|| {
+                vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
+            })?;
         result.map_err(|error| vm.new_runtime_error(format!("ocs.update_many: {error}")))
     }
 
@@ -4953,13 +5114,20 @@ mod ocs {
                 .entities()
                 .filter(|entity| top.contains(&entity.common().owner_handle))
                 .filter(|entity| entity.common().layer.eq_ignore_ascii_case(&layer))
-                .map(|entity| {
-                    vm.new_pyobj(i64::try_from(entity.common().handle.value()).unwrap_or(0))
-                })
+                .map(|entity| i64::try_from(entity.common().handle.value()).unwrap_or(0))
                 .collect::<Vec<_>>()
         })
         .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
-        Ok(vm.ctx.new_list(handles).into())
+        let py_handles = handles
+            .into_iter()
+            .map(|handle| vm.new_pyobj(handle))
+            .collect::<Vec<_>>();
+        Ok(vm.ctx.new_list(py_handles).into())
+    }
+
+    enum BatchUpdateError {
+        Value(String),
+        Runtime(String),
     }
 
     /// Set many top-level entities' layer in one undo step
@@ -4976,25 +5144,32 @@ mod ocs {
                 vm.new_value_error("ocs.set_entity_layers: an undo label is required".to_owned())
             );
         }
-        let entities = host_ctx::with_host(|host| -> PyResult<Vec<EntityType>> {
-            use rustpython_vm::builtins::PyDictRef;
-            let updates = pairs.try_into_value::<Vec<PyDictRef>>(vm)?;
+        if !host_ctx::is_active() {
+            return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
+        }
+        use rustpython_vm::builtins::PyDictRef;
+        let updates = pairs.try_into_value::<Vec<PyDictRef>>(vm)?;
+        let mut parsed = Vec::with_capacity(updates.len());
+        for update in updates {
+            let handle = update.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
+            let Some(layer) = update
+                .get_item_opt("layer", vm)?
+                .and_then(|value| value.try_into_value::<String>(vm).ok())
+            else {
+                return Err(vm.new_value_error(format!(
+                    "ocs.set_entity_layers: update for {handle} misses \"layer\""
+                )));
+            };
+            parsed.push((handle, layer));
+        }
+        let outcome = host_ctx::with_host(|host| -> Result<usize, BatchUpdateError> {
             let top = top_level_blocks(host.document());
             let mut entities = Vec::new();
-            for update in updates {
-                let handle = update.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
-                let Some(layer) = update
-                    .get_item_opt("layer", vm)?
-                    .and_then(|value| value.try_into_value::<String>(vm).ok())
-                else {
-                    return Err(vm.new_value_error(format!(
-                        "ocs.set_entity_layers: update for {handle} misses \"layer\""
-                    )));
-                };
+            for (handle, layer) in parsed {
                 // A layer the drawing does not carry would leave the entity
                 // pointing at no LAYER record.
                 if host.document().layers.get(&layer).is_none() {
-                    return Err(vm.new_value_error(format!(
+                    return Err(BatchUpdateError::Value(format!(
                         "ocs.set_entity_layers: layer {layer:?} not found"
                     )));
                 }
@@ -5004,7 +5179,7 @@ mod ocs {
                     .filter(|entity| top.contains(&entity.common().owner_handle))
                     .cloned()
                 else {
-                    return Err(vm.new_value_error(format!(
+                    return Err(BatchUpdateError::Value(format!(
                         "ocs.set_entity_layers: top-level entity {handle} not found"
                     )));
                 };
@@ -5014,17 +5189,18 @@ mod ocs {
                 entity.common_mut().layer = layer;
                 entities.push(entity);
             }
-            Ok(entities)
+            let count = entities.len();
+            host.update_entities_transaction(&label, entities)
+                .map_err(|error| {
+                    BatchUpdateError::Runtime(format!("ocs.set_entity_layers: {error}"))
+                })?;
+            Ok(count)
         })
         .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
-        let entities = entities?;
-        let count = entities.len();
-        host_ctx::with_host(|host| host.update_entities_transaction(&label, entities))
-            .ok_or_else(|| {
-                vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
-            })?
-            .map_err(|error| vm.new_runtime_error(format!("ocs.set_entity_layers: {error}")))?;
-        Ok(count)
+        outcome.map_err(|error| match error {
+            BatchUpdateError::Value(msg) => vm.new_value_error(msg),
+            BatchUpdateError::Runtime(msg) => vm.new_runtime_error(msg),
+        })
     }
 
     /// Handles (`int`) of every top-level entity: the ungated twin of the
@@ -5036,13 +5212,15 @@ mod ocs {
         let handles = host_ctx::with_host(|host| {
             host.document()
                 .entities()
-                .map(|entity| {
-                    vm.new_pyobj(i64::try_from(entity.common().handle.value()).unwrap_or(0))
-                })
+                .map(|entity| i64::try_from(entity.common().handle.value()).unwrap_or(0))
                 .collect::<Vec<_>>()
         })
         .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
-        Ok(vm.ctx.new_list(handles).into())
+        let py_handles = handles
+            .into_iter()
+            .map(|handle| vm.new_pyobj(handle))
+            .collect::<Vec<_>>();
+        Ok(vm.ctx.new_list(py_handles).into())
     }
 
     /// Set one top-level entity's color; preserving handle and everything
@@ -5090,32 +5268,33 @@ mod ocs {
                 vm.new_value_error("ocs.set_entity_colors: an undo label is required".to_owned())
             );
         }
-        let entities = host_ctx::with_host(|host| -> PyResult<Vec<EntityType>> {
-            use rustpython_vm::builtins::PyDictRef;
-            let updates = pairs.try_into_value::<Vec<PyDictRef>>(vm)?;
+        if !host_ctx::is_active() {
+            return Err(vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()));
+        }
+        use rustpython_vm::builtins::PyDictRef;
+        let updates = pairs.try_into_value::<Vec<PyDictRef>>(vm)?;
+        let mut parsed = Vec::with_capacity(updates.len());
+        for update in updates {
+            let handle = update.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
+            let Some(color_value) = update.get_item_opt("color", vm)? else {
+                return Err(vm.new_value_error(format!(
+                    "ocs.set_entity_colors: update for {handle} misses \"color\""
+                )));
+            };
+            let color = py_entity_color(color_value, vm)?;
+            parsed.push((handle, color));
+        }
+        let outcome = host_ctx::with_host(|host| -> Result<usize, BatchUpdateError> {
             let top = top_level_blocks(host.document());
             let mut entities = Vec::new();
-            for update in updates {
-                let handle = update.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
-                let Some(color_value) = update.get_item_opt("color", vm)? else {
-                    return Err(vm.new_value_error(format!(
-                        "ocs.set_entity_colors: update for {handle} misses \"color\""
-                    )));
-                };
-                let color = py_entity_color(color_value, vm)?;
-                // Per-pair snapshot reads are deliberate: the transaction
-                // writes full typed entities, so the current color is
-                // needed anyway. Each chunk costs one snapshot re-clone
-                // (writes invalidate the dispatch snapshot) plus one IPC
-                // frame — chunk size balances both against the 64 MiB IPC
-                // cap.
+            for (handle, color) in parsed {
                 let Some(mut entity) = host
                     .document()
                     .get_entity(Handle::new(handle))
                     .filter(|entity| top.contains(&entity.common().owner_handle))
                     .cloned()
                 else {
-                    return Err(vm.new_value_error(format!(
+                    return Err(BatchUpdateError::Value(format!(
                         "ocs.set_entity_colors: top-level entity {handle} not found"
                     )));
                 };
@@ -5125,17 +5304,18 @@ mod ocs {
                 entity.common_mut().color = color;
                 entities.push(entity);
             }
-            Ok(entities)
+            let count = entities.len();
+            host.update_entities_transaction(&label, entities)
+                .map_err(|error| {
+                    BatchUpdateError::Runtime(format!("ocs.set_entity_colors: {error}"))
+                })?;
+            Ok(count)
         })
         .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))?;
-        let entities = entities?;
-        let count = entities.len();
-        host_ctx::with_host(|host| host.update_entities_transaction(&label, entities))
-            .ok_or_else(|| {
-                vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
-            })?
-            .map_err(|error| vm.new_runtime_error(format!("ocs.set_entity_colors: {error}")))?;
-        Ok(count)
+        outcome.map_err(|error| match error {
+            BatchUpdateError::Value(msg) => vm.new_value_error(msg),
+            BatchUpdateError::Runtime(msg) => vm.new_runtime_error(msg),
+        })
     }
 
     /// Create one layer record when it is missing, or rewrite its color
@@ -6842,5 +7022,140 @@ mod tests {
         assert_eq!(empty_batch, Err(NO_HOST.to_string()));
         let malformed = eval(r#"ocs.set_entity_colors([{"handle": 7}], "label")"#);
         assert_eq!(malformed, Err(NO_HOST.to_string()));
+    }
+
+    #[test]
+    fn sandboxed_output_path_rejects_traversal_outside_and_symlinks() {
+        let base = std::env::temp_dir().join(format!("ocs_py_sandbox_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let allowed = base.join("drawing_dir");
+        let outside = base.join("outside_dir");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let roots = vec![std::fs::canonicalize(&allowed).unwrap()];
+
+        assert!(super::ocs::validate_sandboxed_output_path("../outside_dir/x.txt", &roots).is_err());
+        assert!(
+            super::ocs::validate_sandboxed_output_path(
+                outside.join("x.txt").to_str().unwrap(),
+                &roots
+            )
+            .is_err()
+        );
+        assert!(super::ocs::validate_sandboxed_output_path("out.txt", &[]).is_err());
+        assert!(
+            super::ocs::validate_sandboxed_output_path(
+                allowed.join("report.txt").to_str().unwrap(),
+                &roots
+            )
+            .is_ok()
+        );
+        assert!(super::ocs::validate_sandboxed_output_path("report.txt", &roots).is_ok());
+
+        #[cfg(unix)]
+        {
+            let link_dir = allowed.join("link_out");
+            std::os::unix::fs::symlink(&outside, &link_dir).unwrap();
+            assert!(
+                super::ocs::validate_sandboxed_output_path(
+                    link_dir.join("x.txt").to_str().unwrap(),
+                    &roots
+                )
+                .is_err()
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn output_helpers_fail_closed_outside_host() {
+        assert_eq!(
+            eval(r#"ocs.write_new_text_file("report.txt", "hello")"#),
+            Err(NO_HOST.to_string())
+        );
+        assert_eq!(
+            eval(r#"ocs.export_layer_dwg("0", "layer0.dwg")"#),
+            Err(NO_HOST.to_string())
+        );
+        assert_eq!(
+            eval(r#"ocs.export_layer_dwgs([["0", "layer0.dwg"]])"#),
+            Err(NO_HOST.to_string())
+        );
+    }
+
+    #[test]
+    fn update_evaluates_python_hooks_outside_with_host_and_allows_sandboxed_outputs() {
+        let base = std::env::temp_dir().join(format!("ocs_py_live_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let doc_dir = base.join("drawing");
+        let outside_dir = base.join("outside");
+        std::fs::create_dir_all(&doc_dir).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        let mut host = crate::host_ctx::StubHost::new(0);
+        host.doc_path = Some(doc_dir.join("sample.dwg"));
+        let line = ocs_plugin_api::host::document::entities::Line::from_coords(
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+        );
+        let handle = host
+            .doc
+            .add_entity(ocs_plugin_api::host::EntityType::Line(line))
+            .unwrap();
+
+        {
+            let _guard = crate::host_ctx::HostGuard::set(&mut host, "py_test");
+            let builder = rustpython_vm::Interpreter::builder(Default::default());
+            let ocs_def = module_def(&builder.ctx);
+            let interp = builder.add_native_module(ocs_def).build();
+            interp.enter(|vm| {
+                let scope = vm.new_scope_with_builtins();
+                let ocs = vm.import("ocs", 0).unwrap();
+                scope.globals.set_item("ocs", ocs, vm).unwrap();
+
+                let script = format!(
+                    r#"
+seen = []
+class HookedFloat:
+    def __float__(self):
+        seen.append(ocs.selection())
+        return 42.0
+
+ocs.update({handle}, {{"start": {{"x": HookedFloat(), "y": 0.0, "z": 0.0}}}})
+assert len(seen) == 1, "expected HookedFloat to run ocs.selection() cleanly"
+ocs.write_new_text_file("report.txt", "ok")
+try:
+    ocs.write_new_text_file({outside_txt:?}, "bad")
+    raise AssertionError("expected outside write to fail")
+except RuntimeError:
+    pass
+exported = ocs.export_layer_dwg("0", "layer0.dwg")
+assert exported >= 1
+"#,
+                    handle = handle.value(),
+                    outside_txt = outside_dir.join("escape.txt").to_string_lossy().into_owned(),
+                );
+                let code_obj = vm
+                    .compile(
+                        &script,
+                        rustpython_vm::compiler::Mode::Exec,
+                        "<live_test>".to_owned(),
+                    )
+                    .unwrap();
+                vm.run_code_obj(code_obj, scope)
+                    .map_err(|exc| exc_string(vm, &exc))
+                    .unwrap();
+            });
+        }
+
+        let updated = host.doc.get_entity(handle).expect("entity still present");
+        let ocs_plugin_api::host::EntityType::Line(line) = updated else {
+            panic!("expected Line");
+        };
+        assert!((line.start.x - 42.0).abs() < 1e-9, "got {}", line.start.x);
+        assert_eq!(std::fs::read_to_string(doc_dir.join("report.txt")).unwrap(), "ok");
+        assert!(doc_dir.join("layer0.dwg").is_file());
+        assert!(!outside_dir.join("escape.txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

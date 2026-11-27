@@ -1190,6 +1190,8 @@ pub(super) struct OpenCADStudio {
     pub save_file_path: String,
     /// SCRIPTCOMMANDS: scripts may run OCS commands (see `UserSettings`).
     pub script_commands: bool,
+    /// Rejection message recorded when a script-restricted command chain fails mid-line.
+    pub(in crate::app) script_command_rejected: Option<String>,
     /// Persisted default viewport background, restored from settings and applied
     /// to every drawing tab (new and opened) so a chosen background survives
     /// restarts (#188). `None` = the built-in dark-grey / off-white defaults.
@@ -3167,6 +3169,7 @@ impl OpenCADStudio {
             savetime_min: 10,
             save_file_path: String::new(),
             script_commands: true,
+            script_command_rejected: None,
             default_bg_color: None,
             default_paper_bg_color: None,
             cliprompt_lines: 3,

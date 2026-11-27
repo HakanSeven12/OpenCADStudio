@@ -9,6 +9,9 @@ publish = false
 # so the DWG/DXF byte serialization and the worker wire format each have
 # exactly one implementation. No UI/app dependencies — only the codec + serde.
 
+[lints]
+workspace = true
+
 [dependencies]
 document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "c5074b3f7808cd21ed49179566dbf5b9df32e8e0", features = ["serde", "mline-pilot"] }
 bincode = "1.3"

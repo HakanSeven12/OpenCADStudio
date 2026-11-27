@@ -7,6 +7,9 @@ publish = false
 # OpenCADStudio on Solidcore: its records read from and written to ACIS (SAT/SAB),
 # solids rebuilt from their history, and what the app asks of Solidcore beside.
 
+[lints]
+workspace = true
+
 [dependencies]
 ocs_geom = { path = "../ocs_geom" }
 document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "c5074b3f7808cd21ed49179566dbf5b9df32e8e0" }

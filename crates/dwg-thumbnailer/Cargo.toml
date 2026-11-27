@@ -10,6 +10,9 @@ license = "MIT OR Apache-2.0"
 # QuickLook extension.
 #   rlib      — OCS and the Windows DLL call `extract` directly.
 #   staticlib — the macOS QuickLook extension links the C ABI (`dwg_thumbnail_png`).
+[lints]
+workspace = true
+
 [lib]
 name = "dwg_thumbnailer"
 path = "src/lib.rs"

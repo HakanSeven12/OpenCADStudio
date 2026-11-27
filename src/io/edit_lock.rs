@@ -465,11 +465,12 @@ mod tests {
         file.set_modified(UNIX_EPOCH + Duration::from_secs(1_795_727_405))
             .unwrap();
         assert_eq!(saved, FileFingerprint::capture(&path).unwrap());
-        // Another second, or another sub-second time, is a change.
+        // Another second, or another sub-second time, is a change (500 ns:
+        // NTFS keeps file times in 100 ns steps).
         file.set_modified(UNIX_EPOCH + Duration::from_secs(1_795_727_406))
             .unwrap();
         assert_ne!(saved, FileFingerprint::capture(&path).unwrap());
-        file.set_modified(UNIX_EPOCH + Duration::new(1_795_727_405, 5))
+        file.set_modified(UNIX_EPOCH + Duration::new(1_795_727_405, 500))
             .unwrap();
         assert_ne!(saved, FileFingerprint::capture(&path).unwrap());
         drop(file);

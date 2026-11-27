@@ -4,7 +4,7 @@
 //! shared cell definitions. Element fields are little-endian; coordinates
 //! are UORs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
 use super::model::{
@@ -61,25 +61,48 @@ impl<'a> Cfb<'a> {
             .filter_map(|i| u32_at(b, 76 + i * 4))
             .filter(|&v| v < END)
             .collect();
-        // The DIFAT chain cannot hold more sectors than the file does, so a
-        // looping chain stops there.
+        // The DIFAT chain cannot hold more sectors than the file does, and a
+        // cycle or overflowed offset must stop cleanly instead of looping or
+        // duplicating FAT entries without bound.
+        let max_sectors = b.len() / sector;
         let (mut next, mut count) = (
             u32_at(b, 68)?,
-            u32_at(b, 72)?.min((b.len() / sector) as u32),
+            u32_at(b, 72)?.min(max_sectors as u32),
         );
+        let mut seen_difat = HashSet::new();
         while count > 0 && next < END {
-            let at = (next as usize + 1) * sector;
+            if !seen_difat.insert(next) {
+                break;
+            }
+            let Some(at) = (next as usize).checked_add(1).and_then(|v| v.checked_mul(sector)) else {
+                break;
+            };
+            if at.checked_add(sector).is_none_or(|end| end > b.len()) {
+                break;
+            }
             for i in 0..sector / 4 - 1 {
                 if let Some(v) = u32_at(b, at + i * 4).filter(|&v| v < END) {
                     difat.push(v);
                 }
             }
-            next = u32_at(b, at + sector - 4)?;
+            let Some(next_difat) = at.checked_add(sector - 4).and_then(|pos| u32_at(b, pos)) else {
+                break;
+            };
+            next = next_difat;
             count -= 1;
         }
         let mut fat = Vec::new();
+        let mut seen_fat = HashSet::new();
         for s in difat {
-            let at = (s as usize + 1) * sector;
+            if !seen_fat.insert(s) || seen_fat.len() > max_sectors {
+                continue;
+            }
+            let Some(at) = (s as usize).checked_add(1).and_then(|v| v.checked_mul(sector)) else {
+                continue;
+            };
+            if at >= b.len() {
+                continue;
+            }
             for i in 0..sector / 4 {
                 fat.push(u32_at(b, at + i * 4).unwrap_or(END));
             }
@@ -135,8 +158,16 @@ impl<'a> Cfb<'a> {
         let mut out = Vec::new();
         let mut guard = 0;
         while s < END && guard < max_sectors {
-            let at = (s as usize + 1) * self.sector;
-            let Some(block) = self.b.get(at..at + self.sector) else {
+            let Some(at) = (s as usize)
+                .checked_add(1)
+                .and_then(|v| v.checked_mul(self.sector))
+            else {
+                break;
+            };
+            let Some(end) = at.checked_add(self.sector) else {
+                break;
+            };
+            let Some(block) = self.b.get(at..end) else {
                 break;
             };
             out.extend_from_slice(block);
@@ -161,8 +192,13 @@ impl<'a> Cfb<'a> {
         // (64 MB per call) before `truncate` shortened the length.
         let max_sectors = self.mini.len() / 64;
         while s < END && guard < max_sectors {
-            let at = s as usize * 64;
-            let Some(block) = self.mini.get(at..at + 64) else {
+            let Some(at) = (s as usize).checked_mul(64) else {
+                break;
+            };
+            let Some(end) = at.checked_add(64) else {
+                break;
+            };
+            let Some(block) = self.mini.get(at..end) else {
                 break;
             };
             out.extend_from_slice(block);
@@ -220,6 +256,9 @@ fn inflate(data: &[u8]) -> Vec<u8> {
 
 /// [`inflate`] stopping after `limit` bytes.
 fn inflate_at_most(data: &[u8], limit: u64) -> Vec<u8> {
+    if limit == 0 {
+        return Vec::new();
+    }
     for skip in [16usize, 0] {
         if let Some(z) = data.get(skip..) {
             let mut out = Vec::new();
@@ -233,7 +272,24 @@ fn inflate_at_most(data: &[u8], limit: u64) -> Vec<u8> {
             }
         }
     }
-    data.to_vec()
+    let cap = usize::try_from(limit).unwrap_or(usize::MAX);
+    data[..data.len().min(cap)].to_vec()
+}
+
+fn inflate_within(data: &[u8], budget: &mut usize) -> Vec<u8> {
+    if *budget == 0 {
+        return Vec::new();
+    }
+    let out = inflate_at_most(data, (*budget as u64).min(STREAM_LIMIT));
+    *budget = budget.saturating_sub(out.len());
+    out
+}
+
+fn element_stream_within(data: &[u8], budget: &mut usize) -> Vec<u8> {
+    if data.len() <= 16 {
+        return Vec::new();
+    }
+    inflate_within(data, budget)
 }
 
 /// An element stream inflated. One holding no elements is its 16-byte header
@@ -256,17 +312,22 @@ fn elements(d: &[u8]) -> Vec<&[u8]> {
         let Some(words) = u32_at(d, at + 4) else {
             break;
         };
-        let len = 4 + words as usize * 2;
+        let Some(len) = (words as usize).checked_mul(2).and_then(|n| n.checked_add(4)) else {
+            break;
+        };
         if len < 8 {
             break;
         }
+        let Some(end) = at.checked_add(len) else {
+            break;
+        };
         // The stream can end inside its last element (its trailing words are
         // not stored); what is there is still read.
-        let e = &d[at..(at + len).min(d.len())];
+        let e = &d[at..end.min(d.len())];
         if !is_deleted(e) {
             out.push(e);
         }
-        at += len;
+        at = end;
     }
     out
 }
@@ -532,31 +593,38 @@ struct Styles {
 /// The true colours of the file: a zlib-packed UTF-16 record in the
 /// non-model attributes stream reading
 /// `<ExtendedColors><Entry Color="(r,g,b)"/>…</ExtendedColors>`.
-fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
+fn extended_colors_within(cfb: &Cfb, budget: &mut usize) -> Vec<[u8; 3]> {
+    const MAX_EXTENDED_COLOR_PROBES: usize = 64;
     let Some(attrs) = cfb
         .streams()
         .iter()
         .find(|(p, _)| p == "Dgn^NmA/$1")
-        .map(|(_, e)| inflate(&cfb.stream(e)))
+        .map(|(_, e)| inflate_within(&cfb.stream(e), budget))
     else {
         return Vec::new();
     };
+    let mut probes = 0usize;
     for at in 0..attrs.len().saturating_sub(2) {
         // A zlib header: deflate, and a check value divisible by 31.
         let (a, b) = (attrs[at], attrs[at + 1]);
         if a & 0x0f != 8 || !((a as u16) << 8 | b as u16).is_multiple_of(31) {
             continue;
         }
+        if *budget == 0 || probes >= MAX_EXTENDED_COLOR_PROBES {
+            break;
+        }
+        probes += 1;
         // The record is a short XML list; the cap keeps a stream that
         // inflates without end (or a crafted one) from exhausting memory.
         const RECORD_LIMIT: u64 = 4 << 20;
+        let cap = RECORD_LIMIT.min(*budget as u64);
         let mut out = Vec::new();
-        if flate2::read::ZlibDecoder::new(&attrs[at..])
-            .take(RECORD_LIMIT)
+        let failed = flate2::read::ZlibDecoder::new(&attrs[at..])
+            .take(cap)
             .read_to_end(&mut out)
-            .is_err()
-            || out.len() < 2
-        {
+            .is_err();
+        *budget = budget.saturating_sub(out.len());
+        if failed || out.len() < 2 {
             continue;
         }
         let units: Vec<u16> = out
@@ -1004,8 +1072,9 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 }
             }
             4 | 6 | 11 => {
-                let n = u32_at(e, 104).unwrap_or(0) as usize;
                 let stride = if d3 { 24 } else { 16 };
+                let max_n = e.len().saturating_sub(112) / stride;
+                let n = (u32_at(e, 104).unwrap_or(0) as usize).min(max_n);
                 let pts3: Vec<[f64; 3]> = (0..n).filter_map(|k| p3(112 + k * stride)).collect();
                 let pts: Vec<[f64; 2]> = pts3.iter().map(|p| plan(*p)).collect();
                 if pts.len() >= 2 {
@@ -1211,8 +1280,12 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                     .and_then(|id| styles.cells.get(&id));
                 let dim = e.get(133).copied().unwrap_or(0);
                 let count = e.get(135).copied().unwrap_or(0) as usize;
-                let points: Option<Vec<[f64; 3]>> =
-                    (0..count).map(|k| p3(304 + 48 * k).map(at3)).collect();
+                let max_count = e.len().saturating_sub(304) / 48;
+                let points: Option<Vec<[f64; 3]>> = if count > max_count {
+                    None
+                } else {
+                    (0..count).map(|k| p3(304 + 48 * k).map(at3)).collect()
+                };
                 let style = u32_at(e, 104).unwrap_or(0);
                 // Only a dimension in the XY plane comes in as a dimension.
                 let axes = if d3 {
@@ -1378,8 +1451,9 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 }
             }
             21 => {
-                let n = u32_at(e, 104).unwrap_or(0) as usize;
                 let stride = if d3 { 24 } else { 16 };
+                let max_n = e.len().saturating_sub(112) / stride;
+                let n = (u32_at(e, 104).unwrap_or(0) as usize).min(max_n);
                 let poles: Vec<[f64; 3]> = (0..n).filter_map(|k| p3(112 + k * stride)).collect();
                 if let Some((order, count, closed, header)) = spline.take() {
                     if poles.len() == count && count >= order && order >= 2 {
@@ -1394,21 +1468,28 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                         {
                             let plan_poles: Vec<[f64; 2]> =
                                 poles.iter().map(|p| [p[0], p[1]]).collect();
-                            let pts = bspline_points(degree + 1, &plan_poles, knots, 24 * count);
-                            let mut pb = PathBuilder::default();
-                            pb.move_to(pts[0]);
-                            for p in &pts[1..] {
-                                pb.line_to(*p);
-                            }
-                            push(
-                                &mut raw,
-                                &mut complex,
-                                Path {
-                                    subpaths: pb.finish(),
-                                    stroke,
-                                    fill: None,
-                                },
+                            let pts = bspline_points(
+                                degree + 1,
+                                &plan_poles,
+                                knots,
+                                24usize.saturating_mul(count),
                             );
+                            if !pts.is_empty() {
+                                let mut pb = PathBuilder::default();
+                                pb.move_to(pts[0]);
+                                for p in &pts[1..] {
+                                    pb.line_to(*p);
+                                }
+                                push(
+                                    &mut raw,
+                                    &mut complex,
+                                    Path {
+                                        subpaths: pb.finish(),
+                                        stroke,
+                                        fill: None,
+                                    },
+                                );
+                            }
                         }
                         collect.push(DgnElement { geom, ..header });
                     } else {
@@ -1569,45 +1650,38 @@ fn numbered<'a, E>(streams: &'a [(String, E)], dir: &str, kind: &str) -> Vec<&'a
     found.into_iter().map(|(_, e)| e).collect()
 }
 
-/// Models of the file: (name, graphic stream, header stream).
-fn models(cfb: &Cfb) -> Vec<(String, Vec<u8>, Vec<u8>)> {
+/// Models of the file: (name, graphic stream, header stream), bounded by a
+/// caller-owned shared inflate budget.
+fn models_within(cfb: &Cfb, budget: &mut usize) -> Vec<(String, Vec<u8>, Vec<u8>)> {
     let streams = cfb.streams();
     let dirs = model_dirs(&streams);
-    // Each stream may inflate to `STREAM_LIMIT` (512 MB) and every model
-    // dir inflates its own — entries can all point at the same payload, so
-    // N dirs × 512 MB was reachable from one small stream. The budget
-    // scales with the file (×64 covers any real compression ratio, so
-    // legitimate files never trip it) with a 256 MiB floor for small ones;
-    // models past the budget are dropped, the earlier ones still load.
-    let total_limit = inflate_budget(cfb);
-    let mut total = 0usize;
     let mut out = Vec::new();
     for dir in dirs {
-        if total >= total_limit {
+        if *budget == 0 {
             break;
         }
-        let get = |suffix: &str| {
-            streams
-                .iter()
-                .find(|(p, _)| *p == format!("{dir}/{suffix}"))
-                .map(|(_, e)| inflate(&cfb.stream(e)))
-                .unwrap_or_default()
-        };
         let mut graphics = Vec::new();
         for entry in numbered(&streams, &dir, "Dgn^G") {
-            if total.saturating_add(graphics.len()) >= total_limit {
+            if *budget == 0 {
                 break;
             }
-            graphics.extend(element_stream(&cfb.stream(entry)));
+            graphics.extend(element_stream_within(&cfb.stream(entry), budget));
         }
-        let header = get("Dgn~Mh");
-        total = total
-            .saturating_add(graphics.len())
-            .saturating_add(header.len());
+        let header = streams
+            .iter()
+            .find(|(p, _)| *p == format!("{dir}/Dgn~Mh"))
+            .map(|(_, e)| inflate_within(&cfb.stream(e), budget))
+            .unwrap_or_default();
         let name = marked_string(&header, 0).unwrap_or_else(|| "Default".to_string());
         out.push((name, graphics, header));
     }
     out
+}
+
+/// Models of the file: (name, graphic stream, header stream).
+fn models(cfb: &Cfb) -> Vec<(String, Vec<u8>, Vec<u8>)> {
+    let mut budget = inflate_budget(cfb);
+    models_within(cfb, &mut budget)
 }
 
 pub fn model_names(bytes: &[u8]) -> Option<Vec<String>> {
@@ -1653,20 +1727,29 @@ fn level_table_raw(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
     out
 }
 
-/// The non-model element streams `Dgn^Nm/$1`, `$2`, … in number order. A
-/// file can keep its tables in a later stream, the level table in `$23`
-/// with `$1` holding others (#3093).
-fn non_model(cfb: &Cfb) -> Vec<Vec<u8>> {
+fn non_model_within(cfb: &Cfb, budget: &mut usize) -> Vec<Vec<u8>> {
     let streams = cfb.streams();
     let mut found: Vec<(u32, &Entry)> = streams
         .iter()
         .filter_map(|(p, e)| Some((p.strip_prefix("Dgn^Nm/$")?.parse().ok()?, *e)))
         .collect();
     found.sort_by_key(|(n, _)| *n);
-    found
-        .into_iter()
-        .map(|(_, e)| element_stream(&cfb.stream(e)))
-        .collect()
+    let mut out = Vec::with_capacity(found.len());
+    for (_, e) in found {
+        if *budget == 0 {
+            break;
+        }
+        out.push(element_stream_within(&cfb.stream(e), budget));
+    }
+    out
+}
+
+/// The non-model element streams `Dgn^Nm/$1`, `$2`, … in number order. A
+/// file can keep its tables in a later stream, the level table in `$23`
+/// with `$1` holding others (#3093).
+fn non_model(cfb: &Cfb) -> Vec<Vec<u8>> {
+    let mut budget = inflate_budget(cfb);
+    non_model_within(cfb, &mut budget)
 }
 
 /// The elements of every non-model stream, in stream order.
@@ -1689,12 +1772,13 @@ pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
 
 pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
     let cfb = Cfb::open(bytes)?;
-    let all = models(&cfb);
+    let mut budget = inflate_budget(&cfb);
+    let all = models_within(&cfb, &mut budget);
     let (_, graphics, header) = all
         .iter()
         .find(|m| m.0.eq_ignore_ascii_case(name))
         .or_else(|| all.first())?;
-    let non_model = non_model(&cfb);
+    let non_model = non_model_within(&cfb, &mut budget);
     let nm = non_model_elements(&non_model);
     // Colours 0-254 from byte 37, the background (255) opening the table.
     let color_table = nm
@@ -1714,7 +1798,7 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         colors,
         levels,
         hidden,
-        extended: extended_colors(&cfb),
+        extended: extended_colors_within(&cfb, &mut budget),
         cells: cell_ids(&nm),
     };
     // Shared cell definitions: a type-34 element and its components.
@@ -1837,27 +1921,20 @@ pub fn design_model_names(bytes: &[u8]) -> Option<Vec<String>> {
 }
 
 /// The control stream (Dgn^C) of model `k` in the order `models` lists
-/// them, inflated within what is left of the file's budget (`used` bytes
-/// are taken by the models already read).
-fn control_stream(cfb: &Cfb, k: usize, used: usize) -> Vec<u8> {
+/// them, inflated within the remaining shared `budget`.
+fn control_stream_within(cfb: &Cfb, k: usize, budget: &mut usize) -> Vec<u8> {
     let streams = cfb.streams();
     let dirs = model_dirs(&streams);
     let Some(dir) = dirs.get(k) else {
         return Vec::new();
     };
-    let mut left = inflate_budget(cfb).saturating_sub(used) as u64;
     let mut out = Vec::new();
     for entry in numbered(&streams, dir, "Dgn^C") {
-        if left == 0 {
+        if *budget == 0 {
             break;
         }
         let data = cfb.stream(entry);
-        if data.len() <= 16 {
-            continue; // an empty stream: its header alone (#2820)
-        }
-        let part = inflate_at_most(&data, left.min(STREAM_LIMIT));
-        left = left.saturating_sub(part.len() as u64);
-        out.extend(part);
+        out.extend(element_stream_within(&data, budget));
     }
     out
 }
@@ -1923,7 +2000,8 @@ fn references(control: &[u8]) -> Vec<DgnReference> {
 /// every level by id with its own name and colour.
 pub fn import(bytes: &[u8], name: &str) -> Option<DgnImport> {
     let cfb = Cfb::open(bytes)?;
-    let all = models(&cfb);
+    let mut budget = inflate_budget(&cfb);
+    let all = models_within(&cfb, &mut budget);
     let designs: Vec<usize> = (0..all.len()).filter(|k| is_design(&all[*k].2)).collect();
     let k = designs
         .iter()
@@ -1931,7 +2009,7 @@ pub fn import(bytes: &[u8], name: &str) -> Option<DgnImport> {
         .find(|k| all[*k].0.eq_ignore_ascii_case(name))
         .or_else(|| designs.first().copied())?;
     let (_, graphics, header) = &all[k];
-    let non_model = non_model(&cfb);
+    let non_model = non_model_within(&cfb, &mut budget);
     let nm = non_model_elements(&non_model);
     let colors = nm
         .iter()
@@ -1942,7 +2020,7 @@ pub fn import(bytes: &[u8], name: &str) -> Option<DgnImport> {
     let styles = Styles {
         levels: table.iter().map(|l| (l.0, l.2)).collect(),
         hidden: Default::default(),
-        extended: extended_colors(&cfb),
+        extended: extended_colors_within(&cfb, &mut budget),
         cells: cell_ids(&nm),
         colors,
     };
@@ -1984,8 +2062,7 @@ pub fn import(bytes: &[u8], name: &str) -> Option<DgnImport> {
         (Some(n), Some(d)) if n > 0.0 && d > 0.0 => unit_name(d / n),
         _ => String::new(),
     };
-    let used = all.iter().map(|m| m.1.len() + m.2.len()).sum();
-    let references = references(&control_stream(&cfb, k, used))
+    let references = references(&control_stream_within(&cfb, k, &mut budget))
         .into_iter()
         .map(|r| DgnReference {
             origin: [
@@ -2413,5 +2490,165 @@ mod cell_tests {
         assert_eq!(paths(10, true), DGN_PLACEMENT_BUDGET / 12);
         // A cell that draws nothing still spends: 100⁷ placements before.
         assert_eq!(paths(100, false), 0);
+    }
+}
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::*;
+
+    const ENDOFCHAIN: u32 = 0xFFFF_FFFE;
+    const NONE: u32 = 0xFFFF_FFFF;
+
+    #[test]
+    fn cyclic_and_duplicate_difat_sectors_stay_bounded() {
+        let sector = 512usize;
+        let mut b = vec![0u8; 4 * sector];
+        b[0..8].copy_from_slice(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+        b[30..32].copy_from_slice(&9u16.to_le_bytes());
+        b[32..34].copy_from_slice(&6u16.to_le_bytes());
+        b[48..52].copy_from_slice(&0u32.to_le_bytes());
+        b[56..60].copy_from_slice(&4096u32.to_le_bytes());
+        b[60..64].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
+        // Cyclic DIFAT pointer back to sector 1, plus duplicate FAT sector ids in header slots.
+        b[68..72].copy_from_slice(&1u32.to_le_bytes());
+        b[72..76].copy_from_slice(&100u32.to_le_bytes());
+        for slot in 0..109 {
+            b[76 + slot * 4..80 + slot * 4].copy_from_slice(&2u32.to_le_bytes());
+        }
+        // DIFAT sector 1 points back to itself and duplicates sector 2.
+        let difat1 = 2 * sector;
+        for i in 0..sector / 4 - 1 {
+            b[difat1 + i * 4..difat1 + i * 4 + 4].copy_from_slice(&2u32.to_le_bytes());
+        }
+        b[difat1 + sector - 4..difat1 + sector].copy_from_slice(&1u32.to_le_bytes());
+        // Directory root entry in sector 0.
+        let dir0 = sector;
+        b[dir0 + 64..dir0 + 66].copy_from_slice(&2u16.to_le_bytes());
+        b[dir0 + 66] = 1;
+        b[dir0 + 68..dir0 + 72].copy_from_slice(&NONE.to_le_bytes());
+        b[dir0 + 72..dir0 + 76].copy_from_slice(&NONE.to_le_bytes());
+        b[dir0 + 76..dir0 + 80].copy_from_slice(&NONE.to_le_bytes());
+        b[dir0 + 116..dir0 + 120].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
+        b[dir0 + 120..dir0 + 124].copy_from_slice(&0u32.to_le_bytes());
+
+        let cfb = Cfb::open(&b).expect("cyclic DIFAT should still open safely");
+        assert!(cfb.fat.len() <= (b.len() / sector) * (sector / 4));
+    }
+
+    #[test]
+    fn elements_and_read_run_reject_huge_counts_without_overflow() {
+        let mut data = vec![0u8; 16];
+        data[4] = 3;
+        data[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(elements(&data).len() <= 1);
+        data[8..12].copy_from_slice(&0x8000_0002u32.to_le_bytes());
+        assert!(elements(&data).len() <= 1);
+
+        let styles = Styles {
+            colors: DGN_DEFAULT_COLORS.to_vec(),
+            levels: HashMap::new(),
+            hidden: Default::default(),
+            extended: Vec::new(),
+            cells: HashMap::new(),
+        };
+        let words = ((120 - 4) / 2) as u32;
+        let mut line_chain = vec![0u8; 120];
+        line_chain[0] = 4;
+        line_chain[4..8].copy_from_slice(&words.to_le_bytes());
+        line_chain[104..108].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let mut poles = vec![0u8; 120];
+        poles[0] = 21;
+        poles[4..8].copy_from_slice(&words.to_le_bytes());
+        poles[104..108].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let raw = read_run(&[&line_chain, &poles], &styles, &IDENTITY);
+        assert!(raw.elements.is_empty());
+    }
+
+    #[test]
+    fn shared_budget_and_extended_color_probe_cap_hold() {
+        let sector = 512usize;
+        // Sectors: 0 = dir (entries 0..5), 1 = FAT, 2 = Dgn^Nm/$1 payload, 3 = Dgn^NmA/$1 payload.
+        let mut b = vec![0u8; 5 * sector];
+        b[0..8].copy_from_slice(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+        b[30..32].copy_from_slice(&9u16.to_le_bytes());
+        b[32..34].copy_from_slice(&6u16.to_le_bytes());
+        b[48..52].copy_from_slice(&0u32.to_le_bytes());
+        b[56..60].copy_from_slice(&512u32.to_le_bytes());
+        b[60..64].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
+        b[68..72].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
+        b[72..76].copy_from_slice(&0u32.to_le_bytes());
+        b[76..80].copy_from_slice(&1u32.to_le_bytes());
+        for slot in 1..109 {
+            b[76 + slot * 4..80 + slot * 4].copy_from_slice(&NONE.to_le_bytes());
+        }
+
+        let put_dir = |buf: &mut [u8],
+                       idx: usize,
+                       name: &str,
+                       kind: u8,
+                       left: u32,
+                       right: u32,
+                       child: u32,
+                       start: u32,
+                       size: u32| {
+            let e = sector + idx * 128;
+            let utf16: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            for (i, ch) in utf16.iter().enumerate() {
+                buf[e + i * 2..e + i * 2 + 2].copy_from_slice(&ch.to_le_bytes());
+            }
+            buf[e + 64..e + 66].copy_from_slice(&((utf16.len() * 2) as u16).to_le_bytes());
+            buf[e + 66] = kind;
+            buf[e + 68..e + 72].copy_from_slice(&left.to_le_bytes());
+            buf[e + 72..e + 76].copy_from_slice(&right.to_le_bytes());
+            buf[e + 76..e + 80].copy_from_slice(&child.to_le_bytes());
+            buf[e + 116..e + 120].copy_from_slice(&start.to_le_bytes());
+            buf[e + 120..e + 124].copy_from_slice(&size.to_le_bytes());
+        };
+        // Entry 0 (Root) -> child 1 (Dgn^Nm), sibling tree has 2 (Dgn^NmA) as right child.
+        put_dir(&mut b, 0, "Root", 1, NONE, NONE, 1, ENDOFCHAIN, 0);
+        put_dir(&mut b, 1, "Dgn^Nm", 1, NONE, 2, 3, ENDOFCHAIN, 0);
+        put_dir(&mut b, 2, "Dgn^NmA", 1, NONE, NONE, 4, ENDOFCHAIN, 0);
+        put_dir(&mut b, 3, "$1", 2, NONE, NONE, NONE, 2, 512);
+        // Compress `<ExtendedColors><Entry Color="(7,8,9)"/></ExtendedColors>` in UTF-16LE.
+        let xml: Vec<u8> = "<ExtendedColors><Entry Color=\"(7,8,9)\"/></ExtendedColors>"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut enc, &xml).unwrap();
+        let zxml = enc.finish().unwrap();
+
+        let mut attrs = vec![0x78u8, 0x9c];
+        // Build 65 false zlib headers (0x78, 0x9c followed by invalid block) before real XML.
+        attrs.clear();
+        for _ in 0..65 {
+            attrs.extend_from_slice(&[0x78, 0x9c, 0x03, 0xff]);
+        }
+        attrs.extend_from_slice(&zxml);
+        assert!(attrs.len() <= sector);
+        put_dir(&mut b, 4, "$1", 2, NONE, NONE, NONE, 3, attrs.len() as u32);
+        let nm_off = 3 * sector;
+        b[nm_off..nm_off + 32].fill(0xAA);
+        let attr_off = 4 * sector;
+        b[attr_off..attr_off + attrs.len()].copy_from_slice(&attrs);
+        let fat = 2 * sector;
+        for s in 0..4usize {
+            b[fat + s * 4..fat + s * 4 + 4].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
+        }
+
+        let cfb = Cfb::open(&b).expect("synthetic CFB opens");
+        // Exhausting shared budget in `non_model_within` stops `extended_colors_within`.
+        let mut tight = 32usize;
+        let nm = non_model_within(&cfb, &mut tight);
+        assert_eq!(nm.len(), 1);
+        assert_eq!(tight, 0);
+        assert!(extended_colors_within(&cfb, &mut tight).is_empty());
+
+        // With generous budget, 65 prior false probes exceed MAX_EXTENDED_COLOR_PROBES (64).
+        let mut large = 100_000usize;
+        assert!(extended_colors_within(&cfb, &mut large).is_empty());
     }
 }

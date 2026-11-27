@@ -506,12 +506,9 @@ fn emit_page_content(
 // ── Wires ────────────────────────────────────────────────────────────────────
 
 /// Escapes a value for use inside an XML attribute (layer names are free-form
-/// drawing text).
+/// drawing text), stripping forbidden XML 1.0 control characters too.
 fn xml_attr(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('"', "&quot;")
+    xml_escape(value)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2344,6 +2341,10 @@ mod tests {
         assert_eq!(
             xml_escape("C1:\u{80}; Unicode:č😀"),
             "C1:\u{80}; Unicode:č😀"
+        );
+        assert_eq!(
+            xml_attr("a\u{0}b\u{7}\"'<>&"),
+            "a\u{fffd}b\u{fffd}&quot;&apos;&lt;&gt;&amp;"
         );
     }
 

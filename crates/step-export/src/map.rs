@@ -188,10 +188,13 @@ impl<'a> Mapper<'a> {
             return Err(MapError::Unsupported(r.name.clone()));
         }
         let c = list(param(r, 1)?)?;
-        let x = num_at(c, 0)?;
-        let y = num_at(c, 1)?;
-        let z = if c.len() > 2 { num_at(c, 2)? } else { 0.0 };
-        Ok([x * s, y * s, z * s])
+        let x = num_at(c, 0)? * s;
+        let y = num_at(c, 1)? * s;
+        let z = if c.len() > 2 { num_at(c, 2)? } else { 0.0 } * s;
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return invalid("non-finite scaled coordinate");
+        }
+        Ok([x, y, z])
     }
 
     fn direction(&self, p: &Param) -> R<P3> {
@@ -213,6 +216,9 @@ impl<'a> Mapper<'a> {
         let d =
             unit(self.direction(param(r, 1)?)?).map_or_else(|| invalid("zero direction"), Ok)?;
         let m = num(param(r, 2)?)? * s;
+        if !m.is_finite() {
+            return invalid("non-finite scaled magnitude");
+        }
         Ok((d, m))
     }
 
@@ -2407,5 +2413,22 @@ mod tests {
         assert_eq!(b.faces[0].surface, b.faces[1].surface);
         assert_eq!(b.edges.len(), 3);
         assert_eq!(b.vertices.len(), 3);
+    }
+
+    #[test]
+    fn rejects_non_finite_coordinate_scale_overflow() {
+        let m = model(
+            "#1=CARTESIAN_POINT('',(1.E306,0.,0.));\n\
+             #2=DIRECTION('',(0.,0.,1.));\n\
+             #3=DIRECTION('',(1.,0.,0.));\n\
+             #4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n\
+             #5=PLANE('',#4);\n\
+             #6=ADVANCED_FACE('',(),#5,.T.);\n\
+             #7=CLOSED_SHELL('',(#6));\n\
+             #8=MANIFOLD_SOLID_BREP('b',#7);\n\
+             #9=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.));\n\
+             #10=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#9)) REPRESENTATION_CONTEXT('',''));",
+        );
+        assert!(!m.skipped.is_empty());
     }
 }

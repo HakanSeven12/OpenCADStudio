@@ -525,16 +525,13 @@ fn write_bspline_surface(
         let weights = weights
             .iter()
             .map(|row| {
-                format!(
-                    "({})",
-                    row.iter()
-                        .map(|v| number(*v))
-                        .collect::<Result<Vec<_>, _>>()
-                        .unwrap_or_default()
-                        .join(",")
-                )
+                let vals = row
+                    .iter()
+                    .map(|v| number(*v))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("({})", vals.join(",")))
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, ExportError>>()?
             .join(",");
         format!(
             "(\n BOUNDED_SURFACE()\n B_SPLINE_SURFACE({},{},({list}),.UNSPECIFIED.,.U.,.U.,.U.)\n B_SPLINE_SURFACE_WITH_KNOTS(({umults}),({vmults}),({uknots}),({vknots}),.UNSPECIFIED.)\n GEOMETRIC_REPRESENTATION_ITEM()\n RATIONAL_B_SPLINE_SURFACE(({weights}))\n REPRESENTATION_ITEM('')\n SURFACE()\n)",
@@ -2370,6 +2367,26 @@ mod tests {
         assert!(write_with_metadata(&triangle(), &metadata).is_err());
         let metadata = ExportMetadata::new().with_color([f64::NAN, 0.0, 0.0]);
         assert!(write_with_metadata(&triangle(), &metadata).is_err());
+    }
+
+    #[test]
+    fn rejects_non_finite_bspline_weights() {
+        let mut model = triangle();
+        model.bodies[0].faces[0].surface =
+            Surface::BSpline(solidcore_record::step::model::BSplineSurface {
+                u_degree: 1,
+                v_degree: 1,
+                points: vec![
+                    vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    vec![[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                ],
+                u_mults: vec![2, 2],
+                v_mults: vec![2, 2],
+                u_knots: vec![0.0, 1.0],
+                v_knots: vec![0.0, 1.0],
+                weights: Some(vec![vec![1.0, f64::NAN], vec![1.0, 1.0]]),
+            });
+        assert!(write(&model).is_err());
     }
 
     /// The tetrahedron from the original writer test, built through `planar_model`.

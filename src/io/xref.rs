@@ -1759,16 +1759,23 @@ pub(crate) fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
     resolve_path_in(raw, base_dir, &dirs)
 }
 
+fn is_unc_path(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    trimmed.starts_with("\\\\") || (trimmed.starts_with("//") && !trimmed.starts_with("///"))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn resolve_path_in(raw: &str, base_dir: &Path, search_dirs: &[PathBuf]) -> Option<PathBuf> {
     let p = PathBuf::from(raw.replace('\\', "/"));
-    let direct = if p.is_absolute() {
-        p.clone()
-    } else {
-        base_dir.join(&p)
-    };
-    if direct.is_file() {
-        return Some(direct);
+    if !is_unc_path(raw) {
+        let direct = if p.is_absolute() {
+            p.clone()
+        } else {
+            base_dir.join(&p)
+        };
+        if direct.is_file() {
+            return Some(direct);
+        }
     }
     let name = p.file_name()?;
     std::iter::once(base_dir.to_path_buf())
@@ -3977,10 +3984,19 @@ fn collect_bind_images(
     if defs.is_empty() {
         return Ok(());
     }
-    // Plan every copy first (dedupe repeat references to one source file).
+    // Plan every copy first (dedupe repeat references to one source file, and
+    // reserve chosen destination names so two distinct folders' same-named
+    // images never collide during the copy pass).
     let mut planned: HashMap<String, String> = HashMap::default();
+    let mut reserved: std::collections::HashSet<String> = std::collections::HashSet::default();
     let mut ops: Vec<(Handle, PathBuf, String)> = Vec::new();
     for (handle, saved) in &defs {
+        if is_unc_path(saved) {
+            return Err(bind_failed(
+                ref_name,
+                format!("refusing remote UNC image path: {saved}"),
+            ));
+        }
         // Native-only path: `resolve_path` stats the real filesystem (and
         // the copy below reads it), so image COLLECT stays desktop-only.
         let Some(resolved) = resolve_path(saved, source_dir) else {
@@ -3990,12 +4006,23 @@ fn collect_bind_images(
         let dest_name = if let Some(prior) = planned.get(&norm) {
             prior.clone()
         } else {
-            let base = file_name_only(saved);
+            let Some(base) = safe_bind_file_name(saved) else {
+                return Err(bind_failed(
+                    ref_name,
+                    format!("invalid image filename: {saved}"),
+                ));
+            };
             let mut candidate = base.clone();
             let mut n = 0u32;
-            while host_dir.join(&candidate).exists()
-                && !same_file(&resolved, &host_dir.join(&candidate))
-            {
+            loop {
+                let dest_path = host_dir.join(&candidate);
+                let key = candidate.to_ascii_lowercase();
+                let disk_collision = std::fs::symlink_metadata(&dest_path).is_ok()
+                    && !same_file(&resolved, &dest_path);
+                if !reserved.contains(&key) && !disk_collision {
+                    reserved.insert(key);
+                    break;
+                }
                 n += 1;
                 candidate = unique_file_name(&base, n);
             }
@@ -4036,8 +4063,12 @@ fn collect_bind_images(
     Ok(())
 }
 
-fn file_name_only(raw: &str) -> String {
-    raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
+fn safe_bind_file_name(raw: &str) -> Option<String> {
+    let name = raw.rsplit(['/', '\\']).next().unwrap_or(raw).trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 fn unique_file_name(base: &str, n: u32) -> String {
@@ -6207,5 +6238,74 @@ mod web_registry_tests {
             vec!["Missing A.dwg".to_string(), "Missing B.dxf".to_string()]
         );
         assert!(unresolved_xref_names(&[]).is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn collect_bind_images_reserves_same_basename_and_avoids_dangling_symlink() {
+        let root = std::env::temp_dir().join(format!(
+            "ocs-collect-bind-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let src1 = root.join("dir1");
+        let src2 = root.join("dir2");
+        let host = root.join("host");
+        std::fs::create_dir_all(&src1).unwrap();
+        std::fs::create_dir_all(&src2).unwrap();
+        std::fs::create_dir_all(&host).unwrap();
+        std::fs::write(src1.join("pic.png"), b"first").unwrap();
+        std::fs::write(src2.join("pic.png"), b"second").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("nonexistent.png"), host.join("pic.png")).unwrap();
+
+        let mut source = Document::new();
+        let mut def1 = document::objects::ImageDefinition::new("dir1/pic.png");
+        def1.handle = source.allocate_handle();
+        let h1 = def1.handle;
+        source
+            .objects
+            .insert(h1, document::objects::ObjectType::ImageDefinition(def1));
+        let mut def2 = document::objects::ImageDefinition::new("dir2/pic.png");
+        def2.handle = source.allocate_handle();
+        let h2 = def2.handle;
+        source
+            .objects
+            .insert(h2, document::objects::ObjectType::ImageDefinition(def2));
+
+        collect_bind_images(&mut source, "test", &root, &host, None).unwrap();
+
+        let n1 = match source.objects.get(&h1) {
+            Some(document::objects::ObjectType::ImageDefinition(d)) => d.file_name.clone(),
+            other => panic!("{other:?}"),
+        };
+        let n2 = match source.objects.get(&h2) {
+            Some(document::objects::ObjectType::ImageDefinition(d)) => d.file_name.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_ne!(n1, n2);
+        #[cfg(unix)]
+        {
+            assert_ne!(n1, "pic.png");
+            assert_ne!(n2, "pic.png");
+        }
+        assert_eq!(std::fs::read(host.join(&n1)).unwrap(), b"first");
+        assert_eq!(std::fs::read(host.join(&n2)).unwrap(), b"second");
+
+        // UNC paths are skipped in resolve_path_in direct probing and rejected in collect_bind_images.
+        assert!(resolve_path_in(r"\\evil-server\share\missing.dwg", &host, &[]).is_none());
+        let mut unc_doc = Document::new();
+        let mut udef = document::objects::ImageDefinition::new(r"\\evil-server\share\pic.png");
+        udef.handle = unc_doc.allocate_handle();
+        unc_doc.objects.insert(
+            udef.handle,
+            document::objects::ObjectType::ImageDefinition(udef),
+        );
+        assert!(collect_bind_images(&mut unc_doc, "test", &root, &host, None).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

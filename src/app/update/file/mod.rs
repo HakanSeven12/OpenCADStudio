@@ -56,7 +56,7 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::fs::write(path, bytes).map_err(|e| e.to_string())
+        crate::io::write_file_atomic(path, bytes).map_err(|e| e.to_string())
     }
 }
 

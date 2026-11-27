@@ -8,7 +8,7 @@
   },
   "imports": [
     {
-      "uri": "urn:example:ifccad:0.12.0"
+      "uri": "urn:example:ifccad:0.13.0"
     }
   ],
   "schemas": {},
@@ -33,7 +33,7 @@
           "nextLayoutId": 43,
           "nextLinePatternId": 1,
           "nextSymbolSourceId": 1,
-          "profileVersion": "0.12.0",
+          "profileVersion": "0.13.0",
           "nextUcsId": 1,
           "nextModelWindowId": 1,
           "nextAnnotationScaleId": 1,
@@ -138,26 +138,32 @@
           "layer": "/cad/d1/layer/0",
           "linePatternScale": 1.0
         },
-        "ifccad::geom::placement": {
-          "origin": [
-            10000.0,
-            5000.0,
-            0.0
-          ],
-          "xAxis": [
-            0.0,
-            1.0,
-            0.0
-          ],
-          "yAxis": [
-            -1.0,
-            0.0,
-            0.0
-          ]
-        },
         "ifccad::xref": {
           "source": "/cad/d1/externalSource/1",
-          "scale": 500.0
+          "transform": {
+            "placement": {
+              "origin": [
+                10000.0,
+                5000.0,
+                0.0
+              ],
+              "xAxis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "yAxis": [
+                -1.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scale": [
+              500.0,
+              500.0,
+              500.0
+            ]
+          }
         }
       }
     },

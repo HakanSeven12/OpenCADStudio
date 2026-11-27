@@ -383,24 +383,38 @@ impl CadCommand for CreatePointManualCommand {
                     }
                 }
             }
-            Step::Bearing(q) => match dms(typed).filter(|b| (0.0..=90.0).contains(b)) {
-                // The bearing turns from north or south toward east or west.
-                Some(b) => self.step = Step::Distance([b, 180.0 - b, 180.0 + b, 360.0 - b][usize::from(q) - 1]),
-                None => {
-                    self.step = Step::Bearing(q);
-                    return Self::invalid();
+            Step::Bearing(q) => {
+                use super::point_intersect::{azimuth_of, bearing_text};
+                // Measured: each refusal writes the unit line again; a bearing
+                // above 90° is shown as that azimuth's bearing against the
+                // first quadrant's range, whatever the quadrant.
+                let refused = |why: String| Some(CmdResult::ReportError(format!("{why}\n{}", t(DIRECTION_UNIT))));
+                self.step = Step::Bearing(q);
+                match dms(typed) {
+                    // The bearing turns from north or south toward east or west.
+                    Some(b) if (0.0..=90.0).contains(&b) => self.step = Step::Distance(azimuth_of(q, b)),
+                    Some(b) if b < 0.0 => return refused(t("Please specify a positive bearing value.")),
+                    Some(b) => {
+                        return refused(format!(
+                            "{}\n{}",
+                            crate::tf!("'Transparent Commands Bearing Property' validation error - value '{}' out of range.", bearing_text(b)),
+                            crate::tf!("Please enter a value greater than or equal to {} and less than or equal to {}", "N0° 00' 00\"E", "N90° 00' 00\"E"),
+                        ));
+                    }
+                    None => return refused(t("Invalid input")),
                 }
-            },
+            }
             Step::Azimuth => {
                 if typed.is_empty() {
                     return Some(self.resume());
                 }
+                // Measured: text it cannot read asks again silently; any
+                // azimuth not below zero is taken (400 too).
+                self.step = Step::Azimuth;
                 match dms(typed) {
+                    Some(a) if a < 0.0 => return Some(CmdResult::ReportError(t("Please specify a positive azimuth value."))),
                     Some(a) => self.step = Step::Distance(a),
-                    None => {
-                        self.step = Step::Azimuth;
-                        return Self::invalid();
-                    }
+                    None => return Some(CmdResult::NeedPoint),
                 }
             }
             Step::End => {
@@ -417,12 +431,18 @@ impl CadCommand for CreatePointManualCommand {
                     self.step = Step::Angle;
                     return Some(CmdResult::NeedPoint);
                 }
+                // Measured: an angle within ±360° is taken, negative too.
+                self.step = Step::Angle;
                 match number(typed) {
-                    Some(a) => self.step = Step::Distance(a),
-                    None => {
-                        self.step = Step::Angle;
-                        return Self::invalid();
+                    Some(a) if a.abs() <= 360.0 => self.step = Step::Distance(a),
+                    Some(a) => {
+                        return Some(CmdResult::ReportError(format!(
+                            "{}\n{}",
+                            crate::tf!("'Transparent Commands Angle Property' validation error - value '{:.4} (d)' out of range.", a),
+                            crate::tf!("Please enter a value greater than or equal to {} and less than or equal to {}", "-360.0000 (d)", "360.0000 (d)"),
+                        )));
                     }
+                    None => return Self::invalid(),
                 }
             }
             Step::Distance(direction) => {
@@ -480,10 +500,15 @@ impl CadCommand for CreatePointManualCommand {
     }
 
     fn on_escape(&mut self) -> CmdResult {
-        // Esc in a direction mode drops back to the location prompt.
+        // Measured: Esc at a direction mode's prompt writes `*Cancel*` and
+        // drops back to the location prompt; at the description or the
+        // elevation it ends the command.
         match (self.mode, &self.step) {
             (Mode::Manual, _) | (_, Step::Description(_) | Step::Elevation(..)) => CmdResult::Cancel,
-            _ => self.resume(),
+            _ => {
+                let _ = self.resume();
+                CmdResult::ReportMessage(format!("{}\n{}", t("*Cancel*"), t(RESUMING)))
+            }
         }
     }
 }

@@ -251,8 +251,22 @@ pub struct Point {
     pub format: Option<String>,
     /// The raw description in that format (the raw one without a key).
     pub full: Option<String>,
-    /// Grid easting and northing, when the drawing has a coordinate system.
-    pub grid: Option<[f64; 2]>,
+    /// Under a projected coordinate system: grid easting and northing,
+    /// latitude, longitude, point scale and convergence.
+    pub geo: Option<Geo>,
+    /// The point's own point style, label style and its layer, by name.
+    pub style: String,
+    pub label: String,
+    pub layer: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geo {
+    pub grid: [f64; 2],
+    pub latitude: f64,
+    pub longitude: f64,
+    pub scale: f64,
+    pub convergence: f64,
 }
 
 impl Point {
@@ -264,7 +278,10 @@ impl Point {
             raw: p.description.clone(),
             format: p.description_format.clone(),
             full: p.full_description(),
-            grid: None,
+            geo: None,
+            style: String::new(),
+            label: String::new(),
+            layer: String::new(),
         }
     }
 
@@ -686,7 +703,7 @@ mod tests {
     use super::*;
 
     fn pts() -> Vec<Point> {
-        let p = |n, z: f64, d: &str| Point { number: n, position: [0.0, 0.0, z], name: None, raw: Some(d.into()), format: None, full: Some(d.into()), grid: None };
+        let p = |n, z: f64, d: &str| Point { number: n, position: [0.0, 0.0, z], name: None, raw: Some(d.into()), format: None, full: Some(d.into()), geo: None, style: String::new(), label: String::new(), layer: String::new() };
         vec![p(1, 10.0, "TREE"), p(2, 20.0, "TREE2"), p(3, 30.0, "POLE"), p(4, NO_ELEVATION, "MH"), p(5, 15.0, "tree")]
     }
 

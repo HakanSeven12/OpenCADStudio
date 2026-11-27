@@ -127,7 +127,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=e65e7d8b166c5ef0d009b2cf4d2530896966f44c#e65e7d8b166c5ef0d009b2cf4d2530896966f44c"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=f1f7a8b46c3162991a1bd95134716b0444f74ef7#f1f7a8b46c3162991a1bd95134716b0444f74ef7"
 dependencies = [
  "anyhow",
  "bitflags 2.13.2",
@@ -3250,8 +3250,8 @@ dependencies = [
 
 [[package]]
 name = "ifccad"
-version = "2026.47.0"
-source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=785590abb669c38afb700b339d36cc8cc0c18161#785590abb669c38afb700b339d36cc8cc0c18161"
+version = "2026.48.0"
+source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=207a5ad6f24f73e1e53d994d4c3ac52d1e616ab7#207a5ad6f24f73e1e53d994d4c3ac52d1e616ab7"
 dependencies = [
  "base64 0.22.1",
  "fpmath",
@@ -4902,7 +4902,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=b5925f27edda425f936a3469b756ecdb36c10445#b5925f27edda425f936a3469b756ecdb36c10445"
+source = "git+https://github.com/BjornFidder/opencaddocument.git?rev=049575d1df13b89bed622c36a08d660cb1082f8b#049575d1df13b89bed622c36a08d660cb1082f8b"
 dependencies = [
  "acadrust",
  "ifccad",
@@ -5247,6 +5247,12 @@ name = "pin-project-lite"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c938015719552d665fd0553b90d96cd7ff58e83e4c061ca99e6bb78865a72752"
+
+[[package]]
+name = "pin-utils"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13bee6c73da26345c729282832b60b0363cf3dd9f4bfd81d8551b7a1c889a113"
 
 [[package]]
 name = "piper"
@@ -7756,14 +7762,14 @@ dependencies = [
 
 [[package]]
 name = "wasmtimer"
-version = "0.4.5"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c62b7f338e4397a45d054c15a2b36a93d57cccdda7be11a7d7b045d47b5e70ce"
+checksum = "1c598d6b99ea013e35844697fc4670d08339d5cda15588f193c6beedd12f644b"
 dependencies = [
  "futures",
  "js-sys",
  "parking_lot",
- "pin-project-lite",
+ "pin-utils",
  "slab",
  "wasm-bindgen",
 ]

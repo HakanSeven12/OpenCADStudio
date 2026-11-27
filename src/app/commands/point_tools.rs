@@ -72,6 +72,22 @@ pub fn description_key_codes(doc: &document::Document) -> Vec<(String, String)> 
     out
 }
 
+/// The record of the point group named `name`.
+fn group_handle(doc: &document::Document, name: &str) -> Option<Handle> {
+    doc.objects
+        .iter()
+        .filter_map(|(h, o)| arch(o).filter(|a| a.dxf_name == "AECC_POINT_PG").map(|a| (h, a)))
+        .find(|(_, o)| {
+            let d = o.decode();
+            if name == "_All Points" {
+                d.strings.iter().any(|s| s == "AeccImpAllPointsPG")
+            } else {
+                d.strings.first().map(String::as_str) == Some(name)
+            }
+        })
+        .map(|(h, _)| *h)
+}
+
 /// The drawing's point groups in the group node's order: name,
 /// description, members, and the point and label style handles.
 pub fn point_groups(doc: &document::Document) -> Vec<(String, String, Vec<u32>, u64, u64)> {
@@ -113,10 +129,26 @@ impl OpenCADStudio {
                 use crate::modules::civil::point_geodetic::{GeodeticDirectCommand, LocalGrid};
                 let c = GeodeticDirectCommand::new(crs, crate::io::crs::model_space_geo_data(doc).and_then(LocalGrid::of));
                 for p in &mut points {
-                    let g = c.grid(glam::DVec3::new(p.position[0], p.position[1], 0.0));
-                    p.grid = Some([g.x, g.y]);
+                    p.geo = c.geodetic(glam::DVec3::new(p.position[0], p.position[1], 0.0)).map(|(g, latitude, longitude, scale, convergence)| pq::Geo {
+                        grid: [g.x, g.y],
+                        latitude,
+                        longitude,
+                        scale,
+                        convergence,
+                    });
                 }
             }
+        }
+        // The point's own styles by name and its layer.
+        let own = c3d::cogo_points(doc);
+        let layers: HashMap<u32, String> =
+            doc.entities().filter_map(|e| Some((arch_entity(e)?.cogo_point_number()?, e.common().layer.clone()))).collect();
+        for p in &mut points {
+            p.layer = layers.get(&p.number).cloned().unwrap_or_default();
+            let Some(cp) = own.iter().find(|c| c.number == p.number) else { continue };
+            let name = |h: u64| doc.objects.get(&Handle::new(h)).and_then(arch).map(style_name).filter(|_| h != 0).unwrap_or_default();
+            p.style = name(cp.style);
+            p.label = name(cp.label_style);
         }
         let unit = match doc.header.insertion_units {
             6 => "m",
@@ -391,6 +423,7 @@ impl OpenCADStudio {
                     ListSwitch::Full => &mut list.full,
                     ListSwitch::Name => &mut list.name,
                     ListSwitch::Raw => &mut list.raw,
+                    ListSwitch::Styles => &mut list.styles,
                     ListSwitch::Columns => &mut list.columns_open,
                 };
                 *flag = !*flag;
@@ -652,6 +685,10 @@ pub struct BlockJob {
     /// The point asked about and the block it would replace.
     pub pending: Option<(c3d::CogoPoint, Handle)>,
     pub converted: usize,
+    /// The answer to the duplicate question (true: overwrite), asked once
+    /// a conversion: it settles every later duplicate too (measured: one
+    /// Overwrite replaced all ten blocks).
+    pub answer: Option<bool>,
 }
 
 impl OpenCADStudio {
@@ -784,6 +821,7 @@ impl OpenCADStudio {
         let Some(w) = self.point_tools.corridor.as_mut() else { return };
         let parts: Vec<&str> = args.split_whitespace().collect();
         match parts[..] {
+            ["cancel"] => self.command_line.push_output(&crate::t!("*Cancel*")),
             [hex] => {
                 let picked = u64::from_str_radix(hex, 16).ok();
                 match w.baselines.iter().position(|b| Some(b.3) == picked) {
@@ -795,7 +833,6 @@ impl OpenCADStudio {
                     None => w.error = Some(crate::t!("The alignment picked is not a baseline of this corridor.").into_owned()),
                 }
             }
-            ["cancel"] => self.command_line.push_output(&crate::t!("*Cancel*")),
             [which, s] => {
                 if let Ok(s) = s.parse::<f64>() {
                     let text = w.station_text(s);
@@ -943,6 +980,27 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::PointBlocks);
     }
 
+    /// The draw order the group picker shows, written to the drawing's
+    /// groups when it differs from theirs (one undo step); the window's
+    /// list follows it.
+    fn write_group_order(&mut self) {
+        let i = self.active_tab;
+        let Some(w) = self.point_tools.blocks.as_mut() else { return };
+        let Some(rows) = w.picker.as_ref() else { return };
+        let order: Vec<String> = rows.iter().map(|r| r.0.clone()).collect();
+        let handles: Vec<Handle> = rows.iter().map(|r| Handle::new(r.3)).collect();
+        let changed = w.groups.iter().map(|g| &g.0).ne(order.iter());
+        w.groups.sort_by_key(|g| order.iter().position(|n| *n == g.0));
+        if !changed || handles.iter().any(|h| h.value() == 0) {
+            return;
+        }
+        self.push_undo_snapshot(i, "CREATEBLOCKSFROMPOINTS");
+        match c3d::set_point_group_draw_order(&mut self.tabs[i].scene.document, &handles) {
+            Ok(()) => self.tabs[i].dirty = true,
+            Err(e) => self.command_line.push_error(&e.to_string()),
+        }
+    }
+
     /// The window "Define window" picked (or none: unchanged).
     pub(in crate::app) fn point_blocks_window(&mut self, corners: &str) {
         let i = self.active_tab;
@@ -1006,7 +1064,7 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, "CREATEBLOCKSFROMPOINTS");
         self.ensure_point_block(i, &block);
         let layer = if self.tabs[i].scene.document.layers.get(&state.layer).is_some() { state.layer.clone() } else { "0".to_string() };
-        self.point_tools.block_job = Some(BlockJob { block, layer, queue: points.into(), pending: None, converted: 0 });
+        self.point_tools.block_job = Some(BlockJob { block, layer, queue: points.into(), pending: None, converted: 0, answer: None });
         self.run_block_job();
     }
 
@@ -1048,15 +1106,21 @@ impl OpenCADStudio {
                 .entities()
                 .find(|e| matches!(e, document::EntityType::Insert(ins) if attribute(ins, "POINT") == Some(number.as_str())))
                 .map(|e| e.common().handle);
-            match existing {
-                Some(h) => {
+            let answer = self.point_tools.block_job.as_ref().and_then(|j| j.answer);
+            match (existing, answer) {
+                (Some(h), None) => {
                     if let Some(job) = self.point_tools.block_job.as_mut() {
                         job.pending = Some((p, h));
                     }
                     self.active_modal = Some(crate::app::ModalKind::BlockDuplicate);
                     return;
                 }
-                None => self.insert_point_block(i, &p),
+                (Some(h), Some(true)) => {
+                    self.tabs[i].scene.erase_entities(&[h]);
+                    self.insert_point_block(i, &p);
+                }
+                (Some(_), Some(false)) => {}
+                (None, _) => self.insert_point_block(i, &p),
             }
         }
         self.finish_block_job();
@@ -1357,25 +1421,36 @@ impl OpenCADStudio {
                 }
             }
             PointToolMsg::PickGroups => {
-                let descriptions: Vec<(String, String)> = point_groups(&self.tabs[i].scene.document).into_iter().map(|g| (g.0, g.1)).collect();
+                let doc = &self.tabs[i].scene.document;
+                let descriptions: Vec<(String, String)> = point_groups(doc).into_iter().map(|g| (g.0, g.1)).collect();
+                let rows = self.point_tools.blocks.as_ref().map(|w| {
+                    w.groups
+                        .iter()
+                        .map(|(n, on)| (n.clone(), descriptions.iter().find(|d| d.0 == *n).map(|d| d.1.clone()).unwrap_or_default(), *on, group_handle(doc, n).map_or(0, |h| h.value())))
+                        .collect()
+                });
                 if let Some(w) = self.point_tools.blocks.as_mut() {
-                    w.picker = Some(
-                        w.groups
-                            .iter()
-                            .map(|(n, on)| (n.clone(), descriptions.iter().find(|d| d.0 == *n).map(|d| d.1.clone()).unwrap_or_default(), *on))
-                            .collect(),
-                    );
+                    w.picker = rows;
                 }
             }
+            PointToolMsg::PickerMove(m) => {
+                if let Some(rows) = self.point_tools.blocks.as_mut().and_then(|w| w.picker.as_mut()) {
+                    m.apply(rows, |r| r.2);
+                }
+            }
+            // Apply writes the order at once; a later Cancel keeps it
+            // (measured).
+            PointToolMsg::PickerApply => self.write_group_order(),
             PointToolMsg::PickerRow(k, on) => {
                 if let Some(row) = self.point_tools.blocks.as_mut().and_then(|w| w.picker.as_mut()).and_then(|p| p.get_mut(k)) {
                     row.2 = on;
                 }
             }
             PointToolMsg::PickerOk => {
+                self.write_group_order();
                 if let Some(w) = self.point_tools.blocks.as_mut() {
                     if let Some(rows) = w.picker.take() {
-                        w.groups = rows.into_iter().map(|(n, _, on)| (n, on)).collect();
+                        w.groups = rows.into_iter().map(|(n, _, on, _)| (n, on)).collect();
                     }
                 }
             }
@@ -1409,6 +1484,9 @@ impl OpenCADStudio {
             PointToolMsg::BlockSkip | PointToolMsg::BlockOverwrite => {
                 self.active_modal = None;
                 let overwrite = matches!(message, PointToolMsg::BlockOverwrite);
+                if let Some(job) = self.point_tools.block_job.as_mut() {
+                    job.answer = Some(overwrite);
+                }
                 if let Some((p, old)) = self.point_tools.block_job.as_mut().and_then(|j| j.pending.take()) {
                     if overwrite {
                         self.tabs[i].scene.erase_entities(&[old]);

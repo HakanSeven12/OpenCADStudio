@@ -3683,7 +3683,7 @@ impl OpenCADStudio {
             // "row=<k>:<set operator>:<0|1 open>:<property 0-4>:<operator>:
             // <value>:<0|1 close>", "reset", "override=<k>:0|1",
             // "override_text=<k>:<text>", "list_filter=<text>",
-            // "list_sort=<column title>", "list_switch=grid|full|name|raw|
+            // "list_sort=<column title>", "list_switch=grid|full|name|raw|styles|
             // columns", "list_pick=<number>", "list_show[=<number>]",
             // "apply", "ok", "cancel".
             // Create COGO Points (corridor): "range=entire|user",
@@ -3692,7 +3692,8 @@ impl OpenCADStudio {
             // "drag=start|end:<0..1 along the range bar>",
             // "ok". Create Blocks from COGO Points:
             // "spatial=none|display|window", "pick_window", "group=<k>:0|1",
-            // "pick_groups", "picker=<k>:0|1", "picker_ok", "picker_cancel",
+            // "pick_groups", "picker=<k>:0|1", "picker_move=top|up|down|
+            // bottom", "picker_apply", "picker_ok", "picker_cancel",
             // "existing=<block>", "new=<name>", "layer=<name>", "ok". The
             // duplicate block question: "skip", "overwrite", "cancel".
             // Duplicate Point Number: "resolution=<label>", "offset=",
@@ -3753,6 +3754,7 @@ impl OpenCADStudio {
                                 "full" => S::Full,
                                 "name" => S::Name,
                                 "raw" => S::Raw,
+                                "styles" => S::Styles,
                                 "columns" => S::Columns,
                                 _ => return Err(bad()),
                             })
@@ -3806,6 +3808,14 @@ impl OpenCADStudio {
                             (K::PointBlocks, "group") => pair().map(|(k, v)| P::BlockGroup(k, v)).ok_or_else(bad)?,
                             (K::PointBlocks, "pick_groups") => P::PickGroups,
                             (K::PointBlocks, "picker") => pair().map(|(k, v)| P::PickerRow(k, v)).ok_or_else(bad)?,
+                            (K::PointBlocks, "picker_move") => P::PickerMove(match value {
+                                "top" => crate::ui::window::point_tools::Move::Top,
+                                "up" => crate::ui::window::point_tools::Move::Up,
+                                "down" => crate::ui::window::point_tools::Move::Down,
+                                "bottom" => crate::ui::window::point_tools::Move::Bottom,
+                                _ => return Err(bad()),
+                            }),
+                            (K::PointBlocks, "picker_apply") => P::PickerApply,
                             (K::PointBlocks, "picker_ok") => P::PickerOk,
                             (K::PointBlocks, "picker_cancel") => P::PickerCancel,
                             (K::PointBlocks, "existing") => {

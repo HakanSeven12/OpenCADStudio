@@ -178,6 +178,24 @@ impl FloatingPanel {
     }
 }
 
+/// The window edge a docked toolbar runs down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ToolbarEdge {
+    Left,
+    Right,
+}
+
+/// A ribbon panel docked as a one-column toolbar at a window edge, beside
+/// the drawing. Like a floating panel it leaves its ribbon row.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct DockedToolbar {
+    /// Its panel key (`extras::panel_key`).
+    pub key: String,
+    /// The module id of the tab it belongs to.
+    pub module_id: String,
+    pub edge: ToolbarEdge,
+}
+
 /// The ribbon's persisted layout. Panels are named by their panel key
 /// (`extras::panel_key`), tabs by their module id.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -208,6 +226,8 @@ pub struct RibbonLayout {
     pub qat_faces: BTreeMap<String, String>,
     /// The panels floating over the drawing.
     pub floating: Vec<FloatingPanel>,
+    /// The panels docked as toolbars at the window's edges, top to bottom.
+    pub docked: Vec<DockedToolbar>,
     /// The user's own panels, shown on the My Tools tab.
     pub custom_panels: Vec<CustomPanel>,
     /// The tabs and the panels sit in the middle of the ribbon instead of
@@ -240,6 +260,7 @@ impl Default for RibbonLayout {
             qat_below: false,
             qat_faces: BTreeMap::new(),
             floating: Vec::new(),
+            docked: Vec::new(),
             custom_panels: Vec::new(),
             centered: false,
             wheel_switches_tabs: true,
@@ -359,6 +380,13 @@ impl RibbonLayout {
         self.floating
             .iter()
             .find(|panel| is_key(&panel.key, module_id, title))
+    }
+
+    /// The panel `title` of module `module_id`, if it is docked.
+    pub(super) fn docked_toolbar(&self, module_id: &str, title: &str) -> Option<&DockedToolbar> {
+        self.docked
+            .iter()
+            .find(|toolbar| is_key(&toolbar.key, module_id, title))
     }
 
     /// Keep each floating panel's title strip inside a window `win` big;

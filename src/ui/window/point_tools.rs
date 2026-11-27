@@ -52,9 +52,9 @@ pub struct PointBlocksWindow {
     /// Point group names in the drawing's order and whether each is
     /// selected.
     pub groups: Vec<(String, bool)>,
-    /// The group picker while it is open: names, descriptions and the
-    /// rows selected in it.
-    pub picker: Option<Vec<(String, String, bool)>>,
+    /// The group picker while it is open: names, descriptions, the rows
+    /// selected in it and the groups' records, in the order it shows.
+    pub picker: Option<Vec<(String, String, bool, u64)>>,
     /// The drawing's blocks that hold a POINT attribute definition.
     pub blocks: Vec<String>,
     pub use_existing: bool,
@@ -63,6 +63,49 @@ pub struct PointBlocksWindow {
     pub layers: Vec<String>,
     pub layer: String,
     pub error: Option<String>,
+}
+
+/// Where the group picker's arrows move the selected rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Move {
+    Top,
+    Up,
+    Down,
+    Bottom,
+}
+
+impl Move {
+    /// The rows of `selected` moved: to the top or the bottom keeping their
+    /// order, or one row past the next row not selected.
+    pub fn apply<T>(self, rows: &mut Vec<T>, selected: impl Fn(&T) -> bool) {
+        match self {
+            Move::Top | Move::Bottom => {
+                let (mut picked, rest): (Vec<T>, Vec<T>) = rows.drain(..).partition(|r| selected(r));
+                if self == Move::Top {
+                    picked.extend(rest);
+                    *rows = picked;
+                } else {
+                    let mut all = rest;
+                    all.extend(picked);
+                    *rows = all;
+                }
+            }
+            Move::Up => {
+                for k in 1..rows.len() {
+                    if selected(&rows[k]) && !selected(&rows[k - 1]) {
+                        rows.swap(k, k - 1);
+                    }
+                }
+            }
+            Move::Down => {
+                for k in (0..rows.len().saturating_sub(1)).rev() {
+                    if selected(&rows[k]) && !selected(&rows[k + 1]) {
+                        rows.swap(k, k + 1);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// How a point number already in use is settled (the reference's order).
@@ -119,9 +162,12 @@ pub enum PointToolMsg {
     Spatial(Spatial),
     PickWindow,
     BlockGroup(usize, bool),
-    /// The group picker: open it, a row clicked on or off, OK, Cancel.
+    /// The group picker: open it, a row clicked on or off, the selected
+    /// rows moved, Apply, OK, Cancel.
     PickGroups,
     PickerRow(usize, bool),
+    PickerMove(Move),
+    PickerApply,
     PickerOk,
     PickerCancel,
     UseExisting(bool),
@@ -198,6 +244,21 @@ fn footer<'a>(help: &'static str, ok: Message) -> Element<'a, Message> {
 }
 
 static PICK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
+static UP_ICON: &[u8] = include_bytes!("../../../assets/icons/ui/up.svg");
+static TOP_ICON: &[u8] = include_bytes!("../../../assets/icons/ui/to_top.svg");
+
+/// An arrow button of the group picker (`turned`: pointing down).
+fn arrow<'a>(icon: &'static [u8], turned: bool, m: Option<Message>) -> Element<'a, Message> {
+    let enabled = m.is_some();
+    let svg = iced::widget::svg(crate::ui::icons::themed_handle(icon))
+        .width(13)
+        .height(13)
+        .rotation(iced::Radians(if turned { std::f32::consts::PI } else { 0.0 }))
+        .style(move |theme: &iced::Theme, _| iced::widget::svg::Style {
+            color: Some(if enabled { theme.palette().background.base.text } else { theme.palette().background.base.text.scale_alpha(0.35) }),
+        });
+    button(container(svg).center(Length::Fixed(18.0))).on_press_maybe(m).style(button_style(false)).padding(2).into()
+}
 
 /// A station as typed: `0+60.00`, `0+60.00'`, `0+60.00m` or `60`.
 pub fn parse_station(s: &str) -> Option<f64> {
@@ -518,7 +579,7 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
         // selectable.
         Some(rows) => {
             let mut list = column![].spacing(2);
-            for (k, (name, description, on)) in rows.iter().enumerate() {
+            for (k, (name, description, on, _)) in rows.iter().enumerate() {
                 list = list.push(
                     button(row![small(name.clone()).width(Length::Fixed(200.0)), small(description.clone()).style(muted_style)].spacing(8))
                         .on_press(msg(PointToolMsg::PickerRow(k, !on)))
@@ -528,12 +589,22 @@ pub fn view_blocks<'a>(state: &'a PointBlocksWindow, sizing: crate::ui::modal::M
                 );
             }
             // The list and its buttons take the room of the selected list.
+            let any = rows.iter().any(|r| r.2);
+            let mv = |m: Move| any.then(|| msg(PointToolMsg::PickerMove(m)));
+            let arrows = column![
+                arrow(TOP_ICON, false, mv(Move::Top)),
+                arrow(UP_ICON, false, mv(Move::Up)),
+                arrow(UP_ICON, true, mv(Move::Down)),
+                arrow(TOP_ICON, true, mv(Move::Bottom)),
+            ]
+            .spacing(1);
             column![
-                scrollable(list).height(Length::Fixed(86.0)),
+                row![scrollable(list).height(Length::Fixed(86.0)), arrows].spacing(6),
+                small(t!("Click rows to select the point groups; the arrows set their draw order.")).style(muted_style),
                 row![
-                    small(t!("Click rows to select the point groups.")).style(muted_style),
                     Space::new().width(Fill),
                     button(small(t!("Cancel"))).on_press(msg(PointToolMsg::PickerCancel)).style(button_style(false)).padding([4, 10]),
+                    button(small(t!("Apply"))).on_press(msg(PointToolMsg::PickerApply)).style(button_style(false)).padding([4, 10]),
                     button(small(t!("OK"))).on_press(msg(PointToolMsg::PickerOk)).style(button_style(true)).padding([4, 10]),
                 ]
                 .spacing(6)

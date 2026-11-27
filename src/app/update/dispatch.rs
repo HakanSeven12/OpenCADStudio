@@ -234,7 +234,7 @@ impl OpenCADStudio {
                 for line in add_line.lines().chain(config.lines()) {
                     self.command_line.push_info(line);
                 }
-                iced::clipboard::write(config).discard()
+                crate::sys::clipboard_write(config)
             }
             // Drain plugin-to-host requests that arrived outside of a host call.
             // This runs on a periodic timer so long-lived plugin sessions such
@@ -1356,6 +1356,12 @@ impl OpenCADStudio {
             }
 
             Message::WblockSave(block_name) => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Task::none();
+                }
                 let name = block_name.clone();
                 let title = if block_name == "-" {
                     crate::t!("Create Drawing File").into_owned()
@@ -3759,7 +3765,7 @@ impl OpenCADStudio {
                 if text.is_empty() {
                     Task::none()
                 } else {
-                    iced::clipboard::write(text).discard()
+                    crate::sys::clipboard_write(text)
                 }
             }
 
@@ -7453,6 +7459,14 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::WblockApply => {
+                if self.read_only {
+                    self.wblock = None;
+                    self.active_modal = None;
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Task::none();
+                }
                 let Some(state) = self.wblock.as_mut() else {
                     return Task::none();
                 };
@@ -11978,9 +11992,17 @@ impl OpenCADStudio {
             }
 
             Message::OpenFolder(path) => {
-                // The fonts folder exists only once something is put in it.
-                let _ = std::fs::create_dir_all(&path);
-                crate::sys::open_url(&path, None)
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // The fonts folder exists only once something is put in it.
+                    let _ = std::fs::create_dir_all(&path);
+                    crate::sys::open_local_path(std::path::Path::new(&path), None)
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = path;
+                    Task::none()
+                }
             }
 
             #[cfg(target_arch = "wasm32")]
@@ -12984,15 +13006,7 @@ impl OpenCADStudio {
 
             Message::AboutCopyInfo => {
                 let info = crate::ui::window::about::report();
-                #[cfg(target_arch = "wasm32")]
-                {
-                    crate::sys::write_clipboard_text(&info);
-                    Task::none()
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    iced::clipboard::write(info).discard()
-                }
+                crate::sys::clipboard_write(info)
             }
 
             // ── Plugin Manager window ─────────────────────────────────────

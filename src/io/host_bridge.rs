@@ -10,6 +10,42 @@ use std::path::Path;
 
 #[allow(dead_code)] // bounded queue capacity exercised by wasm32 emitter and native unit tests
 const MAX_PENDING_SAVES: usize = 16;
+#[allow(dead_code)] // bounded inbound queue capacity exercised by wasm32 listener and native unit tests
+pub(crate) const MAX_HOST_QUEUE: usize = 32;
+#[allow(dead_code)] // byte cap enforced on wasm32 host open/drop payloads and native unit tests
+pub(crate) const MAX_HOST_OPEN_BYTES: usize = 256 * 1024 * 1024;
+
+#[allow(dead_code)]
+pub(crate) fn is_valid_host_origin(origin: &str) -> bool {
+    !origin.is_empty() && origin != "null"
+}
+
+#[allow(dead_code)]
+pub(crate) fn sanitize_host_filename(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let basename = cleaned
+        .rsplit(['/', '\\'])
+        .find(|seg| !seg.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("");
+    if basename.is_empty() || basename == "." || basename == ".." {
+        "drawing.dxf".to_string()
+    } else {
+        basename.to_string()
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn push_bounded<T>(queue: &mut VecDeque<T>, item: T, cap: usize) -> bool {
+    if queue.len() >= cap {
+        return false;
+    }
+    queue.push_back(item);
+    true
+}
 
 /// Metadata retained for each outbound `ocs:save` until the host acknowledges
 /// completion via `ocs:saved`.
@@ -154,9 +190,13 @@ mod web {
                 return;
             };
             let expected_origin = window.location().origin().unwrap_or_default();
+            if !super::is_valid_host_origin(&expected_origin) {
+                return;
+            }
             let closure = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
                 move |event: web_sys::MessageEvent| {
-                    if event.origin() != expected_origin {
+                    let origin = event.origin();
+                    if !super::is_valid_host_origin(&origin) || origin != expected_origin {
                         return;
                     }
                     let Some(win) = web_sys::window() else {
@@ -179,13 +219,38 @@ mod web {
                     };
                     let cmd = match msg_type.as_str() {
                         "ocs:open" => {
-                            let name = str_prop(&data, "name")
+                            let raw_name = str_prop(&data, "name")
                                 .unwrap_or_else(|| "drawing.dxf".to_string());
+                            let name = super::sanitize_host_filename(&raw_name);
                             // Fail closed: omitted `readOnly` stays read-only.
                             let read_only = bool_prop(&data, "readOnly").unwrap_or(true);
                             let buf = js_sys::Reflect::get(&data, &"buffer".into())
                                 .unwrap_or(JsValue::UNDEFINED);
-                            let bytes = js_sys::Uint8Array::new(&buf).to_vec();
+                            let bytes = if let Some(arr) = buf.dyn_ref::<js_sys::Uint8Array>() {
+                                if (arr.byte_length() as usize) > super::MAX_HOST_OPEN_BYTES {
+                                    emit_error(
+                                        "file_too_large",
+                                        "Host open payload exceeds maximum allowed size.",
+                                    );
+                                    return;
+                                }
+                                arr.to_vec()
+                            } else if let Some(ab) = buf.dyn_ref::<js_sys::ArrayBuffer>() {
+                                if (ab.byte_length() as usize) > super::MAX_HOST_OPEN_BYTES {
+                                    emit_error(
+                                        "file_too_large",
+                                        "Host open payload exceeds maximum allowed size.",
+                                    );
+                                    return;
+                                }
+                                js_sys::Uint8Array::new(ab).to_vec()
+                            } else {
+                                emit_error(
+                                    "invalid_open",
+                                    "Host open buffer must be an ArrayBuffer or Uint8Array.",
+                                );
+                                return;
+                            };
                             Some(HostCommand::Open {
                                 name,
                                 bytes,
@@ -204,10 +269,13 @@ mod web {
                         _ => None,
                     };
                     if let Some(cmd) = cmd {
-                        COMMAND_QUEUE
+                        let mut queue = COMMAND_QUEUE
                             .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push_back(cmd);
+                            .unwrap_or_else(|e| e.into_inner());
+                        if !super::push_bounded(&mut queue, cmd, super::MAX_HOST_QUEUE) {
+                            drop(queue);
+                            emit_error("queue_full", "Host command queue is full.");
+                        }
                     }
                 },
             );
@@ -333,6 +401,9 @@ mod web {
         let Ok(origin) = window.location().origin() else {
             return;
         };
+        if !super::is_valid_host_origin(&origin) {
+            return;
+        }
         let obj = js_sys::Object::new();
         let _ = js_sys::Reflect::set(&obj, &"source".into(), &"opencadstudio-embed".into());
         let _ = js_sys::Reflect::set(&obj, &"type".into(), &msg_type.into());
@@ -365,10 +436,38 @@ pub fn report_unsaved_changes(active: bool) {
 #[cfg(test)]
 mod tests {
     use super::{
-        cad_save_format, push_pending_save_in, saved_label_from_ack, search_has_flag,
-        take_pending_save_in, PendingSave,
+        cad_save_format, is_valid_host_origin, push_bounded, push_pending_save_in,
+        sanitize_host_filename, saved_label_from_ack, search_has_flag, take_pending_save_in,
+        PendingSave, MAX_HOST_QUEUE,
     };
     use std::collections::VecDeque;
+
+    #[test]
+    fn origin_validation_rejects_empty_and_opaque_null() {
+        assert!(!is_valid_host_origin(""));
+        assert!(!is_valid_host_origin("null"));
+        assert!(is_valid_host_origin("https://cad.example.com"));
+        assert!(is_valid_host_origin("http://127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn sanitize_host_filename_strips_paths_and_control_chars() {
+        assert_eq!(sanitize_host_filename("../../secret.dwg"), "secret.dwg");
+        assert_eq!(sanitize_host_filename(r"C:\tmp\plan.dxf"), "plan.dxf");
+        assert_eq!(sanitize_host_filename("dir/\x00bad\n.dxf"), "bad.dxf");
+        assert_eq!(sanitize_host_filename(".."), "drawing.dxf");
+        assert_eq!(sanitize_host_filename(""), "drawing.dxf");
+    }
+
+    #[test]
+    fn bounded_host_queue_rejects_overflow_entries() {
+        let mut queue = VecDeque::new();
+        for i in 0..MAX_HOST_QUEUE {
+            assert!(push_bounded(&mut queue, i, MAX_HOST_QUEUE));
+        }
+        assert!(!push_bounded(&mut queue, 999, MAX_HOST_QUEUE));
+        assert_eq!(queue.len(), MAX_HOST_QUEUE);
+    }
 
     fn sample_save(id: &str, name: &str) -> PendingSave {
         PendingSave {

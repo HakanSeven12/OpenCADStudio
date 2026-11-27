@@ -935,6 +935,7 @@ impl OpenCADStudio {
     pub(crate) fn new_headless(read_only: bool) -> Self {
         let mut app = Self::new();
         app.read_only = read_only;
+        app.control.enabled = true;
         app
     }
 
@@ -1018,7 +1019,54 @@ impl OpenCADStudio {
             Ok(v) => v,
             Err(e) => return err(format!("invalid JSON: {e}")),
         };
-        match req["op"].as_str().unwrap_or("") {
+        let op = req["op"].as_str().unwrap_or("");
+        let is_query = matches!(
+            op,
+            "state"
+                | "hello"
+                | "operation"
+                | "events"
+                | "commands"
+                | "properties"
+                | "measure"
+                | "snap"
+                | "grips"
+                | "query"
+                | "civil_station_offset"
+                | "civil_surface_stats"
+                | "records"
+                | "record_schema"
+                | "capabilities"
+                | "tools"
+                | "entities"
+                | "audit"
+                | "layers"
+                | "layouts"
+                | "xrefs"
+                | "page_setup_get"
+                | "header"
+                | "history"
+                | "xdata_get"
+                | "get_selection"
+                | "text_search"
+                | "text_audit"
+                | "blocks"
+                | "block_instances"
+                | "cad_get_blocks"
+                | "cad_extract_block_instances"
+                | "keytips"
+                | "plugins"
+                | "plugin_panels"
+        );
+        if !is_query && !self.control.enabled {
+            return json!({
+                "ok": false,
+                "status": "failed",
+                "code": "disabled",
+                "error": "Automation is stopped. Enable it in OCS.",
+            });
+        }
+        match op {
             "new" => {
                 if self.tabs[self.active_tab].block_test.is_some() {
                     return err("Close Test Block before replacing the drawing.");

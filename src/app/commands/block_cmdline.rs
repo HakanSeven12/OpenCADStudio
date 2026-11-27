@@ -28,6 +28,12 @@ impl OpenCADStudio {
                 self.start_block_cmdline(i, Box::new(command));
             }
             "-WBLOCK" | "-WB" => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 let preselected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
                 let table = BlockTable::of(&self.tabs[i].scene.document);
                 let command = DashWblockCommand::new(table, preselected);
@@ -40,6 +46,12 @@ impl OpenCADStudio {
                 self.start_block_cmdline(i, Box::new(command));
             }
             cmd if cmd.starts_with("_-WBLOCKFILE ") => {
+                if self.read_only {
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 let path = cmd["_-WBLOCKFILE ".len()..].trim().to_string();
                 let preselected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
                 let table = BlockTable::of(&self.tabs[i].scene.document);

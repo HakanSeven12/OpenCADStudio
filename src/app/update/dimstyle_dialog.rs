@@ -1105,7 +1105,7 @@ impl OpenCADStudio {
                     }
                     out.push_str("\r\n");
                 }
-                return iced::clipboard::write(out).map(|_| Message::Noop);
+                return crate::sys::clipboard_write(out);
             }
             DsMsg::CompareClose => self.dsd.compare = None,
             DsMsg::Delete(name) => {

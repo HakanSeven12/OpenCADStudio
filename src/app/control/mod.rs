@@ -762,7 +762,11 @@ impl OpenCADStudio {
                 | "plugins"
                 | "plugin_panels"
         );
-        if !query && !self.control.enabled {
+        #[cfg(target_arch = "wasm32")]
+        let query_blocked = crate::io::host_bridge::is_embed_mode() && !self.control.enabled;
+        #[cfg(not(target_arch = "wasm32"))]
+        let query_blocked = false;
+        if (!query || query_blocked) && !self.control.enabled {
             return (
                 failure("disabled", "Automation is stopped. Enable it in OCS."),
                 Task::none(),
@@ -1651,6 +1655,9 @@ impl OpenCADStudio {
             // Web: no filesystem path; the drawing comes back in the reply.
             #[cfg(target_arch = "wasm32")]
             "save" => {
+                if let Some(refusal) = self.read_only_save_refusal() {
+                    return Err(refusal);
+                }
                 if self.tabs[i].block_test.is_some() {
                     return Err(failure(
                         "temporary_document",

@@ -911,8 +911,49 @@ fn route(
                 }),
             )
         }
-        Plan::Run { request, created } => {
-            let response = app.automation_op(&request.to_string());
+        Plan::Run {
+            mut request,
+            created,
+        } => {
+            if let Some(obj) = request.as_object_mut() {
+                obj.insert("protocol".into(), json!(1));
+                if obj
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                {
+                    *counter += 1;
+                    obj.insert(
+                        "request_id".into(),
+                        json!(format!("http-{}-{}", std::process::id(), *counter)),
+                    );
+                }
+            }
+            let op = request["op"].as_str().unwrap_or("").to_owned();
+            let needs_doc = matches!(op.as_str(), "run" | "undo" | "redo")
+                && request.get("document_id").is_none();
+            if needs_doc && document_id.is_none() {
+                if let Some(id) = fetch_state(app) {
+                    *document_id = Some(id);
+                }
+            }
+            if needs_doc {
+                if let Some(id) = *document_id {
+                    request["document_id"] = json!(id);
+                }
+            }
+            let mut response = app.automation_op(&request.to_string());
+            let code = response["code"].as_str().unwrap_or("");
+            if needs_doc && response["ok"] == false && RETRYABLE.contains(&code) {
+                if let Some(id) = fetch_state(app) {
+                    *document_id = Some(id);
+                    *counter += 1;
+                    request["document_id"] = json!(id);
+                    request["request_id"] =
+                        json!(format!("http-{}-{}", std::process::id(), *counter));
+                    response = app.automation_op(&request.to_string());
+                }
+            }
             harvest(document_id, &response);
             (map_status(response.clone(), created == 201), response)
         }
@@ -1009,6 +1050,7 @@ pub(crate) fn map_status(response: Value, created: bool) -> u16 {
         return if created { 201 } else { 200 };
     }
     match response["code"].as_str().unwrap_or("") {
+        "disabled" => 403,
         "entity_absent" | "layout_missing" | "xref_missing" | "unknown_route" => 404,
         "stale_state" | "session_changed" | "document_not_active" | "gui_required" => 409,
         "busy" => 503,
@@ -1896,5 +1938,60 @@ mod tests {
         assert!(status.contains("431"), "expected 431, got: {status:?}");
         drop(server);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn stopped_automation_blocks_mutating_rest_run_routes() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut document_id = None;
+        let mut counter = 0;
+        let _ = route(
+            &mut app,
+            &request("GET", "/api/v1/state", ""),
+            &mut document_id,
+            &mut counter,
+        );
+        let (stop_status, stop_body) = route(
+            &mut app,
+            &request("POST", "/api/v1/stop", "{}"),
+            &mut document_id,
+            &mut counter,
+        );
+        assert_eq!(stop_status, 200, "{stop_body}");
+
+        let (status, body) = route(
+            &mut app,
+            &request("POST", "/api/v1/commands", r#"{"cmd":"LINE 0,0 1,1"}"#),
+            &mut document_id,
+            &mut counter,
+        );
+        assert_eq!(status, 403, "{body}");
+        assert_eq!(body["code"], "disabled", "{body}");
+
+        for (method, path, payload) in [
+            ("POST", "/api/v1/undo", "{}"),
+            ("POST", "/api/v1/redo", "{}"),
+            ("POST", "/api/v1/documents", r#"{"path":"nope.dwg"}"#),
+        ] {
+            let (status, body) = route(
+                &mut app,
+                &request(method, path, payload),
+                &mut document_id,
+                &mut counter,
+            );
+            assert_eq!(status, 403, "{path}: {body}");
+            assert_eq!(body["code"], "disabled", "{path}: {body}");
+        }
+
+        // Read-only queries continue to work when automation is stopped.
+        let (status, body) = route(
+            &mut app,
+            &request("GET", "/api/v1/layouts", ""),
+            &mut document_id,
+            &mut counter,
+        );
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["ok"], true, "{body}");
     }
 }

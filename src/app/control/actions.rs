@@ -587,6 +587,9 @@ impl OpenCADStudio {
     /// this needs no undo snapshot. Format follows the path extension.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn control_wblock(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        if let Some(refusal) = self.read_only_save_refusal() {
+            return Err(refusal);
+        }
         if self.tabs[self.active_tab].block_test.is_some() {
             return Err(failure(
                 "temporary_document",
@@ -594,6 +597,12 @@ impl OpenCADStudio {
             ));
         }
         let path = string(req, "path")?;
+        if req["overwrite"].as_bool() != Some(true) && std::path::Path::new(path).exists() {
+            return Err(failure(
+                "destination_exists",
+                "Destination exists; set overwrite=true to replace an existing file",
+            ));
+        }
         // The export is built from the document as a save writes it: the
         // header's save stamps and the current display form of the geometry.
         let document = self.tabs[self.active_tab].document_for_save();

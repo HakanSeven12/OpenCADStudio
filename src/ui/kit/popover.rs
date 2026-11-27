@@ -37,19 +37,35 @@ fn inset<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fixed(km::ROW_H))
-        .padding(Padding::ZERO.left(km::INDENT + km::CELL_PAD_X))
+        .padding(Padding::ZERO.left(km::INDENT + km::LINE + km::CELL_PAD_X))
         .align_y(iced::Center)
         .into()
 }
 
-/// A check box with `label` after it, toggled by a press on either.
+/// A check box with `label` after it, toggled by a press on either. The
+/// label stays on one line, cut with "…" where its cell ends.
 fn check<'a>(label: String, checked: bool, on_toggle: Option<Message>) -> Element<'a, Message> {
-    checkbox(checked)
-        .label(label)
-        .on_toggle_maybe(on_toggle.map(|message| move |_| message.clone()))
-        .size(km::CHECK)
+    let enabled = on_toggle.is_some();
+    let box_ = checkbox(checked)
+        .on_toggle_maybe(on_toggle.clone().map(|message| move |_| message.clone()))
+        .size(km::CHECK);
+    let text = super::one_line(iced::widget::text(label))
+        .size(text::UI)
+        .line_height(text::line())
+        .style(move |theme: &Theme| iced::widget::text::Style {
+            color: Some(if enabled {
+                chrome::text(theme)
+            } else {
+                chrome::muted(theme)
+            }),
+        });
+    let mut text = iced::widget::mouse_area(container(text).width(Length::Fill));
+    if let Some(message) = on_toggle {
+        text = text.on_press(message);
+    }
+    row![box_, text]
         .spacing(km::CELL_PAD_X)
-        .text_size(text::UI)
+        .align_y(iced::Center)
         .into()
 }
 
@@ -78,15 +94,7 @@ pub fn check_select_row<'a>(
         Some(dropdown) => dropdown,
         None => super::read_only_field(shown),
     };
-    row![
-        container(inset(check(label.into(), checked, on_toggle))).width(Length::FillPortion(1)),
-        container(value)
-            .width(Length::FillPortion(1))
-            .height(Length::Fixed(km::ROW_H))
-            .align_y(iced::Center),
-    ]
-    .height(Length::Fixed(km::ROW_H))
-    .into()
+    super::row_view_half(check(label.into(), checked, on_toggle), value)
 }
 
 /// A row of choice tiles, one per option (`icon` and label), side by side

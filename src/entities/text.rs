@@ -347,11 +347,21 @@ fn grips(t: &Text) -> Vec<GripDef> {
         t.insertion_point.y,
         t.insertion_point.z,
     );
-    let mut grips = vec![square_grip(0, insertion)];
-    if let Some(point) = t.alignment_point {
-        grips.push(square_grip(1, glam::DVec3::new(point.x, point.y, point.z)));
+    let alignment = t
+        .alignment_point
+        .map(|point| square_grip(1, glam::DVec3::new(point.x, point.y, point.z)));
+    // A justified text (not Left, Align or Fit) has one grip, at the point
+    // its justification puts on it; the insertion point is then only the
+    // computed start of the baseline, which an edit recomputes.
+    let is_plain_left =
+        matches!(t.horizontal_alignment, HA::Left) && matches!(t.vertical_alignment, VA::Baseline);
+    let is_two_point = matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
+    match alignment {
+        Some(grip) if !is_plain_left && !is_two_point => vec![grip],
+        alignment => std::iter::once(square_grip(0, insertion))
+            .chain(alignment)
+            .collect(),
     }
-    grips
 }
 
 /// The placement point the Properties palette shows as Position. Text
@@ -711,6 +721,40 @@ impl Grippable for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A justified TEXT whose insertion point is the start of its baseline
+    /// (as a file or JUSTIFYTEXT / MATCHPROP leaves it) shows one grip, at
+    /// its justification point; Left shows the insertion point, Align and
+    /// Fit both ends.
+    #[test]
+    fn a_justified_text_has_one_grip_at_its_justification_point() {
+        use document::types::Vector3;
+        let mut t = Text::default();
+        t.value = "ABC".to_string();
+        t.height = 2.5;
+        t.insertion_point = Vector3::new(10.0, 20.0, 0.0);
+        let points = |t: &Text| -> Vec<(usize, [f64; 2])> {
+            grips(t)
+                .iter()
+                .map(|g| (g.id, [g.world.x, g.world.y]))
+                .collect()
+        };
+        assert_eq!(points(&t), vec![(0, [10.0, 20.0])], "Left");
+
+        t.horizontal_alignment = HA::Center;
+        t.vertical_alignment = VA::Middle;
+        t.alignment_point = Some(Vector3::new(13.0, 21.25, 0.0));
+        assert_eq!(points(&t), vec![(1, [13.0, 21.25])], "Middle Center");
+
+        t.horizontal_alignment = HA::Fit;
+        t.vertical_alignment = VA::Baseline;
+        t.alignment_point = Some(Vector3::new(16.0, 20.0, 0.0));
+        assert_eq!(
+            points(&t),
+            vec![(0, [10.0, 20.0]), (1, [16.0, 20.0])],
+            "Fit"
+        );
+    }
 
     #[test]
     fn arabic_text_placement() {

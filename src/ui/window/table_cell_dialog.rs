@@ -11,6 +11,7 @@ use crate::app::Message;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button_styled_opt, field_style};
 use crate::ui::window::pdf_dialogs::{card, chip};
+pub use crate::entities::table::FORMAT_KINDS;
 
 /// Which edges of the picked range the border settings go on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,18 +426,6 @@ pub struct CellBlockState {
     pub rotation: String,
 }
 
-/// The data types a cell can read as, in the window's order.
-pub const FORMAT_KINDS: [&str; 9] = [
-    "Angle",
-    "Currency",
-    "Date",
-    "Decimal Number",
-    "General",
-    "Percentage",
-    "Point",
-    "Text",
-    "Whole Number",
-];
 pub const ANGLE_FORMATS: [(&str, &str); 7] = [
     ("(none)", ""),
     ("Current units", "%au5"),

@@ -142,7 +142,7 @@ pub struct SelectionMenu {
     /// `Option` mirrors `open_at`'s discipline: the transient popup state
     /// belongs to the selection boundary, and [`SelectionMenu::open`] /
     /// [`SelectionMenu::close`] reset it exactly like the context-menu state.
-    pub quad: Option<crate::ui::popup::quad_menu::QuadUi>,
+    pub quad: Option<QuadUi>,
     /// The open menu is POPMENU's: only the user's own commands.
     pub user: bool,
 }
@@ -182,7 +182,7 @@ pub struct SelectionOrbit {
 #[derive(Clone, Default)]
 pub struct ContextMenuUi {
     /// The accordion submenu currently expanded (at most one).
-    pub open_submenu: Option<crate::ui::popup::context_menu::SubmenuId>,
+    pub open_submenu: Option<SubmenuId>,
     /// Keyboard highlight as an index into `ContextMenu::selectable()`.
     /// `None` until an arrow key / mnemonic is pressed, so a mouse user is
     /// never shown a highlighted row that is not under the pointer.
@@ -210,4 +210,44 @@ impl SelectionState {
         self.input.clear_left_buttons();
         self.gesture.clear_left();
     }
+}
+
+/// Transient quad window state next to the context-menu state in
+/// `SelectionMenu` (the "selection boundary owns transient popup state"
+/// convention).
+#[derive(Debug, Clone)]
+pub struct QuadUi {
+    /// Screen position the quad is anchored at (cursor position).
+    pub anchor: Point,
+    pub mode: QuadMode,
+    /// Collapsed = single default icon; expanded = the panel grid with tabs.
+    pub expanded: bool,
+    /// Index into the open quad's panel list — over ALL panels, primary =
+    /// `0` (tabs carry their real panel index); a collapsed quad keeps `0`.
+    pub active_tab: usize,
+}
+
+/// Which cursor situation the quad was opened for (docs/quad-menu.md §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuadMode {
+    /// Dwell on a hovered entity (quad-on-hover flag).
+    Hover,
+    /// A selection set exists (quad-on-select flag).
+    Selection,
+    /// Nothing under the cursor: creation / recent quad.
+    NoSelection,
+}
+
+/// Identifies an inline-expanding (accordion) submenu. Only one is open at a
+/// time; the open one is tracked in `SelectionMenu::ui`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubmenuId {
+    RecentInput,
+    Clipboard,
+    DrawOrder,
+    Isolate,
+    SnapOverrides,
+    SavedFilters,
+    /// A submenu of a menu-bar menu opened from the keyboard.
+    MenuBar(u16),
 }

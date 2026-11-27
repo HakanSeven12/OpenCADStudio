@@ -97,7 +97,7 @@ fn model_space_handles(out: &Document) -> Vec<document::Handle> {
 /// references measured through their block definitions.
 fn recompute_model_space_extents(out: &mut Document) {
     let handles = model_space_handles(out);
-    if let Some(bounds) = crate::app::helpers::entities_bounds(out, &handles) {
+    if let Some(bounds) = crate::scene::bounds::entities_bounds(out, &handles) {
         out.header.model_space_extents_min = bounds.min;
         out.header.model_space_extents_max = bounds.max;
     }
@@ -155,13 +155,13 @@ fn copy_with_dependencies(
             )
         })
         .collect();
-    let (entities, deps) = crate::app::copy_to_clipboard_kernel(src, &handles);
-    crate::app::paste_entities_kernel(
+    let (entities, deps) = crate::scene::clipboard::kernel::copy_to_clipboard_kernel(src, &handles);
+    crate::scene::clipboard::kernel::paste_entities_kernel(
         out,
         &entities,
         &deps,
         translate,
-        crate::app::PasteSpace::Model,
+        crate::scene::clipboard::kernel::PasteSpace::Model,
     );
 }
 
@@ -173,7 +173,7 @@ fn copy_with_dependencies(
 pub fn normalize_to_origin(out: &mut Document) {
     let model_space = out.header.model_space_block_handle;
     let handles = model_space_handles(out);
-    let Some(bounds) = crate::app::helpers::entities_bounds(out, &handles) else {
+    let Some(bounds) = crate::scene::bounds::entities_bounds(out, &handles) else {
         return;
     };
     let min = bounds.min;

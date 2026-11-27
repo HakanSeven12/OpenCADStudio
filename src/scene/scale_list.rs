@@ -53,7 +53,7 @@ impl Scene {
         } else {
             4 // Millimeters
         };
-        crate::modules::draw::units::conversion_factor(
+        crate::entities::units::conversion_factor(
             self.document.header.insertion_units,
             paper_unit,
         )
@@ -750,7 +750,7 @@ impl Scene {
     /// Set MSLTSCALE. The shader reads it every frame; complex linetypes have
     /// it baked into their wires, so those are re-tessellated.
     pub fn set_model_linetype_scaling(&mut self, on: bool) {
-        crate::io::set_drawing_variable(
+        crate::scene::drawing_vars::set_drawing_variable(
             &mut self.document,
             "MSLTSCALE",
             if on { "1" } else { "0" },
@@ -785,7 +785,7 @@ impl Scene {
         use document::xdata::{ExtendedDataRecord, XDataValue};
         if self.current_layout == "Model" {
             let value = if value { "1" } else { "0" };
-            crate::io::set_drawing_variable(&mut self.document, "ANNOALLVISIBLE", value);
+            crate::scene::drawing_vars::set_drawing_variable(&mut self.document, "ANNOALLVISIBLE", value);
             return;
         }
         if value {
@@ -1174,7 +1174,7 @@ impl Scene {
     }
 
     /// List of user viewports in the current layout: (handle, label, frozen_layer_handles).
-    pub fn viewport_list(&self) -> Vec<crate::ui::window::layers::ViewportLayers> {
+    pub fn viewport_list(&self) -> Vec<ViewportLayers> {
         if self.current_layout == "Model" {
             return vec![];
         }
@@ -1248,7 +1248,7 @@ impl Scene {
                     })
                     .map(|layer| layer.handle)
                     .collect();
-                crate::ui::window::layers::ViewportLayers {
+                ViewportLayers {
                     handle,
                     label,
                     frozen,
@@ -1276,4 +1276,16 @@ impl Scene {
         self.object_isolation.is_active()
     }
 
+}
+
+/// A layout viewport as the Layer Manager shows it: its frozen layers and
+/// its layer overrides.
+pub struct ViewportLayers {
+    pub handle: Handle,
+    pub label: String,
+    pub frozen: Vec<Handle>,
+    pub colors: Vec<(Handle, document::types::Color)>,
+    /// Layers carrying any property override on this viewport: colour,
+    /// linetype, lineweight or transparency. VP Freeze is separate.
+    pub overridden: Vec<Handle>,
 }

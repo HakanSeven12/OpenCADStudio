@@ -14,7 +14,6 @@
 //! no arguments of its own.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use clap::Parser;
 
@@ -157,37 +156,5 @@ pub struct Cli {
     pub dwg_thumbnail: Option<Vec<String>>,
 }
 
-/// GUI startup configuration, handed from `main` to `app::boot` out-of-band
-/// because the iced daemon's boot closure takes no arguments.
-#[derive(Debug, Default, Clone)]
-pub struct GuiConfig {
-    /// Files to open on launch (empty for a blank session).
-    pub files: Vec<PathBuf>,
-    /// Open a fresh drawing tab on launch instead of the welcome screen.
-    pub new: bool,
-    /// Saving disabled for this session.
-    pub read_only: bool,
-    pub low_memory: bool,
-    /// Force storage-buffer-free wire and hatch pipelines.
-    pub compat_renderer: bool,
-    /// Command lines to run once the editor is up.
-    pub script_lines: Vec<String>,
-    /// Why this launch switched graphics backend, if it did. Shown once
-    /// as a command-line warning so the switch is never silent.
-    pub gpu_fallback_notice: Option<String>,
-    /// The GPU probe found no shader storage buffers: the packed
-    /// compatibility renderer was enabled automatically for this session.
-    pub gpu_compat_auto: bool,
-}
-
-/// Set once by `main` before the GUI boots; read by `app::boot`.
-pub static GUI_CONFIG: OnceLock<GuiConfig> = OnceLock::new();
-
-pub(crate) fn low_memory_viewing() -> bool {
-    GUI_CONFIG.get().is_some_and(|cfg| cfg.read_only && cfg.low_memory)
-}
-
-/// The GUI config, or a default empty one if `main` never set it (e.g. tests).
-pub fn gui_config() -> GuiConfig {
-    GUI_CONFIG.get().cloned().unwrap_or_default()
-}
+pub(crate) use crate::config::low_memory_viewing;
+pub use crate::config::{gui_config, GUI_CONFIG, GuiConfig};

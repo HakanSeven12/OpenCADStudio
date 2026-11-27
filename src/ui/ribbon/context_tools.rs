@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::modules::{ModuleEvent, ToolDef};
+pub use crate::modules::table_cell::table_cell_alignments;
 
 /// The switches of the selected underlay (the first one) the toolbar shows
 /// as on.
@@ -183,30 +184,6 @@ pub fn table_cell_tools() -> Vec<ToolDef> {
             "Edit\nText",
             include_bytes!("../../../assets/icons/ddedit.svg"),
         ),
-    ]
-}
-
-/// The nine cell alignments, top row first, left to right.
-pub fn table_cell_alignments() -> Vec<ToolDef> {
-    macro_rules! align {
-        ($code:literal, $label:literal, $icon:literal) => {
-            tool(
-                concat!("_TCELLALIGN ", $code),
-                $label,
-                include_bytes!(concat!("../../../assets/icons/table_align_", $icon, ".svg")),
-            )
-        };
-    }
-    vec![
-        align!("TL", "Top\nLeft", "tl"),
-        align!("TC", "Top\nCenter", "tc"),
-        align!("TR", "Top\nRight", "tr"),
-        align!("ML", "Middle\nLeft", "ml"),
-        align!("MC", "Middle\nCenter", "mc"),
-        align!("MR", "Middle\nRight", "mr"),
-        align!("BL", "Bottom\nLeft", "bl"),
-        align!("BC", "Bottom\nCenter", "bc"),
-        align!("BR", "Bottom\nRight", "br"),
     ]
 }
 

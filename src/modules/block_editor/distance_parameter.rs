@@ -7,23 +7,7 @@ use crate::scene::{
 };
 use document::{types::Vector3, Handle};
 use glam::DVec3;
-
-/// Values answered at the base-point prompt before the parameter exists.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Options {
-    pub name: Option<String>,
-    pub chain: Option<bool>,
-    pub description: Option<String>,
-    pub palette: Option<bool>,
-    pub distance_label: Option<String>,
-    pub angle_label: Option<String>,
-    pub horizontal_label: Option<String>,
-    pub vertical_label: Option<String>,
-    pub base_location: Option<BaseLocation>,
-    pub value_set: Option<ValueSet>,
-    pub angle_value_set: Option<ValueSet>,
-    pub vertical_value_set: Option<ValueSet>,
-}
+pub use crate::command::requests::DistanceParameterOptions as Options;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Asking {

@@ -151,7 +151,7 @@ pub fn match_special_props(
     if let (true, E::Viewport(sv), E::Viewport(dv)) =
         (opts.has(MatchOpts::VIEWPORT), src, dst as &mut E)
     {
-        let scale = crate::scene::vp_effective_scale(sv.custom_scale, sv.view_height, sv.height);
+        let scale = crate::entities::viewport::vp_effective_scale(sv.custom_scale, sv.view_height, sv.height);
         dv.custom_scale = scale;
         if scale.abs() > 1e-9 {
             dv.view_height = dv.height / scale;
@@ -330,7 +330,7 @@ pub fn match_special_props(
             d.cross_gap_relative = s.cross_gap_relative;
             d.extension_length = s.extension_length;
             d.show_extensions = s.show_extensions;
-            crate::scene::centermark::update_carrier(dl, &d);
+            crate::entities::centermark::update_carrier(dl, &d);
         }
     }
 }
@@ -642,13 +642,13 @@ pub fn match_properties_kernel(
         dst.as_entity_mut().set_layer(common.layer.clone());
     }
     if opts.has(MatchOpts::COLOR) {
-        crate::scene::view::dispatch::apply_color(dst, common.color);
+        crate::entities::dispatch::apply_color(dst, common.color);
         let dst_common = dst.common_mut();
         dst_common.color_name = common.color_name.clone();
         dst_common.color_book_handle = common.color_book_handle;
     }
     if opts.has(MatchOpts::LINEWEIGHT) {
-        crate::scene::view::dispatch::apply_line_weight(dst, common.line_weight);
+        crate::entities::dispatch::apply_line_weight(dst, common.line_weight);
     }
     {
         let dst_common = dst.common_mut();
@@ -678,8 +678,8 @@ pub fn match_properties_kernel(
         }
     }
     if opts.has(MatchOpts::THICKNESS) {
-        if let Some(value) = crate::scene::view::dispatch::entity_thickness(src) {
-            crate::scene::view::dispatch::set_entity_thickness(dst, value);
+        if let Some(value) = crate::entities::dispatch::entity_thickness(src) {
+            crate::entities::dispatch::set_entity_thickness(dst, value);
         }
     }
     match_special_props(src, dst, opts);
@@ -773,9 +773,9 @@ mod match_properties_kernel_tests {
         assert_eq!(dst.common().layer, "WALLS");
         assert!((dst.common().linetype_scale - 2.5).abs() < 1e-9);
         assert!(
-            crate::scene::view::dispatch::entity_thickness(&dst) == Some(1.25),
+            crate::entities::dispatch::entity_thickness(&dst) == Some(1.25),
             "thickness must follow the source, got {:?}",
-            crate::scene::view::dispatch::entity_thickness(&dst)
+            crate::entities::dispatch::entity_thickness(&dst)
         );
     }
 
@@ -813,7 +813,7 @@ mod match_properties_kernel_tests {
 
         assert_eq!(dst.common().layer, "0", "disabled common must not copy");
         assert!(
-            crate::scene::view::dispatch::entity_thickness(&dst) == Some(1.25),
+            crate::entities::dispatch::entity_thickness(&dst) == Some(1.25),
             "enabled thickness must still copy"
         );
     }

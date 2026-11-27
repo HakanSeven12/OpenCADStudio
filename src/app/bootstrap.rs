@@ -69,7 +69,7 @@ pub(crate) static RESTART_AFTER_EXIT: std::sync::atomic::AtomicBool =
 impl Drop for OpenCADStudio {
     fn drop(&mut self) {
         #[cfg(target_arch = "wasm32")]
-        crate::sys::set_unsaved_changes_warning(false);
+        crate::io::host_bridge::report_unsaved_changes(false);
         // Kill plugin runner processes as soon as the application state is
         // dropped, instead of waiting for the thread-local manager destructor.
         // This makes host shutdown deterministic and fast on every exit path.

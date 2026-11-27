@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// Original crosshair geometry retained at the default setting values.
 pub const CROSSHAIR_SQ: f32 = 7.5;
 pub const CROSSHAIR_ARM: f32 = 60.0;
-pub(crate) const TRACKING_DASH_PX: [f32; 2] = [6.0, 4.0];
+pub(crate) use crate::command::TRACKING_DASH_PX;
 const DEFAULT_CURSOR_SIZE: i32 = 5;
 const CONSTRAINT_HOVER_MARKER_RADIUS: f32 = 7.0;
 

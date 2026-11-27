@@ -6,9 +6,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
-use crate::scene::model::wire_model::TangentGeom;
+use crate::display::render_entity::{extrusion_wall_tris, RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
+use crate::display::wire_model::TangentGeom;
 
 /// The number of segments to tessellate a circle into, based on its radius and the
 /// current viewport's world units per pixel (`wpp`).
@@ -25,7 +25,7 @@ pub fn circle_segments(radius: f64, wpp: Option<f32>) -> usize {
         // The zoom-independent set draws circles up to the analytical cap on
         // the GPU; a larger one is drawn from these points at every zoom, so
         // its chords must stay within ~2e-8 of the radius.
-        if r > crate::scene::pipeline::circle_gpu::ANALYTIC_MAX_RADIUS && r.is_finite() {
+        if r > ANALYTIC_MAX_RADIUS && r.is_finite() {
             return 16384;
         }
         return MIN_SEGMENTS;
@@ -55,8 +55,8 @@ pub fn to_render_with_wpp(circle: &Circle, wpp: Option<f32>) -> RenderEntity {
     let r = circle.radius;
     let normal = (circle.normal.x, circle.normal.y, circle.normal.z);
 
-    let (ax, ay) = crate::scene::view::transform::ocs_axes(normal);
-    let (cwx, cwy, cwz) = crate::scene::view::transform::ocs_point_to_wcs((cx, cy, cz), normal);
+    let (ax, ay) = crate::entities::transform::ocs_axes(normal);
+    let (cwx, cwy, cwz) = crate::entities::transform::ocs_point_to_wcs((cx, cy, cz), normal);
 
     // Centre and quadrants come from the entity's own curve, so the same
     // definition answers here, in the tessellation and in a trim.
@@ -210,7 +210,7 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
                 "center_z" => z = v,
                 _ => {}
             }
-            let (ox, oy, oz) = crate::scene::view::transform::wcs_point_to_ocs((x, y, z), normal);
+            let (ox, oy, oz) = crate::entities::transform::wcs_point_to_ocs((x, y, z), normal);
             circle.center.x = ox;
             circle.center.y = oy;
             circle.center.z = oz;
@@ -226,7 +226,7 @@ fn apply_geom_prop(circle: &mut Circle, field: &str, value: &str) {
 fn apply_grip(circle: &mut Circle, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Absolute(p)) => {
-            let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+            let (x, y, z) = crate::entities::transform::wcs_point_to_ocs(
                 (p.x, p.y, p.z),
                 (circle.normal.x, circle.normal.y, circle.normal.z),
             );
@@ -235,7 +235,7 @@ fn apply_grip(circle: &mut Circle, grip_id: usize, apply: GripApply) {
             circle.center.z = z;
         }
         (0, GripApply::Translate(d)) => {
-            let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+            let (x, y, z) = crate::entities::transform::wcs_point_to_ocs(
                 (d.x, d.y, d.z),
                 (circle.normal.x, circle.normal.y, circle.normal.z),
             );
@@ -258,8 +258,8 @@ fn apply_grip(circle: &mut Circle, grip_id: usize, apply: GripApply) {
 
 fn apply_transform(circle: &mut Circle, t: &EntityTransform) {
     let normal = circle.normal;
-    crate::scene::view::transform::apply_ocs_entity_transform(circle, t, normal, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
+    crate::entities::transform::apply_ocs_entity_transform(circle, t, normal, |entity, p1, p2| {
+        crate::entities::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,
             p1,
@@ -283,8 +283,8 @@ impl crate::entities::traits::Grippable for Circle {
         apply_grip(self, grip_id, apply);
     }
 
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         let mut items = vec![GripMenuItem {
             label: "Stretch",
             action: GripMenuAction::Stretch,
@@ -301,19 +301,19 @@ impl crate::entities::traits::Grippable for Circle {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        matches!(action, crate::scene::model::object::GripMenuAction::Radius)
+        matches!(action, crate::entities::object::GripMenuAction::Radius)
             .then_some("New radius")
     }
 
     fn grip_menu_point_value(
         &self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
-        if !matches!(action, crate::scene::model::object::GripMenuAction::Radius)
+        if !matches!(action, crate::entities::object::GripMenuAction::Radius)
             || !(1..=4).contains(&grip_id)
         {
             return None;
@@ -327,10 +327,10 @@ impl crate::entities::traits::Grippable for Circle {
     fn apply_grip_menu_value(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        if matches!(action, crate::scene::model::object::GripMenuAction::Radius)
+        if matches!(action, crate::entities::object::GripMenuAction::Radius)
             && (1..=4).contains(&grip_id)
             && value > 1.0e-9
         {
@@ -369,6 +369,10 @@ impl crate::entities::traits::MassPropsCalc for Circle {
     }
 }
 
+/// Largest radius drawn as an analytical quad. Past it the f32 quad
+/// interpolation drifts visibly, so the circle stays on the wire path.
+pub const ANALYTIC_MAX_RADIUS: f64 = 1e6;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,7 +380,7 @@ mod tests {
     #[test]
     fn quadrant_grips_offer_interactive_radius() {
         use crate::entities::traits::Grippable;
-        use crate::scene::model::object::GripMenuAction;
+        use crate::entities::object::GripMenuAction;
 
         let mut circle = Circle::default();
         circle.radius = 2.0;

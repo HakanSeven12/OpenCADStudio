@@ -56,7 +56,7 @@ pub(crate) fn resolve(doc: &mut Document, value: &str) -> Option<Handle> {
     // The attributes take the drawing's current text style.
     let text_style = doc.header.current_text_style_name.clone();
     let entities = geometry(name, &text_style)?;
-    crate::app::define_block_raw_doc(doc, name, Vector3::ZERO, &entities);
+    crate::entities::doc_edit::define_block_raw_doc(doc, name, Vector3::ZERO, &entities);
     doc.block_records.get(name).map(|record| record.handle)
 }
 

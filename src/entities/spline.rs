@@ -1,5 +1,6 @@
 use document::entities::Spline;
 use ocs_geom::geom2d::Curve as KernelCurve;
+use ocs_geom::geom2d::{NurbsCurve as Nurbs2, Parameterization as Param2};
 use ocs_geom::space::{NurbsCurve3, Parameterization};
 
 use crate::entities::common::{
@@ -8,8 +9,8 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::t;
 
 pub(crate) fn uses_fit_method(spline: &Spline) -> bool {
@@ -342,13 +343,13 @@ fn to_render(spl: &Spline) -> RenderEntity {
             snap_pts.extend(spl.fit_points.iter().map(|p| {
                 (
                     glam::DVec3::new(p.x, p.y, p.z),
-                    crate::scene::model::wire_model::SnapHint::Endpoint,
+                    crate::display::wire_model::SnapHint::Endpoint,
                 )
             }));
             snap_pts.extend(
                 spline_knot_points(spl)
                     .into_iter()
-                    .map(|p| (p, crate::scene::model::wire_model::SnapHint::Knot)),
+                    .map(|p| (p, crate::display::wire_model::SnapHint::Knot)),
             );
             let key_vertices = if planar.is_some() {
                 Vec::new()
@@ -391,14 +392,14 @@ fn to_render(spl: &Spline) -> RenderEntity {
                 points.extend(spl.fit_points.iter().map(|p| {
                     (
                         glam::DVec3::new(p.x, p.y, p.z),
-                        crate::scene::model::wire_model::SnapHint::Endpoint,
+                        crate::display::wire_model::SnapHint::Endpoint,
                     )
                 }));
             }
             points.extend(
                 spline_knot_points(spl)
                     .into_iter()
-                    .map(|p| (p, crate::scene::model::wire_model::SnapHint::Knot)),
+                    .map(|p| (p, crate::display::wire_model::SnapHint::Knot)),
             );
             (points, Vec::new())
         }
@@ -939,7 +940,7 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
         15 => "Custom",
         _ => "Custom",
     };
-    let current = crate::scene::view::dispatch::prop_current_vertex();
+    let current = crate::entities::dispatch::prop_current_vertex();
     let mut data_points = if show_fit {
         let count = spline.fit_points.len();
         let index = current.min(count.saturating_sub(1));
@@ -1209,9 +1210,9 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
         return;
     }
     let Some(v) = parse_f64(value) else { return };
-    let control_index = crate::scene::view::dispatch::prop_current_vertex()
+    let control_index = crate::entities::dispatch::prop_current_vertex()
         .min(spline.control_points.len().saturating_sub(1));
-    let fit_index = crate::scene::view::dispatch::prop_current_vertex()
+    let fit_index = crate::entities::dispatch::prop_current_vertex()
         .min(spline.fit_points.len().saturating_sub(1));
     match field {
         "ctrl_pt_x" => {
@@ -1324,17 +1325,17 @@ fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
     } = t
     {
         let transform =
-            crate::scene::view::transform::reflection_about_working_line(*p1, *p2, *working_normal);
+            crate::entities::transform::reflection_about_working_line(*p1, *p2, *working_normal);
         document::Entity::apply_transform(spline, &transform);
         spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
         return;
     }
-    crate::scene::view::transform::apply_standard_entity_transform(spline, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(spline, t, |entity, p1, p2| {
         for cp in &mut entity.control_points {
-            crate::scene::view::transform::reflect_xy_point(&mut cp.x, &mut cp.y, p1, p2);
+            crate::entities::transform::reflect_xy_point(&mut cp.x, &mut cp.y, p1, p2);
         }
         for fp in &mut entity.fit_points {
-            crate::scene::view::transform::reflect_xy_point(&mut fp.x, &mut fp.y, p1, p2);
+            crate::entities::transform::reflect_xy_point(&mut fp.x, &mut fp.y, p1, p2);
         }
     });
     spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
@@ -1353,8 +1354,8 @@ impl crate::entities::traits::Grippable for Spline {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         if grip_id == SPLINE_MODE_GRIP_ID {
             let fit_method = uses_fit_method(self);
             let can_show_control =
@@ -1398,9 +1399,9 @@ impl crate::entities::traits::Grippable for Spline {
     fn apply_grip_menu(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::ShowFit => {
                 if prepare_fit_point_view(self) {
@@ -1431,6 +1432,111 @@ impl crate::entities::traits::Transformable for Spline {
     fn apply_transform(&mut self, t: &EntityTransform) {
         apply_transform(self, t);
     }
+}
+
+/// Convert a document `Spline` to a kernel `NurbsCurve`, weights included.
+///
+/// A SPLINE is stored one of two ways and both turn up: a control polygon the
+/// curve approaches, or fit points it must pass through with optional end
+/// tangents. Control points win when they describe a curve; otherwise the fit
+/// points are interpolated into one, so a fit-point spline is as editable as
+/// any other instead of failing every command that touches it.
+///
+/// `None` only when neither form has enough points to describe a curve.
+///
+/// Reads the stored points as XY directly, which is right for the splines the
+/// editing commands work on — they run in the world frame. A spline on an
+/// extruded plane needs [`spline_to_nurbs_on`] instead.
+pub fn spline_to_nurbs(spl: &Spline) -> Option<Nurbs2> {
+    spline_to_nurbs_with(spl, |p| [p.x, p.y], |v| [v.x, v.y])
+}
+
+/// [`spline_to_nurbs`] with the points expressed in `plane`'s coordinates.
+///
+/// The two differ only for a spline whose extrusion normal is not +Z. Where
+/// it is, the projection reduces to reading X and Y, so this is the same
+/// conversion with the frame made explicit.
+///
+/// `None` additionally when the plane is degenerate, since there is then no
+/// coordinate to express the points in.
+pub fn spline_to_nurbs_on(spl: &Spline, plane: &ocs_geom::space::Plane) -> Option<Nurbs2> {
+    let point = |p: &document::types::Vector3| plane.project([p.x, p.y, p.z]).unwrap_or([p.x, p.y]);
+    let vector = |v: &document::types::Vector3| plane.project_vector([v.x, v.y, v.z]).unwrap_or([v.x, v.y]);
+    plane.normal()?;
+    spline_to_nurbs_with(spl, point, vector)
+}
+
+fn spline_to_nurbs_with(
+    spl: &Spline,
+    point: impl Fn(&document::types::Vector3) -> [f64; 2],
+    vector: impl Fn(&document::types::Vector3) -> [f64; 2],
+) -> Option<Nurbs2> {
+    let degree = (spl.degree.max(1)) as usize;
+    let (control_points, knots, weights) =
+        if let Some((points, knots, weights)) = crate::entities::spline::unwrapped_periodic(spl) {
+            let projected = points
+                .into_iter()
+                .map(|[x, y, z]| point(&document::types::Vector3::new(x, y, z)))
+                .collect();
+            (projected, knots, Some(weights))
+        } else {
+            (
+                spl.control_points.iter().map(&point).collect(),
+                spl.knots.clone(),
+                (!spl.weights.is_empty()).then(|| spl.weights.clone()),
+            )
+        };
+
+    if let Some(curve) = Nurbs2::new(degree, control_points, knots, weights) {
+        return Some(curve);
+    }
+
+    // No usable control polygon, so this is a fit-point spline.
+    if spl.fit_tolerance > 0.0 && !spl.flags.periodic {
+        // Fitted within a tolerance: the shared spatial fit, read in the
+        // plane. Projecting the control points projects the curve.
+        let curve = crate::entities::spline::fit_nurbs3(spl)?;
+        let projected = curve
+            .control_points()
+            .iter()
+            .map(|p| point(&document::types::Vector3::new(p[0], p[1], p[2])))
+            .collect();
+        return Nurbs2::new(
+            curve.degree(),
+            projected,
+            curve.knots().to_vec(),
+            Some(curve.weights().to_vec()),
+        );
+    }
+    let mut fit: Vec<[f64; 2]> = spl.fit_points.iter().map(&point).collect();
+    let parameterization = match spl.knot_parameterization {
+        2 => Param2::Uniform,
+        1 => Param2::Centripetal,
+        _ => Param2::Chord,
+    };
+    if spl.flags.periodic {
+        return Nurbs2::interpolate_periodic(&fit, parameterization);
+    }
+    if spl.flags.closed {
+        // The interpolation is a clamped solve and does not model a wrap, so
+        // a closed spline came back as an open curve that never returned to
+        // its start — and a TRIM against it then cut nothing along the seam.
+        // Repeating the first point closes it. The seam is C¹ rather than the
+        // C² the rest of the curve has, which is the honest limit of a
+        // clamped solve; the alternative was a curve with a gap in it.
+        if let (Some(&first), Some(&last)) = (fit.first(), fit.last()) {
+            if first != last {
+                fit.push(first);
+            }
+        }
+    }
+    let tangent = |v: &document::types::Vector3| {
+        let flat = vector(v);
+        (flat[0] * flat[0] + flat[1] * flat[1] > 1e-18).then_some(flat)
+    };
+    let start_tangent = tangent(&spl.begin_tangent);
+    let end_tangent = tangent(&spl.end_tangent);
+    Nurbs2::interpolate(&fit, start_tangent, end_tangent, parameterization)
 }
 
 #[cfg(test)]

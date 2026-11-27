@@ -478,40 +478,6 @@ mod native_attachment_tests {
     }
 }
 
-/// Status of an external reference block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum XrefStatus {
-    /// File was found and loaded successfully.
-    Loaded,
-    /// File was loaded with recoverable parser errors.
-    Recovered,
-    /// File was found but could not produce usable drawing data.
-    Failed,
-    /// File path is set but the file could not be found or read.
-    NotFound,
-    /// XRef is marked Unloaded in the host DWG — opening honors that and
-    /// skips resolving the external file. The user can re-load via UI.
-    Unloaded,
-}
-
-/// Describes a single external reference found in a document.
-#[derive(Debug, Clone)]
-pub struct XrefInfo {
-    /// Block name (e.g. the filename stem).
-    pub name: String,
-    /// Resolved file path (or raw path if not found).
-    pub path: String,
-    pub status: XrefStatus,
-    /// Reader diagnostics retained for the recovery report.
-    pub diagnostics: Vec<String>,
-    pub read_stats: Option<document::ReadStats>,
-    pub source_sha256: Option<String>,
-    /// The reference loaded a drawing whose FingerprintGUID differs from
-    /// the one it held before in this session: another drawing took the
-    /// file's place, not a revision of it.
-    pub other_drawing: bool,
-}
-
 /// Names of the xrefs that resolved to nothing (`NotFound`) — the list the
 /// one-line "unresolved references" warning after a web open shows.
 pub fn unresolved_xref_names(infos: &[XrefInfo]) -> Vec<String> {
@@ -2504,6 +2470,7 @@ fn set_handle(entity: &mut EntityType, h: Handle) {
 
 /// Re-exported so CLI + tests share one derivation with the model.
 pub use crate::io::xref_model::child_key;
+pub use crate::scene::xref_info::{XrefInfo, XrefStatus};
 
 /// Unified reference list for the XREF manager.
 ///

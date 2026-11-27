@@ -13,9 +13,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{FallbackTess, Grippable, PropertyEditable, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::tess_util::FallbackGeometry;
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::tess_util::FallbackGeometry;
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 
 /// The area enclosed by the hatch boundary paths.
 pub(crate) fn boundary_area(h: &Hatch) -> f64 {
@@ -323,7 +323,7 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
         } else {
             "Two color"
         };
-        let (kind, inverted) = crate::scene::model::hatch_model::GradientKind::from_name(&g.name);
+        let (kind, inverted) = crate::display::hatch_model::GradientKind::from_name(&g.name);
         let mut pattern_props = vec![
             ro(
                 t!("Type").as_ref(),
@@ -343,7 +343,7 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                 field: "gradient_type",
                 value: PropValue::Choice {
                     selected: kind.choice_label(inverted).to_string(),
-                    options: crate::scene::model::hatch_model::GradientKind::CHOICES
+                    options: crate::display::hatch_model::GradientKind::CHOICES
                         .iter()
                         .map(|(kind, inverted)| kind.choice_label(*inverted).to_string())
                         .collect(),
@@ -669,7 +669,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
             return;
         }
         "gradient_type" => {
-            use crate::scene::model::hatch_model::GradientKind;
+            use crate::display::hatch_model::GradientKind;
             if let Some((kind, invert)) = GradientKind::from_choice_label(value) {
                 h.gradient_color.name = kind.dxf_name(invert).to_string();
             }
@@ -765,9 +765,8 @@ fn transparency_percent(t: document::types::Transparency) -> Option<u8> {
 pub(crate) fn panel_settings(
     h: &Hatch,
     annotative: bool,
-) -> crate::modules::draw::draw::hatch::HatchSettings {
-    use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings, GRADIENT_COLORS};
-    use crate::scene::model::hatch_model::GradientKind;
+) -> HatchSettings {
+    use crate::display::hatch_model::GradientKind;
     let fill = if h.gradient_color.enabled {
         let (kind, invert) = GradientKind::from_name(&h.gradient_color.name);
         HatchFill::Gradient(kind, invert)
@@ -845,10 +844,10 @@ fn set_predefined_pattern(h: &mut Hatch, name: &str) {
 /// caller, which owns the layer table.
 pub(crate) fn apply_panel_settings(
     h: &mut Hatch,
-    before: &crate::modules::draw::draw::hatch::HatchSettings,
-    after: &crate::modules::draw::draw::hatch::HatchSettings,
+    before: &HatchSettings,
+    after: &HatchSettings,
 ) {
-    use crate::modules::draw::draw::hatch::HatchFill;
+    use HatchFill;
     use document::entities::HatchPatternType;
     let number = |value: f64| value.to_string();
     if after.fill != before.fill {
@@ -923,9 +922,9 @@ pub(crate) fn apply_panel_settings(
 }
 
 fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(h, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(h, t, |entity, p1, p2| {
         // Keep boundary directions, angles, and sweeps consistent.
-        let t = crate::scene::view::transform::reflection_about_xy_line(p1, p2);
+        let t = crate::entities::transform::reflection_about_xy_line(p1, p2);
         document::entities::Entity::apply_transform(entity, &t);
     });
 }
@@ -1028,8 +1027,8 @@ impl Grippable for Hatch {
         set_boundary_point(self, point, nx, ny);
     }
 
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         if let Some(point) = vertex_point_at(self, grip_id) {
             let removable = match point {
                 BoundaryPoint::LineVertex {
@@ -1084,9 +1083,9 @@ impl Grippable for Hatch {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if let Some(point) = vertex_point_at(self, grip_id) {
             edit_boundary_vertex(self, point, action);
             return;
@@ -1107,9 +1106,9 @@ impl Grippable for Hatch {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::HatchAngle => Some("Angle (deg)"),
             A::HatchScale => Some("Scale"),
@@ -1120,10 +1119,10 @@ impl Grippable for Hatch {
     fn apply_grip_menu_value(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::HatchAngle => {
                 let angle = value.to_radians();
@@ -1151,7 +1150,7 @@ impl FallbackTess for Hatch {
         // Convert a 2D OCS hatch boundary point to absolute WCS.
         let to_wcs = |x: f64, y: f64| -> [f64; 3] {
             let (wx, wy, wz) =
-                crate::scene::view::transform::ocs_point_to_wcs((x, y, self.elevation), normal);
+                crate::entities::transform::ocs_point_to_wcs((x, y, self.elevation), normal);
             [wx, wy, wz]
         };
         // Snap point at a world (f64) location, cast to the f32 snap buffer.
@@ -1460,9 +1459,9 @@ fn vertex_point_at(hatch: &Hatch, grip_id: usize) -> Option<BoundaryPoint> {
 fn edit_boundary_vertex(
     hatch: &mut Hatch,
     point: BoundaryPoint,
-    action: crate::scene::model::object::GripMenuAction,
+    action: crate::entities::object::GripMenuAction,
 ) {
-    use crate::scene::model::object::GripMenuAction as A;
+    use crate::entities::object::GripMenuAction as A;
     match point {
         BoundaryPoint::PolylineVertex { path, edge, vertex } => {
             let BoundaryEdge::Polyline(polyline) = &mut hatch.paths[path].edges[edge] else {
@@ -1543,3 +1542,80 @@ fn edit_boundary_vertex(
         _ => {}
     }
 }
+
+/// The boundary method and draw mode HATCH and GRADIENT start with, kept in
+/// the profile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HatchPrefs {
+    /// 0 pick internal point, 1 select objects, 2 draw.
+    pub method: u8,
+    /// Draw mode Path (else Area).
+    pub path: bool,
+    /// Path width.
+    pub width: f64,
+    /// Path alignment: 0 center, 1 inside, 2 outside.
+    pub alignment: u8,
+}
+
+impl Default for HatchPrefs {
+    fn default() -> Self {
+        Self {
+            method: 0,
+            path: false,
+            width: 0.25,
+            alignment: 0,
+        }
+    }
+}
+
+/// What a hatch is filled with.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HatchFill {
+    Solid,
+    Pattern(String),
+    /// Parallel lines `spacing` apart, crossed at 90° when `double`.
+    User {
+        spacing: f64,
+        double: bool,
+    },
+    Gradient(crate::display::hatch_model::GradientKind, bool),
+}
+
+/// HATCH's settings as the Hatch panel shows and edits them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HatchSettings {
+    /// Solid, a named pattern, user-defined lines or a gradient.
+    pub fill: HatchFill,
+    pub angle_deg: f64,
+    pub scale: f64,
+    pub origin: [f64; 2],
+    /// 0 pick internal point, 1 select objects, 2 draw.
+    pub method: u8,
+    pub islands: document::entities::HatchStyleType,
+    pub associative: bool,
+    pub separate: bool,
+    pub keep_boundaries: bool,
+    pub gap_tolerance: f64,
+    /// `None`: the current colour.
+    pub color: Option<document::types::Color>,
+    /// `None`: no background colour.
+    pub background: Option<document::types::Color>,
+    /// `None`: the current layer.
+    pub layer: Option<String>,
+    /// `None`: the current transparency; else 0–90 percent.
+    pub transparency: Option<u8>,
+    /// GFCLR1 / GFCLR2.
+    pub gradient_colors: [document::types::Color; 2],
+    /// HPDRAWORDER: 0 none, 1 back, 2 front, 3 behind the boundary,
+    /// 4 in front of the boundary.
+    pub draw_order: u8,
+    /// HPANNOTATIVE.
+    pub annotative: bool,
+}
+
+/// The pattern a fill draws with, and its name.
+/// GFCLR1 / GFCLR2: the two colours a new gradient starts with.
+pub const GRADIENT_COLORS: [document::types::Color; 2] = [
+    document::types::Color::Index(5),
+    document::types::Color::Index(2),
+];

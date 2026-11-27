@@ -432,7 +432,7 @@ pub(crate) fn apply(
     };
     match e {
         EntityType::Arc(arc) => {
-            if !crate::modules::draw::modify::stretch::stretch_arc_endpoints(
+            if !crate::entities::curve::stretch_arc_endpoints(
                 arc,
                 binding.indexes.contains(&0),
                 binding.indexes.contains(&1),
@@ -485,7 +485,7 @@ pub(crate) fn apply(
                 .map(|v| [v.location.x, v.location.y])
                 .collect::<Vec<_>>();
             for (i, v) in world.vertices.iter_mut().enumerate() {
-                v.bulge = crate::modules::draw::modify::stretch::held_bulge(
+                v.bulge = crate::entities::curve::held_bulge(
                     v.bulge,
                     &before,
                     &after,
@@ -516,7 +516,7 @@ pub(crate) fn apply(
                 .collect::<Vec<_>>();
             let closed = p.is_closed();
             for (index, vertex) in p.vertices.iter_mut().enumerate() {
-                vertex.bulge = crate::modules::draw::modify::stretch::held_bulge(
+                vertex.bulge = crate::entities::curve::held_bulge(
                     vertex.bulge,
                     &before,
                     &after,

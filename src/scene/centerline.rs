@@ -5,6 +5,7 @@ use document::objects::XRecordValue;
 use document::types::Vector3;
 use glam::DVec3;
 use ocs_geom::geom2d::{centerline_between, closest_point, Curve, Line as KernelLine};
+pub(crate) use crate::entities::centermark::{center_measure_is_relative, resolve_center_measure};
 
 const SETTINGS_RECORD: &str = "OPEN_CAD_CENTERLINE_SETTINGS";
 
@@ -314,7 +315,7 @@ impl Scene {
                     .map(|entry| &entry.value)
             })
         };
-        let variable = |name: &str| crate::io::drawing_variable(&self.document, name);
+        let variable = |name: &str| crate::scene::drawing_vars::drawing_variable(&self.document, name);
         let number = |name: &str, code, fallback: f64| {
             variable(name)
                 .and_then(|value| value.trim().parse::<f64>().ok())
@@ -364,7 +365,7 @@ impl Scene {
                 .unwrap_or_else(|_| value.to_owned()),
             _ => value.to_owned(),
         };
-        crate::io::set_drawing_variable(&mut self.document, name, &stored);
+        crate::scene::drawing_vars::set_drawing_variable(&mut self.document, name, &stored);
     }
 
     /// Centre-line carriers attached to the changed source handles, read from
@@ -634,31 +635,6 @@ impl Scene {
         }
         candidates.len()
     }
-}
-
-pub(crate) fn resolve_center_measure(
-    specification: &str,
-    diameter: f64,
-    fallback_factor: f64,
-) -> f64 {
-    let text = specification.trim();
-    if text.eq_ignore_ascii_case("ByLineType") {
-        return diameter * fallback_factor;
-    }
-    if let Some(factor) = text
-        .strip_suffix(['x', 'X'])
-        .and_then(|value| value.parse::<f64>().ok())
-    {
-        return diameter * factor.max(0.0);
-    }
-    text.parse::<f64>()
-        .unwrap_or(diameter * fallback_factor)
-        .max(0.0)
-}
-
-pub(crate) fn center_measure_is_relative(specification: &str) -> bool {
-    let text = specification.trim();
-    text.eq_ignore_ascii_case("ByLineType") || text.ends_with(['x', 'X'])
 }
 
 /// Whether `entity` is a centre mark or a centre line.

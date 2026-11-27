@@ -1395,7 +1395,7 @@ impl OpenCADStudio {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        crate::sys::set_unsaved_changes_warning(
+        crate::io::host_bridge::report_unsaved_changes(
             self.tabs
                 .iter()
                 .any(|tab| tab.dirty && tab.block_test.is_none()),

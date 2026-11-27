@@ -15,6 +15,7 @@ use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
+pub(crate) use crate::entities::table::{table_cell_at, TableCellHit};
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/table.svg"));
 
@@ -1330,15 +1331,6 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["TABLE", "-TABLE"]
 });
 
-/// A table cell resolved from a pick: grid coordinates plus whether its
-/// content is locked against editing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TableCellHit {
-    pub row: usize,
-    pub column: usize,
-    pub locked: bool,
-}
-
 /// Outcome of launching the table cell editor for a pick (double-click or
 /// TABLEDIT). Distinguishes "cell found but locked" — the caller should
 /// stop, the indicator is armed — from "nothing to edit" — the caller may
@@ -1359,115 +1351,6 @@ impl TableCellHit {
     pub fn index(&self, table: &document::entities::Table) -> usize {
         self.row * table.column_count() + self.column
     }
-}
-
-/// Resolve the table cell under `click_world`. Shared by the double-click
-/// shortcut and the TABLEDIT command so both agree on grid coordinates,
-/// flow direction and locked-cell detection. `table_style` is the style
-/// object the table references, when the caller has the document at hand;
-/// the table's embedded base style covers the common fallbacks.
-pub(crate) fn table_cell_at(
-    table: &document::entities::Table,
-    table_style: Option<&document::objects::TableStyle>,
-    click_world: DVec3,
-) -> Option<TableCellHit> {
-    let horizontal = glam::DVec3::new(
-        table.horizontal_direction.x,
-        table.horizontal_direction.y,
-        table.horizontal_direction.z,
-    )
-    .normalize_or(glam::DVec3::X);
-    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
-        .normalize_or(glam::DVec3::Z);
-    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
-    if crate::entities::table::resolved_flow_up(table, table_style) {
-        down = -down;
-    }
-    let origin = glam::DVec3::new(
-        table.insertion_point.x,
-        table.insertion_point.y,
-        table.insertion_point.z,
-    );
-    let relative = click_world - origin;
-    let x = relative.dot(horizontal);
-    let y = relative.dot(down);
-    if x < 0.0 || y < 0.0 {
-        return None;
-    }
-    let column = table
-        .columns
-        .iter()
-        .scan(0.0, |offset, column| {
-            *offset += column.width;
-            Some(*offset)
-        })
-        .position(|end| x <= end)?;
-    let row = table
-        .rows
-        .iter()
-        .scan(0.0, |offset, row| {
-            *offset += row.height;
-            Some(*offset)
-        })
-        .position(|end| y <= end)?;
-    // A merged cell is one cell: a pick anywhere inside its span edits the
-    // owner, never a hidden covered cell underneath it (the in-place editor
-    // already widens, and a scripted TABLEDIT must reach the same cell).
-    let (row, column, _, _) =
-        crate::entities::table::widen_to_merged(table, (row, column, row, column));
-    Some(TableCellHit {
-        row,
-        column,
-        locked: cell_locked(table, row, column),
-    })
-}
-
-/// The cell (its merged owner) whose inside holds `point`, at least `margin`
-/// away from the cell's edges: a pick near a grid line takes the table, one
-/// inside a cell takes the cell.
-pub(crate) fn table_cell_inside(
-    table: &document::entities::Table,
-    table_style: Option<&document::objects::TableStyle>,
-    point: DVec3,
-    margin: f64,
-) -> Option<(usize, usize)> {
-    let hit = table_cell_at(table, table_style, point)?;
-    let (r0, c0, r1, c1) =
-        crate::entities::table::widen_to_merged(table, (hit.row, hit.column, hit.row, hit.column));
-    let horizontal = glam::DVec3::new(
-        table.horizontal_direction.x,
-        table.horizontal_direction.y,
-        table.horizontal_direction.z,
-    )
-    .normalize_or(glam::DVec3::X);
-    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
-        .normalize_or(glam::DVec3::Z);
-    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
-    if crate::entities::table::resolved_flow_up(table, table_style) {
-        down = -down;
-    }
-    let origin = glam::DVec3::new(
-        table.insertion_point.x,
-        table.insertion_point.y,
-        table.insertion_point.z,
-    );
-    let x = (point - origin).dot(horizontal);
-    let y = (point - origin).dot(down);
-    let left: f64 = table.columns[..c0].iter().map(|c| c.width).sum();
-    let right: f64 = left + table.columns[c0..=c1].iter().map(|c| c.width).sum::<f64>();
-    let top: f64 = table.rows[..r0].iter().map(|r| r.height).sum();
-    let bottom: f64 = top + table.rows[r0..=r1].iter().map(|r| r.height).sum::<f64>();
-    (x > left + margin && x < right - margin && y > top + margin && y < bottom - margin)
-        .then_some((r0, c0))
-}
-
-/// True when the cell's content may not be edited (locked or read-only).
-pub(crate) fn cell_locked(table: &document::entities::Table, row: usize, column: usize) -> bool {
-    use document::entities::table::CellStateFlags;
-    table.cell(row, column).is_some_and(|cell| {
-        cell.state
-            .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
-    })
 }
 
 /// TABLEDIT — edit a table cell's text by picking it. The pick only

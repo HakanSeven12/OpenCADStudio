@@ -12,15 +12,7 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind};
 use crate::scene::model::wire_model::WireModel;
-
-/// Which window the pick opens.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AtteditKind {
-    /// EATTEDIT: the enhanced attribute editor.
-    Enhanced,
-    /// ATTEDIT: the attribute value form.
-    Classic,
-}
+pub use crate::command::requests::AtteditKind;
 
 pub struct AtteditCommand {
     kind: AtteditKind,
@@ -204,10 +196,10 @@ impl DashAtteditCommand {
     }
 
     fn matches(&self, candidate: &AttributeCandidate) -> bool {
-        use crate::app::control::block_ops::glob_match_ci;
-        glob_match_ci(&self.block_spec, &candidate.block)
-            && glob_match_ci(&self.tag_spec, &candidate.tag)
-            && glob_match_ci(&self.value_spec, &candidate.value)
+        use crate::wildcard::wildcard_match;
+        wildcard_match(&candidate.block, &self.block_spec)
+            && wildcard_match(&candidate.tag, &self.tag_spec)
+            && wildcard_match(&candidate.value, &self.value_spec)
             && (!self.visible_only || candidate.on_screen)
     }
 

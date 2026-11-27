@@ -1091,7 +1091,7 @@ mod xref_attach_read_tests {
             assert_eq!(references(&app, i), 1);
             assert_eq!(inserts(&app, i), 1);
             let saved = ocs_save::write_external_for_edit(
-                &app.tabs[i].scene.document_for_save(),
+                &app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content),
                 ocs_save::external_format("ifccad").unwrap(),
                 false,
                 app.tabs[i].ifccad_session.as_ref(),

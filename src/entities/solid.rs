@@ -6,9 +6,9 @@ use document::entities::Solid;
 use crate::entities::common::{edit_prop as edit, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
+use crate::display::wire_model::SnapHint;
 
 type Edge = ([f64; 3], [f64; 3]);
 
@@ -31,7 +31,7 @@ fn dvec3(v: [f64; 3]) -> glam::DVec3 {
 pub(crate) fn wcs_corners(solid: &Solid) -> [[f64; 3]; 4] {
     let n = normal_tuple(solid);
     let w = |v: &document::types::Vector3| {
-        let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs((v.x, v.y, v.z), n);
+        let (x, y, z) = crate::entities::transform::ocs_point_to_wcs((v.x, v.y, v.z), n);
         [x, y, z]
     };
     [
@@ -44,7 +44,7 @@ pub(crate) fn wcs_corners(solid: &Solid) -> [[f64; 3]; 4] {
 
 fn set_wcs_corner(solid: &mut Solid, index: usize, point: glam::DVec3) {
     let n = normal_tuple(solid);
-    let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs((point.x, point.y, point.z), n);
+    let (x, y, z) = crate::entities::transform::wcs_point_to_ocs((point.x, point.y, point.z), n);
     let corner = match index {
         0 => &mut solid.first_corner,
         1 => &mut solid.second_corner,
@@ -326,7 +326,7 @@ impl PropertyEditable for Solid {
 impl Transformable for Solid {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let normal = self.normal;
-        crate::scene::view::transform::apply_ocs_entity_transform(
+        crate::entities::transform::apply_ocs_entity_transform(
             self,
             t,
             normal,
@@ -337,7 +337,7 @@ impl Transformable for Solid {
                     &mut entity.third_corner,
                     &mut entity.fourth_corner,
                 ] {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut corner.x,
                         &mut corner.y,
                         p1,

@@ -364,20 +364,15 @@ impl OpenCADStudio {
                             .entities_mut()
                             .find(|e| e.common().handle == *handle)
                         {
-                            if !crate::app::control::block_ops::glob_match_ci(
-                                block_spec,
-                                &ins.block_name,
-                            ) {
+                            if !crate::wildcard::wildcard_match(&ins.block_name, block_spec) {
                                 continue;
                             }
                             for attr in &mut ins.attributes {
-                                if !crate::app::control::block_ops::glob_match_ci(
-                                    tag_spec, &attr.tag,
-                                ) {
+                                if !crate::wildcard::wildcard_match(&attr.tag, tag_spec) {
                                     continue;
                                 }
                                 let value = attr.get_value().to_string();
-                                if crate::app::control::block_ops::glob_match_ci(value_spec, &value)
+                                if crate::wildcard::wildcard_match(&value, value_spec)
                                     && value.contains(old)
                                 {
                                     occurrences += value.matches(old).count();

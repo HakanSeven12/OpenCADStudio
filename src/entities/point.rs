@@ -6,9 +6,9 @@ use ocs_geom::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
-use crate::scene::model::wire_model::{PointMarker, SnapHint};
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
+use crate::display::wire_model::{PointMarker, SnapHint};
 use crate::t;
 
 /// Resolve a positive (absolute) PDSIZE to a world size. Relative/zero PDSIZE
@@ -290,8 +290,8 @@ fn apply_grip(pt: &mut Point, _grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(pt: &mut Point, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(pt, t, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
+    crate::entities::transform::apply_standard_entity_transform(pt, t, |entity, p1, p2| {
+        crate::entities::transform::reflect_xy_point(
             &mut entity.location.x,
             &mut entity.location.y,
             p1,

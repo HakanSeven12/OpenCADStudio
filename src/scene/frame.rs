@@ -93,7 +93,7 @@ fn wipeout_variables_handle(document: &Document) -> Option<Handle> {
 }
 
 fn drawing_mode(document: &Document, name: &str, default: i16) -> i16 {
-    crate::io::drawing_variable(document, name)
+    crate::scene::drawing_vars::drawing_variable(document, name)
         .and_then(|value| value.parse::<i16>().ok())
         .unwrap_or(default)
         .clamp(0, 2)
@@ -112,7 +112,7 @@ pub(crate) fn mode(document: &Document, kind: FrameKind) -> i16 {
         FrameKind::Pdf => drawing_mode(document, "PDFFRAME", 1),
         FrameKind::Dwf => document.header.dwf_frame.clamp(0, 2),
         FrameKind::Dgn => document.header.dgn_frame.clamp(0, 2),
-        FrameKind::Wipeout => crate::io::drawing_variable(document, "WIPEOUTFRAME")
+        FrameKind::Wipeout => crate::scene::drawing_vars::drawing_variable(document, "WIPEOUTFRAME")
             .and_then(|value| value.parse::<i16>().ok())
             .or_else(|| {
                 wipeout_variables_handle(document).and_then(|handle| {
@@ -173,7 +173,7 @@ fn set_image_mode(document: &mut Document, value: i16) {
 }
 
 fn set_wipeout_mode(document: &mut Document, value: i16) {
-    crate::io::set_drawing_variable(document, "WIPEOUTFRAME", &value.to_string());
+    crate::scene::drawing_vars::set_drawing_variable(document, "WIPEOUTFRAME", &value.to_string());
     let owner = crate::scene::annotative::root_named_dict_handle(document);
     let handle = wipeout_variables_handle(document).unwrap_or_else(|| {
         let handle = document.allocate_handle();
@@ -196,13 +196,13 @@ pub(crate) fn set_mode(document: &mut Document, kind: FrameKind, value: i16) {
     let value = value.clamp(0, 2);
     match kind {
         FrameKind::Image => set_image_mode(document, value),
-        FrameKind::Pdf => crate::io::set_drawing_variable(document, "PDFFRAME", &value.to_string()),
+        FrameKind::Pdf => crate::scene::drawing_vars::set_drawing_variable(document, "PDFFRAME", &value.to_string()),
         FrameKind::Dwf => document.header.dwf_frame = value,
         FrameKind::Dgn => document.header.dgn_frame = value,
         FrameKind::Wipeout => set_wipeout_mode(document, value),
         FrameKind::Xclip => document.header.xclip_frame = value,
         FrameKind::PointCloudClip => {
-            crate::io::set_drawing_variable(document, "POINTCLOUDCLIPFRAME", &value.to_string())
+            crate::scene::drawing_vars::set_drawing_variable(document, "POINTCLOUDCLIPFRAME", &value.to_string())
         }
     }
 }

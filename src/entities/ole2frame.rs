@@ -3,9 +3,9 @@ use document::entities::{Ole2Frame, OleObjectType};
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
+use crate::display::wire_model::SnapHint;
 use crate::t;
 
 fn to_render(ole: &Ole2Frame) -> RenderEntity {
@@ -123,7 +123,8 @@ pub(crate) fn hidden(ole: &Ole2Frame) -> bool {
 /// OLEFRAME of the drawing: 0 no frame, 1 frame shown and plotted, 2 frame
 /// shown but not plotted (the default).
 pub(crate) fn frame_mode(document: &document::Document) -> i16 {
-    crate::io::drawing_variable(document, "OLEFRAME")
+    document
+        .drawing_variable("OLEFRAME")
         .and_then(|value| value.trim().parse::<i16>().ok())
         .filter(|value| (0..=2).contains(value))
         .unwrap_or(2)
@@ -170,7 +171,7 @@ pub(crate) fn validate_property(field: &str, value: &str) -> Result<(), &'static
 }
 
 fn properties(ole: &Ole2Frame) -> Vec<PropSection> {
-    use crate::scene::model::object::{PropValue, Property};
+    use crate::entities::object::{PropValue, Property};
     let type_str = match ole.ole_object_type {
         OleObjectType::Link => crate::tr!("ole-props", "type-link"),
         OleObjectType::Embedded => crate::tr!("ole-props", "type-embedded"),
@@ -325,7 +326,7 @@ impl RenderConvertible for Ole2Frame {
 crate::impl_entity_basics!(Ole2Frame);
 
 impl crate::entities::traits::FallbackTess for Ole2Frame {
-    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::display::tess_util::FallbackGeometry {
         // OLE objects carry a bounding rectangle in model space.
         // Render a simple X-through-rectangle placeholder.
         let x0 = self.upper_left_corner.x;

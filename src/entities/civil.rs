@@ -13,7 +13,7 @@ use document::objects::ObjectType;
 use document::entities::{EntityType, ExtendedEntityData};
 use document::types::Handle;
 
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
+use crate::display::render_entity::{RenderEntity, RenderObject};
 use crate::scene::convert::proxy_graphics::{
     Decoded, ProxyColor, ProxyPolyline, ProxyStyle, ProxyText, LT_BYBLOCK, LT_BYLAYER,
 };
@@ -551,7 +551,6 @@ fn chains(runs: impl Iterator<Item = Vec<[f64; 3]>>) -> Vec<[f64; 3]> {
     points
 }
 
-
 fn profile_entity(document: &document::Document, handle: u64) -> Option<&ArchEntityData> {
     let EntityType::Extended(entity) = document.get_entity(Handle::new(handle))? else {
         return None;
@@ -762,19 +761,19 @@ fn cogo_point(data: &ArchEntityData, document: &document::Document, out: &mut De
 pub(crate) const COGO_POINT_NAME: &str = "ext_civil_point_name";
 
 /// Number, name, description and position of a selected COGO point.
-pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
+pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> Vec<crate::entities::object::PropSection> {
     use crate::entities::common::ro_prop;
     let EntityType::Extended(e) = entity else { return Vec::new() };
     let ExtendedEntityData::Arch(data) = &e.data else { return Vec::new() };
     let Some(point) = cogo_point_of(data, document) else { return other_properties(data, e.common.handle.value(), document) };
-    vec![crate::scene::model::object::PropSection {
+    vec![crate::entities::object::PropSection {
         title: crate::t!("Class").into_owned(),
         props: vec![
             ro_prop(crate::t!("Point Number").as_ref(), "ext_civil_point_number", point.number.to_string()),
-            crate::scene::model::object::Property {
+            crate::entities::object::Property {
                 label: crate::t!("Name").into_owned(),
                 field: COGO_POINT_NAME,
-                value: crate::scene::model::object::PropValue::PlainText(point.name.clone().unwrap_or_default()),
+                value: crate::entities::object::PropValue::PlainText(point.name.clone().unwrap_or_default()),
             },
             ro_prop(crate::t!("Description").as_ref(), "ext_civil_description", point.description.clone().unwrap_or_default()),
             ro_prop(crate::t!("Easting").as_ref(), "ext_civil_easting", format!("{:.4}", point.position.x)),
@@ -790,7 +789,7 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
 
 /// Read-only rows of the civil records the codec names: sample lines, view frames, match
 /// lines, survey figures and networks, superelevation views.
-fn other_properties(data: &ArchEntityData, handle: u64, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
+fn other_properties(data: &ArchEntityData, handle: u64, document: &document::Document) -> Vec<crate::entities::object::PropSection> {
     use crate::entities::common::ro_prop;
     // The name of the civil record `h` (its third text, an alignment's fourth).
     let name_of = |h: u64| match document.get_entity(Handle::new(h)) {
@@ -852,7 +851,7 @@ fn other_properties(data: &ArchEntityData, handle: u64, document: &document::Doc
     if rows.is_empty() {
         return Vec::new();
     }
-    vec![crate::scene::model::object::PropSection { title: crate::t!("Class").into_owned(), props: rows }]
+    vec![crate::entities::object::PropSection { title: crate::t!("Class").into_owned(), props: rows }]
 }
 
 fn shown_stations(alignment: Option<&ArchEntityData>) -> impl Fn(f64) -> f64 {
@@ -2435,6 +2434,16 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
     Some(())
 }
 
+/// The Civil 3D class of `entity`, if it is one.
+pub fn civil_class(entity: &EntityType) -> Option<&str> {
+    match entity {
+        EntityType::Extended(x) => match &x.data {
+            document::entities::ExtendedEntityData::Arch(a) => Some(a.dxf_name.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 #[cfg(test)]
 mod tests {

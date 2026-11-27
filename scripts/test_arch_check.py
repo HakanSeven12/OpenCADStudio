@@ -90,7 +90,7 @@ class Direction(unittest.TestCase):
         self.assertIn("scene -> io", edges({"scene/a.rs": "use crate::io::linetypes;\n"}))
 
     def test_grouped_use_counts_each_module(self):
-        found = edges({"entities/a.rs": "use crate::{\n    snap::Hint,\n    scene::model::Object,\n};\n"})
+        found = edges({"entities/a.rs": "use crate::{\n    parametric::Hint,\n    scene::model::Object,\n};\n"})
         self.assertEqual(list(found), ["entities -> scene"])
 
     def test_a_file_counts_once_and_keeps_its_first_line(self):

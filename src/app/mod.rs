@@ -40,7 +40,7 @@ mod block_visibility;
 mod bricscad_visibility_tests;
 #[cfg(test)]
 mod visibilitystates_tests;
-pub(crate) mod calc;
+pub(crate) use crate::calc;
 mod command_driver;
 mod extraction_catalog;
 mod attr_editor;
@@ -51,9 +51,7 @@ mod insert_attributes_tests;
 mod insert_units_tests;
 #[cfg(test)]
 mod work_count_tests;
-pub(crate) use command_driver::{
-    copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
-};
+pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel, PasteSpace};
 mod assistant;
 pub(crate) mod commands;
 #[doc(hidden)]
@@ -410,8 +408,7 @@ pub struct GripPendingValue {
     pub label: &'static str,
 }
 
-mod qselect_state;
-pub use self::qselect_state::*;
+pub use crate::filter::qselect_state::*;
 
 /// The Find and Replace window. Its texts, history and options outlive the
 /// window; the search position and the result list belong to one opening.
@@ -2624,8 +2621,7 @@ pub enum ColorPickTarget {
     AttrEditor,
 }
 
-mod clipboard;
-pub use self::clipboard::*;
+pub use crate::scene::clipboard::*;
 
 /// The right-click menu editor's actions.
 #[derive(Debug, Clone)]
@@ -2895,7 +2891,7 @@ impl OpenCADStudio {
             doc_tab_layouts: None,
             doc_tab_hover_gen: 0,
             tab_counter: 0,
-            ribbon: Ribbon::new(),
+            ribbon: Ribbon::with_modules(crate::plugin::all_ribbon_modules()),
             // Populated from the consolidated config after construction
             // (`apply_config`); default empty here.
             recent_files: Vec::new(),

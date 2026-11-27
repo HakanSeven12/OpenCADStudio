@@ -2,22 +2,12 @@
 
 use iced::wgpu;
 
+pub use crate::display::text_vertex::{split_ds, TextVertex};
+
 use crate::scene::text::glyph_quads::GlyphQuad;
 use crate::scene::text::sdf_atlas::GlyphAtlas;
 
 // ── Vertex ────────────────────────────────────────────────────────────────
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TextVertex {
-    pub pos: [f32; 3],
-    pub pos_low: [f32; 3],
-    pub uv: [f32; 2],
-    pub color: [f32; 4],
-    pub draw_depth: f32,
-    /// Pen half-width of a stroke glyph in atlas glyph units (0 = filled).
-    pub pen: f32,
-} // 56 bytes, no padding holes (all f32)
 
 impl TextVertex {
     pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -157,13 +147,6 @@ impl BlockTextBatch {
             draws: batch.draws,
         });
     }
-}
-
-/// Split an f64 into the double-single (high f32, low residual f32) pair the
-/// shaders reconstruct relative-to-eye.
-pub(crate) fn split_ds(v: f64) -> (f32, f32) {
-    let high = v as f32;
-    (high, (v - high as f64) as f32)
 }
 
 /// Append the two triangles (6 vertices) for each glyph quad of one text run

@@ -144,7 +144,7 @@ pub(crate) fn complex_linetype_anno(
 pub(crate) fn walk_complex_linetype(
     name: &str,
     path: &[[f64; 3]],
-    linetype: &crate::io::linetypes::ComplexLt,
+    linetype: &crate::catalog::linetypes::ComplexLt,
     scale: f32,
     closure: DashClosure,
     color: [f32; 4],
@@ -266,7 +266,7 @@ fn walk_mline_element(
     viewport: Option<Handle>,
 ) -> Vec<WireModel> {
     let linetype = wire.element_linetype.as_deref().and_then(|element| {
-        crate::io::linetypes::resolve_complex_lt(
+        crate::catalog::linetypes::resolve_complex_lt(
             document,
             crate::entities::mline::element_linetype_name(document, layer, element, viewport),
         )
@@ -1771,7 +1771,7 @@ fn tessellate_entity_inner(
                 continue;
             };
             let (color, pattern_length, pattern, element_aci) =
-                crate::entities::mline::element_style(
+                crate::scene::mline_style::element_style(
                     document,
                     mline,
                     color,
@@ -1862,7 +1862,7 @@ fn tessellate_entity_inner(
     // wire per arc plus one wire of its straight segments, so it walks its own
     // ordered path (`polyline_lt_path`); every other entity is one wire.
     let own_complex = (!matches!(e, EntityType::MLine(_)))
-        .then(|| crate::io::linetypes::resolve_complex_lt(document, lt_name))
+        .then(|| crate::catalog::linetypes::resolve_complex_lt(document, lt_name))
         .flatten();
     if let Some(clt) = own_complex {
         let complex_lt_anno = complex_linetype_anno(document, linetype_anno, viewport_lt);
@@ -2448,7 +2448,7 @@ pub(crate) fn entity_bounds_in(
         }
     }
     if let document::EntityType::Insert(insert) = e {
-        if let Some(bounds) = crate::app::helpers::insert_world_bounds(document, insert) {
+        if let Some(bounds) = crate::scene::bounds::insert_world_bounds(document, insert) {
             return (
                 [bounds.min.x, bounds.min.y, bounds.min.z],
                 [bounds.max.x, bounds.max.y, bounds.max.z],

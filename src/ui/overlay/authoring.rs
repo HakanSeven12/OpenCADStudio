@@ -1,4 +1,5 @@
 use iced::{widget::canvas, Color, Point, Size};
+pub(crate) use crate::scene::{display_color, normalize_color};
 
 #[derive(Default)]
 pub struct AuthoringFeedback {
@@ -48,47 +49,6 @@ impl AuthoringVisualOptions {
             font: prefs.parameter_font.clone(),
             horizontal: prefs.text_horizontal,
         }
-    }
-}
-
-pub(crate) fn normalize_color(value: &str) -> Option<String> {
-    let value = value.trim().to_ascii_uppercase();
-    match value.as_str() {
-        "BYLAYER" | "BYBLOCK" => Some(value),
-        _ if value.starts_with("RGB:") => {
-            let channels = value[4..]
-                .split(',')
-                .map(|v| v.trim().parse::<u8>())
-                .collect::<Result<Vec<_>, _>>()
-                .ok()?;
-            (channels.len() == 3)
-                .then(|| format!("RGB:{},{},{}", channels[0], channels[1], channels[2]))
-        }
-        _ => value
-            .parse::<u8>()
-            .ok()
-            .filter(|v| *v > 0)
-            .map(|v| v.to_string()),
-    }
-}
-
-pub(crate) fn display_color(value: &str, by_layer: Color, foreground: Color) -> Color {
-    let Some(value) = normalize_color(value) else {
-        return foreground;
-    };
-    match value.as_str() {
-        "BYLAYER" => by_layer,
-        "BYBLOCK" | "7" => foreground,
-        _ if value.starts_with("RGB:") => {
-            let channels: Vec<u8> = value[4..]
-                .split(',')
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            Color::from_rgb8(channels[0], channels[1], channels[2])
-        }
-        _ => document::types::aci_table::aci_to_rgb(value.parse().unwrap_or(7))
-            .map(|(r, g, b)| Color::from_rgb8(r, g, b))
-            .unwrap_or(foreground),
     }
 }
 

@@ -1286,7 +1286,7 @@ fn tessellate_wires(
             // The viewport and block context re-resolve both off the wire.
             // Selection forces a plain solid highlight.
             let (element_color, element_pattern_length, element_pattern, aci) =
-                crate::entities::mline::element_style(document, m, l.color, &l.linetype, None);
+                crate::scene::mline_style::element_style(document, m, l.color, &l.linetype, None);
             let wcolor = if selected {
                 WireModel::SELECTED
             } else {
@@ -2954,7 +2954,7 @@ fn tessellate_wires(
         // the document stays untouched and every piece retains the REGION's
         // source handle. Separate wires keep holes and disconnected edges from
         // acquiring fictitious joining segments or chord midpoint snaps.
-        for piece in crate::modules::draw::modify::explode::explode_entity(entity, document) {
+        for piece in crate::scene::explode::explode_entity(entity, document) {
             let mut boundary = tessellate(
                 document,
                 handle,
@@ -3799,7 +3799,7 @@ mod tests {
         let mut doc = Document::new();
         let circle =
             document::entities::Circle::from_center_radius(document::types::Vector3::ZERO, 0.25);
-        crate::app::define_block_raw_doc(
+        crate::entities::doc_edit::define_block_raw_doc(
             &mut doc,
             "_NONE",
             document::types::Vector3::ZERO,
@@ -3818,7 +3818,7 @@ mod tests {
 
         // AutoCAD's own "_None" is empty: no arrow.
         let mut doc = Document::new();
-        crate::app::define_block_raw_doc(&mut doc, "_None", document::types::Vector3::ZERO, &[]);
+        crate::entities::doc_edit::define_block_raw_doc(&mut doc, "_None", document::types::Vector3::ZERO, &[]);
         let handle = doc.block_records.get("_None").unwrap().handle;
         assert!(matches!(
             arrow_from_block(&doc, handle, 50.0),

@@ -9,8 +9,8 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::RenderEntity;
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::render_entity::RenderEntity;
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::t;
 
 const EPSILON: f64 = 1.0e-9;
@@ -498,19 +498,19 @@ fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
             axis,
             angle_rad,
         } => {
-            crate::scene::view::transform::apply_standard_transform(
+            crate::entities::transform::apply_standard_transform(
                 helix, *center, *axis, *angle_rad,
             );
         }
         EntityTransform::Scale { center, factor } => {
-            crate::scene::view::transform::apply_standard_scale(helix, *center, *factor);
+            crate::entities::transform::apply_standard_scale(helix, *center, *factor);
         }
         EntityTransform::Mirror {
             p1,
             p2,
             working_normal,
         } => {
-            let reflection = crate::scene::view::transform::reflection_about_working_line(
+            let reflection = crate::entities::transform::reflection_about_working_line(
                 *p1,
                 *p2,
                 *working_normal,

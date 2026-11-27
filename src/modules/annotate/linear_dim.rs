@@ -1,4 +1,3 @@
-use document::entities::{Dimension, DimensionLinear};
 use document::types::Vector3;
 use document::EntityType;
 use ocs_geom::geom2d::{closest_point, Circle as KernelCircle, Curve, Line as KernelLine};
@@ -11,6 +10,9 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 use glam::DVec3;
+pub(crate) use crate::entities::dimension::build::linear::{
+    dim_line_endpoints, linear_dimension_entity, linear_text_pos,
+};
 
 /// Select the measured axis from where the dimension line clears the points.
 pub(crate) fn measure_axis(first: DVec3, second: DVec3, def: DVec3) -> DVec3 {
@@ -129,28 +131,6 @@ impl LinearDimensionCommand {
         }
         self.plane.place_entity(entity)
     }
-}
-
-/// A linear dimension between two points of the working plane, its
-/// dimension line through `point` along `axis` — what DIMLINEAR places and
-/// what a dynamic dimensional constraint draws.
-pub(crate) fn linear_dimension_entity(
-    first: DVec3,
-    second: DVec3,
-    point: DVec3,
-    axis: DVec3,
-    text_override: Option<String>,
-) -> EntityType {
-    let mut dim = DimensionLinear::new(v3(first), v3(second));
-    dim.rotation = axis.y.atan2(axis.x);
-    dim.set_offset(dimension_line_offset(second, point, axis));
-    dim.base.definition_point = dim.definition_point;
-    dim.base.text_middle_point = v3(linear_text_pos(first, second, point, axis));
-    dim.base.insertion_point = dim.base.text_middle_point;
-    crate::entities::dimension::reset_automatic_text_position(&mut dim.base);
-    dim.base.actual_measurement = dim.measurement();
-    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
-    EntityType::Dimension(Box::new(Dimension::Linear(dim)))
 }
 
 impl CadCommand for LinearDimensionCommand {
@@ -473,15 +453,6 @@ impl CadCommand for LinearDimensionCommand {
     }
 }
 
-fn v3(pt: DVec3) -> Vector3 {
-    Vector3::new(pt.x, pt.y, pt.z)
-}
-
-fn dimension_line_offset(second: DVec3, point: DVec3, axis: DVec3) -> f64 {
-    let perpendicular = DVec3::new(-axis.y, axis.x, 0.0);
-    (point - second).dot(perpendicular)
-}
-
 pub(crate) fn dimension_source_points(entity: &EntityType, click: DVec3) -> Option<(DVec3, DVec3)> {
     let point = |p: Vector3| DVec3::new(p.x, p.y, p.z);
     match entity {
@@ -600,19 +571,6 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
     )
 }
 
-/// Project the two extension origins onto the dimension line, which passes
-/// through `def` along `axis`. Each origin is projected *independently*: a
-/// single shared offset only lands both on the line when they are level, and
-/// tilts the dimension line when they are not (e.g. measuring across sloped
-/// points). See #181.
-fn dim_line_endpoints(first: DVec3, second: DVec3, def: DVec3, axis: DVec3) -> (DVec3, DVec3) {
-    let perp = DVec3::new(-axis.y, axis.x, 0.0);
-    let dperp = def.dot(perp);
-    let d1 = first + perp * (dperp - first.dot(perp));
-    let d2 = second + perp * (dperp - second.dot(perp));
-    (d1, d2)
-}
-
 fn linear_dimension_preview(first: DVec3, second: DVec3, def: DVec3, axis: DVec3) -> Vec<DVec3> {
     let (d1, d2) = dim_line_endpoints(first, second, def, axis);
     let nan = DVec3::new(f64::NAN, f64::NAN, f64::NAN);
@@ -649,12 +607,6 @@ fn linear_dimension_preview(first: DVec3, second: DVec3, def: DVec3, axis: DVec3
         text - axis * half_width + perp * half_height,
         text - axis * half_width - perp * half_height,
     ]
-}
-
-fn linear_text_pos(first: DVec3, second: DVec3, def: DVec3, axis: DVec3) -> DVec3 {
-    let (d1, d2) = dim_line_endpoints(first, second, def, axis);
-    let perp = DVec3::new(-axis.y, axis.x, 0.0);
-    (d1 + d2) * 0.5 + perp * 0.15
 }
 
 // ── Autocomplete registry ─────────────────────────────────

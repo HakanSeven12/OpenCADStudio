@@ -500,20 +500,20 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
         // with dedicated SVGs in `assets/icons/`.
         for (command, label, icon) in [
             // File, session & help
-            ("UNDO", "Undo", crate::ui::icons::undo_icon()),
-            ("REDO", "Redo", crate::ui::icons::redo_icon()),
-            ("NEW", "New", crate::ui::icons::DOC_NEW),
-            ("QNEW", "New", crate::ui::icons::DOC_NEW),
-            ("OPEN", "Open", crate::ui::icons::FOLDER_OPEN),
-            ("SAVE", "Save", crate::ui::icons::SAVE),
-            ("QSAVE", "Save", crate::ui::icons::SAVE),
-            ("SAVEAS", "Save As", crate::ui::icons::FILE_EXPORT),
-            ("EXPORT", "Export", crate::ui::icons::FILE_EXPORT),
-            ("EXPORTPDF", "Export PDF", crate::ui::icons::FILE_EXPORT),
-            ("CLOSE", "Close", crate::ui::icons::CLOSE),
-            ("CLOSEALL", "Close All", crate::ui::icons::CLOSE),
-            ("QUIT", "Exit", crate::ui::icons::CLOSE),
-            ("EXIT", "Exit", crate::ui::icons::CLOSE),
+            ("UNDO", "Undo", crate::icon_assets::undo_icon()),
+            ("REDO", "Redo", crate::icon_assets::redo_icon()),
+            ("NEW", "New", crate::icon_assets::DOC_NEW),
+            ("QNEW", "New", crate::icon_assets::DOC_NEW),
+            ("OPEN", "Open", crate::icon_assets::FOLDER_OPEN),
+            ("SAVE", "Save", crate::icon_assets::SAVE),
+            ("QSAVE", "Save", crate::icon_assets::SAVE),
+            ("SAVEAS", "Save As", crate::icon_assets::FILE_EXPORT),
+            ("EXPORT", "Export", crate::icon_assets::FILE_EXPORT),
+            ("EXPORTPDF", "Export PDF", crate::icon_assets::FILE_EXPORT),
+            ("CLOSE", "Close", crate::icon_assets::CLOSE),
+            ("CLOSEALL", "Close All", crate::icon_assets::CLOSE),
+            ("QUIT", "Exit", crate::icon_assets::CLOSE),
+            ("EXIT", "Exit", crate::icon_assets::CLOSE),
             (
                 "HELP",
                 "Help",
@@ -530,49 +530,49 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                 include_bytes!("../../assets/icons/blocks/quick_select.svg"),
             ),
             // Status-bar & drafting aids
-            ("OSNAP", "Object Snap", crate::ui::icons::ST_OSNAP),
-            ("DDOSNAP", "Object Snap", crate::ui::icons::ST_OSNAP),
+            ("OSNAP", "Object Snap", crate::icon_assets::ST_OSNAP),
+            ("DDOSNAP", "Object Snap", crate::icon_assets::ST_OSNAP),
             (
                 "OTRACK",
                 "Object Snap Tracking",
-                crate::ui::icons::ST_OTRACK,
+                crate::icon_assets::ST_OTRACK,
             ),
-            ("POLAR", "Polar Tracking", crate::ui::icons::ST_POLAR),
-            ("GRID", "Grid", crate::ui::icons::GRID),
-            ("SNAP", "Snap", crate::ui::icons::SNAP),
-            ("LWEIGHT", "Lineweight", crate::ui::icons::ST_LWT),
+            ("POLAR", "Polar Tracking", crate::icon_assets::ST_POLAR),
+            ("GRID", "Grid", crate::icon_assets::GRID),
+            ("SNAP", "Snap", crate::icon_assets::SNAP),
+            ("LWEIGHT", "Lineweight", crate::icon_assets::ST_LWT),
             (
                 "QUICKPROPERTIES",
                 "Quick Properties",
-                crate::ui::icons::ST_QUICKPROPS,
+                crate::icon_assets::ST_QUICKPROPS,
             ),
-            ("QP", "Quick Properties", crate::ui::icons::ST_QUICKPROPS),
-            ("FILTER", "Selection Filter", crate::ui::icons::ST_FILTER),
+            ("QP", "Quick Properties", crate::icon_assets::ST_QUICKPROPS),
+            ("FILTER", "Selection Filter", crate::icon_assets::ST_FILTER),
             (
                 "CLEANSCREENON",
                 "Clean Screen On",
-                crate::ui::icons::ST_CLEANSCREEN,
+                crate::icon_assets::ST_CLEANSCREEN,
             ),
             (
                 "CLEANSCREENOFF",
                 "Clean Screen Off",
-                crate::ui::icons::ST_CLEANSCREEN,
+                crate::icon_assets::ST_CLEANSCREEN,
             ),
             (
                 "ISOLATEOBJECTS",
                 "Isolate Objects",
-                crate::ui::icons::ST_ISOLATE,
+                crate::icon_assets::ST_ISOLATE,
             ),
-            ("HIDEOBJECTS", "Hide Objects", crate::ui::icons::ST_ISOLATE),
+            ("HIDEOBJECTS", "Hide Objects", crate::icon_assets::ST_ISOLATE),
             (
                 "UNISOLATEOBJECTS",
                 "End Object Isolation",
-                crate::ui::icons::ST_ISOLATE,
+                crate::icon_assets::ST_ISOLATE,
             ),
             // Snap modifiers, calculator, styles & mesh/layout tools
-            ("MTP", "Mid Between 2 Points", crate::ui::icons::mtp_icon()),
-            ("M2P", "Mid Between 2 Points", crate::ui::icons::mtp_icon()),
-            ("FROM", "From", crate::ui::icons::from_icon()),
+            ("MTP", "Mid Between 2 Points", crate::icon_assets::mtp_icon()),
+            ("M2P", "Mid Between 2 Points", crate::icon_assets::mtp_icon()),
+            ("FROM", "From", crate::icon_assets::from_icon()),
             (
                 "QUICKCALC",
                 "QuickCalc",
@@ -638,9 +638,9 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                 "Uncrop Point Cloud",
                 include_bytes!("../../assets/icons/xclip_remove.svg"),
             ),
-            ("3DFACE", "3D Face", crate::ui::icons::MESH),
-            ("3DMESH", "3D Mesh", crate::ui::icons::MESH),
-            ("MESH", "Mesh", crate::ui::icons::MESH),
+            ("3DFACE", "3D Face", crate::icon_assets::MESH),
+            ("3DMESH", "3D Mesh", crate::icon_assets::MESH),
+            ("MESH", "Mesh", crate::icon_assets::MESH),
             (
                 "LAYOUT",
                 "Layout",
@@ -671,15 +671,15 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
                 "Block Action",
                 include_bytes!("../../assets/icons/ui/bolt.svg"),
             ),
-            ("RESETBLOCK", "Reset Block", crate::ui::icons::REFRESH),
-            ("LIST", "List", crate::ui::icons::LIST),
-            ("REDRAW", "Redraw", crate::ui::icons::REFRESH),
+            ("RESETBLOCK", "Reset Block", crate::icon_assets::REFRESH),
+            ("LIST", "List", crate::icon_assets::LIST),
+            ("REDRAW", "Redraw", crate::icon_assets::REFRESH),
             (
                 "HIDE",
                 "Hide",
                 include_bytes!("../../assets/icons/hidden.svg"),
             ),
-            ("DWGPROPS", "Drawing Properties", crate::ui::icons::INFO),
+            ("DWGPROPS", "Drawing Properties", crate::icon_assets::INFO),
             (
                 "SLICE",
                 "Slice",
@@ -732,7 +732,7 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
             }
         }
         // Propagate icons to default PGP command aliases.
-        for (alias, target) in crate::app::alias::default_alias_rows() {
+        for (alias, target) in crate::command::aliases::default_alias_rows() {
             if let Some(entry) = out.get(&target).copied() {
                 out.entry(alias).or_insert(entry);
             }
@@ -1147,7 +1147,7 @@ mod tests {
     /// Editor Settings keep the plain tool palette.
     #[test]
     fn authoring_palettes_have_their_own_icon() {
-        let authoring = crate::ui::icons::AUTHORING_PALETTES;
+        let authoring = crate::icon_assets::AUTHORING_PALETTES;
         for command in ["BAUTHORPALETTE", "BAUTHORPALETTECLOSE"] {
             assert_eq!(command_icon(command), Some(authoring), "{command}");
         }

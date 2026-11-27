@@ -10,7 +10,7 @@ use iced::{Background, Border, Color, Element, Fill, Font, Padding, Shadow, Them
 use super::view::{POINT, STRONG, icon, m, mix, muted, strong, tip, tokens};
 use super::{Flyout, Key, KeypadMode, MemoryOp, QuickCalcMsg, QuickCalcPalette};
 use crate::app::Message;
-use crate::app::calc::Value;
+use crate::calc::Value;
 use crate::ui::icons::TRI_DOWN;
 
 const BACKSPACE: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/backspace.svg");

@@ -9,9 +9,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::TangentGeom;
+use crate::display::render_entity::{extrusion_wall_tris, RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::TangentGeom;
 
 const TAU: f64 = std::f64::consts::TAU;
 const WIDTH_EPSILON: f64 = 1.0e-9;
@@ -303,7 +303,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
     let seg_count = if pline.is_closed { count } else { count - 1 };
     // Convert OCS (x, y, elevation) to a WCS point.
     let to_wcs = |x: f64, y: f64| -> (f64, f64, f64) {
-        crate::scene::view::transform::ocs_point_to_wcs((x, y, elev), normal)
+        crate::entities::transform::ocs_point_to_wcs((x, y, elev), normal)
     };
     let to_pt = |v: &LwVertex| -> [f64; 3] {
         let (wx, wy, wz) = to_wcs(v.location.x, v.location.y);
@@ -667,7 +667,7 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     let vi = if n == 0 {
         0
     } else {
-        crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
+        crate::entities::dispatch::prop_current_vertex().min(n - 1)
     };
     let v = pline.vertices.get(vi);
     let vx = v.map_or(0.0, |v| v.location.x);
@@ -794,7 +794,7 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
     let vi = if n == 0 {
         0
     } else {
-        crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
+        crate::entities::dispatch::prop_current_vertex().min(n - 1)
     };
     match field {
         "elevation" => pline.elevation = v,
@@ -1006,9 +1006,9 @@ fn resize_arc_segment_radius(polyline: &mut LwPolyline, segment: usize, radius: 
 }
 fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
     let normal = pline.normal;
-    crate::scene::view::transform::apply_ocs_entity_transform(pline, t, normal, |entity, p1, p2| {
+    crate::entities::transform::apply_ocs_entity_transform(pline, t, normal, |entity, p1, p2| {
         for v in &mut entity.vertices {
-            crate::scene::view::transform::reflect_xy_point(
+            crate::entities::transform::reflect_xy_point(
                 &mut v.location.x,
                 &mut v.location.y,
                 p1,
@@ -1036,20 +1036,20 @@ impl RenderConvertible for LwPolyline {
 }
 
 impl crate::entities::traits::Grippable for LwPolyline {
-    fn grips(&self) -> Vec<crate::scene::model::object::GripDef> {
+    fn grips(&self) -> Vec<crate::entities::object::GripDef> {
         if is_revision_cloud(self) {
             return crate::entities::revcloud::grips(self);
         }
         grips(self)
     }
-    fn apply_grip(&mut self, grip_id: usize, apply: crate::scene::model::object::GripApply) {
+    fn apply_grip(&mut self, grip_id: usize, apply: crate::entities::object::GripApply) {
         if is_revision_cloud(self) {
             return crate::entities::revcloud::apply_grip(self, grip_id, apply);
         }
         apply_grip(self, grip_id, apply);
     }
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         // A revision cloud's grips only reshape it.
         if is_revision_cloud(self) {
             return Vec::new();
@@ -1155,9 +1155,9 @@ impl crate::entities::traits::Grippable for LwPolyline {
     fn grip_menu_value_prompt(
         &self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let n = self.vertices.len();
         if action == A::MoveParallel && grip_id >= n {
             let seg = grip_id - n;
@@ -1192,10 +1192,10 @@ impl crate::entities::traits::Grippable for LwPolyline {
     fn grip_menu_point_value(
         &self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if action == A::Radius {
             let n = self.vertices.len();
             let seg = grip_id.checked_sub(n)?;
@@ -1241,10 +1241,10 @@ impl crate::entities::traits::Grippable for LwPolyline {
     fn apply_grip_menu_value(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if action == A::Radius {
             if let Some(seg) = grip_id.checked_sub(self.vertices.len()) {
                 resize_arc_segment_radius(self, seg, value);
@@ -1298,9 +1298,9 @@ impl crate::entities::traits::Grippable for LwPolyline {
     fn apply_grip_menu(
         &mut self,
         grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
             A::Stretch => {}
@@ -1396,7 +1396,7 @@ impl crate::entities::traits::PropertyEditable for LwPolyline {
     fn geometry_properties(
         &self,
         _text_style_names: &[String],
-    ) -> Vec<crate::scene::model::object::PropSection> {
+    ) -> Vec<crate::entities::object::PropSection> {
         properties(self)
     }
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
@@ -1508,7 +1508,7 @@ mod tests {
     use super::*;
 
     use crate::entities::traits::{Grippable, PropertyEditable};
-    use crate::scene::model::object::GripMenuAction;
+    use crate::entities::object::GripMenuAction;
     use document::entities::{LwPolyline, LwVertex};
     use document::{Vector2, Vector3};
 

@@ -20,17 +20,11 @@
 
 use super::OpenCADStudio;
 use rustc_hash::FxHashMap;
-mod pgp;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-
-/// The shipped default alias file, embedded at compile time. Its aliases live in
-/// `assets/ocad.pgp` — not in Rust — so the defaults are just data in the same
-/// format the user edits. On first launch this text is written verbatim to the
-/// user's config folder (comments and all) as the starting `ocad.pgp`; only that
-/// user copy is read thereafter. This embedded copy is the first-run seed /
-/// factory default.
-const DEFAULT_ALIASES_PGP: &str = include_str!("../../assets/ocad.pgp");
+pub(crate) use crate::command::aliases::{
+    default_alias_rows, default_map, parse_pgp, pgp, DEFAULT_ALIASES_PGP,
+};
 
 /// Path to the user's alias file, `<config>/ocad.pgp`. `None` when the platform
 /// config base can't be resolved (headless, no `HOME`).
@@ -184,13 +178,6 @@ fn migrate_aliases(stored: &mut FxHashMap<String, String>, from_version: u32) ->
     changed
 }
 
-/// Parse `.pgp` text into an `alias → command` map, both uppercased. Skips blank
-/// lines and `;` comments; tolerates a leading `*` on the command and arbitrary
-/// whitespace padding.
-fn parse_pgp(body: &str) -> FxHashMap<String, String> {
-    pgp::parse(body).into_iter().collect()
-}
-
 /// Serialize an `alias → command` map to `.pgp` text with a header and aligned
 /// columns, sorted by alias for a stable, diffable file.
 pub(super) fn to_pgp(map: &FxHashMap<String, String>) -> String {
@@ -205,19 +192,6 @@ pub(super) fn to_pgp(map: &FxHashMap<String, String>) -> String {
         out.push_str(&format!("{:<10}*{}\n", format!("{alias},"), cmd));
     }
     out
-}
-
-/// The built-in defaults, parsed from the embedded `.pgp`. Used when no user
-/// file exists yet (or can't be reached, e.g. wasm).
-fn default_map() -> FxHashMap<String, String> {
-    parse_pgp(DEFAULT_ALIASES_PGP)
-}
-
-/// Sorted factory-default rows for the ALIASEDIT reset action.
-pub(crate) fn default_alias_rows() -> Vec<(String, String)> {
-    let mut rows: Vec<(String, String)> = default_map().into_iter().collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
 }
 
 /// Load the alias table at boot. Native reads `ocad.pgp`; web reads the same

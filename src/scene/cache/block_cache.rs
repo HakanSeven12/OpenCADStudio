@@ -48,11 +48,11 @@ use crate::scene::model::wire_model::DashClosure;
 #[derive(Debug)]
 pub struct NamedComplexLinetype {
     name: String,
-    linetype: crate::io::linetypes::ComplexLt,
+    linetype: crate::catalog::linetypes::ComplexLt,
 }
 
 fn named_complex_linetype(doc: &Document, name: &str) -> Option<Arc<NamedComplexLinetype>> {
-    crate::io::linetypes::resolve_complex_lt(doc, name).map(|linetype| {
+    crate::catalog::linetypes::resolve_complex_lt(doc, name).map(|linetype| {
         Arc::new(NamedComplexLinetype {
             name: name.to_string(),
             linetype,
@@ -348,7 +348,7 @@ pub struct BlockCache {
     prototypes_enabled: bool,
     clip_prototypes: std::sync::Mutex<HashMap<(u64, Vec<u64>), u64>>,
     cycle_warnings: std::sync::Mutex<HashSet<String>>,
-    /// [`crate::io::linetypes::defines_complex_lt`] at build time. Drawings with
+    /// [`crate::catalog::linetypes::defines_complex_lt`] at build time. Drawings with
     /// none pay nothing for the walk: no path is kept and no linetype is looked up.
     complex_possible: bool,
     /// The viewport whose layer overrides this cache was built with.
@@ -703,7 +703,7 @@ impl BlockCache {
         let t_all = perf.then(iced::time::Instant::now);
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
-        let complex_possible = crate::io::linetypes::defines_complex_lt(doc);
+        let complex_possible = crate::catalog::linetypes::defines_complex_lt(doc);
         cache.complex_possible = complex_possible;
         cache.viewport = viewport;
         let t_refs = perf.then(iced::time::Instant::now);
@@ -911,7 +911,7 @@ impl BlockCache {
         use crate::par::prelude::*;
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
-        let complex_possible = crate::io::linetypes::defines_complex_lt(doc);
+        let complex_possible = crate::catalog::linetypes::defines_complex_lt(doc);
         cache.complex_possible = complex_possible;
         cache.viewport = viewport;
         let referenced = referenced_block_tree(doc, block_name, anno_scale);
@@ -1948,7 +1948,7 @@ fn tessellate_sub_local(
         let element = match (sub, wire.element_color, wire.element_linetype.as_deref()) {
             (EntityType::MLine(mline), Some(color), Some(linetype)) => Some((
                 color,
-                crate::entities::mline::element_style(doc, mline, color, linetype, viewport),
+                crate::scene::mline_style::element_style(doc, mline, color, linetype, viewport),
             )),
             _ => None,
         };
@@ -2533,133 +2533,7 @@ fn proto_numeric_key(
     }
 }
 
-pub(crate) fn translated_prototype_wire(
-    source: &WireModel,
-    name: &str,
-    delta: [f64; 3],
-) -> WireModel {
-    if delta == [0.0, 0.0, 0.0] {
-        return source.clone_with_name(name);
-    }
-    let mut wire = source.clone_with_name(name);
-    if let Some(stub) = &source.stub {
-        wire.stub = Some(Arc::new(
-            crate::scene::model::instance_model::InstanceStub {
-                prototype: Arc::clone(&stub.prototype),
-                delta: [
-                    stub.delta[0] + delta[0],
-                    stub.delta[1] + delta[1],
-                    stub.delta[2] + delta[2],
-                ],
-                depth_delta: stub.depth_delta,
-            },
-        ));
-    }
-    if let Some(instance) = wire.render_instance.as_mut() {
-        for axis in 0..3 {
-            instance.translation[axis] += delta[axis];
-        }
-    }
-    let geom = wire.geom_mut();
-    translate_double_single(&mut geom.points, geom.points_low.dense_mut(), delta);
-    if let Some(surfaces) = geom.surfaces.as_deref_mut() {
-        translate_double_single(&mut surfaces.fill_tris, &mut surfaces.fill_tris_low, delta);
-        translate_double_single(&mut surfaces.pick_tris, &mut surfaces.pick_tris_low, delta);
-    }
-    if let Some(marker) = &mut wire.point_marker {
-        marker.origin += glam::DVec3::from_array(delta);
-    }
-    for (point, _) in &mut wire.snap_pts {
-        point.x += delta[0];
-        point.y += delta[1];
-        point.z += delta[2];
-    }
-    for point in &mut wire.key_vertices {
-        point[0] += delta[0];
-        point[1] += delta[1];
-        point[2] += delta[2];
-    }
-    let delta_f32 = [delta[0] as f32, delta[1] as f32, delta[2] as f32];
-    for tangent in &mut wire.tangent_geoms {
-        match tangent {
-            TangentGeom::Line { p1, p2 } => {
-                for axis in 0..3 {
-                    p1[axis] += delta_f32[axis];
-                    p2[axis] += delta_f32[axis];
-                }
-            }
-            TangentGeom::Circle { center, .. } => {
-                for axis in 0..3 {
-                    center[axis] += delta_f32[axis];
-                }
-            }
-            TangentGeom::PlanarCircle { center, .. }
-            | TangentGeom::Arc { center, .. }
-            | TangentGeom::PlanarEllipse { center, .. } => {
-                for axis in 0..3 {
-                    center[axis] += delta[axis];
-                }
-            }
-        }
-    }
-    wire.map_text_layout(
-        &|p| [p[0] + delta[0], p[1] + delta[1], p[2] + delta[2]],
-        1.0,
-        0.0,
-    );
-    if wire.aabb != WireModel::UNBOUNDED_AABB {
-        wire.aabb = crate::scene::model::instance_model::translated_aabb(wire.aabb, delta);
-    }
-    wire
-}
-
-#[inline]
-fn translate_ds_slice(points: &mut [[f32; 3]], lows: &mut [[f32; 3]], delta: [f64; 3]) {
-    for (point, low) in points.iter_mut().zip(lows.iter_mut()) {
-        for axis in 0..3 {
-            let value = point[axis] as f64 + low[axis] as f64 + delta[axis];
-            let high = value as f32;
-            point[axis] = high;
-            low[axis] = (value - high as f64) as f32;
-        }
-    }
-}
-
-fn translate_double_single(points: &mut [[f32; 3]], lows: &mut Vec<[f32; 3]>, delta: [f64; 3]) {
-    if points.is_empty() {
-        return;
-    }
-    if lows.len() != points.len() {
-        // Avoid allocating a zero-residual buffer unless some coordinate
-        // actually leaves a non-zero double-single remainder after translation.
-        if lows.is_empty() {
-            let point_count = points.len();
-            for (index, point) in points.iter_mut().enumerate() {
-                for axis in 0..3 {
-                    let value = point[axis] as f64 + delta[axis];
-                    let high = value as f32;
-                    let rem = (value - high as f64) as f32;
-                    point[axis] = high;
-                    if rem != 0.0 {
-                        lows.resize(point_count, [0.0; 3]);
-                        lows[index][axis] = rem;
-                        for rest_axis in (axis + 1)..3 {
-                            let v = point[rest_axis] as f64 + delta[rest_axis];
-                            let h = v as f32;
-                            point[rest_axis] = h;
-                            lows[index][rest_axis] = (v - h as f64) as f32;
-                        }
-                        translate_ds_slice(&mut points[index + 1..], &mut lows[index + 1..], delta);
-                        return;
-                    }
-                }
-            }
-            return;
-        }
-        lows.resize(points.len(), [0.0; 3]);
-    }
-    translate_ds_slice(points, lows, delta);
-}
+pub(crate) use crate::display::instance_model::translated_prototype_wire;
 
 fn aabb_pixel_size(local_aabb: [f32; 4], world_per_pixel: f32) -> f32 {
     let w = (local_aabb[2] - local_aabb[0]).abs();
@@ -3875,7 +3749,7 @@ fn transformed_marker_point(
 /// wire stays as hidden reference geometry, which keeps its snaps and tangents.
 fn emit_complex_walk(
     lw: &LocalWire,
-    linetype: &crate::io::linetypes::ComplexLt,
+    linetype: &crate::catalog::linetypes::ComplexLt,
     accum_xform: &Transform,
     ctx: &ExpandCtx,
     out: &mut Batches,

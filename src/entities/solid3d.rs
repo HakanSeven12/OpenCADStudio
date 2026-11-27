@@ -7,7 +7,7 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::entities::object::{GripApply, GripDef, PropSection};
 use crate::t;
 use document::entities::{Body, Region, Solid3D, Surface};
 use document::xdata::{ExtendedDataRecord, XDataValue};
@@ -22,11 +22,11 @@ macro_rules! impl_acis_transformable {
     ($ty:ty) => {
         impl Transformable for $ty {
             fn apply_transform(&mut self, t: &EntityTransform) {
-                crate::scene::view::transform::apply_standard_entity_transform(
+                crate::entities::transform::apply_standard_entity_transform(
                     self,
                     t,
                     |e, p1, p2| {
-                        let m = crate::scene::view::transform::reflection_about_xy_line(p1, p2);
+                        let m = crate::entities::transform::reflection_about_xy_line(p1, p2);
                         document::Entity::apply_transform(e, &m);
                     },
                 );

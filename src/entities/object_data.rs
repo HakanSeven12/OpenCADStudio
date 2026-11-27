@@ -11,7 +11,7 @@ use document::objects::{
 };
 use document::{Document, EntityType, Handle};
 
-use crate::scene::model::object::{PropSection, PropValue, Property};
+use crate::entities::object::{PropSection, PropValue, Property};
 
 #[derive(Debug, Clone, Default)]
 pub struct ObjectDataCache {

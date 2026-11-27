@@ -125,7 +125,8 @@ pub fn resolve(document: &Document, host: Handle) -> Option<String> {
 /// the events that update fields — 1 open, 2 save, 4 plot, 8 eTransmit,
 /// 16 regen.
 pub fn fieldeval(document: &Document) -> i32 {
-    crate::io::drawing_variable(document, "FIELDEVAL")
+    document
+        .drawing_variable("FIELDEVAL")
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(31)
 }

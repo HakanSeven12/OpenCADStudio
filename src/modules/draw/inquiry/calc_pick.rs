@@ -4,7 +4,7 @@
 use glam::DVec3;
 
 use super::dist::{measure, rubber_band};
-use crate::app::calc::{AngleMode, Value};
+use crate::calc::{AngleMode, Value};
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::entities::common::format_length;
 use crate::scene::model::wire_model::WireModel;

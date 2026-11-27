@@ -1,18 +1,11 @@
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use document::Handle;
 use glam::DVec3;
+pub use crate::command::requests::ConstructionOperation as Operation;
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &["BCONSTRUCTION"]
 });
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Operation {
-    Convert,
-    Revert,
-    Show,
-    Hide,
-}
 
 impl Operation {
     pub(crate) fn parse(value: &str) -> Option<Self> {

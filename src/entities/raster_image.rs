@@ -8,10 +8,10 @@ use crate::entities::common::{
 use crate::entities::text_support::{resolve_text_style, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{GlyphRun, RenderEntity, RenderObject, TextStroke};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
-use crate::scene::text::lff;
+use crate::display::render_entity::{GlyphRun, RenderEntity, RenderObject, TextStroke};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
+use crate::text::lff;
 
 // ── Shared geometry helpers ───────────────────────────────────────────────────
 
@@ -429,11 +429,11 @@ impl PropertyEditable for RasterImage {
 
 impl Transformable for RasterImage {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut entity.insertion_point.x,
                     &mut entity.insertion_point.y,
                     p1,
@@ -865,11 +865,11 @@ impl PropertyEditable for Wipeout {
 
 impl Transformable for Wipeout {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
-                crate::scene::view::transform::reflect_xy_point(
+                crate::entities::transform::reflect_xy_point(
                     &mut entity.insertion_point.x,
                     &mut entity.insertion_point.y,
                     p1,

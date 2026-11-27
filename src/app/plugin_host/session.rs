@@ -93,13 +93,13 @@ impl<'a> HostSession<'a> {
             other => {
                 let read = crate::app::quick_calc::sysvars(&self.app.tabs[self.tab]);
                 match (read.0)(&other.to_ascii_lowercase())? {
-                    crate::app::calc::SysVar::Number(value) => {
+                    crate::calc::SysVar::Number(value) => {
                         Some(HostSettingValue::Number(value))
                     }
-                    crate::app::calc::SysVar::Point(p) => {
+                    crate::calc::SysVar::Point(p) => {
                         Some(HostSettingValue::Text(format!("{},{},{}", p.x, p.y, p.z)))
                     }
-                    crate::app::calc::SysVar::Text => None,
+                    crate::calc::SysVar::Text => None,
                 }
             }
         }

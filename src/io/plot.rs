@@ -8,8 +8,8 @@
 
 use crate::io::plot_style::PlotStyleTable;
 use crate::scene::model::hatch_model::HatchModel;
-use crate::scene::model::image_model::ImageModel;
 use crate::scene::WireModel;
+pub use crate::scene::PlotImage;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -49,13 +49,6 @@ pub(crate) fn hatch_layer<'a>(
             .and_then(|handle| entity_layers.get(&handle))
             .map(String::as_str)
     })
-}
-
-/// Decoded image geometry plus inherited block/viewport clip boundaries.
-#[derive(Clone, Debug)]
-pub struct PlotImage {
-    pub image: ImageModel,
-    pub clips: Vec<Vec<[f64; 2]>>,
 }
 
 /// Image resolution preset from the plot dialog's Quality dropdown. Vector

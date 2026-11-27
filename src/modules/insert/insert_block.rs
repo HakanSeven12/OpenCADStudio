@@ -17,7 +17,6 @@ use document::types::Vector3;
 use document::EntityType;
 use glam::DVec3;
 
-use crate::app::settings::BlockInsertOptions;
 use crate::command::{CadCommand, CmdResult, DynField, InputKind, WorkingPlane};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
@@ -485,7 +484,7 @@ impl CadCommand for InsertBlockCommand {
                 .block_records
                 .get(&self.name)
                 .map_or(0, |record| record.units);
-            self.unit_factor = crate::app::properties::insert_unit_scale(
+            self.unit_factor = insert_unit_scale(
                 document.header.insertion_units,
                 units,
             )
@@ -1275,6 +1274,51 @@ impl InsertBlockCommand {
 inventory::submit!(crate::command::CommandRegistration {
     names: &["INSERT", "-INSERT"]
 });
+
+/// The Blocks palette's insertion options.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BlockInsertOptions {
+    pub insertion_point: bool,
+    pub scale: bool,
+    pub uniform: bool,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub rotation: bool,
+    pub angle: f64,
+    pub auto_placement: bool,
+    pub repeat: bool,
+    pub explode: bool,
+}
+
+impl Default for BlockInsertOptions {
+    fn default() -> Self {
+        Self {
+            insertion_point: true,
+            scale: false,
+            uniform: false,
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+            rotation: false,
+            angle: 0.0,
+            auto_placement: true,
+            repeat: false,
+            explode: false,
+        }
+    }
+}
+
+/// Unit-conversion scale for a new INSERT.
+pub(crate) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
+    let host_mm = crate::entities::units::insunits_to_mm(host_units)?;
+    let src_mm = crate::entities::units::insunits_to_mm(src_units)?;
+    let ratio = src_mm / host_mm;
+    if !ratio.is_finite() || (ratio - 1.0).abs() <= 1e-9 {
+        return None;
+    }
+    Some(ratio)
+}
 
 #[cfg(test)]
 mod cycling_tests {

@@ -2926,7 +2926,7 @@ fn a_created_dimension_is_a_complete_record_across_a_save() {
     );
 
     // The document prepared the way a worker save prepares it before writing.
-    let document = app.tabs[i].scene.document_for_save();
+    let document = app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
     let version = document.version;
     let prepared = crate::io::prepare_document_for_save(document, version);
     let bytes = document::DxfWriter::new(&prepared).write_to_vec().unwrap();
@@ -4366,7 +4366,7 @@ fn native_xref_host_source_edit_grip_undo_and_offline_save() {
         let reply = control(&mut app, json!({"op":op}));
         assert_eq!(reply["ok"], true, "{reply}");
     }
-    let prepared = app.tabs[i].scene.document_for_save();
+    let prepared = app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
     let bytes = ocs_save::write_external_for_edit(
         &prepared,
         ocs_save::external_format("ifccad").unwrap(),
@@ -4934,7 +4934,7 @@ fn xref_placement_all_owners_refresh_graphics_grips_history_and_offline_save() {
         assert_eq!(drawn(&app.tabs[i].scene.document, owner), moved);
         assert_eq!(bounds(&app.tabs[i].scene.document), moved_bounds);
     }
-    let prepared = app.tabs[i].scene.document_for_save();
+    let prepared = app.tabs[i].scene.document_for_save_with(crate::io::xref::strip_resolved_xref_content);
     let bytes = ocs_save::write_external_for_edit(
         &prepared,
         ocs_save::external_format("ifccad").unwrap(),

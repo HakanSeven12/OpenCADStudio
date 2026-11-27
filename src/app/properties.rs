@@ -6047,17 +6047,7 @@ fn dim_lineweight_label(dimlwd: i16) -> String {
 }
 
 pub(crate) use crate::entities::units::{insunits_name, insunits_to_mm};
-
-/// Unit-conversion scale for a new INSERT.
-pub(crate) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
-    let host_mm = insunits_to_mm(host_units)?;
-    let src_mm = insunits_to_mm(src_units)?;
-    let ratio = src_mm / host_mm;
-    if !ratio.is_finite() || (ratio - 1.0).abs() <= 1e-9 {
-        return None;
-    }
-    Some(ratio)
-}
+pub(crate) use crate::modules::insert::insert_block::insert_unit_scale;
 
 pub(in crate::app) fn format_unit_factor(factor: f64) -> String {
     let magnitude = factor.abs();

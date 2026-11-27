@@ -11,6 +11,8 @@ use glam::DVec3;
 use ocs_geom::geom2d::{
     bounded_faces, contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance,
 };
+pub use crate::entities::hatch::{HatchFill, HatchPrefs, HatchSettings};
+pub use crate::entities::hatch::GRADIENT_COLORS;
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -244,76 +246,6 @@ pub fn last_pattern_name(fallback: &str) -> String {
     }
 }
 
-/// The boundary method and draw mode HATCH and GRADIENT start with, kept in
-/// the profile.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct HatchPrefs {
-    /// 0 pick internal point, 1 select objects, 2 draw.
-    pub method: u8,
-    /// Draw mode Path (else Area).
-    pub path: bool,
-    /// Path width.
-    pub width: f64,
-    /// Path alignment: 0 center, 1 inside, 2 outside.
-    pub alignment: u8,
-}
-
-impl Default for HatchPrefs {
-    fn default() -> Self {
-        Self {
-            method: 0,
-            path: false,
-            width: 0.25,
-            alignment: 0,
-        }
-    }
-}
-
-/// What a hatch is filled with.
-#[derive(Clone, Debug, PartialEq)]
-pub enum HatchFill {
-    Solid,
-    Pattern(String),
-    /// Parallel lines `spacing` apart, crossed at 90° when `double`.
-    User {
-        spacing: f64,
-        double: bool,
-    },
-    Gradient(GradientKind, bool),
-}
-
-/// HATCH's settings as the Hatch panel shows and edits them.
-#[derive(Clone, Debug, PartialEq)]
-pub struct HatchSettings {
-    /// Solid, a named pattern, user-defined lines or a gradient.
-    pub fill: HatchFill,
-    pub angle_deg: f64,
-    pub scale: f64,
-    pub origin: [f64; 2],
-    /// 0 pick internal point, 1 select objects, 2 draw.
-    pub method: u8,
-    pub islands: document::entities::HatchStyleType,
-    pub associative: bool,
-    pub separate: bool,
-    pub keep_boundaries: bool,
-    pub gap_tolerance: f64,
-    /// `None`: the current colour.
-    pub color: Option<document::types::Color>,
-    /// `None`: no background colour.
-    pub background: Option<document::types::Color>,
-    /// `None`: the current layer.
-    pub layer: Option<String>,
-    /// `None`: the current transparency; else 0–90 percent.
-    pub transparency: Option<u8>,
-    /// GFCLR1 / GFCLR2.
-    pub gradient_colors: [document::types::Color; 2],
-    /// HPDRAWORDER: 0 none, 1 back, 2 front, 3 behind the boundary,
-    /// 4 in front of the boundary.
-    pub draw_order: u8,
-    /// HPANNOTATIVE.
-    pub annotative: bool,
-}
-
 /// The prompt HATCH is at besides its boundary method's own prompt.
 #[derive(Clone, Copy, PartialEq)]
 enum HatchStep {
@@ -391,13 +323,6 @@ fn parse_number(text: &str) -> Option<f64> {
         .ok()
         .filter(|value| value.is_finite())
 }
-
-/// The pattern a fill draws with, and its name.
-/// GFCLR1 / GFCLR2: the two colours a new gradient starts with.
-pub const GRADIENT_COLORS: [document::types::Color; 2] = [
-    document::types::Color::Index(5),
-    document::types::Color::Index(2),
-];
 
 /// A colour as the fill renders it.
 pub fn color_rgba(color: &document::types::Color, alpha: f32) -> [f32; 4] {

@@ -217,7 +217,7 @@ impl CadCommand for ModeCommand {
         "SETBYLAYERMODE"
     }
     fn prompt(&self) -> String {
-        crate::ui::command_line::value_prompt("SETBYLAYERMODE", &mode())
+        crate::command::prompt::value_prompt("SETBYLAYERMODE", &mode())
     }
     fn wants_text_input(&self) -> bool {
         true

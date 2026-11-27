@@ -23,6 +23,7 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
 use crate::modules::IconKind;
+use crate::scene::model::pdf_password;
 use crate::scene::model::wire_model::WireModel;
 
 pub const ICON: IconKind =
@@ -286,7 +287,7 @@ impl PdfAttachCommand {
         }
         let mut notice = None;
         if self.kind == UnderlayType::Pdf {
-            match crate::scene::model::pdf_password::prompt_gate(&path, text, true) {
+            match prompt_gate(&path, text, true) {
                 Ok(n) => notice = n,
                 Err(ask) => return ask,
             }
@@ -473,6 +474,28 @@ impl PdfAttachCommand {
         let [x0, y0, x1, y1] = self.rect;
         let corners = [at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1), at(x0, y0)];
         corners.iter().map(|p| p.to_array()).collect()
+    }
+}
+
+/// A file prompt's answer for `path` (typed as `input`): the password
+/// request, or the notice to print once the file is read. `attach`: document
+/// access is enough and cancelling the window prints that the file is
+/// encrypted; otherwise owner access is needed.
+fn prompt_gate(
+    path: &str,
+    input: &str,
+    attach: bool,
+) -> Result<Option<String>, CmdResult> {
+    match pdf_password::gate(path, !attach) {
+        pdf_password::Gate::Open => Ok(None),
+        pdf_password::Gate::Remembered => Ok(Some(pdf_password::remembered_notice(path))),
+        pdf_password::Gate::Ask { stage, remembered } => Err(CmdResult::PdfPassword {
+            path: path.to_string(),
+            input: input.to_string(),
+            stage,
+            remembered,
+            attach,
+        }),
     }
 }
 

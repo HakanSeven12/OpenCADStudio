@@ -24,6 +24,7 @@ use glam::DVec3;
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
+pub(crate) use crate::entities::curve::{held_bulge, stretch_arc_endpoints};
 
 // ── Stretching one entity ──────────────────────────────────────────────────
 
@@ -346,31 +347,6 @@ pub(crate) fn stretch_entity_except(
     stretched
 }
 
-/// The bulge of the segment from vertex `k` once its ends moved from
-/// `before` to `after`: the arc keeps its height, bulge · chord / 2.
-pub(crate) fn held_bulge(
-    bulge: f64,
-    before: &[[f64; 2]],
-    after: &[[f64; 2]],
-    k: usize,
-    closed: bool,
-) -> f64 {
-    let next = if k + 1 < before.len() {
-        k + 1
-    } else if closed {
-        0
-    } else {
-        return bulge;
-    };
-    let chord = |p: &[[f64; 2]]| (p[next][0] - p[k][0]).hypot(p[next][1] - p[k][1]);
-    let (old, new) = (chord(before), chord(after));
-    if bulge == 0.0 || old <= 1e-12 || new <= 1e-12 {
-        bulge
-    } else {
-        bulge * old / new
-    }
-}
-
 /// Stretch an arc by its ends: both in the window move it whole; one moves
 /// that end while the arc keeps its height over the new chord.
 fn stretch_arc(
@@ -385,58 +361,6 @@ fn stretch_arc(
         in_win(finish.x, finish.y),
         delta,
     )
-}
-
-/// Apply fixed endpoint membership, shared by ordinary and dynamic Stretch.
-pub(crate) fn stretch_arc_endpoints(
-    arc: &mut document::entities::Arc,
-    start_in: bool,
-    finish_in: bool,
-    delta: DVec3,
-) -> bool {
-    use document::types::{Matrix3, Vector3};
-    let ocs = Matrix3::arbitrary_axis(arc.normal);
-    let end = |angle: f64| {
-        Vector3::new(
-            arc.center.x + arc.radius * angle.cos(),
-            arc.center.y + arc.radius * angle.sin(),
-            arc.center.z,
-        )
-    };
-    let (start, finish) = (end(arc.start_angle), end(arc.end_angle));
-    if !start_in && !finish_in {
-        return false;
-    }
-    let local = ocs.transpose() * Vector3::new(delta.x, delta.y, delta.z);
-    if start_in && finish_in {
-        arc.center = arc.center + local;
-        return true;
-    }
-    let sweep = (arc.end_angle - arc.start_angle).rem_euclid(std::f64::consts::TAU);
-    let shift = |p: Vector3, moved: bool| if moved { p + local } else { p };
-    let (a, b) = (shift(start, start_in), shift(finish, finish_in));
-    let old_chord = (finish.x - start.x).hypot(finish.y - start.y);
-    let new_chord = (b.x - a.x).hypot(b.y - a.y);
-    if old_chord <= 1e-12 || new_chord <= 1e-12 {
-        return false;
-    }
-    let bulge = (sweep / 4.0).tan() * old_chord / new_chord;
-    // The arc through `a` and `b` with that bulge, counter-clockwise from
-    // `a`: its centre sits off the chord's midpoint by the apothem.
-    let sweep = 4.0 * bulge.atan();
-    let radius = new_chord / (2.0 * (sweep / 2.0).sin());
-    let apothem = radius * (sweep / 2.0).cos();
-    let (ux, uy) = ((b.x - a.x) / new_chord, (b.y - a.y) / new_chord);
-    let centre = Vector3::new(
-        (a.x + b.x) / 2.0 - uy * apothem,
-        (a.y + b.y) / 2.0 + ux * apothem,
-        arc.center.z,
-    );
-    arc.center = centre;
-    arc.radius = radius.abs();
-    arc.start_angle = (a.y - centre.y).atan2(a.x - centre.x);
-    arc.end_angle = (b.y - centre.y).atan2(b.x - centre.x);
-    true
 }
 
 // ── Ribbon definition ──────────────────────────────────────────────────────

@@ -11,8 +11,8 @@ use crate::entities::transform::EntityTransform;
 
 use crate::scene::cache::block_cache;
 use crate::scene::convert::tessellate;
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::WireModel;
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::WireModel;
 use crate::scene::view::render;
 
 /// Grip ids from here up address the INSERT's attributes — `BASE + i` is
@@ -43,7 +43,7 @@ pub(crate) fn unscale_attribute_grip(
     let block_scale = insert_attribute_block_scale(
         insert,
         annotation_scale,
-        crate::scene::BlockScalePolicy::FromInsert,
+        BlockScalePolicy::FromInsert,
     );
     if (block_scale - 1.0).abs() <= 1.0e-6 {
         return apply;
@@ -81,9 +81,9 @@ fn attribute_is_render_visible(
 fn insert_attribute_block_scale(
     insert: &Insert,
     annotation_scale: f32,
-    scale_policy: crate::scene::BlockScalePolicy,
+    scale_policy: BlockScalePolicy,
 ) -> f64 {
-    if scale_policy == crate::scene::BlockScalePolicy::FromInsert
+    if scale_policy == BlockScalePolicy::FromInsert
         && insert
             .common
             .extended_data
@@ -165,7 +165,7 @@ pub(crate) fn visible_attribute_grips(
     let block_scale = insert_attribute_block_scale(
         insert,
         annotation_scale,
-        crate::scene::BlockScalePolicy::FromInsert,
+        BlockScalePolicy::FromInsert,
     );
     out.extend(
         insert
@@ -319,7 +319,7 @@ fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(ins, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(ins, t, |entity, p1, p2| {
         let dx = p2.x - p1.x;
         let dy = p2.y - p1.y;
         let len = (dx * dx + dy * dy).sqrt();
@@ -347,7 +347,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
 crate::impl_entity_basics!(Insert);
 
 impl crate::entities::traits::FallbackTess for Insert {
-    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::display::tess_util::FallbackGeometry {
         // `insert_point` is in the OCS of `normal`.
         let w = Matrix3::arbitrary_axis(self.normal) * self.insert_point;
         let (ipx, ipy, ipz) = (w.x, w.y, w.z);
@@ -361,7 +361,7 @@ impl crate::entities::traits::FallbackTess for Insert {
         ];
         (
             pts,
-            vec![(ip, crate::scene::model::wire_model::SnapHint::Insertion)],
+            vec![(ip, crate::display::wire_model::SnapHint::Insertion)],
             vec![],
             vec![],
         )
@@ -372,7 +372,7 @@ pub(crate) fn insert_attribute_entities(
     insert: &document::entities::Insert,
     annotation_scale: f32,
     annotation_scale_handle: Option<Handle>,
-    scale_policy: crate::scene::BlockScalePolicy,
+    scale_policy: BlockScalePolicy,
 ) -> Vec<EntityType> {
     let visibility = document.header.attribute_visibility;
     if visibility == 0 || insert.attributes.is_empty() {
@@ -424,7 +424,7 @@ pub(crate) fn append_insert_attribute_wires(
         ins,
         anno_scale,
         annotation_scale_handle,
-        crate::scene::BlockScalePolicy::FromInsert,
+        BlockScalePolicy::FromInsert,
     );
     if attributes.is_empty() {
         return;
@@ -435,7 +435,7 @@ pub(crate) fn append_insert_attribute_wires(
             ins,
             offset,
             anno_scale,
-            crate::scene::BlockScalePolicy::FromInsert,
+            BlockScalePolicy::FromInsert,
         );
         for source in &attributes {
             let mut attr_entity = source.clone();
@@ -513,12 +513,26 @@ pub(crate) fn append_insert_attribute_wires(
                 w.aabb = sub_aabb;
                 w.plot_visible &= attr_plottable;
                 // Over every member of the block, its wipeouts included.
-                w.depth_override = Some(crate::scene::INSERT_ATTRIBUTE_RANK);
+                w.depth_override = Some(INSERT_ATTRIBUTE_RANK);
             }
             wires.extend(attr_wires);
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub enum BlockScalePolicy {
+    #[default]
+    FromInsert,
+    Applied,
+}
+
+/// The rank an insert's attributes are drawn at: `insert depth + rank * half`.
+/// Block members draw at their own ranks, all inside (0, 2) of the insert's
+/// half gap, so this one is above every member (an attribute is drawn after the
+/// block's contents, over its wipeout) and still under the next sibling, which
+/// starts two half gaps further on.
+pub(crate) const INSERT_ATTRIBUTE_RANK: f32 = 1.95;
 
 #[cfg(test)]
 mod tests {
@@ -725,7 +739,7 @@ mod tests {
             insert,
             1.0,
             Some(scale),
-            crate::scene::BlockScalePolicy::FromInsert,
+            BlockScalePolicy::FromInsert,
         );
         let [EntityType::AttributeEntity(attribute)] = painted.as_slice() else {
             panic!("expected one attribute, got {painted:?}");
@@ -881,7 +895,7 @@ mod tests {
                 insert,
                 1.0,
                 Some(scale),
-                crate::scene::BlockScalePolicy::FromInsert,
+                BlockScalePolicy::FromInsert,
             );
             let EntityType::AttributeEntity(attribute) = &entities[0] else {
                 panic!("expected ATTRIB")
@@ -938,7 +952,7 @@ mod tests {
             .document
             .add_entity(EntityType::Insert(insert.clone()))
             .unwrap();
-        crate::scene::view::dispatch::apply_geom_prop(
+        crate::entities::dispatch::apply_geom_prop(
             scene.document.get_entity_mut(handle).unwrap(),
             "ins_x",
             "8",
@@ -1006,7 +1020,7 @@ mod tests {
                 false,
                 [0.0, 0.0, 0.0, 1.0],
                 1.0,
-                crate::scene::BlockScalePolicy::FromInsert,
+                BlockScalePolicy::FromInsert,
                 false,
                 1.0,
             )
@@ -1053,7 +1067,7 @@ mod tests {
             &ins,
             1.0,
             None,
-            crate::scene::BlockScalePolicy::FromInsert,
+            BlockScalePolicy::FromInsert,
         )
         .into_iter()
         .map(|entity| match entity {

@@ -4,7 +4,7 @@ pub fn tool() -> ToolDef {
     ToolDef {
         id: "FILESPALETTE",
         label: "Files",
-        icon: IconKind::Svg(crate::ui::icons::FOLDER_TREE),
+        icon: IconKind::Svg(crate::icon_assets::FOLDER_TREE),
         event: ModuleEvent::Command("FILESPALETTE".to_string()),
     }
 }

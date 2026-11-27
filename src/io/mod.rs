@@ -11,13 +11,13 @@ pub mod edit_lock;
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.
 pub mod brep_build;
-pub mod crs;
+pub use crate::catalog::crs;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod dsd;
 pub mod dwf_export;
 pub mod fbx;
 pub mod file_association;
-pub mod font_repo;
+pub use crate::text::font_repo;
 pub(crate) mod fs_access;
 pub mod geopdf;
 pub mod geopdf_export;
@@ -26,12 +26,12 @@ pub mod gltf;
 pub mod iges_import;
 pub mod iges_surfaces;
 pub mod line_read;
-pub mod linetypes;
+pub use crate::catalog::linetypes;
 pub mod model_import;
 pub mod obj;
 pub mod ole_embed;
-pub mod paper_catalog;
-pub mod patterns;
+pub use crate::catalog::paper_catalog;
+pub use crate::catalog::patterns;
 pub mod pdf_compact;
 pub mod pdf_export;
 #[cfg(not(target_arch = "wasm32"))]
@@ -39,7 +39,7 @@ pub mod pdf_publish;
 pub mod picture_import;
 pub mod plot;
 pub mod plot_device;
-pub mod plot_style;
+pub use crate::catalog::plot_style;
 pub mod print_to_printer;
 pub mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,7 +56,7 @@ pub mod thumbnail;
 pub(crate) mod transmit;
 pub(crate) mod transmit_zip;
 pub mod update_check;
-pub mod visual_styles;
+pub use crate::catalog::visual_styles;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_recent;
 pub mod wmf_import;
@@ -543,7 +543,7 @@ async fn open_path_with_phase_attempt(
                                 &path2,
                                 Some(parser_progress),
                                 &attempt,
-                                crate::cli::low_memory_viewing(),
+                                crate::config::low_memory_viewing(),
                             )?,
                             None,
                         )
@@ -1161,14 +1161,7 @@ fn sniff_dwg_or_dxf_bytes(bytes: &[u8]) -> &'static str {
     }
 }
 
-/// The folder of the drawing `doc` was read from, where resources stored
-/// relative to it are looked up first.
-pub(crate) fn drawing_dir(doc: &Document) -> Option<&Path> {
-    doc.source_path
-        .as_deref()
-        .map(Path::new)
-        .and_then(Path::parent)
-}
+pub(crate) use crate::entities::common::drawing_dir;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_file(path: &Path) -> Result<Document, String> {
@@ -1786,32 +1779,7 @@ fn resolve_raster_image_paths(doc: &mut Document, base_dir: Option<&Path>) {
     }
 }
 
-/// Resolve a (possibly foreign / absolute) image path to an existing file:
-/// as stored, then relative to the drawing folder, then just the file name
-/// next to the drawing.
-pub(crate) fn resolve_image_file(raw: &str, base_dir: Option<&Path>) -> Option<String> {
-    if Path::new(raw).is_file() {
-        return Some(raw.to_string());
-    }
-    let base_dir = base_dir?;
-    // A relative path written on Windows (`.\images\a.tif`) keeps its
-    // backslashes on other systems, where they are not separators.
-    let relative = if cfg!(windows) {
-        std::borrow::Cow::Borrowed(raw)
-    } else {
-        std::borrow::Cow::Owned(raw.replace('\\', "/"))
-    };
-    let joined = base_dir.join(&*relative);
-    if joined.is_file() {
-        return Some(joined.to_string_lossy().into_owned());
-    }
-    let name = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
-    let cand = base_dir.join(name);
-    if cand.is_file() {
-        return Some(cand.to_string_lossy().into_owned());
-    }
-    None
-}
+pub(crate) use crate::paths::resolve_image_file;
 
 // ── Save ──────────────────────────────────────────────────────────────────
 
@@ -2146,6 +2114,8 @@ mod open_phase_tests;
 
 mod backup;
 pub use backup::write_backup;
+pub(crate) use crate::scene::drawing_vars::{drawing_variable, set_drawing_variable};
+pub use crate::scene::drawing_vars::{saved_active_layout, set_saved_active_layout};
 
 /// Structured native-save failure. The UI needs the OS error category after
 /// the worker completes so file-sharing violations can offer recovery actions
@@ -2924,7 +2894,7 @@ where
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
     let dimensions_started = iced::time::Instant::now();
-    crate::modules::draw::modify::explode::bake_dimension_blocks(&mut doc);
+    crate::scene::explode::bake_dimension_blocks(&mut doc);
     let dimensions_ms = dimensions_started.elapsed().as_secs_f64() * 1000.0;
     let temp_path = save_temp_path(path);
     let ext = temp_path
@@ -3305,7 +3275,7 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
     sync_current_styles_on_save(&mut doc);
     let styles_ms = crate::perf::elapsed_ms(styles_started);
     let dimensions_started = perf.then(iced::time::Instant::now);
-    crate::modules::draw::modify::explode::bake_dimension_blocks(&mut doc);
+    crate::scene::explode::bake_dimension_blocks(&mut doc);
     let dimensions_ms = crate::perf::elapsed_ms(dimensions_started);
     let attributes_started = perf.then(iced::time::Instant::now);
     // The "block has attribute definitions" marker a DXF file writes for a
@@ -3598,11 +3568,6 @@ fn reflect_current_annotation_scale(doc: &mut Document) {
     doc.header.annotation_scale_value = value;
 }
 
-/// A system variable stored in the drawing's variable dictionary.
-pub(crate) fn drawing_variable(doc: &Document, name: &str) -> Option<String> {
-    doc.drawing_variable(name).map(str::to_string)
-}
-
 fn reflect_sketch_settings(doc: &mut Document) {
     let sketch_type = drawing_variable(doc, "SKPOLY")
         .and_then(|value| value.parse::<i16>().ok())
@@ -3629,14 +3594,6 @@ fn reflect_sketch_settings(doc: &mut Document) {
     };
 }
 
-/// Write a drawing variable, creating the variable dictionary and record when
-/// needed so new drawings preserve the value too.
-pub(crate) fn set_drawing_variable(doc: &mut Document, name: &str, value: &str) {
-    // The codec follows the header's root pointer; repair a stale one first.
-    crate::scene::annotative::root_named_dict_handle(doc);
-    doc.set_drawing_variable(name, value);
-}
-
 pub(crate) fn set_sketch_settings(
     doc: &mut Document,
     sketch_type: i16,
@@ -3660,22 +3617,6 @@ pub(crate) fn set_sketch_settings(
     set_drawing_variable(doc, "SKPOLY", &sketch_type.to_string());
     set_drawing_variable(doc, "SKETCHINC", &increment.to_string());
     set_drawing_variable(doc, "SKTOLERANCE", &tolerance.to_string());
-}
-
-/// The layout tab that was active when the drawing was saved — the `CTAB`
-/// system variable (stored in the variable dictionary as a `DICTIONARYVAR`).
-/// `None` when the file recorded no current tab.
-pub fn saved_active_layout(doc: &Document) -> Option<String> {
-    drawing_variable(doc, "CTAB").filter(|s| !s.is_empty())
-}
-
-/// Record `name` as the active layout tab (`CTAB`) so the next save round-trips
-/// which space was open. Updates the existing `CTAB` variable in place, or
-/// creates one under the root named-object dictionary when the drawing never
-/// carried it (e.g. a document authored here from scratch) — otherwise the exact
-/// paper layout would be lost and reopening fell back to the first paper tab.
-pub fn set_saved_active_layout(doc: &mut Document, name: &str) {
-    set_drawing_variable(doc, "CTAB", name);
 }
 
 /// Materialise the current-style choices into their format-specific storage

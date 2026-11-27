@@ -9,6 +9,7 @@ pub mod analysis;
 pub mod annotative;
 pub mod assoc_array;
 pub mod assoc_array_grips;
+pub mod auto_constrain;
 pub(crate) mod block_action_bars;
 pub(crate) mod block_actions;
 pub(crate) mod block_alignment;
@@ -26,13 +27,14 @@ pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
 pub mod block_visibility;
+pub mod bounds;
 pub(crate) mod bricscad_parameters;
 pub mod cache;
 pub mod compare;
 pub mod convert;
 pub mod creation_style;
 pub(crate) mod frame;
-pub(crate) mod hyperlink;
+pub(crate) use crate::entities::hyperlink;
 pub mod linetype_service;
 pub mod model;
 pub mod pick;
@@ -45,13 +47,6 @@ pub mod section_cull;
 pub mod sub_select;
 pub mod text;
 pub mod view;
-
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
-pub enum BlockScalePolicy {
-    #[default]
-    FromInsert,
-    Applied,
-}
 
 // Topic submodules split out of this root (each contributes `impl Scene`
 // blocks and/or free functions). Pure text-move from the original mod.rs.
@@ -93,9 +88,14 @@ pub use camera_ops::{add_background, copy_background, erase_background};
 pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
-pub(crate) mod centermark;
+mod center_marks;
+pub(crate) use crate::entities::centermark;
+pub mod clipboard;
 pub(crate) mod dimension_assoc;
 pub(crate) mod dimension_assoc_chain;
+pub mod drawing_vars;
+pub mod explode;
+pub(crate) mod mline_style;
 pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
@@ -160,6 +160,7 @@ pub mod viewport_ref;
 mod viewport_underlay_tests;
 pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;
+pub mod xref_info;
 mod parametric_solve;
 
 #[cfg(test)]
@@ -498,7 +499,7 @@ impl Scene {
                         extension_origin: None,
                         extension_dir: None,
                         viewport: None,
-                        source: Some(crate::command::DimensionAssociationSource::inferred(handle)),
+                        source: Some(crate::snap::DimensionAssociationSource::inferred(handle)),
                         secondary_source: None,
                         model_point: None,
                     },
@@ -919,13 +920,19 @@ fn mesh_interaction_aabb(set: &model::mesh_model::MeshLodSet) -> Option<[f64; 6]
     })
 }
 
+pub use entity::BlockObjectMode;
 pub use model::hatch_model::HatchModel;
+pub use preview::{AreaPreviewRegion, AreaPreviewSource};
 pub use model::image_model::ImageModel;
 pub use model::mesh_model::MeshLodSet;
 pub use model::object::{GripApply, GripDef};
 pub use model::wire_model::{WireGeom, WireModel};
 use pick::interaction_index::{InteractionCandidates, InteractionIndex, SnapQueryCategory};
+pub(crate) use parametric_solve::status::{display_color, normalize_color};
 pub use pick::selection_state::SelectionState;
+pub use project::PlotImage;
+pub use scale_list::ViewportLayers;
+pub(crate) use page_setup::NO_DEVICE_STORED_NAME;
 pub use pipeline::uniforms::Uniforms;
 pub use pipeline::viewcube::{
     hit_test, hit_test_cardinal, hover_id, CubeRegion, NudgeDir, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD,
@@ -951,6 +958,9 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+pub use crate::entities::insert::BlockScalePolicy;
+pub(crate) use crate::entities::insert::INSERT_ATTRIBUTE_RANK;
+pub use crate::entities::viewport::vp_effective_scale;
 
 /// Session-only object visibility used by ISOLATEOBJECTS / HIDEOBJECTS.
 ///
@@ -1450,13 +1460,6 @@ const DRAW_DEPTH_LABEL_SCALE: f32 = 1.0 / 1_073_741_824.0;
 // thousands of Adds before a full rebuild.
 const DRAW_DEPTH_EMPTY_BLOCK_STRIDE: i32 = 1 << 18;
 
-/// The rank an insert's attributes are drawn at: `insert depth + rank * half`.
-/// Block members draw at their own ranks, all inside (0, 2) of the insert's
-/// half gap, so this one is above every member (an attribute is drawn after the
-/// block's contents, over its wipeout) and still under the next sibling, which
-/// starts two half gaps further on.
-pub(crate) const INSERT_ATTRIBUTE_RANK: f32 = 1.95;
-
 /// Labels map into (0, 2): draw order only ever moves 2D geometry towards
 /// the camera. A negative bias pushed lines lying on a solid's face behind
 /// that face in shaded views (#3119); 0 stays the true depth of 3D geometry.
@@ -1610,22 +1613,6 @@ pub(crate) fn wire_gpu_patch_enabled() -> bool {
     true
 }
 
-/// Resolve a viewport's paper-to-model scale ratio from its two
-/// DXF-derived sources.
-///
-/// `view_height` is canonical. `custom_scale` is the fallback when it is
-/// missing or zero.
-#[inline]
-pub fn vp_effective_scale(custom_scale: f64, view_height: f64, vp_height: f64) -> f64 {
-    if view_height.abs() > 1e-9 {
-        return vp_height / view_height;
-    }
-    if custom_scale.abs() > 1e-9 {
-        return custom_scale;
-    }
-    1.0
-}
-
 /// A block name a user may assign: non-empty, no control characters, none of
 /// the symbol-table-reserved characters (`*` marks anonymous blocks, `|`
 /// xref-dependent ones; the rest are the DXF symbol-name exclusions).
@@ -1679,7 +1666,7 @@ pub struct DerivedCaches {
     pub object_data: crate::entities::object_data::ObjectDataCache,
     /// XREF resolution results produced by the loader worker. Keeping these in
     /// the open bundle prevents parsing and merging references on the UI thread.
-    pub xrefs: Vec<crate::io::xref::XrefInfo>,
+    pub xrefs: Vec<crate::scene::xref_info::XrefInfo>,
     /// Model wire set and its spatial interaction index, prepared on the loader
     /// thread. Installing these prevents the first visible frame from paying a
     /// whole-drawing tessellation/index build while the progress overlay freezes.
@@ -1723,7 +1710,7 @@ pub fn build_derived_caches_with_progress(
     build_derived_caches_impl(doc, Some(progress), material_base_dir)
 }
 
-fn build_derived_caches_impl(
+pub(crate) fn build_derived_caches_impl(
     doc: &Document,
     progress: Option<&(dyn Fn(u16) + Sync)>,
     material_base_dir: Option<&std::path::Path>,
@@ -3095,7 +3082,7 @@ pub struct Scene {
     /// The sheet's models split at the first content viewport's draw order.
     paper_sheet_split_cache: RefCell<paper::SheetSplitCache>,
     display_plot_style_cache:
-        RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
+        RefCell<HashMap<(String, String), Option<Arc<crate::catalog::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
     styled_hatch_cache: RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
     styled_wire_fill_cache: RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
@@ -4055,7 +4042,7 @@ impl Scene {
     /// The root drawing's geographic location (GEODATA), when it has one.
     /// Xref and paper-space GEODATA never become the scene CRS by handle order.
     pub(crate) fn geo_data(&self) -> Option<&document::objects::GeoData> {
-        crate::io::crs::model_space_geo_data(&self.document)
+        crate::catalog::crs::model_space_geo_data(&self.document)
     }
 
     pub(crate) fn refresh_object_data_cache(&mut self) {
@@ -4115,7 +4102,7 @@ impl Scene {
         key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
         // Loading a linetype does not move the block epoch, and a cache built
         // before the drawing had a complex one kept no path for its children.
-        key = key.rotate_left(13) ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
+        key = key.rotate_left(13) ^ crate::catalog::linetypes::defines_complex_lt(&self.document) as u64;
         let stale = {
             let cache = self.block_defn_cache.borrow();
             match cache.get(&key) {
@@ -4854,7 +4841,7 @@ impl Scene {
     /// active layout changes; the file otherwise always reopened in Model.
     pub fn sync_active_space_to_document(&mut self) {
         self.document.header.show_model_space = self.current_layout == "Model";
-        crate::io::set_saved_active_layout(&mut self.document, &self.current_layout);
+        crate::scene::drawing_vars::set_saved_active_layout(&mut self.document, &self.current_layout);
     }
 
     /// Record the entered viewport (or the sheet, in paper space) as the
@@ -6988,7 +6975,7 @@ impl Scene {
         )
     }
 
-    pub fn paper_plot_images(&self) -> Vec<crate::io::pdf_export::PlotImage> {
+    pub fn paper_plot_images(&self) -> Vec<crate::scene::project::PlotImage> {
         let scale = if self.current_layout == "Model" {
             self.displayed_annotation_scale_handle()
         } else {
@@ -7012,7 +6999,7 @@ impl Scene {
         all_visible: bool,
         viewport: Option<Handle>,
         plotting: bool,
-    ) -> Vec<crate::io::pdf_export::PlotImage> {
+    ) -> Vec<crate::scene::project::PlotImage> {
         self.collect_images(
             target_block,
             frozen,
@@ -7020,7 +7007,7 @@ impl Scene {
             all_visible,
             viewport,
             plotting,
-            |image, context| crate::io::pdf_export::PlotImage {
+            |image, context| crate::scene::project::PlotImage {
                 image,
                 clips: context.clips.clone(),
             },
@@ -8607,7 +8594,7 @@ impl Scene {
     pub fn native_edit_disabled(&self, handle: Handle) -> bool {
         self.document
             .get_entity(handle)
-            .is_some_and(crate::plugin::entity_labels::native_edit_disabled)
+            .is_some_and(crate::entities::owner_stamp::native_edit_disabled)
     }
 
     /// Insert or remove `handle` in the scene-scoped designation set,
@@ -12591,7 +12578,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         index.signatures.reserve(self.document.entity_count());
         let mut normalized_layers: HashMap<&str, String> = HashMap::default();
         let mut complex_linetypes: HashMap<&str, bool> = HashMap::default();
-        let defines_complex = crate::io::linetypes::defines_complex_lt(&self.document);
+        let defines_complex = crate::catalog::linetypes::defines_complex_lt(&self.document);
         for entity in self.document.entities() {
             let common = entity.common();
             let owner = if common.owner_handle.is_null() {
@@ -12655,7 +12642,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             // changing the scale has to re-tessellate it like annotative content.
             let mut is_complex = |name| {
                 *complex_linetypes.entry(name).or_insert_with(|| {
-                    crate::io::linetypes::resolve_complex_lt(&self.document, name).is_some()
+                    crate::catalog::linetypes::resolve_complex_lt(&self.document, name).is_some()
                 })
             };
             let lt_name = view::render::linetype_name_for_viewport(&self.document, entity, None);

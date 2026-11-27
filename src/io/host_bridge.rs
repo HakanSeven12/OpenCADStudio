@@ -351,6 +351,17 @@ mod web {
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
+/// Tell the page that drawings have unsaved changes: the embedding page when
+/// there is one, else the browser's own leave-page warning.
+#[cfg(target_arch = "wasm32")]
+pub fn report_unsaved_changes(active: bool) {
+    if is_embed_mode() {
+        emit_dirty(active);
+    } else {
+        crate::sys::set_unsaved_changes_warning(active);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

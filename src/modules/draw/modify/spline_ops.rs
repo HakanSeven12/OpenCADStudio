@@ -12,8 +12,8 @@
 use document::entities::Spline;
 use document::types::Vector3;
 use document::Handle;
-use ocs_geom::geom2d::{NurbsCurve, Parameterization};
-use ocs_geom::space::Plane;
+use ocs_geom::geom2d::NurbsCurve;
+pub use crate::entities::spline::{spline_to_nurbs, spline_to_nurbs_on};
 
 /// The drawing plane a spline sits on.
 ///
@@ -29,111 +29,6 @@ fn elevation(spl: &Spline) -> f64 {
 }
 
 // ── Conversion ─────────────────────────────────────────────────────────────
-
-/// Convert a document `Spline` to a kernel `NurbsCurve`, weights included.
-///
-/// A SPLINE is stored one of two ways and both turn up: a control polygon the
-/// curve approaches, or fit points it must pass through with optional end
-/// tangents. Control points win when they describe a curve; otherwise the fit
-/// points are interpolated into one, so a fit-point spline is as editable as
-/// any other instead of failing every command that touches it.
-///
-/// `None` only when neither form has enough points to describe a curve.
-///
-/// Reads the stored points as XY directly, which is right for the splines the
-/// editing commands work on — they run in the world frame. A spline on an
-/// extruded plane needs [`spline_to_nurbs_on`] instead.
-pub fn spline_to_nurbs(spl: &Spline) -> Option<NurbsCurve> {
-    spline_to_nurbs_with(spl, |p| [p.x, p.y], |v| [v.x, v.y])
-}
-
-/// [`spline_to_nurbs`] with the points expressed in `plane`'s coordinates.
-///
-/// The two differ only for a spline whose extrusion normal is not +Z. Where
-/// it is, the projection reduces to reading X and Y, so this is the same
-/// conversion with the frame made explicit.
-///
-/// `None` additionally when the plane is degenerate, since there is then no
-/// coordinate to express the points in.
-pub fn spline_to_nurbs_on(spl: &Spline, plane: &Plane) -> Option<NurbsCurve> {
-    let point = |p: &Vector3| plane.project([p.x, p.y, p.z]).unwrap_or([p.x, p.y]);
-    let vector = |v: &Vector3| plane.project_vector([v.x, v.y, v.z]).unwrap_or([v.x, v.y]);
-    plane.normal()?;
-    spline_to_nurbs_with(spl, point, vector)
-}
-
-fn spline_to_nurbs_with(
-    spl: &Spline,
-    point: impl Fn(&Vector3) -> [f64; 2],
-    vector: impl Fn(&Vector3) -> [f64; 2],
-) -> Option<NurbsCurve> {
-    let degree = (spl.degree.max(1)) as usize;
-    let (control_points, knots, weights) =
-        if let Some((points, knots, weights)) = crate::entities::spline::unwrapped_periodic(spl) {
-            let projected = points
-                .into_iter()
-                .map(|[x, y, z]| point(&Vector3::new(x, y, z)))
-                .collect();
-            (projected, knots, Some(weights))
-        } else {
-            (
-                spl.control_points.iter().map(&point).collect(),
-                spl.knots.clone(),
-                (!spl.weights.is_empty()).then(|| spl.weights.clone()),
-            )
-        };
-
-    if let Some(curve) = NurbsCurve::new(degree, control_points, knots, weights) {
-        return Some(curve);
-    }
-
-    // No usable control polygon, so this is a fit-point spline.
-    if spl.fit_tolerance > 0.0 && !spl.flags.periodic {
-        // Fitted within a tolerance: the shared spatial fit, read in the
-        // plane. Projecting the control points projects the curve.
-        let curve = crate::entities::spline::fit_nurbs3(spl)?;
-        let projected = curve
-            .control_points()
-            .iter()
-            .map(|p| point(&Vector3::new(p[0], p[1], p[2])))
-            .collect();
-        return NurbsCurve::new(
-            curve.degree(),
-            projected,
-            curve.knots().to_vec(),
-            Some(curve.weights().to_vec()),
-        );
-    }
-    let mut fit: Vec<[f64; 2]> = spl.fit_points.iter().map(&point).collect();
-    let parameterization = match spl.knot_parameterization {
-        2 => Parameterization::Uniform,
-        1 => Parameterization::Centripetal,
-        _ => Parameterization::Chord,
-    };
-    if spl.flags.periodic {
-        return NurbsCurve::interpolate_periodic(&fit, parameterization);
-    }
-    if spl.flags.closed {
-        // The interpolation is a clamped solve and does not model a wrap, so
-        // a closed spline came back as an open curve that never returned to
-        // its start — and a TRIM against it then cut nothing along the seam.
-        // Repeating the first point closes it. The seam is C¹ rather than the
-        // C² the rest of the curve has, which is the honest limit of a
-        // clamped solve; the alternative was a curve with a gap in it.
-        if let (Some(&first), Some(&last)) = (fit.first(), fit.last()) {
-            if first != last {
-                fit.push(first);
-            }
-        }
-    }
-    let tangent = |v: &Vector3| {
-        let flat = vector(v);
-        (flat[0] * flat[0] + flat[1] * flat[1] > 1e-18).then_some(flat)
-    };
-    let start_tangent = tangent(&spl.begin_tangent);
-    let end_tangent = tangent(&spl.end_tangent);
-    NurbsCurve::interpolate(&fit, start_tangent, end_tangent, parameterization)
-}
 
 /// Rebuild a document `Spline` from a kernel curve.
 ///

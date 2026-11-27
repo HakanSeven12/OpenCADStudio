@@ -9,7 +9,7 @@ use glam::DVec3;
 use iced::{Element, Task};
 
 use super::{DocumentTab, Message, OpenCADStudio};
-use crate::app::calc::{CalcContext, SysVar, SysVars};
+use crate::calc::{CalcContext, SysVar, SysVars};
 use crate::command::CadCommand;
 use crate::modules::draw::inquiry::calc_pick::{CalcPickCommand, PickKind};
 use crate::ui::dock::PanelId;
@@ -149,8 +149,8 @@ impl OpenCADStudio {
     /// embedded-expression evaluation every typed field shares.
     pub(in crate::app) fn property_expression_value(&self, raw: &str) -> String {
         if crate::app::expr_eval::eval_number(raw.trim()).is_none() {
-            if let Ok(crate::app::calc::Value::Number(n)) =
-                crate::app::calc::value_of(raw, &self.quick_calc_context())
+            if let Ok(crate::calc::Value::Number(n)) =
+                crate::calc::value_of(raw, &self.quick_calc_context())
             {
                 return format!("{n}");
             }
@@ -483,7 +483,7 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::calc::Value;
+    use crate::calc::Value;
     use crate::ui::window::quick_calc::{Flyout, KeypadMode, MemoryOp};
 
     /// A millimetre drawing with the pallet open.

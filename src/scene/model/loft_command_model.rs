@@ -1,7 +1,8 @@
 //! LOFT command/history integration. Geometry and validation live in the kernel.
 
 use super::sweep_model::embedded_path;
-use crate::command::{ExtrudeMode, LoftOptions, LoftSectionSelection};
+
+use crate::scene::model::sweep_model::ExtrudeMode;
 use document::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
 use document::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
 use document::{EntityType, Handle};
@@ -153,4 +154,34 @@ pub fn surface_entity(record: &SolidHistoryLoft) -> EntityType {
         path_curve: None,
     };
     EntityType::Surface(Box::new(surface))
+}
+
+/// Construction parameters shared by the LOFT command and its history.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoftOptions {
+    /// Ruled, Smooth, First normal, Last normal, Ends normal, All normal,
+    /// or Use draft angles, respectively.
+    pub normals: i32,
+    pub start_draft_angle: f64,
+    pub end_draft_angle: f64,
+    pub start_magnitude: f64,
+    pub end_magnitude: f64,
+    /// Point-end continuity: G0 (0) or G1 (1).
+    pub start_continuity: i32,
+    pub end_continuity: i32,
+    /// Positive point-end bulge factors; independent of draft magnitudes.
+    pub start_bulge: f64,
+    pub end_bulge: f64,
+    pub closed: bool,
+    pub periodic: bool,
+    pub align_direction: bool,
+}
+
+/// Ordered cross-sections used by LOFT creation, validation and preview.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoftSectionSelection {
+    Entity(Handle),
+    Point(glam::DVec3),
+    /// Connected source edges forming one exact cross-section.
+    Join(Vec<Handle>),
 }

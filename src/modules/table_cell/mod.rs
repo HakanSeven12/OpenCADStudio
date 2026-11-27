@@ -34,7 +34,7 @@ impl CadModule for TableCellModule {
                     event: ModuleEvent::Command(id.to_string()),
                 })
             };
-            let alignments = crate::ui::ribbon::table_cell_alignments()
+            let alignments = table_cell_alignments()
                 .into_iter()
                 .map(|t| (t.id, t.label, t.icon))
                 .collect();
@@ -175,5 +175,38 @@ impl CadModule for TableCellModule {
                 },
             ]
         })
+    }
+}
+
+/// The nine cell alignments, top row first, left to right.
+pub fn table_cell_alignments() -> Vec<ToolDef> {
+    macro_rules! align {
+        ($code:literal, $label:literal, $icon:literal) => {
+            cell_tool(
+                concat!("_TCELLALIGN ", $code),
+                $label,
+                include_bytes!(concat!("../../../assets/icons/table_align_", $icon, ".svg")),
+            )
+        };
+    }
+    vec![
+        align!("TL", "Top\nLeft", "tl"),
+        align!("TC", "Top\nCenter", "tc"),
+        align!("TR", "Top\nRight", "tr"),
+        align!("ML", "Middle\nLeft", "ml"),
+        align!("MC", "Middle\nCenter", "mc"),
+        align!("MR", "Middle\nRight", "mr"),
+        align!("BL", "Bottom\nLeft", "bl"),
+        align!("BC", "Bottom\nCenter", "bc"),
+        align!("BR", "Bottom\nRight", "br"),
+    ]
+}
+
+fn cell_tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
+    ToolDef {
+        id,
+        label,
+        icon: IconKind::Svg(icon),
+        event: ModuleEvent::Command(id.to_string()),
     }
 }

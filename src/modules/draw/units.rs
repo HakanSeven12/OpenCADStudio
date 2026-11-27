@@ -1,3 +1,4 @@
+pub use crate::entities::units::conversion_factor;
 // Drawing units — three separate questions the word "units" runs together, and
 // the tables that answer them. (#668)
 //
@@ -124,16 +125,6 @@ pub fn code_for_keyword(name: &str) -> Option<i16> {
             label.eq_ignore_ascii_case(name) || short.eq_ignore_ascii_case(name)
         })
         .map(|&(code, ..)| code)
-}
-
-/// What to multiply this drawing's lengths by to say the same distances in
-/// `to`.
-///
-/// `None` when either side is unitless: a drawing that does not say what its
-/// numbers count cannot be converted, only relabelled.
-pub fn conversion_factor(from: i16, to: i16) -> Option<f64> {
-    let millimetres = crate::entities::units::insunits_to_mm;
-    Some(millimetres(from)? / millimetres(to)?)
 }
 
 /// Handles of everything that lives in model space.

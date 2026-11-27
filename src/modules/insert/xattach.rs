@@ -23,6 +23,7 @@ use crate::io::xref_model::{normalize_lexical, Pathtype};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
+pub use crate::command::requests::XrefAttachRequest;
 
 pub fn tool() -> ToolDef {
     ToolDef {
@@ -31,15 +32,6 @@ pub fn tool() -> ToolDef {
         icon: IconKind::Svg(include_bytes!("../../../assets/icons/blocks/insert.svg")),
         event: ModuleEvent::Command("XATTACH".to_string()),
     }
-}
-
-/// What to attach and how the reference is stored.
-#[derive(Debug, Clone, PartialEq)]
-pub struct XrefAttachRequest {
-    /// The drawing file as chosen (absolute).
-    pub path: String,
-    pub overlay: bool,
-    pub path_type: Pathtype,
 }
 
 /// Placement values fixed before the command starts; `None` = on-screen.

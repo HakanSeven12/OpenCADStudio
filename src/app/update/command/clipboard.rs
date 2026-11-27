@@ -175,8 +175,11 @@ impl OpenCADStudio {
             Task::perform(
                 async {
                     let text = crate::sys::read_clipboard_text().await;
-                    let picture = crate::sys::read_clipboard_image()
-                        .await
+                    let picture = crate::sys::read_clipboard_image(
+                        crate::scene::model::image_model::has_source,
+                        crate::scene::model::image_model::register_source,
+                    )
+                    .await
                         .and_then(|(name, bytes)| EmbeddedImage::from_bytes(name, bytes).ok());
                     (text, picture)
                 },
@@ -256,7 +259,10 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         {
             Task::perform(
-                crate::sys::read_clipboard_image(),
+                crate::sys::read_clipboard_image(
+                    crate::scene::model::image_model::has_source,
+                    crate::scene::model::image_model::register_source,
+                ),
                 Message::SystemClipboardPasteImage,
             )
         }

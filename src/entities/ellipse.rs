@@ -13,9 +13,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::RenderConvertible;
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
-use crate::scene::model::wire_model::TangentGeom;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection};
+use crate::display::wire_model::TangentGeom;
 
 fn to_render(ell: &Ellipse) -> RenderEntity {
     // ELLIPSE is one of the few WCS entities in DXF: `center` (code 10) and
@@ -354,11 +354,11 @@ fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
 fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
     // The codec maps the whole ellipse — ratio, principal axes and arc
     // parameters — under rotate, scale, affine and mirror alike.
-    crate::scene::view::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
         let normal = entity.normal;
         document::Entity::apply_mirror(
             entity,
-            &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
+            &crate::entities::transform::reflection_about_xy_line(p1, p2),
         );
         // The codec turns the normal over with the reflection. MIRROR keeps it
         // facing the way it did, which traces the same curve with the

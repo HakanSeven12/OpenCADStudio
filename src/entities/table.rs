@@ -9,11 +9,12 @@ use crate::entities::text_support::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
-use crate::scene::view::transform;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
+use crate::entities::transform;
 use crate::t;
+use glam::DVec3;
 
 /// Largest cell grid (rows × columns) the property editor may grow a
 /// table to. Row/column counts are iteration counts for
@@ -2057,9 +2058,9 @@ pub fn tessellate_table(
     // annotative table renders at the current annotation scale. 1.0 for a
     // non-annotative table (its geometry is already at model size).
     anno_scale: f32,
-) -> Vec<crate::scene::model::wire_model::WireModel> {
-    use crate::scene::convert::tess_util::aci_to_rgba;
-    use crate::scene::model::wire_model::WireModel;
+) -> Vec<crate::display::wire_model::WireModel> {
+    use crate::display::tess_util::aci_to_rgba;
+    use crate::display::wire_model::WireModel;
     use document::types::Color;
     use rustc_hash::FxHashMap as HashMap;
 
@@ -2143,8 +2144,8 @@ pub fn tessellate_table(
     let mut field_fills: Vec<[f32; 3]> = Vec::new();
     // SDF cell text: glyph quads (per-vertex coloured) collected across all
     // cells; emitted as one text-carrying wire at the end.
-    let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
-    let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> = Vec::new();
+    let mut text_verts: Vec<crate::display::text_vertex::TextVertex> = Vec::new();
+    let mut searchable: Vec<crate::display::wire_model::SearchableTextRun> = Vec::new();
     #[allow(clippy::type_complexity)]
     let mut borders: HashMap<([u8; 4], u32, u64), ([f32; 4], f32, Vec<[f32; 3]>)> =
         HashMap::default();
@@ -2759,12 +2760,12 @@ pub fn tessellate_table(
                     } else {
                         entity_color
                     };
-                    if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
+                    if let Ok(mut atlas) = crate::text::sdf_atlas::text_atlas().lock() {
                         for stroke in &layout.strokes {
                             let Some(run) = &stroke.run else {
                                 continue;
                             };
-                            if crate::scene::text::web_font::requires_shaping(&run.text) {
+                            if crate::text::web_font::requires_shaping(&run.text) {
                                 if !stroke.fill_tris.is_empty() {
                                     let entry = fills
                                         .entry(key4(tcol))
@@ -2800,7 +2801,7 @@ pub fn tessellate_table(
                                 continue;
                             }
                             let (quads, pen_adv) =
-                                crate::scene::text::glyph_quads::layout_glyph_quads(
+                                crate::text::glyph_quads::layout_glyph_quads(
                                     &mut atlas,
                                     run.height,
                                     run.rotation,
@@ -2820,7 +2821,7 @@ pub fn tessellate_table(
                                 0.0,
                             );
                             {
-                                use crate::scene::model::wire_model::{
+                                use crate::display::wire_model::{
                                     clean_searchable_text, SearchableTextRun,
                                 };
                                 let visible = clean_searchable_text(&run.text);
@@ -2869,7 +2870,7 @@ pub fn tessellate_table(
                 aci: 0,
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
                     text_verts: Vec::new(),
@@ -2883,12 +2884,12 @@ pub fn tessellate_table(
                     // short low half as all-zero, so it draws at f32 precision
                     // (sub-metre error at UTM scale) — not a crash. Follow-up:
                     // double-single-split via points_to_ds to match emit_wire.
-                    surfaces: crate::scene::model::wire_model::WireSurfaces {
+                    surfaces: crate::display::wire_model::WireSurfaces {
                         fill_tris,
                         ..Default::default()
                     }
                     .into_optional(),
-                    ..crate::scene::WireGeom::default()
+                    ..crate::display::wire_model::WireGeom::default()
                 }),
                 ..Default::default()
             }
@@ -2981,8 +2982,8 @@ impl Grippable for Table {
     }
 
     /// The hover label says what the grip changes, in a few words.
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         let label = match grip_id {
             0 => "Move table",
             1 => "Table width",
@@ -5057,6 +5058,137 @@ pub fn table_indicator(
     Some(indicator)
 }
 
+/// The data types a cell can read as, in the window's order.
+pub const FORMAT_KINDS: [&str; 9] = [
+    "Angle",
+    "Currency",
+    "Date",
+    "Decimal Number",
+    "General",
+    "Percentage",
+    "Point",
+    "Text",
+    "Whole Number",
+];
+
+/// The cell (its merged owner) whose inside holds `point`, at least `margin`
+/// away from the cell's edges: a pick near a grid line takes the table, one
+/// inside a cell takes the cell.
+pub(crate) fn table_cell_inside(
+    table: &document::entities::Table,
+    table_style: Option<&document::objects::TableStyle>,
+    point: DVec3,
+    margin: f64,
+) -> Option<(usize, usize)> {
+    let hit = table_cell_at(table, table_style, point)?;
+    let (r0, c0, r1, c1) =
+        widen_to_merged(table, (hit.row, hit.column, hit.row, hit.column));
+    let horizontal = glam::DVec3::new(
+        table.horizontal_direction.x,
+        table.horizontal_direction.y,
+        table.horizontal_direction.z,
+    )
+    .normalize_or(glam::DVec3::X);
+    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
+        .normalize_or(glam::DVec3::Z);
+    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
+    if resolved_flow_up(table, table_style) {
+        down = -down;
+    }
+    let origin = glam::DVec3::new(
+        table.insertion_point.x,
+        table.insertion_point.y,
+        table.insertion_point.z,
+    );
+    let x = (point - origin).dot(horizontal);
+    let y = (point - origin).dot(down);
+    let left: f64 = table.columns[..c0].iter().map(|c| c.width).sum();
+    let right: f64 = left + table.columns[c0..=c1].iter().map(|c| c.width).sum::<f64>();
+    let top: f64 = table.rows[..r0].iter().map(|r| r.height).sum();
+    let bottom: f64 = top + table.rows[r0..=r1].iter().map(|r| r.height).sum::<f64>();
+    (x > left + margin && x < right - margin && y > top + margin && y < bottom - margin)
+        .then_some((r0, c0))
+}
+
+/// Resolve the table cell under `click_world`. Shared by the double-click
+/// shortcut and the TABLEDIT command so both agree on grid coordinates,
+/// flow direction and locked-cell detection. `table_style` is the style
+/// object the table references, when the caller has the document at hand;
+/// the table's embedded base style covers the common fallbacks.
+pub(crate) fn table_cell_at(
+    table: &document::entities::Table,
+    table_style: Option<&document::objects::TableStyle>,
+    click_world: DVec3,
+) -> Option<TableCellHit> {
+    let horizontal = glam::DVec3::new(
+        table.horizontal_direction.x,
+        table.horizontal_direction.y,
+        table.horizontal_direction.z,
+    )
+    .normalize_or(glam::DVec3::X);
+    let normal = glam::DVec3::new(table.normal.x, table.normal.y, table.normal.z)
+        .normalize_or(glam::DVec3::Z);
+    let mut down = horizontal.cross(normal).normalize_or(glam::DVec3::NEG_Y);
+    if resolved_flow_up(table, table_style) {
+        down = -down;
+    }
+    let origin = glam::DVec3::new(
+        table.insertion_point.x,
+        table.insertion_point.y,
+        table.insertion_point.z,
+    );
+    let relative = click_world - origin;
+    let x = relative.dot(horizontal);
+    let y = relative.dot(down);
+    if x < 0.0 || y < 0.0 {
+        return None;
+    }
+    let column = table
+        .columns
+        .iter()
+        .scan(0.0, |offset, column| {
+            *offset += column.width;
+            Some(*offset)
+        })
+        .position(|end| x <= end)?;
+    let row = table
+        .rows
+        .iter()
+        .scan(0.0, |offset, row| {
+            *offset += row.height;
+            Some(*offset)
+        })
+        .position(|end| y <= end)?;
+    // A merged cell is one cell: a pick anywhere inside its span edits the
+    // owner, never a hidden covered cell underneath it (the in-place editor
+    // already widens, and a scripted TABLEDIT must reach the same cell).
+    let (row, column, _, _) =
+        widen_to_merged(table, (row, column, row, column));
+    Some(TableCellHit {
+        row,
+        column,
+        locked: cell_locked(table, row, column),
+    })
+}
+
+/// A table cell resolved from a pick: grid coordinates plus whether its
+/// content is locked against editing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TableCellHit {
+    pub row: usize,
+    pub column: usize,
+    pub locked: bool,
+}
+
+/// True when the cell's content may not be edited (locked or read-only).
+pub(crate) fn cell_locked(table: &document::entities::Table, row: usize, column: usize) -> bool {
+    use document::entities::table::CellStateFlags;
+    table.cell(row, column).is_some_and(|cell| {
+        cell.state
+            .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5904,7 +6036,7 @@ pub fn cell_range_grips(table: &Table, range: (usize, usize, usize, usize)) -> V
     let at = |x: f64, y: f64| origin + horizontal * x + down * y;
     let (xm, ym) = ((x0 + x1) * 0.5, (y0 + y1) * 0.5);
     let mut fill = square_grip(CELL_GRIP_FILL, at(x1, y1));
-    fill.shape = crate::scene::model::object::GripShape::Diamond;
+    fill.shape = crate::entities::object::GripShape::Diamond;
     vec![
         square_grip(CELL_GRIP_LEFT, at(x0, ym)),
         square_grip(CELL_GRIP_RIGHT, at(x1, ym)),
@@ -6396,7 +6528,7 @@ pub(crate) fn cell_data_kind(table: &Table, row: usize, column: usize) -> Option
     let table_row = table.rows.get(row)?;
     let cell = table_row.cells.get(column)?;
     let kind_of = |data_type: i32, unit_type: i32| {
-        crate::ui::window::table_cell_dialog::FORMAT_KINDS
+        FORMAT_KINDS
             .iter()
             .position(|name| *name == cell_data_category(data_type, unit_type))
     };

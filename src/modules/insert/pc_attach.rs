@@ -17,26 +17,9 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::IconKind;
+pub use crate::command::requests::{AttachOptions, PointCloudPlacement};
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/pc_attach.svg"));
-
-/// What the Attach Point Cloud dialog settles before the prompts: the
-/// path to store, the switches, and the scale and rotation not left to
-/// the command line.
-#[derive(Clone, Debug)]
-pub struct AttachOptions {
-    /// The path stored as given (no path: the file name); None stores the
-    /// full path.
-    pub stored: Option<String>,
-    /// Stored relative to the drawing (once it has a file).
-    pub relative: bool,
-    /// Locked on attach; None follows POINTCLOUDLOCK.
-    pub locked: Option<bool>,
-    /// Zoom to the cloud once attached.
-    pub zoom: bool,
-    pub scale: Option<f64>,
-    pub rotation: Option<f64>,
-}
 
 impl Default for AttachOptions {
     fn default() -> Self {
@@ -51,16 +34,6 @@ impl Default for AttachOptions {
             rotation: None,
         }
     }
-}
-
-/// A point cloud to attach: the file, where and how it is placed.
-#[derive(Clone, Debug)]
-pub struct PointCloudPlacement {
-    pub path: PathBuf,
-    pub insertion: DVec3,
-    /// The placement's axes in the drawing, each as long as the scale.
-    pub axes: [DVec3; 3],
-    pub options: AttachOptions,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

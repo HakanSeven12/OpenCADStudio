@@ -1,6 +1,5 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
-use crate::command::{AreaPreviewRegion, AreaPreviewSource};
 use crate::scene::model::hatch_model::HatchPattern;
 
 pub(super) mod block_parameter;
@@ -708,6 +707,18 @@ impl Scene {
         }
         transform_preview_wires(out)
     }
+}
+
+#[derive(Clone)]
+pub struct AreaPreviewRegion {
+    pub source: AreaPreviewSource,
+    pub subtract: bool,
+}
+
+#[derive(Clone)]
+pub enum AreaPreviewSource {
+    Handles(Vec<Handle>),
+    Boundary(Vec<[f64; 2]>),
 }
 
 #[cfg(test)]

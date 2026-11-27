@@ -544,7 +544,7 @@ pub(crate) fn tessellate_dimension_inner(
                     line_weight_px: lw_ext,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
                         text_verts: Vec::new(),
@@ -553,7 +553,7 @@ pub(crate) fn tessellate_dimension_inner(
                         snap_pts: vec![],
                         tangent_geoms: vec![],
                         key_vertices: vec![],
-                        ..crate::scene::WireGeom::default()
+                        ..crate::display::wire_model::WireGeom::default()
                     }),
                     ..Default::default()
                 });
@@ -581,7 +581,7 @@ pub(crate) fn tessellate_dimension_inner(
                     line_weight_px: lw_ext,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
                         text_verts: Vec::new(),
@@ -590,7 +590,7 @@ pub(crate) fn tessellate_dimension_inner(
                         snap_pts: vec![],
                         tangent_geoms: vec![],
                         key_vertices: vec![],
-                        ..crate::scene::WireGeom::default()
+                        ..crate::display::wire_model::WireGeom::default()
                     }),
                     ..Default::default()
                 });
@@ -618,7 +618,7 @@ pub(crate) fn tessellate_dimension_inner(
                 line_weight_px: lw_ext,
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
                     text_verts: Vec::new(),
@@ -627,7 +627,7 @@ pub(crate) fn tessellate_dimension_inner(
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     key_vertices: vec![],
-                    ..crate::scene::WireGeom::default()
+                    ..crate::display::wire_model::WireGeom::default()
                 }),
                 ..Default::default()
             });
@@ -656,7 +656,7 @@ pub(crate) fn tessellate_dimension_inner(
         line_weight_px: lw_dim,
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        geom: std::sync::Arc::new(crate::scene::WireGeom {
+        geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
             text_verts: Vec::new(),
@@ -670,12 +670,12 @@ pub(crate) fn tessellate_dimension_inner(
             // all-zero, so it draws at f32 precision (sub-metre error at UTM scale)
             // — not a crash. Follow-up: double-single-split via points_to_ds to
             // match emit_wire's paired fill path.
-            surfaces: crate::scene::model::wire_model::WireSurfaces {
+            surfaces: crate::display::wire_model::WireSurfaces {
                 fill_tris: geom.arrow_fill,
                 ..Default::default()
             }
             .into_optional(),
-            ..crate::scene::WireGeom::default()
+            ..crate::display::wire_model::WireGeom::default()
         }),
         ..Default::default()
     });
@@ -733,7 +733,7 @@ pub(crate) fn tessellate_dimension_inner(
             line_weight_px: 1.0,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            geom: std::sync::Arc::new(crate::scene::WireGeom {
+            geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
                 text_verts: Vec::new(),
@@ -742,7 +742,7 @@ pub(crate) fn tessellate_dimension_inner(
                 snap_pts: vec![],
                 tangent_geoms: vec![],
                 key_vertices: vec![],
-                ..crate::scene::WireGeom::default()
+                ..crate::display::wire_model::WireGeom::default()
             }),
             ..Default::default()
         });
@@ -765,7 +765,7 @@ pub(crate) fn tessellate_dimension_inner(
                     // The background mask follows the canvas on screen and
                     // plots as the paper.
                     bg_adapt: (!selected && s.dimtfill == 1).then(|| {
-                        Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                        Box::new(crate::display::wire_model::BgAdaptInputs {
                             raw_color: fill_color,
                             canvas_color: true,
                             preserve_color: true,
@@ -792,7 +792,7 @@ pub(crate) fn tessellate_dimension_inner(
                     line_weight_px: 1.0,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
                         text_verts: Vec::new(),
@@ -806,12 +806,12 @@ pub(crate) fn tessellate_dimension_inner(
                         // short low half as all-zero, so it draws at f32 precision
                         // (sub-metre error at UTM scale) — not a crash. Follow-up:
                         // double-single-split via points_to_ds to match emit_wire.
-                        surfaces: crate::scene::model::wire_model::WireSurfaces {
+                        surfaces: crate::display::wire_model::WireSurfaces {
                             fill_tris: rect,
                             ..Default::default()
                         }
                         .into_optional(),
-                        ..crate::scene::WireGeom::default()
+                        ..crate::display::wire_model::WireGeom::default()
                     }),
                     ..Default::default()
                 });
@@ -855,7 +855,7 @@ pub(crate) fn tessellate_dimension_inner(
                 line_weight_px: 1.0,
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                geom: std::sync::Arc::new(crate::display::wire_model::WireGeom {
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
                     text_verts: Vec::new(),
@@ -864,7 +864,7 @@ pub(crate) fn tessellate_dimension_inner(
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     key_vertices: vec![],
-                    ..crate::scene::WireGeom::default()
+                    ..crate::display::wire_model::WireGeom::default()
                 }),
                 ..Default::default()
             });

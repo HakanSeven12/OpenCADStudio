@@ -3,13 +3,11 @@ use document::entities::Tolerance;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{
-    GlyphRun, RenderEntity, RenderObject, TextPlane, TextStroke,
-};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
-use crate::scene::text::lff;
-use crate::scene::view::transform;
+use crate::display::render_entity::{GlyphRun, RenderEntity, RenderObject, TextPlane, TextStroke};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
+use crate::text::lff;
+use crate::entities::transform;
 use crate::t;
 
 // ── GDT text parser ───────────────────────────────────────────────────────────
@@ -190,7 +188,7 @@ fn run_advance(text: &str, font: &str, height: f32, width_factor: f32, oblique: 
 /// Glyph geometry is authored against a 9-unit cap height, so a font's spacing
 /// scales with the character height like everything else.
 fn letter_spacing(font: &str, height: f32, width_factor: f32) -> f32 {
-    crate::scene::text::font_face::Face::resolve(font).letter_spacing() * height / 9.0
+    crate::text::font_face::Face::resolve(font).letter_spacing() * height / 9.0
         * width_factor
 }
 
@@ -426,7 +424,7 @@ fn frame_basis(tol: &Tolerance) -> (glam::DVec3, glam::DVec3) {
     let normal =
         glam::DVec3::new(tol.normal.x, tol.normal.y, tol.normal.z).normalize_or(glam::DVec3::Z);
     let direction = glam::DVec3::new(tol.direction.x, tol.direction.y, tol.direction.z);
-    let fallback = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z)).0;
+    let fallback = crate::entities::transform::ocs_axes((normal.x, normal.y, normal.z)).0;
     let fallback = glam::DVec3::new(fallback.0, fallback.1, fallback.2);
     let x_axis = (direction - normal * direction.dot(normal)).normalize_or(fallback);
     let y_axis = normal.cross(x_axis).normalize_or(glam::DVec3::Y);
@@ -467,14 +465,14 @@ impl RenderConvertible for Tolerance {
             index
                 .filter(|value| !matches!(value, 0 | 256))
                 .map(|value| {
-                    let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(
+                    let [red, green, blue, _] = crate::display::tess_util::aci_to_rgba(
                         &document::types::Color::from_index(value),
                     );
                     [red, green, blue]
                 })
         };
         let color_value = |color: &document::types::Color| {
-            let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(color);
+            let [red, green, blue, _] = crate::display::tess_util::aci_to_rgba(color);
             [red, green, blue]
         };
         let frame_color = if let Some(index) =
@@ -931,10 +929,10 @@ mod tests {
     /// literally named "gdt.shx", lands on it too, with no code of their own.
     #[test]
     fn the_symbol_font_is_reached_by_name_like_any_other() {
-        use crate::scene::text::font_face::Face;
+        use crate::text::font_face::Face;
         for name in ["gdt", "GDT", "gdt.shx"] {
             assert!(
-                crate::scene::text::lff::is_builtin(name),
+                crate::text::lff::is_builtin(name),
                 "{name:?} must resolve to the bundled symbol font"
             );
             let face = Face::resolve(name);
@@ -958,7 +956,7 @@ mod tests {
     /// must not be the letter m the text fonts draw.
     #[test]
     fn a_letter_in_the_symbol_font_is_a_symbol() {
-        use crate::scene::text::font_face::Face;
+        use crate::text::font_face::Face;
         let gdt = Face::resolve(SYMBOL_FONT);
         let txt = Face::resolve(TEXT_FONT);
         let mut differ = 0;

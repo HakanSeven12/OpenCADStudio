@@ -171,7 +171,7 @@ pub(crate) fn entity_boundary_source_on_plane(
     {
         // Heavy and 3D polylines are not single planar curves in entity_curve.
         // Their constituent edges still cut a hatch when they lie in its OCS.
-        crate::modules::draw::modify::explode::explode_polyline_segments(entity)
+        crate::scene::explode::explode_polyline_segments(entity)
             .iter()
             .flat_map(|piece| entity_curves_on_plane(piece, plane, tolerance))
             .collect()

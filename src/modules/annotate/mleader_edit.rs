@@ -16,6 +16,7 @@ use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
+pub use crate::command::requests::{MLeaderAlignMode, MLeaderCollectLayout};
 
 // ── MLEADEREDIT ───────────────────────────────────────────────────────────────
 
@@ -309,19 +310,6 @@ pub fn tool_align() -> ToolDef {
         icon: ICON_ALIGN,
         event: ModuleEvent::Command("MLEADERALIGN".to_string()),
     }
-}
-
-/// How MLEADERALIGN spaces the multileaders it lines up.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum MLeaderAlignMode {
-    /// Keep each content where it falls along the line (its projection).
-    UseCurrent,
-    /// Spread the contents evenly between two points.
-    Distribute,
-    /// Turn each leader's last segment parallel to the one aligned to.
-    Parallel,
-    /// Stack the contents along the line this far apart.
-    Spacing,
 }
 
 /// The align mode and spacing carry over to the next MLEADERALIGN.
@@ -624,17 +612,6 @@ pub fn tool_collect() -> ToolDef {
         icon: ICON_COLLECT,
         event: ModuleEvent::Command("MLEADERCOLLECT".to_string()),
     }
-}
-
-/// How MLEADERCOLLECT lays the collected blocks out.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum MLeaderCollectLayout {
-    Horizontal,
-    Vertical,
-    /// Rows no wider than the width (0: one row).
-    Wrap(f64),
-    /// Rows of this many blocks.
-    WrapNumber(u32),
 }
 
 /// The layout carries over to the next MLEADERCOLLECT.

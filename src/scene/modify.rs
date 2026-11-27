@@ -1010,60 +1010,7 @@ impl Scene {
     /// (LwPolyline / heavy 2D polyline) get one from the writer, so they need
     /// no fix-up here. Shared with the clipboard paste path. (#129)
     pub(crate) fn reset_clone_subhandles(doc: &mut document::Document, entity: &mut EntityType) {
-        match entity {
-            EntityType::Table(table) => {
-                // A table exclusively owns its anonymous picture block. The
-                // codec also resolves by name, so detach both references.
-                // A table drawn from its cells (no handle, the name kept)
-                // keeps the name as that mark: the scene gives the copy a
-                // block of its own and goes on drawing it from its cells.
-                let from_cells =
-                    table.block_record_handle.is_none() && !table.block_name.is_empty();
-                table.block_record_handle = None;
-                if !from_cells {
-                    table.block_name.clear();
-                }
-            }
-            EntityType::Insert(ins) => {
-                for att in ins.attributes.iter_mut() {
-                    att.common.handle = doc.allocate_handle();
-                    att.common.xdictionary_handle = None;
-                    // The text of a multiline attribute is an object of its
-                    // own inside the reference, so the copy needs a fresh
-                    // handle for it and its new attribute as owner.
-                    let owner = att.common.handle;
-                    if let Some(model) = &mut att.embedded_mtext {
-                        model.common.handle = doc.allocate_handle();
-                        model.common.owner_handle = owner;
-                    }
-                }
-                if ins.seqend_handle.is_some() {
-                    ins.seqend_handle = Some(doc.allocate_handle());
-                }
-            }
-            EntityType::Polyline3D(p) => {
-                for v in p.vertices.iter_mut() {
-                    v.handle = doc.allocate_handle();
-                }
-            }
-            EntityType::PolyfaceMesh(m) => {
-                for v in m.vertices.iter_mut() {
-                    v.common.handle = doc.allocate_handle();
-                }
-                for f in m.faces.iter_mut() {
-                    f.common.handle = doc.allocate_handle();
-                }
-                if m.seqend_handle.is_some() {
-                    m.seqend_handle = Some(doc.allocate_handle());
-                }
-            }
-            EntityType::PolygonMesh(m) => {
-                for v in m.vertices.iter_mut() {
-                    v.common.handle = doc.allocate_handle();
-                }
-            }
-            _ => {}
-        }
+        crate::entities::doc_edit::reset_clone_subhandles(doc, entity);
     }
 
     /// Give each block-member copy (and each inline ATTRIB of a copied INSERT)
@@ -2445,7 +2392,7 @@ impl Scene {
                     let body =
                         sweep_model::extruded_surface(&entity, direction.to_array(), *taper)?;
                     let EntityType::Surface(fresh) =
-                        crate::modules::insert::solid3d_cmds::empty_extruded_surface(
+                        crate::scene::model::sweep_model::empty_extruded_surface(
                             direction, *taper,
                         )
                     else {
@@ -2473,7 +2420,7 @@ impl Scene {
                         *start_angle,
                     )?;
                     let EntityType::Surface(fresh) =
-                        crate::modules::insert::solid3d_cmds::empty_revolved_surface(
+                        crate::scene::model::sweep_model::empty_revolved_surface(
                             &entity,
                             start,
                             end,
@@ -2701,10 +2648,10 @@ impl Scene {
             let document::entities::SurfaceData::Swept { options, .. } = &value.surface_data else {
                 continue;
             };
-            let linked = crate::command::SweepOptions {
+            let linked = crate::scene::model::sweep_model::SweepOptions {
                 align: options.sweep_alignment_flags == 1,
                 bank: options.bank,
-                ..crate::command::SweepOptions::default()
+                ..crate::scene::model::sweep_model::SweepOptions::default()
             };
             crate::scene::model::sweep_model::link_sweep_sources(
                 &mut self.document,

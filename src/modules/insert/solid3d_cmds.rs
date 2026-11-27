@@ -12,6 +12,7 @@ use crate::command::{
 use crate::scene::model::presspull_model::{self, PresspullTarget, PresspullTargetKind};
 use crate::scene::WireModel;
 use crate::t;
+pub(crate) use crate::scene::model::sweep_model::{empty_extruded_surface, empty_revolved_surface};
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
 
@@ -3124,65 +3125,6 @@ impl CadCommand for LoftCommand {
 
 pub fn empty_solid3d() -> EntityType {
     EntityType::Solid3D(Solid3D::new())
-}
-
-pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType {
-    use document::entities::{Surface, SurfaceData, SurfaceKind};
-    use document::types::Vector3;
-
-    let mut surface = Surface::new(SurfaceKind::Extruded);
-    surface.u_isolines = 6;
-    surface.v_isolines = 6;
-    if let SurfaceData::Extruded {
-        options,
-        sweep_vector,
-        ..
-    } = &mut surface.surface_data
-    {
-        options.draft_angle = taper_angle;
-        options.is_solid = false;
-        *sweep_vector = Vector3::new(direction.x, direction.y, direction.z);
-    }
-    EntityType::Surface(Box::new(surface))
-}
-
-pub fn empty_revolved_surface(
-    profile: &EntityType,
-    axis_start: DVec3,
-    axis_end: DVec3,
-    angle: f64,
-    start_angle: f64,
-) -> EntityType {
-    use document::entities::{Surface, SurfaceData, SurfaceKind};
-    use document::types::Vector3;
-
-    let mut surface = Surface::new(SurfaceKind::Revolved);
-    let axis = (axis_end - axis_start).normalize_or(DVec3::Z);
-    surface.point_of_reference = Vector3::new(axis_start.x, axis_start.y, axis_start.z);
-    if let SurfaceData::Revolved {
-        revolve_entity,
-        axis_point,
-        axis_vector,
-        revolve_angle,
-        start_angle: stored_start,
-        entity_transform,
-        solid,
-        ..
-    } = &mut surface.surface_data
-    {
-        if let Some((embedded, transform)) =
-            crate::scene::model::sweep_model::embedded_revolve_profile(profile)
-        {
-            *revolve_entity = Some(embedded);
-            *entity_transform = transform;
-        }
-        *axis_point = Vector3::new(axis_start.x, axis_start.y, axis_start.z);
-        *axis_vector = Vector3::new(axis.x, axis.y, axis.z);
-        *revolve_angle = angle;
-        *stored_start = start_angle;
-        *solid = false;
-    }
-    EntityType::Surface(Box::new(surface))
 }
 
 // ── Autocomplete registry ─────────────────────────────────

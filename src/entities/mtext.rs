@@ -10,9 +10,9 @@ use crate::entities::text_support::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 use crate::t;
 
 /// The entity's `column_data` as the layout's column description.
@@ -811,8 +811,8 @@ fn apply_grip(t: &mut MText, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(t: &mut MText, tr: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
+    crate::entities::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
+        crate::entities::transform::reflect_xy_point(
             &mut entity.insertion_point.x,
             &mut entity.insertion_point.y,
             p1,
@@ -840,8 +840,8 @@ impl Grippable for MText {
         apply_grip(self, grip_id, apply);
     }
 
-    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
-        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::entities::object::GripMenuItem> {
+        use crate::entities::object::{GripMenuAction, GripMenuItem};
         if grip_id == 0 {
             // Insertion point
             vec![
@@ -870,7 +870,7 @@ impl Grippable for MText {
     fn apply_grip_menu(
         &mut self,
         _grip_id: usize,
-        _action: crate::scene::model::object::GripMenuAction,
+        _action: crate::entities::object::GripMenuAction,
     ) {
         // Rotate needs a follow-up angle handled by
         // `apply_grip_menu_value`; Move-with-Text is the default drag.
@@ -879,9 +879,9 @@ impl Grippable for MText {
     fn grip_menu_value_prompt(
         &self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
     ) -> Option<&'static str> {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         match action {
             A::RotateText => Some("Rotation (deg)"),
             _ => None,
@@ -891,10 +891,10 @@ impl Grippable for MText {
     fn apply_grip_menu_value(
         &mut self,
         _grip_id: usize,
-        action: crate::scene::model::object::GripMenuAction,
+        action: crate::entities::object::GripMenuAction,
         value: f64,
     ) {
-        use crate::scene::model::object::GripMenuAction as A;
+        use crate::entities::object::GripMenuAction as A;
         if matches!(action, A::RotateText) {
             self.rotation = value.to_radians();
         }

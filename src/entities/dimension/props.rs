@@ -5,24 +5,24 @@ use super::*;
 pub(crate) fn base_props(
     base: &DimensionBase,
     measurement: f64,
-) -> Vec<crate::scene::model::object::Property> {
+) -> Vec<crate::entities::object::Property> {
     vec![
-        crate::scene::model::object::Property {
+        crate::entities::object::Property {
             label: t!("Text").into_owned(),
             field: "text",
-            value: crate::scene::model::object::PropValue::PlainText(base.text.clone()),
+            value: crate::entities::object::PropValue::PlainText(base.text.clone()),
         },
-        crate::scene::model::object::Property {
+        crate::entities::object::Property {
             label: t!("User Text").into_owned(),
             field: "user_text",
-            value: crate::scene::model::object::PropValue::PlainText(
+            value: crate::entities::object::PropValue::PlainText(
                 base.user_text.clone().unwrap_or_default(),
             ),
         },
-        crate::scene::model::object::Property {
+        crate::entities::object::Property {
             label: t!("Style").into_owned(),
             field: "style_name",
-            value: crate::scene::model::object::PropValue::PlainText(base.style_name.clone()),
+            value: crate::entities::object::PropValue::PlainText(base.style_name.clone()),
         },
         edit(t!("Text X").as_ref(), "text_x", base.text_middle_point.x),
         edit(t!("Text Y").as_ref(), "text_y", base.text_middle_point.y),
@@ -92,10 +92,10 @@ pub(crate) fn properties(dim: &Dimension) -> Vec<PropSection> {
         return vec![PropSection {
             title: t!("Misc").into_owned(),
             props: vec![
-                crate::scene::model::object::Property {
+                crate::entities::object::Property {
                     label: t!("Dimension style").into_owned(),
                     field: "style_name",
-                    value: crate::scene::model::object::PropValue::PlainText(
+                    value: crate::entities::object::PropValue::PlainText(
                         base.style_name.clone(),
                     ),
                 },
@@ -115,10 +115,10 @@ pub(crate) fn properties(dim: &Dimension) -> Vec<PropSection> {
     if matches!(dim, Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_)) {
         return vec![PropSection {
             title: t!("Misc").into_owned(),
-            props: vec![crate::scene::model::object::Property {
+            props: vec![crate::entities::object::Property {
                 label: t!("Dimension style").into_owned(),
                 field: "style_name",
-                value: crate::scene::model::object::PropValue::PlainText(
+                value: crate::entities::object::PropValue::PlainText(
                     dim.base().style_name.clone(),
                 ),
             }],
@@ -352,7 +352,7 @@ pub(crate) fn linear_like_props(
     first: document::types::Vector3,
     second: document::types::Vector3,
     definition: document::types::Vector3,
-) -> Vec<crate::scene::model::object::Property> {
+) -> Vec<crate::entities::object::Property> {
     vec![
         edit(t!("First X").as_ref(), "first_x", first.x),
         edit(t!("First Y").as_ref(), "first_y", first.y),
@@ -369,7 +369,7 @@ pub(crate) fn linear_like_props(
 pub(crate) fn radius_like_props(
     center: document::types::Vector3,
     point: document::types::Vector3,
-) -> Vec<crate::scene::model::object::Property> {
+) -> Vec<crate::entities::object::Property> {
     vec![
         edit(t!("Center X").as_ref(), "center_x", center.x),
         edit(t!("Center Y").as_ref(), "center_y", center.y),
@@ -385,7 +385,7 @@ pub(crate) fn angular_props(
     first: document::types::Vector3,
     second: document::types::Vector3,
     definition: document::types::Vector3,
-) -> Vec<crate::scene::model::object::Property> {
+) -> Vec<crate::entities::object::Property> {
     vec![
         edit(t!("Vertex X").as_ref(), "vertex_x", vertex.x),
         edit(t!("Vertex Y").as_ref(), "vertex_y", vertex.y),
@@ -893,10 +893,10 @@ pub(crate) fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
         let p = base.text_middle_point;
         !base.text_user_positioned && p.x == 0.0 && p.y == 0.0 && p.z == 0.0
     };
-    crate::scene::view::transform::apply_standard_entity_transform(dim, t, |entity, p1, p2| {
+    crate::entities::transform::apply_standard_entity_transform(dim, t, |entity, p1, p2| {
         document::Entity::apply_transform(
             entity,
-            &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
+            &crate::entities::transform::reflection_about_xy_line(p1, p2),
         );
     });
     if auto_text {

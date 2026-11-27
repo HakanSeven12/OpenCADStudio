@@ -18,6 +18,7 @@ use crate::scene::parametric_constraints::ConstraintId;
 use crate::scene::pick::grip::GripEditMode;
 use crate::snap::SnapType;
 use crate::t;
+pub use crate::scene::pick::selection_state::SubmenuId;
 
 /// Fixed row height used by the renderer, so `ContextMenu::default_row_y`
 /// (which anchors the default row under the cursor) agrees with the layout.
@@ -39,20 +40,6 @@ const CHECK_W: f32 = 10.0;
 const CARET_W: f32 = 9.0;
 /// How many recent entries the Recent Input / Repeat lists show.
 pub const RECENT_LIMIT: usize = 10;
-
-/// Identifies an inline-expanding (accordion) submenu. Only one is open at a
-/// time; the open one is tracked in `SelectionMenu::ui`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SubmenuId {
-    RecentInput,
-    Clipboard,
-    DrawOrder,
-    Isolate,
-    SnapOverrides,
-    SavedFilters,
-    /// A submenu of a menu-bar menu opened from the keyboard.
-    MenuBar(u16),
-}
 
 /// Glyph drawn in a row's icon gutter (commercial solutions show one for object snaps
 /// and the navigation rows).

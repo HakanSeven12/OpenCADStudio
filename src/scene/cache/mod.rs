@@ -5,4 +5,4 @@ pub mod block_cache;
 mod block_layer_tests;
 #[cfg(test)]
 mod block_linetype_tests;
-pub mod properties;
+pub use crate::entities::properties;

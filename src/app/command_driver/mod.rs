@@ -100,8 +100,8 @@ mod utilities;
 mod viewport;
 
 pub(crate) use clipboard::{
-    copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel,
-    remap_ext_subtree_reference, remap_object, PasteSpace,
+    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference, remap_object,
+    PasteSpace,
 };
 
 impl OpenCADStudio {

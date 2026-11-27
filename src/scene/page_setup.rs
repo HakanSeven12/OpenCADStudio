@@ -15,7 +15,7 @@ use document::{Document, Handle};
 /// plot style table to attach, or is empty.
 pub fn apply_default_page_setup(layout: &mut Layout, plot_style: &str) {
     use document::objects::{PlotPaperUnits, PlotRotation, PlotType, ScaledType};
-    let a4 = crate::io::paper_catalog::default_paper();
+    let a4 = crate::catalog::paper_catalog::default_paper();
     let (paper_width, paper_height) = a4.portrait_mm();
     layout.min_limits = (0.0, 0.0);
     layout.max_limits = (paper_height, paper_width);
@@ -37,7 +37,7 @@ pub fn apply_default_page_setup(layout: &mut Layout, plot_style: &str) {
     layout.plot_flags.show_plot_styles = !plot_style.is_empty();
     layout.plot_style_sheet = plot_style.to_string();
     layout.paper_size = a4.canonical.to_string();
-    layout.plot_printer_name = crate::io::plot_device::PlotDevice::None.canonical_name();
+    layout.plot_printer_name = NO_DEVICE_STORED_NAME.to_string();
 }
 
 /// The unprintable margins of a sheet as they appear on the rotated layout,
@@ -283,3 +283,6 @@ impl Scene {
         }
     }
 }
+
+/// …and the name it actually stores in the drawing for that choice.
+pub(crate) const NO_DEVICE_STORED_NAME: &str = "none_device";

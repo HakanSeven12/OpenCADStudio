@@ -7,7 +7,7 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use crate::app::Message;
-use crate::plugin::external::{ExternalPlugin, RegistryEntry, ReleaseInfo};
+use crate::plugin_catalog::{ExternalPlugin, RegistryEntry, ReleaseInfo};
 use crate::t;
 use crate::ui::style::common::muted_style;
 use iced::widget::{
@@ -1203,7 +1203,7 @@ pub fn view_web_notice<'a>() -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::{newest_update, registry_error_message, repository_display_name};
-    use crate::plugin::external::ReleaseInfo;
+    use crate::plugin_catalog::ReleaseInfo;
 
     #[test]
     fn newest_update_uses_semver_not_release_order() {

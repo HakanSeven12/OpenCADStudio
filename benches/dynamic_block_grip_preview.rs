@@ -89,8 +89,7 @@ fn bench_flip(scene: &mut Scene, insert: document::types::Handle, flip_param: do
 }
 
 fn bench_alignment(scene: &Scene, insert: document::types::Handle) {
-    let mut cmd = scene
-        .bench_start_alignment_command(insert)
+    let mut cmd = OpenCADStudio::modules::block_editor::bench_start_alignment_command(scene, insert)
         .expect("alignment command");
     let mut samples = Vec::with_capacity(RUNS);
     let mut sink = 0usize;

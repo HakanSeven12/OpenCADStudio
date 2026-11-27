@@ -7,8 +7,7 @@
 //! holding the untyped conditions, under an any-root. With a single type (or
 //! none) the group is the root itself.
 
-use super::{Condition, Filter, Group, Item, Match, Op};
-use crate::app::{QSelectCondition, QSelectOp};
+use super::{Condition, Filter, Group, Item, Match, Op, QSelectCondition, QSelectOp};
 
 impl From<&QSelectCondition> for Condition {
     fn from(condition: &QSelectCondition) -> Self {
@@ -161,10 +160,10 @@ mod tests {
     fn qs(type_filter: Option<&str>, field: Option<&str>, value: &str) -> QSelectCondition {
         QSelectCondition {
             type_filter: type_filter.map(str::to_owned),
-            property: field.map(|field| crate::app::QSelectPropertyChoice {
+            property: field.map(|field| crate::filter::QSelectPropertyChoice {
                 field: field.to_owned(),
                 label: field.to_owned(),
-                editor: crate::app::QSelectValueEditor::Text,
+                editor: crate::filter::QSelectValueEditor::Text,
             }),
             operator: QSelectOp::Eq,
             value: value.to_owned(),

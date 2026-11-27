@@ -6,7 +6,8 @@ use document::types::Vector3;
 use document::EntityType;
 
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
-use crate::command::{ExtrudeMode, SweepOptions};
+use crate::scene::model::sweep_model::ExtrudeMode;
+use crate::scene::model::sweep_model::SweepOptions;
 
 /// A 3D polyline profile or path as the reference records it: a wire body.
 fn embedded_sweep_profile(
@@ -259,7 +260,7 @@ fn reversed_toward_pick(path: &EntityType, pick: glam::DVec3) -> Option<EntityTy
             polyline.elevation = arc.center.z;
             Some(EntityType::LwPolyline(polyline))
         }
-        _ => crate::modules::draw::modify::reverse::ReverseCommand::reversed(path),
+        _ => crate::entities::reverse::reversed(path),
     }
 }
 

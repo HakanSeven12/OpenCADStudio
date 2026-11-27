@@ -15,7 +15,6 @@ use document::entities::{
 use document::types::Vector3;
 use document::{Document, EntityType, Handle};
 
-use crate::app::settings::Txt2MtxtSettings;
 use crate::entities::text_support::{resolve_dxf_special_chars, text_local_bounds};
 
 /// What the command does to the drawing.
@@ -376,3 +375,31 @@ pub fn plan(
 inventory::submit!(crate::command::CommandRegistration {
     names: &["TXT2MTXT"]
 });
+
+/// TXT2MTXT (Combine Text) settings, the profile values
+/// TXT2MTXTCOMBINEMTEXT, TXT2MTXTTEXTORDER, TXT2MTXTWORDWRAP and
+/// TXT2MTXTLINESPACING.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Txt2MtxtSettings {
+    /// Combine everything into one MTEXT (else each TEXT becomes its own).
+    pub combine: bool,
+    /// Keep the selection order (else sort top-down).
+    pub select_order: bool,
+    /// Run the lines on separated by spaces in a computed width (else one
+    /// paragraph per object).
+    pub word_wrap: bool,
+    /// Force uniform line spacing (always on while word-wrap is).
+    pub uniform_spacing: bool,
+}
+
+impl Default for Txt2MtxtSettings {
+    fn default() -> Self {
+        Self {
+            combine: true,
+            select_order: false,
+            word_wrap: true,
+            uniform_spacing: true,
+        }
+    }
+}

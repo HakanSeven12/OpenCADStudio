@@ -786,7 +786,7 @@ fn picture_off_scale(
         return false;
     }
     let expected = style.dimtxt
-        * crate::modules::draw::modify::explode::annotative_picture_scale(dimension, document);
+        * crate::scene::explode::annotative_picture_scale(dimension, document);
     let drawn = record.entity_handles.iter().find_map(|handle| match document.get_entity(*handle) {
         Some(EntityType::Text(text)) => Some(text.height),
         Some(EntityType::MText(text)) => Some(text.height),

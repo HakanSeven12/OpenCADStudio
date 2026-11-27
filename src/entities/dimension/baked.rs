@@ -188,9 +188,9 @@ pub(crate) fn baked_dimension_text(
         if origin != Vector3::ZERO {
             let local = shift_dimension(dim, origin);
             let mut text = dimension_text_entity(&local, dim_txt, style, document, dim_scale)?;
-            crate::scene::view::dispatch::apply_transform(
+            crate::entities::dispatch::apply_transform(
                 &mut text,
-                &crate::command::EntityTransform::Translate(DVec3::new(
+                &crate::entities::transform::EntityTransform::Translate(DVec3::new(
                     origin.x, origin.y, origin.z,
                 )),
             );

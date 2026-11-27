@@ -7,7 +7,7 @@
 //! Shape X → along the linetype direction; Shape Y → perpendicular in XZ.
 
 use crate::entities::text_support::resolve_dxf_special_chars;
-use crate::io::linetypes::{ComplexLt, LtRotation, LtSegment};
+use crate::catalog::linetypes::{ComplexLt, LtRotation, LtSegment};
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::text::lff;
 
@@ -825,7 +825,7 @@ fn reads_upside_down(angle: f32) -> bool {
 #[cfg(test)]
 mod upright_tests {
     use super::apply_along;
-    use crate::io::linetypes::{ComplexLt, LtRotation, LtSegment};
+    use crate::catalog::linetypes::{ComplexLt, LtRotation, LtSegment};
 
     #[test]
     fn batched_strokes_preserve_breaks_across_chunks() {

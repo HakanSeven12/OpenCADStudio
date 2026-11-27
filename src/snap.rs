@@ -11,9 +11,53 @@ use iced::{Point, Rectangle};
 use document::types::Handle;
 use ocs_geom::geom2d::Curve;
 
-use crate::command::{DimensionAssociationSource, TangentObject};
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 use crate::scene::pick::interaction_index::WireSource;
+
+/// Association source with an optional sub-entity marker.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DimensionAssociationSource {
+    pub handle: Handle,
+    pub marker: Option<i32>,
+    pub parameter: f64,
+}
+
+impl DimensionAssociationSource {
+    pub const fn inferred(handle: Handle) -> Self {
+        Self {
+            handle,
+            marker: None,
+            parameter: 0.0,
+        }
+    }
+
+    pub const fn explicit(handle: Handle, marker: i32, parameter: f64) -> Self {
+        Self {
+            handle,
+            marker: Some(marker),
+            parameter,
+        }
+    }
+}
+
+// ── Tangent object ─────────────────────────────────────────────────────────
+
+/// Geometric representation of a tangent-snap target.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TangentObject {
+    /// Infinite line through two world-space XZ-plane points.
+    Line { p1: DVec3, p2: DVec3 },
+    /// Circle in the world XY plane.
+    Circle { center: DVec3, radius: f64 },
+    /// Planar ellipse in world space.
+    Ellipse {
+        center: DVec3,
+        major_axis: DVec3,
+        normal: DVec3,
+        minor_axis_ratio: f64,
+    },
+}
+
 pub(crate) const DEFAULT_OSNAP_RADIUS_PX: f32 = 25.0;
 /// APERTURE bounds: the object-snap capture radius in screen pixels.
 pub(crate) const MIN_OSNAP_RADIUS_PX: f32 = 4.0;
@@ -4783,6 +4827,15 @@ fn t_on_segment(p: Point, a: Point, b: Point) -> f32 {
         return 0.0;
     }
     (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0)
+}
+
+/// Current screen projection and configured aperture for point-feature picking.
+#[derive(Clone, Copy)]
+pub struct PointPickContext {
+    pub view: glam::Mat4,
+    pub eye: DVec3,
+    pub bounds: iced::Rectangle,
+    pub aperture_px: f32,
 }
 
 #[cfg(test)]

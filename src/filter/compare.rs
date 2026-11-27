@@ -48,7 +48,7 @@ pub fn matches_value(actual: &str, wanted: &str) -> bool {
         .filter(|alternative| !alternative.is_empty())
         .any(|alternative| {
             values_equal(actual, alternative)
-                || crate::io::xref_model::wildcard_match_with_digits(actual, alternative)
+                || crate::wildcard::wildcard_match_with_digits(actual, alternative)
         });
     hit != negate
 }

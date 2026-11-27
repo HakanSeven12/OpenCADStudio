@@ -4,7 +4,7 @@ use document::entities::{SectionSymbol, ViewBorder};
 use crate::entities::common::{edit_angle_prop, edit_prop, parse_f64, ro_prop, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::model::object::{GripApply, GripDef, PropSection};
+use crate::entities::object::{GripApply, GripDef, PropSection};
 
 fn handle_text(handle: document::Handle) -> String {
     if handle.is_null() {
@@ -19,11 +19,11 @@ fn vector_text(vector: &document::types::Vector3) -> String {
 }
 
 fn apply_entity_transform<T: document::Entity>(entity: &mut T, transform: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(
+    crate::entities::transform::apply_standard_entity_transform(
         entity,
         transform,
         |entity, first, second| {
-            entity.apply_transform(&crate::scene::view::transform::reflection_about_xy_line(
+            entity.apply_transform(&crate::entities::transform::reflection_about_xy_line(
                 first, second,
             ));
         },

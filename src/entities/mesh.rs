@@ -9,9 +9,9 @@ use crate::entities::common::{
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::entities::transform::EntityTransform;
-use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::SnapHint;
+use crate::display::render_entity::{RenderEntity, RenderObject};
+use crate::entities::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::display::wire_model::SnapHint;
 use crate::t;
 
 /// Triangulate a planar polygon through the kernel.
@@ -199,7 +199,7 @@ impl PropertyEditable for Face3D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let was_triangle = self.is_triangle();
         let vertex_count = if was_triangle { 3 } else { 4 };
-        let current = crate::scene::view::dispatch::prop_current_vertex().min(vertex_count - 1);
+        let current = crate::entities::dispatch::prop_current_vertex().min(vertex_count - 1);
         let corner = match current {
             0 => &self.first_corner,
             1 => &self.second_corner,
@@ -261,7 +261,7 @@ impl PropertyEditable for Face3D {
         };
         let was_triangle = self.is_triangle();
         let vertex_count = if was_triangle { 3 } else { 4 };
-        let current = crate::scene::view::dispatch::prop_current_vertex().min(vertex_count - 1);
+        let current = crate::entities::dispatch::prop_current_vertex().min(vertex_count - 1);
         let corner = match current {
             0 => &mut self.first_corner,
             1 => &mut self.second_corner,
@@ -282,7 +282,7 @@ impl PropertyEditable for Face3D {
 
 impl Transformable for Face3D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
@@ -292,7 +292,7 @@ impl Transformable for Face3D {
                     &mut entity.third_corner,
                     &mut entity.fourth_corner,
                 ] {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut corner.x,
                         &mut corner.y,
                         p1,
@@ -472,7 +472,7 @@ impl PropertyEditable for PolygonMesh {
         };
         let vertex_count = self.vertices.len();
         let current =
-            crate::scene::view::dispatch::prop_current_vertex().min(vertex_count.saturating_sub(1));
+            crate::entities::dispatch::prop_current_vertex().min(vertex_count.saturating_sub(1));
         let vertex = self.vertices.get(current);
         let current_vertex = if vertex_count == 0 { 0 } else { current + 1 };
         vec![
@@ -613,7 +613,7 @@ impl PropertyEditable for PolygonMesh {
                 let Some(number) = parse_f64(value).filter(|number| number.is_finite()) else {
                     return;
                 };
-                let index = crate::scene::view::dispatch::prop_current_vertex()
+                let index = crate::entities::dispatch::prop_current_vertex()
                     .min(self.vertices.len().saturating_sub(1));
                 if let Some(vertex) = self.vertices.get_mut(index) {
                     match field {
@@ -631,12 +631,12 @@ impl PropertyEditable for PolygonMesh {
 
 impl Transformable for PolygonMesh {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
                 for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut v.location.x,
                         &mut v.location.y,
                         p1,
@@ -766,12 +766,12 @@ impl PropertyEditable for PolyfaceMesh {
 
 impl Transformable for PolyfaceMesh {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
                 for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(
+                    crate::entities::transform::reflect_xy_point(
                         &mut v.location.x,
                         &mut v.location.y,
                         p1,
@@ -1480,7 +1480,7 @@ pub(crate) fn tessellate_shaded_mesh(
                 face_colors.push(
                     face.color
                         .as_ref()
-                        .map(crate::scene::convert::tess_util::aci_to_rgba),
+                        .map(crate::display::tess_util::aci_to_rgba),
                 );
             }
             make_mesh_lod_set(
@@ -1651,12 +1651,12 @@ impl PropertyEditable for Mesh {
 
 impl Transformable for Mesh {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        crate::entities::transform::apply_standard_entity_transform(
             self,
             t,
             |entity, p1, p2| {
                 for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
+                    crate::entities::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
                 }
             },
         );

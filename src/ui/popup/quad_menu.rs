@@ -10,23 +10,13 @@
 use document::Handle;
 use iced::Point;
 use rustc_hash::FxHashMap;
+pub use crate::scene::pick::selection_state::{QuadMode, QuadUi};
 
 /// Columns of the expanded quad (`QUADWIDTH`), default 6, as in commercial solutions.
 pub const QUAD_WIDTH_DEFAULT: u8 = 6;
 
 /// Maximum most-recently-used commands remembered per entity type key.
 pub const QUAD_MRU_CAP: usize = 16;
-
-/// Which cursor situation the quad was opened for (docs/quad-menu.md §1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuadMode {
-    /// Dwell on a hovered entity (quad-on-hover flag).
-    Hover,
-    /// A selection set exists (quad-on-select flag).
-    Selection,
-    /// Nothing under the cursor: creation / recent quad.
-    NoSelection,
-}
 
 /// Icon of a quad item: the command's ribbon SVG when the registry has one,
 /// otherwise the glyph tile filled from a short text abbreviation of the
@@ -127,21 +117,6 @@ impl QuadTarget {
                 .any(|type_key| applies_to.iter().any(|k| k.eq_ignore_ascii_case(type_key))),
         }
     }
-}
-
-/// Transient quad window state next to the context-menu state in
-/// `SelectionMenu` (the "selection boundary owns transient popup state"
-/// convention).
-#[derive(Debug, Clone)]
-pub struct QuadUi {
-    /// Screen position the quad is anchored at (cursor position).
-    pub anchor: Point,
-    pub mode: QuadMode,
-    /// Collapsed = single default icon; expanded = the panel grid with tabs.
-    pub expanded: bool,
-    /// Index into the open quad's panel list — over ALL panels, primary =
-    /// `0` (tabs carry their real panel index); a collapsed quad keeps `0`.
-    pub active_tab: usize,
 }
 
 impl QuadUi {

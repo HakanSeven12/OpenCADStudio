@@ -11,102 +11,9 @@
 use crate::snap::SnapType;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum AutoConstraintKind {
-    Coincident,
-    Collinear,
-    Parallel,
-    Perpendicular,
-    Tangent,
-    Concentric,
-    Horizontal,
-    Vertical,
-    Equal,
-}
-
-impl AutoConstraintKind {
-    pub const ALL: [Self; 9] = [
-        Self::Coincident,
-        Self::Collinear,
-        Self::Parallel,
-        Self::Perpendicular,
-        Self::Tangent,
-        Self::Concentric,
-        Self::Horizontal,
-        Self::Vertical,
-        Self::Equal,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Coincident => "Coincident",
-            Self::Collinear => "Collinear",
-            Self::Parallel => "Parallel",
-            Self::Perpendicular => "Perpendicular",
-            Self::Tangent => "Tangent",
-            Self::Concentric => "Concentric",
-            Self::Horizontal => "Horizontal",
-            Self::Vertical => "Vertical",
-            Self::Equal => "Equal",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct AutoConstrainSettings {
-    pub priority: Vec<AutoConstraintKind>,
-    pub enabled: Vec<AutoConstraintKind>,
-    pub tangent_must_share_point: bool,
-    pub perpendicular_must_intersect: bool,
-    pub distance_tolerance: f64,
-    pub angle_tolerance_deg: f64,
-}
-
-impl Default for AutoConstrainSettings {
-    fn default() -> Self {
-        Self {
-            priority: AutoConstraintKind::ALL.to_vec(),
-            // Keep Equal available without creating redundant relations
-            // between equal-length segments by default.
-            enabled: AutoConstraintKind::ALL
-                .into_iter()
-                .filter(|kind| *kind != AutoConstraintKind::Equal)
-                .collect(),
-            tangent_must_share_point: true,
-            perpendicular_must_intersect: true,
-            distance_tolerance: 0.05,
-            angle_tolerance_deg: 1.0,
-        }
-    }
-}
-
-impl AutoConstrainSettings {
-    pub fn sanitize(&mut self) {
-        let mut priority = Vec::with_capacity(AutoConstraintKind::ALL.len());
-        for kind in self.priority.iter().copied().chain(AutoConstraintKind::ALL) {
-            if !priority.contains(&kind) {
-                priority.push(kind);
-            }
-        }
-        self.priority = priority;
-        self.enabled
-            .retain(|kind| AutoConstraintKind::ALL.contains(kind));
-        self.enabled.sort_by_key(|kind| {
-            self.priority
-                .iter()
-                .position(|candidate| candidate == kind)
-                .unwrap_or(usize::MAX)
-        });
-        self.enabled.dedup();
-        if !self.distance_tolerance.is_finite() || self.distance_tolerance < 0.0 {
-            self.distance_tolerance = 0.05;
-        }
-        if !self.angle_tolerance_deg.is_finite() || self.angle_tolerance_deg < 0.0 {
-            self.angle_tolerance_deg = 1.0;
-        }
-    }
-}
+pub use crate::scene::auto_constrain::{AutoConstrainSettings, AutoConstraintKind};
+pub use crate::modules::annotate::txt2mtxt::Txt2MtxtSettings;
+pub use crate::modules::insert::insert_block::BlockInsertOptions;
 
 /// Check Spelling preferences kept with the profile.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -121,23 +28,6 @@ pub struct SpellPrefs {
     pub custom_files: Vec<String>,
     /// The custom dictionary file in use; None: the word list above.
     pub current_custom: Option<usize>,
-}
-
-/// TXT2MTXT (Combine Text) settings, the profile values
-/// TXT2MTXTCOMBINEMTEXT, TXT2MTXTTEXTORDER, TXT2MTXTWORDWRAP and
-/// TXT2MTXTLINESPACING.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Txt2MtxtSettings {
-    /// Combine everything into one MTEXT (else each TEXT becomes its own).
-    pub combine: bool,
-    /// Keep the selection order (else sort top-down).
-    pub select_order: bool,
-    /// Run the lines on separated by spaces in a computed width (else one
-    /// paragraph per object).
-    pub word_wrap: bool,
-    /// Force uniform line spacing (always on while word-wrap is).
-    pub uniform_spacing: bool,
 }
 
 /// The Inspection Dimension window's last values, offered the next time.
@@ -160,17 +50,6 @@ impl Default for DimInspectSettings {
             label: String::new(),
             rate_on: true,
             rate: "100%".to_string(),
-        }
-    }
-}
-
-impl Default for Txt2MtxtSettings {
-    fn default() -> Self {
-        Self {
-            combine: true,
-            select_order: false,
-            word_wrap: true,
-            uniform_spacing: true,
         }
     }
 }
@@ -1368,40 +1247,6 @@ impl Default for RefEditOptions {
             attributes: false,
             lock: true,
             nested: false,
-        }
-    }
-}
-
-/// The Blocks palette's insertion options.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BlockInsertOptions {
-    pub insertion_point: bool,
-    pub scale: bool,
-    pub uniform: bool,
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-    pub rotation: bool,
-    pub angle: f64,
-    pub auto_placement: bool,
-    pub repeat: bool,
-    pub explode: bool,
-}
-
-impl Default for BlockInsertOptions {
-    fn default() -> Self {
-        Self {
-            insertion_point: true,
-            scale: false,
-            uniform: false,
-            x: 1.0,
-            y: 1.0,
-            z: 1.0,
-            rotation: false,
-            angle: 0.0,
-            auto_placement: true,
-            repeat: false,
-            explode: false,
         }
     }
 }

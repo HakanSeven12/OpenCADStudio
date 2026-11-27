@@ -12,7 +12,7 @@ use super::{
     has_length_suffix,
 };
 use crate::app::Message;
-use crate::app::calc::{AngleMode, Value};
+use crate::calc::{AngleMode, Value};
 use crate::modules::draw::inquiry::calc_pick::PickKind;
 use crate::ui::dock::{Chrome, PanelId};
 use crate::ui::icons::SWAP;
@@ -512,7 +512,7 @@ fn units<'a>(p: &'a QuickCalcPalette) -> Element<'a, Message> {
 /// Everything the view needs from the app besides the pallet itself.
 pub struct Inputs {
     /// The drawing's system variables, for `getvar`.
-    pub sysvars: Option<crate::app::calc::SysVars>,
+    pub sysvars: Option<crate::calc::SysVars>,
     /// Millimetres per drawing unit.
     pub base_unit: f64,
     /// The drawing unit's short name (`mm`, `m`, `in`, …).
@@ -756,7 +756,7 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
         }
         _ if picking.is_some() => {}
         Preview::Ok(value) => {
-            let lead = if let Some((name, _)) = crate::app::calc::assigned_variable(trimmed) {
+            let lead = if let Some((name, _)) = crate::calc::assigned_variable(trimmed) {
                 crate::tf!("sets ${}", name).into_owned()
             } else if continues_ans(trimmed) {
                 format!("ans {trimmed}")

@@ -292,7 +292,7 @@ impl Scene {
     pub(crate) fn low_memory_viewing() -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            crate::cli::low_memory_viewing()
+            crate::config::low_memory_viewing()
         }
         #[cfg(target_arch = "wasm32")]
         {

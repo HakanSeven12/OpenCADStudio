@@ -1204,7 +1204,7 @@ impl Scene {
         vp_handle: Handle,
         settle: bool,
     ) -> Option<f32> {
-        if !crate::io::linetypes::defines_complex_lt(&self.document) {
+        if !crate::catalog::linetypes::defines_complex_lt(&self.document) {
             return None;
         }
         let current = self.viewport_psltscale_factor(vp_handle)?;

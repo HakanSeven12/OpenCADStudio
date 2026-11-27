@@ -16,7 +16,7 @@ use glam::DVec3;
 use ocs_geom::geom2d::{closest_point, signed_area, Curve, Polyline, PolylineVertex, Vec2};
 
 use crate::entities::common::square_grip;
-use crate::scene::model::object::{GripApply, GripDef};
+use crate::entities::object::{GripApply, GripDef};
 
 /// The xdata application every revision cloud carries.
 pub(crate) const APP: &str = "RevcloudProps";

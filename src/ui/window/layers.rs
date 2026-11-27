@@ -19,6 +19,7 @@ use iced::widget::{
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 use std::borrow::Cow;
 use std::collections::HashMap;
+pub use crate::scene::ViewportLayers;
 
 // ── Per-viewport column descriptor ───────────────────────────────────────────
 
@@ -26,18 +27,6 @@ use std::collections::HashMap;
 pub struct VpCol {
     pub handle: Handle,
     pub label: String,
-}
-
-/// A layout viewport as the Layer Manager shows it: its frozen layers and
-/// its layer overrides.
-pub struct ViewportLayers {
-    pub handle: Handle,
-    pub label: String,
-    pub frozen: Vec<Handle>,
-    pub colors: Vec<(Handle, AcadColor)>,
-    /// Layers carrying any property override on this viewport: colour,
-    /// linetype, lineweight or transparency. VP Freeze is separate.
-    pub overridden: Vec<Handle>,
 }
 
 /// Sortable column in the Layer Manager table. Clicking a header sorts by

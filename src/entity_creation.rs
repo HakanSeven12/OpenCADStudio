@@ -1090,7 +1090,7 @@ pub(crate) fn build_entity(
                 hatch.pattern = pattern;
                 hatch.is_solid = matches!(
                     entry.gpu,
-                    crate::scene::model::hatch_model::HatchPattern::Solid
+                    crate::display::hatch_model::HatchPattern::Solid
                 );
             }
             let mut path = BoundaryPath::external();
@@ -1134,7 +1134,7 @@ pub(crate) fn build_entity(
             };
             attdef::build(
                 &attdef_spec,
-                crate::command::WorkingPlane::default(),
+                crate::entities::transform::WorkingPlane::default(),
                 to_dvec(point_field(spec, "position")?),
                 second.map(to_dvec),
             )

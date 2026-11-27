@@ -156,27 +156,27 @@ impl CadModule for BlockEditorModule {
                 manage.tools.push(RibbonItem::LargeDropdown {
                     id: "BLOCK_CONSTRUCTION",
                     label: "Construction Geometry",
-                    icon: IconKind::Svg(crate::ui::icons::EYE),
+                    icon: IconKind::Svg(crate::icon_assets::EYE),
                     items: vec![
                         (
                             "BCONSTRUCTION CONVERT",
                             "Convert",
-                            IconKind::Svg(crate::ui::icons::EYE),
+                            IconKind::Svg(crate::icon_assets::EYE),
                         ),
                         (
                             "BCONSTRUCTION REVERT",
                             "Revert",
-                            IconKind::Svg(crate::ui::icons::EYE),
+                            IconKind::Svg(crate::icon_assets::EYE),
                         ),
                         (
                             "BCONSTRUCTION SHOW",
                             "Show All",
-                            IconKind::Svg(crate::ui::icons::EYE_ALL),
+                            IconKind::Svg(crate::icon_assets::EYE_ALL),
                         ),
                         (
                             "BCONSTRUCTION HIDE",
                             "Hide All",
-                            IconKind::Svg(crate::ui::icons::EYE_OFF),
+                            IconKind::Svg(crate::icon_assets::EYE_OFF),
                         ),
                     ],
                     default: "BCONSTRUCTION CONVERT",
@@ -201,7 +201,7 @@ impl CadModule for BlockEditorModule {
                     command(
                         "BAUTHORPALETTE",
                         "Authoring Palettes",
-                        crate::ui::icons::AUTHORING_PALETTES,
+                        crate::icon_assets::AUTHORING_PALETTES,
                     ),
                 );
             }
@@ -217,19 +217,19 @@ impl CadModule for BlockEditorModule {
                     RibbonItem::Tool(ToolDef {
                         id: "BVMODE_TOGGLE",
                         label: "Visibility Mode",
-                        icon: IconKind::Svg(crate::ui::icons::EYE_ALL),
+                        icon: IconKind::Svg(crate::icon_assets::EYE_ALL),
                         event: ModuleEvent::Command("BVMODE TOGGLE".into()),
                     }),
                     RibbonItem::Tool(ToolDef {
                         id: "BVSHOW",
                         label: "Make Visible",
-                        icon: IconKind::Svg(crate::ui::icons::EYE),
+                        icon: IconKind::Svg(crate::icon_assets::EYE),
                         event: ModuleEvent::Command("BVSHOW".into()),
                     }),
                     RibbonItem::Tool(ToolDef {
                         id: "BVHIDE",
                         label: "Make Invisible",
-                        icon: IconKind::Svg(crate::ui::icons::EYE_OFF),
+                        icon: IconKind::Svg(crate::icon_assets::EYE_OFF),
                         event: ModuleEvent::Command("BVHIDE".into()),
                     }),
                 ],
@@ -245,4 +245,24 @@ impl CadModule for BlockEditorModule {
             groups
         })
     }
+}
+
+/// The alignment command for the first alignment grip of `insert`, as the
+/// alignment benchmark drives it.
+#[doc(hidden)]
+pub fn bench_start_alignment_command(
+    scene: &crate::scene::Scene,
+    insert: document::Handle,
+) -> Option<Box<dyn crate::command::CadCommand>> {
+    let alignment = scene.alignment_grips(insert).into_iter().next()?;
+    let targets =
+        crate::scene::block_alignment::Targets::from_scene(scene, insert, alignment.plane);
+    let cached_wires =
+        scene.wires_for_entities(&[document::EntityType::Insert(alignment.reference.clone())]);
+    Some(Box::new(alignment::AlignmentCommand::with_cached_wires(
+        1,
+        alignment,
+        targets,
+        cached_wires,
+    )))
 }

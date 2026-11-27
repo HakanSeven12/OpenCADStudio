@@ -19,7 +19,6 @@ use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem, ToolDef};
-use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod draw_panel;
@@ -589,9 +588,16 @@ impl Ribbon {
             .map(|(_, name)| name.clone())
     }
 
+    /// The ribbon with the core tabs only.
     pub fn new() -> Self {
+        Self::with_modules(crate::modules::registry::all_modules())
+    }
+
+    /// The ribbon with `modules` as its tabs: the core ones plus those the
+    /// loaded plugins contribute.
+    pub fn with_modules(modules: Vec<Box<dyn CadModule>>) -> Self {
         Self {
-            modules: all_ribbon_modules(),
+            modules,
             active: 0,
             active_tool: None,
             wireframe: false,

@@ -1,0 +1,502 @@
+// Community font repository — detect missing SHX fonts and fetch them from
+// the project's `fonts/` folder on GitHub.
+//
+// DWG files reference SHX fonts by bare name (`vnarial.shx`, `romans.shx`, …).
+// When the file doesn't resolve on disk the renderer substitutes an embedded
+// LFF stroke font, which mangles drawings authored with fonts it cannot stand
+// in for. This module detects those references and downloads the real files
+// from the community folder, where anyone can contribute (see
+// `fonts/README.md` in the repository root).
+
+use std::path::{Path, PathBuf};
+
+use document::Document;
+
+/// The community folder's GitHub contents API (lists name + download URL).
+#[cfg(not(target_arch = "wasm32"))]
+const REPO_API_URL: &str = "https://api.github.com/repos/HakanSeven12/OpenCADStudio/contents/fonts";
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_FONT_BYTES: u64 = 16 * 1024 * 1024;
+
+#[cfg(not(target_arch = "wasm32"))]
+static FONTS_FOLDER: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// A folder chosen in Options to hold the fonts instead of the default one,
+/// such as a share on the office network.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn fonts_folder() -> Option<PathBuf> {
+    FONTS_FOLDER
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_fonts_folder(folder: Option<PathBuf>) {
+    *FONTS_FOLDER.write().unwrap_or_else(|e| e.into_inner()) = folder;
+    forget_font_paths();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static SUPPORT_FOLDER: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// A folder of the user's own support files — hatch patterns, linetypes,
+/// fonts and shape files — searched beside the built-in locations, so one
+/// folder (on a flash drive, say) carries them from machine to machine.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn support_folder() -> Option<PathBuf> {
+    SUPPORT_FOLDER
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn support_folder() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_support_folder(folder: Option<PathBuf>) {
+    *SUPPORT_FOLDER.write().unwrap_or_else(|e| e.into_inner()) = folder;
+    forget_font_paths();
+}
+
+/// Local store for fonts downloaded from the community repository. Text
+/// resolution searches here after the drawing folder.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn fonts_dir() -> Option<PathBuf> {
+    fonts_folder().or_else(|| crate::config::config_dir().map(|dir| dir.join("fonts")))
+}
+
+/// Web builds have no filesystem to cache fonts into.
+#[cfg(target_arch = "wasm32")]
+pub fn fonts_dir() -> Option<PathBuf> {
+    None
+}
+
+/// Where missing fonts are fetched from. The community repository is the
+/// default; a custom source is any HTTP folder - a company file server, a
+/// private GitHub repo's raw folder - where each font lives as
+/// `{base}/{file_name}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FontSource {
+    Community,
+    Custom(String),
+}
+
+/// Stable key for comparing bare font names without path or case differences.
+pub fn font_key(name: &str) -> String {
+    name.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+impl FontSource {
+    /// Empty / whitespace input selects the community repository.
+    pub fn from_url(url: &str) -> Self {
+        match url.trim() {
+            "" => FontSource::Community,
+            trimmed => FontSource::Custom(trimmed.trim_end_matches('/').to_string()),
+        }
+    }
+}
+
+/// One file listed in the community folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoFont {
+    pub name: String,
+    pub download_url: String,
+}
+
+/// Referenced-but-unresolvable `.shx` font files across the document's text
+/// styles. Names are deduplicated case-insensitively and reduced to the bare
+/// file name (`C:\Fonts\VNArial.shx` → `VNArial.shx`).
+pub fn missing_shx_fonts(doc: &Document) -> Vec<String> {
+    let mut missing: Vec<String> = Vec::new();
+    let base = doc
+        .source_path
+        .as_deref()
+        .map(Path::new)
+        .and_then(|p| p.parent());
+    for style in doc.text_styles.iter() {
+        // The primary font and the big font (Asian double-byte glyphs) are
+        // both plain .shx files the style depends on.
+        for file in [style.font_file.trim(), style.big_font_file.trim()] {
+            if !shx_file_missing(file, base) {
+                continue;
+            }
+            let name = file.rsplit(['/', '\\']).next().unwrap_or(file).to_string();
+            if !missing.iter().any(|m| m.eq_ignore_ascii_case(&name)) {
+                missing.push(name);
+            }
+        }
+    }
+    missing.sort_by_key(|name| name.to_ascii_lowercase());
+    missing
+}
+
+/// Whether `file` is an `.shx` font that draws with an unrelated stand-in:
+/// not bundled, not beside the drawing (`base`), not in the font folders. A
+/// font with a built-in stroke equivalent (romans, simplex, txt...) already
+/// draws as it should.
+pub fn shx_file_missing(file: &str, base: Option<&Path>) -> bool {
+    let file = file.trim();
+    !(file.is_empty()
+        || !file.to_ascii_lowercase().ends_with(".shx")
+        || crate::text::shape_files::is_bundled_shape_file(file)
+        || crate::text::lff::is_builtin(file)
+        || crate::text::shape_files::find_shape_file(file, base).is_some())
+}
+
+/// The `.shx` files in the downloaded-fonts folder and the support folder,
+/// by file name, sorted and de-duplicated case-insensitively.
+pub fn folder_shx_fonts() -> Vec<String> {
+    let mut files: Vec<String> = fonts_dir()
+        .into_iter()
+        .chain(support_folder())
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.to_ascii_lowercase().ends_with(".shx"))
+        .collect();
+    files.sort_by_key(|name| name.to_ascii_lowercase());
+    files.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    files
+}
+
+/// A font file previously downloaded into the local fonts directory, matched
+/// case-insensitively by file name.
+pub fn local_font_file(name: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    FOLDER_SEARCHES.with(|count| count.set(count.get() + 1));
+    let file = name.rsplit(['/', '\\']).next()?;
+    let lower = file.to_ascii_lowercase();
+    fonts_dir()
+        .into_iter()
+        .chain(support_folder())
+        .find_map(|dir| {
+            let direct = dir.join(file);
+            if direct.is_file() {
+                return Some(direct);
+            }
+            std::fs::read_dir(&dir)
+                .ok()?
+                .filter_map(|entry| entry.ok())
+                .find(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase() == lower)
+                .map(|entry| entry.path())
+        })
+}
+
+/// AutoCAD-style transmittal font folders visible to a drawing at `base`.
+/// Drawing-local `Fonts/` wins, followed by ancestor `Fonts/` folders up to the
+/// package root. This covers flat `xref/` and arbitrary preserved hierarchies;
+/// no ancestor's ordinary files are searched, only its `Fonts` directory.
+pub(crate) fn packaged_font_dirs(base: Option<&Path>) -> Vec<PathBuf> {
+    base.into_iter()
+        .flat_map(Path::ancestors)
+        .map(|dir| dir.join("Fonts"))
+        .collect()
+}
+
+/// How long a font file lookup is remembered.
+const FONT_PATH_MEMORY: std::time::Duration = std::time::Duration::from_secs(2);
+
+type FontPaths =
+    std::collections::HashMap<(String, Option<PathBuf>), (iced::time::Instant, Option<String>)>;
+
+fn font_paths() -> &'static std::sync::RwLock<FontPaths> {
+    static PATHS: std::sync::OnceLock<std::sync::RwLock<FontPaths>> = std::sync::OnceLock::new();
+    PATHS.get_or_init(Default::default)
+}
+
+/// Where the font file `name` is on disk: as stored or next to the drawing
+/// (`base` is its folder), then in the fonts and support folders.
+///
+/// Every text asks this for its style's font, and a file that is not there
+/// costs a listing of both folders. The answer is remembered for two seconds,
+/// so the texts of a drawing share one search while it opens or is redrawn,
+/// and a font copied in by hand is found on the redraw after. It is forgotten
+/// at once when the folders change or a font is downloaded.
+pub fn font_file_path(name: &str, base: Option<&Path>) -> Option<String> {
+    let key = (name.to_string(), base.map(Path::to_path_buf));
+    if let Some((found_at, found)) = font_paths()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
+        if found_at.elapsed() < FONT_PATH_MEMORY {
+            return found.clone();
+        }
+    }
+    let found = crate::text::shape_files::find_shape_file(name, base);
+    font_paths()
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, (iced::time::Instant::now(), found.clone()));
+    found
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn forget_font_paths() {
+    #[cfg(test)]
+    let _not_counting = KEEP_FONT_PATHS.read().unwrap_or_else(|e| e.into_inner());
+    font_paths()
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+}
+
+/// Held by a test while it counts font folder searches. Every test that
+/// builds an app applies its settings, which set the font folders and forget
+/// the lookups; they wait here so the count sees only the test's own work.
+#[cfg(test)]
+pub(crate) static KEEP_FONT_PATHS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has searched the font folders.
+    pub(crate) static FOLDER_SEARCHES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// List the community folder through the GitHub contents API.
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_repo_fonts() -> Result<Vec<RepoFont>, String> {
+    let agent = crate::network::agent(std::time::Duration::from_secs(15));
+    let mut response = agent
+        .get(REPO_API_URL)
+        .header(
+            "User-Agent",
+            concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
+        )
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .map_err(|e| format!("Could not reach the font repository: {e}"))?;
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("Could not read the font repository listing: {e}"))?;
+    parse_contents(&body)
+}
+
+/// Parse the GitHub contents-API response:
+/// `[{"name":"romans.shx","download_url":"https://…"}, …]`.
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_contents(body: &str) -> Result<Vec<RepoFont>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("Unexpected font listing: {e}"))?;
+    let items = value
+        .as_array()
+        .ok_or_else(|| "Unexpected font-repository response.".to_string())?;
+    Ok(items
+        .iter()
+        .filter_map(|item| {
+            let name = item.get("name")?.as_str()?.to_string();
+            let url = item.get("download_url")?.as_str()?.to_string();
+            (!name.is_empty() && !url.is_empty()).then_some(RepoFont {
+                name,
+                download_url: url,
+            })
+        })
+        .collect())
+}
+
+/// Download every `missing` font that exists in the community folder into the
+/// local fonts directory. Returns the (requested, saved-path) pairs that were
+/// actually fetched; names absent from the repository are skipped.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn download_fonts(
+    missing: &[String],
+    source: &FontSource,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    let repo = match source {
+        FontSource::Community => Some(fetch_repo_fonts()?),
+        FontSource::Custom(_) => None,
+    };
+    let dir = fonts_dir().ok_or_else(|| "Could not resolve the fonts folder.".to_string())?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+    let mut downloaded = Vec::new();
+    for want in missing {
+        let file = want.rsplit(['/', '\\']).next().unwrap_or(want);
+        let url = match (source, repo.as_ref()) {
+            // Community: download URLs come from the listing, matched by name.
+            (FontSource::Community, Some(repo)) => {
+                let lower = file.to_ascii_lowercase();
+                repo.iter()
+                    .find(|f| f.name.to_ascii_lowercase() == lower)
+                    .map(|f| f.download_url.clone())
+            }
+            // Custom folder: the font is simply `{base}/{file_name}`; a miss
+            // (404) is skipped without failing the batch.
+            (FontSource::Custom(base), _) => Some(format!("{base}/{}", percent_encode_path(file))),
+            (FontSource::Community, None) => None,
+        };
+        let Some(url) = url else { continue };
+        let agent = crate::network::agent(std::time::Duration::from_secs(30));
+        let mut response = agent
+            .get(&url)
+            .header(
+                "User-Agent",
+                concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
+            )
+            .call()
+            .map_err(|e| format!("Could not download {file}: {e}"))?;
+        if response.status() != 200 {
+            continue;
+        }
+        let bytes = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_FONT_BYTES)
+            .read_to_vec()
+            .map_err(|e| format!("Could not download {file}: {e}"))?;
+        if bytes.is_empty() {
+            continue;
+        }
+        let dest = dir.join(file);
+        std::fs::write(&dest, &bytes)
+            .map_err(|e| format!("Could not save {}: {e}", dest.display()))?;
+        downloaded.push((file.to_string(), dest));
+    }
+    forget_font_paths();
+    Ok(downloaded)
+}
+
+/// The web build has no network client, and no fonts folder to save into.
+#[cfg(target_arch = "wasm32")]
+pub fn download_fonts(
+    missing: &[String],
+    _source: &FontSource,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    Err("Downloading fonts is not available in the web app.".to_string())
+}
+
+/// Escape path characters that would break a URL (spaces and non-ASCII file
+/// names are common in font sets).
+#[cfg(not(target_arch = "wasm32"))]
+fn percent_encode_path(file: &str) -> String {
+    let mut out = String::with_capacity(file.len());
+    for byte in file.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_github_contents_listing() {
+        let body = r#"[
+            {"name":"romans.shx","path":"fonts/romans.shx",
+             "download_url":"https://raw.githubusercontent.com/x/y/main/fonts/romans.shx","type":"file"},
+            {"name":"subset","path":"fonts/subset","type":"dir"},
+            {"name":"no-url.shx","path":"fonts/no-url.shx","type":"file"}
+        ]"#;
+        let fonts = parse_contents(body).unwrap();
+        assert_eq!(fonts.len(), 1);
+        assert_eq!(fonts[0].name, "romans.shx");
+        assert!(fonts[0].download_url.ends_with("/fonts/romans.shx"));
+    }
+
+    #[test]
+    fn custom_source_urls_are_trimmed_and_encoded() {
+        assert_eq!(FontSource::from_url(""), FontSource::Community);
+        assert_eq!(
+            FontSource::from_url("  https://intra/fonts/  "),
+            FontSource::Custom("https://intra/fonts".into())
+        );
+        assert_eq!(percent_encode_path("vn 30f.shx"), "vn%2030f.shx");
+    }
+
+    #[test]
+    fn font_keys_are_bare_trimmed_and_case_insensitive() {
+        assert_eq!(font_key(r#" C:\Fonts\ROMANS.SHX "#), "romans.shx");
+        assert_eq!(font_key("folder/simplex.shx"), "simplex.shx");
+    }
+
+    #[test]
+    fn rejects_a_non_listing_response() {
+        assert!(parse_contents("{\"message\":\"Not Found\"}").is_err());
+    }
+
+    #[test]
+    fn missing_fonts_deduplicate_by_name_case_insensitively() {
+        // Two styles referencing the same missing font with different casing
+        // and one whose file resolves next to the drawing must yield one hit.
+        let dir = std::env::temp_dir().join("ocs_font_repo_tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("exists.shx"), b"stub").unwrap();
+        let mut doc = Document::new();
+        let mk = |name: &str, file: &str| {
+            let mut style = document::TextStyle::new(name);
+            style.font_file = file.into();
+            style
+        };
+        let _ = doc.text_styles.add(mk("A", "MISSING1.shx"));
+        let _ = doc.text_styles.add(mk("B", "missing1.SHX"));
+        let _ = doc.text_styles.add(mk("C", "exists.shx"));
+        // A differently-cased reference resolves to that same sibling (#2804).
+        let _ = doc.text_styles.add(mk("F", "EXISTS.SHX"));
+        doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
+        // Fonts with a built-in stroke equivalent are not missing (#2156).
+        let _ = doc.text_styles.add(mk("D", "romans.shx"));
+        let _ = doc.text_styles.add(mk("E", "SIMPLEX.SHX"));
+        let missing = missing_shx_fonts(&doc);
+        assert_eq!(missing, vec!["MISSING1.shx".to_string()]);
+        let _ = std::fs::remove_file(dir.join("exists.shx"));
+    }
+
+    #[test]
+    fn transmittal_fonts_resolve_from_root_and_xref_drawings() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmittal-font-lookup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let fonts = dir.join("Fonts");
+        let xrefs = dir.join("xref/discipline");
+        std::fs::create_dir_all(&fonts).unwrap();
+        std::fs::create_dir_all(&xrefs).unwrap();
+        std::fs::write(fonts.join("Package-Custom.shx"), b"shape").unwrap();
+
+        let resolved = font_file_path("package-custom.SHX", Some(&dir)).unwrap();
+        let expected = fonts
+            .join("Package-Custom.shx")
+            .to_string_lossy()
+            .into_owned();
+        // Windows resolves the direct path with the query's casing, while the
+        // Linux fallback scan returns the directory entry's casing.
+        assert!(resolved.eq_ignore_ascii_case(&expected), "{resolved}");
+        assert_eq!(
+            font_file_path("Package-Custom.shx", Some(&xrefs)),
+            Some(
+                fonts
+                    .join("Package-Custom.shx")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

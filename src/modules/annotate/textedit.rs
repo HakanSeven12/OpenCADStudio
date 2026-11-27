@@ -230,7 +230,7 @@ impl CadCommand for TexteditmodeCommand {
         };
         format!(
             "{prefix}{}",
-            crate::ui::command_line::value_prompt("TEXTEDITMODE", &v)
+            crate::command::prompt::value_prompt("TEXTEDITMODE", &v)
         )
     }
 

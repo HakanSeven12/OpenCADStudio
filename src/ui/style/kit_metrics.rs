@@ -234,7 +234,9 @@ pub const FORM_CARET: f32 = 9.0;
 pub const FORM_TILE_H: f32 = 30.0;
 pub const FORM_TILE_GAP: f32 = 4.0;
 pub const FORM_TILE_PAD: f32 = 4.0;
-pub const FORM_TILES_TOP: f32 = 4.0;
+/// The same as below them, so the tiles sit midway between the section
+/// bar above and the one below.
+pub const FORM_TILES_TOP: f32 = 2.0;
 pub const FORM_TILES_BOTTOM: f32 = 2.0;
 pub const FORM_TILE_ICON_W: f32 = 30.0;
 pub const FORM_TILE_ICON_H: f32 = 20.0;

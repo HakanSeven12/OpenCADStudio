@@ -3981,11 +3981,13 @@ impl OpenCADStudio {
                     SelectExtend::Single
                 };
                 self.xref_manager.click_select(&id, extend);
+                self.xref_manager.keys_active = true;
                 Task::none()
             }
             Message::XrefRowRightClick(id) => {
                 self.xref_manager.row_change_path_open = false;
                 self.xref_manager.right_click_select(&id);
+                self.xref_manager.keys_active = true;
                 Task::none()
             }
             Message::XrefManagerToggleTree => {
@@ -10778,6 +10780,9 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 if let Some(task) = self.layer_manager_key(&key) {
+                    return task;
+                }
+                if let Some(task) = self.xref_manager_key(&key) {
                     return task;
                 }
                 if let Some(task) = self.quick_calc_shortcut(&key) {

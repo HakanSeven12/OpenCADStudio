@@ -4642,6 +4642,7 @@ insert =
     .date = 日期
     .details = 詳細資料
     .xref-detach = 分離
+    .xref-detach-tip = 從圖面中卸離選取的參考 (Delete)
     .failed = 失敗
     .xref-file-attach-is-not-available-on-web = 檔案附加在網頁版中無法使用 — 下面的參考清單為唯讀。
     .xref-file-name = 檔案名稱

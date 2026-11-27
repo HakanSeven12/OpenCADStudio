@@ -158,6 +158,10 @@ pub struct XrefManagerPanel {
     pub refresh_open: bool,
     pub path_open: bool,
     pub row_change_path_open: bool,
+    /// A click in the reference list gives it the keys (Delete detaches,
+    /// Esc gives them back) until the drawing or the command line is used,
+    /// as the Layer manager's table does.
+    pub keys_active: bool,
     /// Decoded preview images keyed by `(entry key, resolved path)` — rebuilt
     /// on every refresh for the anchor entry only, so the per-frame `view`
     /// stays pure and file I/O never happens during rendering.
@@ -201,6 +205,7 @@ impl Default for XrefManagerPanel {
             refresh_open: false,
             path_open: false,
             row_change_path_open: false,
+            keys_active: false,
             previews: HashMap::new(),
             preview_request: None,
             preview_pending: std::collections::HashSet::new(),
@@ -254,6 +259,29 @@ impl XrefRowId {
 }
 
 impl XrefManagerPanel {
+    /// Why Detach cannot run now (web, nothing selected, only nested
+    /// references selected), or `None` when it can.
+    pub fn detach_gate(&self) -> Option<String> {
+        if IS_WASM {
+            return Some(
+                crate::t!(
+                    "Reference changes are not available on web — the reference list is read-only."
+                )
+                .into_owned(),
+            );
+        }
+        if self.selected.is_empty() {
+            return Some(crate::t!("Select a reference first.").into_owned());
+        }
+        if self.selected.iter().all(|i| self.nested.contains(i)) {
+            return Some(
+                crate::t!("Nested references are read-only — edit them in their host drawing.")
+                    .into_owned(),
+            );
+        }
+        None
+    }
+
     /// Rebuild `entries` from `doc` via [`collect_entries_with_prev`] and
     /// recompute the parent → children linkage for tree mode. Selection/anchor
     /// survive by `(key, saved_path)` identity; dead indices are dropped.
@@ -747,8 +775,10 @@ impl XrefManagerPanel {
         };
         let list_btn = mode_btn(crate::t!("List").into_owned(), !self.tree);
         let tree_btn = mode_btn(crate::t!("Tree").into_owned(), self.tree);
-        // Reference operations (Detach/Unload/Reload/Bind/Overlay/Attach)
-        // live in the per-row right-click menu, not the toolbar.
+        // Reference operations (Unload/Reload/Bind/Overlay/Attach) live in
+        // the per-row right-click menu. Detach, the way to remove a
+        // reference, is in the toolbar too (and on Delete after a click in
+        // the list), so it is not only found by right-clicking.
         // Change Path group: greyed until a reference whose path can change
         // (a direct, non-nested row) is selected. Each option carries its own
         // gate so non-executable choices render greyed with the reason.
@@ -839,8 +869,20 @@ impl XrefManagerPanel {
         // Help opens a modal window explaining the manager (and its web
         // shortcomings): the old disabled tip could never be clicked, and
         // an anchored dropdown squeezes the text into the toolbar's width.
+        let detach = match self.detach_gate() {
+            Some(reason) => toolbar_tip(crate::t!("Detach").into_owned(), reason),
+            None => kit::tooltip(
+                kit::text_button(
+                    crate::t!("Detach").into_owned(),
+                    Some(Message::XrefManagerOp(XrefPaletteOp::Detach)),
+                    false,
+                ),
+                crate::tr!("insert", "xref-detach-tip"),
+                kit::TipPosition::Bottom,
+            ),
+        };
         let help = toolbar_btn(crate::t!("Help").into_owned(), Some(Message::XrefHelpOpen));
-        let toolbar = kit::toolbar(vec![attach, refresh, change_path, help]);
+        let toolbar = kit::toolbar(vec![attach, refresh, change_path, detach, help]);
 
         // ── File References pane title ──────────────────────────────────
         // List / Tree live on this row, right-aligned.

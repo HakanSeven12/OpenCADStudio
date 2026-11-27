@@ -4637,6 +4637,7 @@ insert =
     .date = Dátum
     .details = Részletek
     .xref-detach = Leválasztás
+    .xref-detach-tip = A kijelölt hivatkozások leválasztása a rajzról (Delete)
     .failed = Sikertelen
     .xref-file-attach-is-not-available-on-web = Fájl csatolása nem érhető el a weben — az alábbi hivatkozási lista csak olvasható.
     .xref-file-name = Fájlnév

@@ -488,6 +488,11 @@ pub(crate) fn window_event_with_context(
                 {
                     "ARROWDOWN"
                 }
+                // A pallet's list in a window of its own (the External
+                // References list detaches on Delete); a text field keeps it.
+                keyboard::Key::Named(keyboard::key::Named::Delete) if status == Status::Ignored => {
+                    "DELETE"
+                }
                 _ => return None,
             };
             Some(Message::OsWindowKey(win_id, name.to_string()))

@@ -183,10 +183,12 @@ fn check_style(theme: &Theme, status: checkbox::Status) -> checkbox::Style {
         }),
         icon_color: chrome::on_accent(theme),
         border: Border {
+            // An empty box needs more edge than a field to read on a
+            // light theme.
             color: if checked {
                 accent
             } else {
-                chrome::border(theme)
+                chrome::hover_border(theme)
             },
             width: km::line(),
             radius: 0.0.into(),

@@ -445,6 +445,32 @@ impl OpenCADStudio {
         }
     }
 
+    /// Keys for the External References list after a click in it: Delete
+    /// detaches the selected references (one undo step), Esc gives the keys
+    /// back. `None` leaves the key to the rest of the app.
+    pub(in crate::app) fn xref_manager_key(&mut self, key: &str) -> Option<Task<Message>> {
+        if !self.xref_manager.keys_active
+            || !self.dock_panel_visible(crate::ui::dock::PanelId::ExternalReferences)
+        {
+            return None;
+        }
+        // A running command keeps Esc and Delete for itself.
+        if self.tabs[self.active_tab].active_cmd.is_some() {
+            return None;
+        }
+        match key {
+            "DELETE" if self.xref_manager.detach_gate().is_none() => Some(self.update(
+                Message::XrefManagerOp(crate::ui::window::xref_manager::XrefPaletteOp::Detach),
+            )),
+            "DELETE" => Some(Task::none()),
+            "ESCAPE" => {
+                self.xref_manager.keys_active = false;
+                Some(Task::none())
+            }
+            _ => None,
+        }
+    }
+
     /// Keys for the Layer manager's table after a click in it: ↑/↓ move
     /// (Shift extends), Ctrl+A selects all, Del deletes, F2 renames and Esc
     /// clears the selection. `None` leaves the key to the rest of the app.

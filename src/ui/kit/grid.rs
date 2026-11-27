@@ -96,32 +96,43 @@ pub fn row_view<'a>(
     selected: bool,
     on_select: Option<Message>,
 ) -> Element<'a, Message> {
-    row_view_cols(
+    row_view_split(
         name,
         value,
+        NameWidth::Fixed(km::NAME_COL_W),
         selected,
         on_select,
-        Length::Fixed(km::NAME_COL_W),
     )
 }
 
-/// A [`row_view`] whose name and value columns each take half the width,
-/// for a narrow popover where the fixed name column would leave a choice
-/// too little room.
-pub fn row_view_half<'a>(
-    name: Element<'a, Message>,
-    value: Element<'a, Message>,
-) -> Element<'a, Message> {
-    row_view_cols(name, value, false, None, Length::Fill)
+/// How wide a grid row's name column is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NameWidth {
+    /// A fixed width, the palettes' [`km::NAME_COL_W`].
+    Fixed(f32),
+    /// Half the row, the value taking the other half: for a narrow popover
+    /// where the fixed column would leave a choice too little room.
+    Half,
+    /// The whole row, with no value column: a check box and its label.
+    Full,
 }
 
-fn row_view_cols<'a>(
+/// A [`row_view`] with the name column `name_width` wide. Every name/value
+/// row goes through here, so all of them share the indent, the grid lines
+/// and the column edge.
+pub fn row_view_split<'a>(
     name: Element<'a, Message>,
     value: Element<'a, Message>,
+    name_width: NameWidth,
     selected: bool,
     on_select: Option<Message>,
-    name_w: Length,
 ) -> Element<'a, Message> {
+    let name_w = match name_width {
+        NameWidth::Fixed(width) => Length::Fixed(width),
+        NameWidth::Half => Length::FillPortion(1),
+        NameWidth::Full => Length::Fill,
+    };
+    let full = name_width == NameWidth::Full;
     let name_cell = container(name)
         .width(name_w)
         .height(Length::Fixed(km::ROW_H))
@@ -137,7 +148,7 @@ fn row_view_cols<'a>(
             ..Default::default()
         });
     let value_cell = container(value)
-        .width(Length::Fill)
+        .width(Length::FillPortion(1))
         .height(Length::Fixed(km::ROW_H))
         .align_y(iced::Center)
         .clip(true)
@@ -152,16 +163,12 @@ fn row_view_cols<'a>(
         ),
         None => (name_cell.into(), value_cell.into()),
     };
+    let mut cells = row![Space::new().width(km::INDENT), vline(), name_cell];
+    if !full {
+        cells = cells.push(vline()).push(value_cell);
+    }
     column![
-        row![
-            Space::new().width(km::INDENT),
-            vline(),
-            name_cell,
-            vline(),
-            value_cell,
-            vline(),
-        ]
-        .height(Length::Fixed(km::ROW_H)),
+        cells.push(vline()).height(Length::Fixed(km::ROW_H)),
         row![
             Space::new().width(km::INDENT),
             line(Length::Fill, Length::Fixed(km::line())),

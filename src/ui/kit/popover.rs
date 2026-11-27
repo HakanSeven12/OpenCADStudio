@@ -32,16 +32,6 @@ pub fn popover<'a>(
         .into()
 }
 
-/// The grid inset of a row: room before it as before a grid row's name.
-fn inset<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fixed(km::ROW_H))
-        .padding(Padding::ZERO.left(km::INDENT + km::LINE + km::CELL_PAD_X))
-        .align_y(iced::Center)
-        .into()
-}
-
 /// A check box with `label` after it, toggled by a press on either. The
 /// label stays on one line, cut with "…" where its cell ends.
 fn check<'a>(label: String, checked: bool, on_toggle: Option<Message>) -> Element<'a, Message> {
@@ -76,7 +66,13 @@ pub fn check_row<'a>(
     checked: bool,
     on_toggle: Option<Message>,
 ) -> Element<'a, Message> {
-    inset(check(label.into(), checked, on_toggle))
+    super::row_view_split(
+        check(label.into(), checked, on_toggle),
+        Space::new().into(),
+        super::NameWidth::Full,
+        false,
+        None,
+    )
 }
 
 /// A check box and `label` in the left half and a choice (`dropdown`) in
@@ -94,7 +90,13 @@ pub fn check_select_row<'a>(
         Some(dropdown) => dropdown,
         None => super::read_only_field(shown),
     };
-    super::row_view_half(check(label.into(), checked, on_toggle), value)
+    super::row_view_split(
+        check(label.into(), checked, on_toggle),
+        value,
+        super::NameWidth::Half,
+        false,
+        None,
+    )
 }
 
 /// A row of choice tiles, one per option (`icon` and label), side by side

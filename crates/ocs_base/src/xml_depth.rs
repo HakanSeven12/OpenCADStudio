@@ -9,7 +9,7 @@
 /// skips comments, CDATA, PIs, doctype subsets and quoted attribute values
 /// so their `<`/`>` never count. Defensive only: malformed markup may
 /// overcount and reject the file, but must never undercount.
-pub(crate) fn within(text: &str, max: usize) -> bool {
+pub fn within(text: &str, max: usize) -> bool {
     let b = text.as_bytes();
     let mut i = 0usize;
     let mut depth = 0usize;

@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory() as directory:
     (output / 'app/index.html').write_text('<html><head><link rel="icon" href="/old.svg" integrity="old" /></head><body>App</body></html>')
     subprocess.run(['sh', 'scripts/assemble-site.sh', str(output)], cwd=ROOT, check=True)
     catalogs = {p.stem: json.loads(p.read_text()) for p in (ROOT / 'site/locales').glob('*.json')}
-    supported = set(re.findall(r'#\[serde\(rename = "([a-z]{2}-[A-Z]{2})"\)\]', (ROOT / 'src/i18n.rs').read_text()))
+    supported = set(re.findall(r'#\[serde\(rename = "([a-z]{2}-[A-Z]{2})"\)\]', (ROOT / 'crates/ocs_base/src/i18n.rs').read_text()))
     assert catalogs.keys() == supported
     spec = importlib.util.spec_from_file_location('charts', ROOT / 'scripts/generate-star-history.py')
     charts = importlib.util.module_from_spec(spec)

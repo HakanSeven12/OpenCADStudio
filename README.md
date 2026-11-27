@@ -239,7 +239,7 @@ Bug reports, focused pull requests, translations, documentation improvements, an
 - Report vulnerabilities privately by following the [security policy](SECURITY.md).
 
 Application translations live in `locales/*/opencadstudio.ftl`; source labels map through
-`src/locale_catalog.rs`. After editing translations, run `python3 scripts/export-locales.py`
+`crates/ocs_base/src/locale_catalog.rs`. After editing translations, run `python3 scripts/export-locales.py`
 to refresh web and desktop packaging labels. Validate with `python3 scripts/test_site.py`
 and `cargo test --lib i18n::tests`.
 

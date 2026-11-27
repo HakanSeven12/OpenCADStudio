@@ -28,7 +28,7 @@ Each step builds, passes the tests and lands on `main` on its own. A step that m
 2. **Remove the upward dependencies.** Done below the tools: layers 0 to 3 use nothing above them, and `scene` no longer uses `io`. What is left is `ui -> app` (the views reach into the application's state) and one `modules -> ui` use. `python3 scripts/arch_check.py readiness` lists, per planned crate, what still keeps it from building alone, test code included.
 3. **Process-wide state into the session.** About 180 mutable statics (atomics, mutexes, `OnceLock`) and 66 `thread_local!` blocks hold per-session state today, such as a command's last-used values. A switch that is process-wide forces tests that touch it to run serially. They move into the session or the app state they belong to.
 4. **System variables from one table**: name, type, default, where the value is kept (drawing header or user profile), how it is read and set. `SETVAR`, the name lists, the settings file and the command reference are then derived from it instead of being edited in several files.
-5. **Split the crates bottom up**: `ocs_base`, `ocs_model`, `ocs_io`.
+5. **Split the crates bottom up**: `ocs_base` (done: `crates/ocs_base`), `ocs_model`, `ocs_io`. The application's tests depend on `ocs_base` with its `test-isolation` feature, which keeps them off the user's settings folder, system language and clipboard the way `cfg(test)` does inside the crate.
 6. **Split `Scene`** into session, view state (camera, panes), render caches and previews; then `ocs_session` and `ocs_render`.
 7. **The command layer:**
    - a registry in place of the name match;

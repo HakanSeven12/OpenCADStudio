@@ -56,6 +56,7 @@ dependencies = [
  "objc2 0.5.3",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
+ "ocs_base",
  "ocs_constraints",
  "ocs_geom",
  "ocs_plugin_api",
@@ -4787,6 +4788,39 @@ dependencies = [
  "objc2 0.5.3",
  "objc2-core-location",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "ocs_base"
+version = "0.1.0"
+dependencies = [
+ "ashpd",
+ "cosmic-text",
+ "fluent-syntax",
+ "fontdb",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "iced",
+ "js-sys",
+ "jsonschema 0.63.1",
+ "libc",
+ "log",
+ "ocs_plugin_api",
+ "open",
+ "rayon",
+ "rfd",
+ "rstest",
+ "rust-embed",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows-sys 0.61.2",
+ "x11rb 0.14.0",
 ]
 
 [[package]]

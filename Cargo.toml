@@ -15,6 +15,7 @@ workspace = true
 
 [workspace]
 members = [
+    "crates/ocs_base",
     "crates/ocs_solid",
     "crates/ocs_plugin_api",
     "crates/ocs_save",
@@ -35,6 +36,7 @@ undocumented_unsafe_blocks = "warn"
 winresource = "0.1"
 
 [dependencies]
+ocs_base = { path = "crates/ocs_base" }
 serde_json = "1"
 # Offline validation of the same contracts published to automation clients.
 jsonschema = { version = "0.63", default-features = false }
@@ -132,6 +134,8 @@ parry2d-f64 = "0.31"
 parry3d-f64 = "0.31"
 
 [dev-dependencies]
+# The tests run with their settings and language isolated from the machine.
+ocs_base = { path = "crates/ocs_base", features = ["test-isolation"] }
 fluent-syntax = "0.12"
 iced_test = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 naga = { version = "29", features = ["wgsl-in"] }

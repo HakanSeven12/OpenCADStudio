@@ -58,7 +58,7 @@ LAYERS = {
     "ui": 5, "input": 5,
     # 6 the app shell and its front doors
     "app": 6, "plugin": 6, "mcp": 6, "mcp_intent": 6, "mcp_ops": 6, "rest": 6, "cli": 6,
-    "discussions": 6, "patreon": 6, "videos": 6, "locale_catalog": 6,
+    "discussions": 6, "patreon": 6, "videos": 6,
 }
 
 # Same-layer pairs that are still upward: rendering must not depend on file

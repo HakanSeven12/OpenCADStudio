@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 #[derive(Serialize)]
-pub(crate) struct Distribution {
+pub struct Distribution {
     pub samples: Vec<f64>,
     pub median_us: f64,
     pub p95_us: f64,
@@ -41,7 +41,7 @@ impl Distribution {
 }
 
 #[derive(Serialize)]
-pub(crate) struct Comparison {
+pub struct Comparison {
     pub before: Distribution,
     pub after: Distribution,
     pub median_change_percent: f64,
@@ -49,7 +49,7 @@ pub(crate) struct Comparison {
     pub paired_delta_95ci_us: [f64; 2],
 }
 
-pub(crate) fn compare(before: Vec<f64>, after: Vec<f64>) -> Comparison {
+pub fn compare(before: Vec<f64>, after: Vec<f64>) -> Comparison {
     assert_eq!(before.len(), after.len());
     let deltas: Vec<_> = before.iter().zip(&after).map(|(a, b)| b - a).collect();
     let mut rng = 0x53a7_ea19_31cb_942du64;
@@ -77,7 +77,7 @@ pub(crate) fn compare(before: Vec<f64>, after: Vec<f64>) -> Comparison {
 }
 
 /// Alternate order to reduce drift; each closure owns its setup/timed boundary.
-pub(crate) fn paired(
+pub fn paired(
     n: usize,
     mut before: impl FnMut() -> f64,
     mut after: impl FnMut() -> f64,
@@ -97,7 +97,7 @@ pub(crate) fn paired(
     compare(old, new)
 }
 
-pub(crate) fn write_report(name: &str, value: impl Serialize) -> PathBuf {
+pub fn write_report(name: &str, value: impl Serialize) -> PathBuf {
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/performance-audit");
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join(format!("{name}.json"));

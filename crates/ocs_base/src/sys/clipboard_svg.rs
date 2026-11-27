@@ -63,22 +63,22 @@ pub fn write(svg: &str, strokes: &[Stroke]) -> bool {
     if formats.is_empty() {
         return false;
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-isolation"))]
     {
         let _ = strokes;
         test_record::record(formats);
         true
     }
-    #[cfg(all(not(test), target_os = "windows"))]
+    #[cfg(all(not(any(test, feature = "test-isolation")), target_os = "windows"))]
     {
         windows::write(&formats, strokes)
     }
-    #[cfg(all(not(test), target_os = "linux"))]
+    #[cfg(all(not(any(test, feature = "test-isolation")), target_os = "linux"))]
     {
         let _ = strokes;
         x11::write(formats)
     }
-    #[cfg(all(not(test), not(any(target_os = "windows", target_os = "linux"))))]
+    #[cfg(all(not(any(test, feature = "test-isolation")), not(any(target_os = "windows", target_os = "linux"))))]
     {
         let _ = (formats, strokes);
         false
@@ -87,7 +87,7 @@ pub fn write(svg: &str, strokes: &[Stroke]) -> bool {
 
 /// Tests leave the system clipboard alone: each write is kept here, per
 /// thread, as the formats it would have put there.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-isolation"))]
 pub mod test_record {
     use std::cell::RefCell;
 
@@ -107,7 +107,7 @@ pub mod test_record {
     }
 }
 
-#[cfg(all(not(test), target_os = "windows"))]
+#[cfg(all(not(any(test, feature = "test-isolation")), target_os = "windows"))]
 mod windows {
     use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
@@ -263,7 +263,7 @@ mod windows {
     }
 }
 
-#[cfg(all(not(test), target_os = "linux"))]
+#[cfg(all(not(any(test, feature = "test-isolation")), target_os = "linux"))]
 mod x11 {
     //! The CLIPBOARD selection of the X server, owned by a thread of this
     //! process while it holds the copy. Under Wayland, XWayland hands the

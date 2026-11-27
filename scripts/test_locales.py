@@ -6,7 +6,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 STRING = r'"(?:[^"\\]|\\.)*"'
-lookup_text = (ROOT / 'src/locale_catalog.rs').read_text(encoding='utf-8')
+lookup_text = (ROOT / 'crates/ocs_base/src/locale_catalog.rs').read_text(encoding='utf-8')
 lookup = {}
 for match in re.finditer(r'(' + STRING + r')\s*=>\s*Some\(\(\s*"([\w-]+)"\s*,\s*"([\w-]+)"\s*,?\s*\)\)', lookup_text):
     source = json.loads(match[1])

@@ -7,8 +7,7 @@
   "exclude": [
    {"path": "src/scene/pipeline/", "why": "GPU rendering: needs a graphics device, which unit tests do not have."},
    {"path": "src/scene/view/render.rs", "why": "GPU rendering: needs a graphics device, which unit tests do not have."},
-   {"path": "src/gpu_backend.rs", "why": "Graphics backend selection: needs a graphics device."},
-   {"path": "src/perf.rs", "why": "Profiling aid, not application behaviour."}
+   {"path": "src/gpu_backend.rs", "why": "Graphics backend selection: needs a graphics device."}
   ]
  },
  "measures": [

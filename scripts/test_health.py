@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from unittest import mock
 import unittest
 from unittest import mock
 
@@ -471,7 +472,10 @@ class Page(unittest.TestCase):
         cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(root)))}
         goals = json.loads(code_health.GOALS.read_text())
         self.assertNotIn("## Crate readiness", code_health.render(cur, goals, [], [], "v1"))
-        cur["details"]["crate_readiness"] = health.arch_check.readiness(root)
+        # A module placed in no planned crate: `catalog`, taken out of its crate.
+        crates = [(n, l, [m for m in ms if m != "catalog"]) for n, l, ms in health.arch_check.CRATES]
+        with mock.patch.object(health.arch_check, "CRATES", crates):
+            cur["details"]["crate_readiness"] = health.arch_check.readiness(root)
         page = code_health.render(cur, goals, [], [], "v1")
         self.assertLess(page.index("## Crate readiness"), page.index("## Thanks"))
         self.assertIn("| `ocs_base` | `par`, `perf`,", page)

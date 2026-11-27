@@ -1,7 +1,7 @@
 //! Application language selection and embedded Fluent resources.
 
 use i18n_embed::fluent::{fluent_language_loader, FluentLanguageLoader};
-#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+#[cfg(all(not(target_arch = "wasm32"), not(any(test, feature = "test-isolation"))))]
 use i18n_embed::DesktopLanguageRequester;
 use i18n_embed::LanguageLoader;
 #[cfg(target_arch = "wasm32")]
@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 mod locale_catalog;
 
 #[derive(RustEmbed)]
-#[folder = "locales/"]
+#[folder = "../../locales/"]
 struct Localizations;
 
 /// User-selectable UI language. `System` keeps following the platform's
@@ -179,14 +179,14 @@ fn system_languages() -> Vec<i18n_embed::unic_langid::LanguageIdentifier> {
     // process-wide loader, and every `apply_config` of a default config asks
     // for the system language, so the machine's locale must never reach
     // them — not even from a test that runs in parallel.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-isolation"))]
     {
         vec!["en-US"
             .parse()
             .expect("en-US is a valid language identifier")]
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-isolation")))]
     {
         #[cfg(target_arch = "wasm32")]
         let mut requested = WebLanguageRequester::requested_languages();
@@ -332,7 +332,7 @@ pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
     }
 }
 
-pub(crate) fn format_attribute(
+pub fn format_attribute(
     message: &str,
     attribute: &str,
     arguments: &[(&str, &str)],

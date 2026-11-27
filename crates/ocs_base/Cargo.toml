@@ -1,0 +1,122 @@
+[package]
+name = "ocs_base"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Open CAD Studio's foundations: localisation, configuration, platform glue and helpers with no knowledge of CAD."
+publish = false
+
+[features]
+# Set by the application's dev-dependency on this crate: its tests then
+# never read or write the user's real settings and always run in en-US.
+test-isolation = []
+
+[dependencies]
+serde_json = "1"
+jsonschema = { version = "0.63", default-features = false }
+serde = { version = "1", features = ["derive"] }
+url = "2"
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["image", "svg", "advanced", "canvas", "smol", "markdown"] }
+rfd = "0.18"
+log = "0.4"
+i18n-embed = { version = "0.16", features = ["fluent-system"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
+rustc-hash = "2"
+fontdb = "0.23"
+cosmic-text = "0.19"
+
+[dev-dependencies]
+fluent-syntax = "0.12"
+rstest = "0.29"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Globalization", "Win32_Security_Authentication_Identity", "Win32_UI_Controls_Dialogs"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.14"
+ashpd = { version = "0.14.3", default-features = false, features = ["async-io", "settings", "wayland"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ocs_plugin_api = { path = "../ocs_plugin_api", features = ["host"] }
+i18n-embed = { version = "0.16", features = ["desktop-requester"] }
+rayon = "1"
+open = "5"
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ocs_plugin_api = { path = "../ocs_plugin_api" }
+i18n-embed = { version = "0.16", features = ["web-sys-requester"] }
+rust-embed = { version = "8", features = ["debug-embed"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "=0.3.85", features = [
+    "Window",
+    "Storage",
+    "StorageManager",
+    "Navigator",
+    "Document",
+    "Element",
+    "HtmlAnchorElement",
+    "Blob",
+    "File",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    # FileSystemFileHandle derefs to FileSystemHandle for the `name()`
+    # getter the in-place save (io::fs_access) reads off a picked handle.
+    "FileSystemHandle",
+    "FileSystemGetDirectoryOptions",
+    "FileSystemGetFileOptions",
+    "FileSystemWritableFileStream",
+    "WritableStream",
+    "Url",
+    "Response",
+    # The wasm remote-raster fetch (image_model::fetch_remote_web) builds a
+    # `Request` with an `AbortController` signal for its deadline; the fetch
+    # rejection is classified via `DomException` (AbortError = timeout) and
+    # the body size is pre-checked against the Content-Length `Headers`.
+    "Request",
+    "RequestInit",
+    "AbortController",
+    "AbortSignal",
+    "DomException",
+    "Headers",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
+    "MessageEvent",
+    "ErrorEvent",
+    "Clipboard",
+    # The web image paste reads `navigator.clipboard.read()` items
+    # (sys::read_clipboard_image): their `types()`/`getType()` surface lives
+    # on ClipboardItem.
+    "ClipboardItem",
+    "KeyboardEvent",
+    "KeyboardEventInit",
+    "EventInit",
+    "EventTarget",
+    "BeforeUnloadEvent",
+    # COLORSCHEME SYSTEM resolves prefers-color-scheme through a media
+    # query listener read at boot and on every re-run.
+    "MediaQueryList",
+    "console",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
+    "DragEvent",
+    "DataTransfer",
+    "FileList",
+    "Event",
+    "ReadableStreamDefaultReader",
+    "ReadableStream",
+    # The ?file= boot deep link reads location.search and compares the link's
+    # origin against the page's (io::web_link).
+    "Location",
+] }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }

@@ -8,6 +8,8 @@ static AUDIT_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub mod app;
 
+pub use ocs_base::{perf_record, perf_record_diagnostic, t, tf, tr};
+
 /// The Quad display-option message, re-exported at the crate root so every
 /// surface reaches it as `crate::QuadOptionMsg` (see `app/mod.rs`).
 pub(crate) use app::QuadOptionMsg;
@@ -38,7 +40,7 @@ pub mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cli;
 pub mod command;
-pub mod config;
+pub use ocs_base::config;
 pub mod discussions;
 pub mod display;
 pub mod entities;
@@ -46,8 +48,8 @@ pub(crate) mod entity_creation;
 pub mod filter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_backend;
-pub mod i18n;
-pub mod icon_assets;
+pub use ocs_base::i18n;
+pub use ocs_base::icon_assets;
 pub(crate) mod ifc_plan;
 pub(crate) mod input;
 pub mod io;
@@ -60,24 +62,44 @@ pub mod mcp_ops;
 pub mod media;
 pub mod modules;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod network;
-pub mod par;
+pub use ocs_base::network;
+pub use ocs_base::par;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod parametric;
-pub mod paths;
+pub use ocs_base::paths;
 pub mod patreon;
-pub mod perf;
+pub mod perf {
+    pub use ocs_base::perf::*;
+    #[cfg(all(test, feature = "performance-audit"))]
+    pub(crate) mod audit;
+}
 pub mod plugin;
 pub mod plugin_catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod rest;
 pub mod scene;
-pub(crate) mod schema_validation;
+pub use ocs_base::schema_validation;
 pub mod snap;
-pub mod sys;
-pub mod sysinfo;
+pub mod sys {
+    pub use ocs_base::sys::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    pub mod crash_log;
+}
+pub use ocs_base::sysinfo;
 pub mod text;
 pub mod ui;
 pub mod videos;
-pub mod wildcard;
-pub(crate) mod xml_depth;
+pub use ocs_base::wildcard;
+pub use ocs_base::xml_depth;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod isolation_tests {
+    /// This crate's tests reach `ocs_base` with its test isolation on
+    /// (`test-isolation`, set by the dev-dependency): their settings go to a
+    /// scratch folder, never the user's own.
+    #[test]
+    fn tests_never_touch_the_real_config_folder() {
+        let dir = crate::config::config_dir().expect("a config folder");
+        assert!(dir.starts_with(std::env::temp_dir()), "{dir:?}");
+    }
+}

@@ -33,7 +33,7 @@ pub struct GuiConfig {
 /// Set once by `main` before the GUI boots; read by `app::boot`.
 pub static GUI_CONFIG: std::sync::OnceLock<GuiConfig> = std::sync::OnceLock::new();
 
-pub(crate) fn low_memory_viewing() -> bool {
+pub fn low_memory_viewing() -> bool {
     GUI_CONFIG.get().is_some_and(|cfg| cfg.read_only && cfg.low_memory)
 }
 
@@ -51,7 +51,7 @@ pub fn config_dir() -> Option<PathBuf> {
     // once raced dozens of tests through an alias-table migration and left the
     // user's alias file holding a single line. Every store routes through here,
     // so one per-process scratch folder isolates them all.
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-isolation")) {
         return Some(std::env::temp_dir().join(format!("ocs-test-config-{}", std::process::id())));
     }
     let base: PathBuf = if cfg!(target_os = "windows") {

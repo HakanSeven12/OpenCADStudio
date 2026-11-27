@@ -16,7 +16,7 @@ Where the layers are going (crates, and the order of the work) is in [`TARGET.md
 | 3 tool contract | `command`, `plugin_catalog` | What a command or an add-on package is |
 | 4 tools | `modules`, `entity_creation` | The commands and ribbon tabs themselves |
 | 5 presentation | `ui`, `input` | Windows, widgets, input handling |
-| 6 app shell | `app`, `plugin`, `mcp`, `mcp_intent`, `mcp_ops`, `rest`, `cli`, `discussions`, `patreon`, `videos`, `locale_catalog` | The application and its front doors |
+| 6 app shell | `app`, `plugin`, `mcp`, `mcp_intent`, `mcp_ops`, `rest`, `cli`, `discussions`, `patreon`, `videos` | The application and its front doors |
 
 The rule of thumb: code that many things depend on sits low and changes rarely; code that changes often sits high, and nothing depends on it.
 

@@ -210,7 +210,7 @@ fn aligned(source: &ocs_geom::geom2d::Polyline, mut offset: ocs_geom::geom2d::Po
 }
 
 /// The azimuth (degrees clockwise from north) of bearing `b` in quadrant `q`.
-fn azimuth_of(q: u8, b: f64) -> f64 {
+pub(super) fn azimuth_of(q: u8, b: f64) -> f64 {
     [b, 180.0 - b, 180.0 + b, 360.0 - b][usize::from(q.clamp(1, 4)) - 1]
 }
 
@@ -224,7 +224,7 @@ fn quadrant_letters(q: u8) -> (char, char) {
 }
 
 /// An azimuth written as a bearing, `S85° 00' 00"E`.
-fn bearing_text(azimuth: f64) -> String {
+pub(super) fn bearing_text(azimuth: f64) -> String {
     let a = azimuth.rem_euclid(360.0);
     let (ns, ew, b) = match a {
         a if a <= 90.0 => ('N', 'E', a),

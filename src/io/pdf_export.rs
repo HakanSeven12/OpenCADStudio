@@ -39,6 +39,8 @@ pub enum PlotFileKind {
     Pdf,
     Svg,
     Dwf,
+    /// A raster image; the chosen extension picks PNG, JPEG, BMP or TIFF.
+    Image,
 }
 
 /// Web: no save dialog — the export continues with a virtual file name and the
@@ -425,6 +427,13 @@ pub fn pick_plot_path_owned(
             .add_filter(crate::t!("DWF Files").as_ref(), &["dwf"])
             .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
             .add_filter(crate::t!("SVG Files").as_ref(), &["svg"]),
+        PlotFileKind::Image => dialog
+            .set_title(crate::t!("Export").as_ref())
+            .set_file_name(&format!("{stem}.png"))
+            .add_filter("PNG", &["png"])
+            .add_filter("JPEG", &["jpg", "jpeg"])
+            .add_filter("BMP", &["bmp"])
+            .add_filter("TIFF", &["tif", "tiff"]),
         PlotFileKind::Pdf => dialog
             .set_title(crate::t!("Export as PDF").as_ref())
             .set_file_name(&format!("{stem}.pdf"))
@@ -462,6 +471,13 @@ pub async fn pick_plot_path_async(stem: String, kind: PlotFileKind) -> Option<st
             .add_filter(crate::t!("DWF Files").as_ref(), &["dwf"])
             .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
             .add_filter(crate::t!("SVG Files").as_ref(), &["svg"]),
+        PlotFileKind::Image => dialog
+            .set_title(crate::t!("Export").as_ref())
+            .set_file_name(format!("{stem}.png"))
+            .add_filter("PNG", &["png"])
+            .add_filter("JPEG", &["jpg", "jpeg"])
+            .add_filter("BMP", &["bmp"])
+            .add_filter("TIFF", &["tif", "tiff"]),
         PlotFileKind::Pdf => dialog
             .set_title(crate::t!("Export as PDF").as_ref())
             .set_file_name(format!("{stem}.pdf"))

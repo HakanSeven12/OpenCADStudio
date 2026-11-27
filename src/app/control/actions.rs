@@ -1967,12 +1967,14 @@ impl OpenCADStudio {
             "conversion_loss_back" => Message::ConversionLossBack,
             // Show a layout (or "Model"), as clicking its tab does.
             "layout_switch" => Message::LayoutSwitch(string(req, "value")?.into()),
-            // Pick the Plot dialog's output device: a printer name, "pdf" or "svg".
+            // Pick the Plot dialog's output device: a printer name, "pdf", "svg"
+            // or "image".
             "plot_printer" => {
-                use crate::ui::window::plot::{PlotDlgMsg, OUT_PDF, OUT_SVG};
+                use crate::ui::window::plot::{PlotDlgMsg, OUT_IMAGE, OUT_PDF, OUT_SVG};
                 let device = match string(req, "value")? {
                     "pdf" => OUT_PDF.to_string(),
                     "svg" => OUT_SVG.to_string(),
+                    "image" => OUT_IMAGE.to_string(),
                     other => other.to_string(),
                 };
                 Message::PlotDlg(PlotDlgMsg::Printer(device))

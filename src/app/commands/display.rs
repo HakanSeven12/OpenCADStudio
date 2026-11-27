@@ -1386,6 +1386,7 @@ impl OpenCADStudio {
             "EXPORTPDF" => {
                 self.plot_dialog.file_svg = false;
                 self.plot_dialog.file_dwf = false;
+                self.plot_dialog.file_image = false;
                 return Some(Task::done(Message::PlotExport));
             }
             // EXPORTDWF <file.dwf> [ALL] — the direct form of EXPORTPDF,
@@ -1431,6 +1432,7 @@ impl OpenCADStudio {
                 self.plot_dialog.to_file = true;
                 self.plot_dialog.file_svg = true;
                 self.plot_dialog.file_dwf = false;
+                self.plot_dialog.file_image = false;
                 return Some(Task::done(Message::PlotExport));
             }
             // PLOTSTYLE — load or clear CTB/STB plot style table

@@ -121,16 +121,97 @@ pub fn bundled_plugins_dir() -> Option<PathBuf> {
 
 /// Delete an installed package's folder. It stays loaded for the current
 /// session (the library is resident); the removal takes effect on next start.
+pub(crate) fn is_valid_plugin_id(id: &str) -> bool {
+    if id.is_empty()
+        || id.len() > 64
+        || id == "."
+        || id == ".."
+        || id.contains("..")
+        || id.ends_with('.')
+    {
+        return false;
+    }
+    let bytes = id.as_bytes();
+    if !bytes[0].is_ascii_alphanumeric() {
+        return false;
+    }
+    if !bytes
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return false;
+    }
+    let stem = id.split('.').next().unwrap_or(id).to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn uninstall(id: &str) -> Result<(), String> {
-    let user_root = plugins_dir().ok_or("cannot locate the plugins folder")?;
-    let dir = discover_from_roots(None, Some(&user_root))
-        .into_iter()
-        .find(|p| p.id == id)
-        .map(|p| p.dir)
-        .unwrap_or_else(|| user_root.join(id));
-    if dir.is_dir() {
-        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    if !is_valid_plugin_id(id) {
+        return Err(format!("invalid plugin id `{id}`"));
+    }
+    let root = plugins_dir().ok_or("cannot locate the plugins folder")?;
+    uninstall_in_root(&root, id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn uninstall_in_root(user_root: &std::path::Path, id: &str) -> Result<(), String> {
+    if !is_valid_plugin_id(id) {
+        return Err(format!("invalid plugin id `{id}`"));
+    }
+    if !user_root.exists() {
+        return Ok(());
+    }
+    let root_canon = std::fs::canonicalize(user_root).map_err(|e| e.to_string())?;
+    let mut discovered = std::collections::BTreeMap::new();
+    discover_root(&root_canon, false, &mut discovered);
+    let candidate = discovered
+        .get(id)
+        .map(|plugin| plugin.dir.clone())
+        .unwrap_or_else(|| root_canon.join(id));
+    match std::fs::symlink_metadata(&candidate) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "refusing to uninstall symlinked plugin directory for `{id}`"
+                ));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    }
+    let dir_canon = std::fs::canonicalize(&candidate).map_err(|e| e.to_string())?;
+    if dir_canon == root_canon || dir_canon.parent() != Some(root_canon.as_path()) {
+        return Err(format!(
+            "plugin directory for `{id}` escapes plugins folder"
+        ));
+    }
+    if dir_canon.is_dir() {
+        std::fs::remove_dir_all(&dir_canon).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -270,8 +351,9 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         }
     }
 
+    let id = id.filter(|id| is_valid_plugin_id(id))?;
     Some(ExternalPlugin {
-        id: id?,
+        id,
         name,
         version,
         description,
@@ -292,21 +374,31 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
 
 /// Convert a plugin source URL or shorthand to the marketplace's canonical
 /// `owner/repo` form.
+fn is_valid_github_slug_segment(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg != "."
+        && seg != ".."
+        && seg
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 pub(crate) fn normalize_repository(value: &str) -> Option<String> {
-    let repo = value
-        .trim()
-        .trim_start_matches("https://github.com/")
-        .trim_start_matches("http://github.com/")
-        .trim_end_matches('/')
-        .trim_end_matches(".git");
+    let raw = value.trim();
+    let repo = raw
+        .strip_prefix("https://github.com/")
+        .or_else(|| raw.strip_prefix("http://github.com/"))
+        .unwrap_or(raw)
+        .trim_end_matches('/');
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
     let mut parts = repo.split('/');
     let (Some(owner), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
         return None;
     };
-    if owner.is_empty() || name.is_empty() {
-        None
-    } else {
+    if is_valid_github_slug_segment(owner) && is_valid_github_slug_segment(name) {
         Some(format!("{owner}/{name}"))
+    } else {
+        None
     }
 }
 
@@ -597,14 +689,23 @@ mod loader {
     /// platform's extension. A declared name that is missing or does not
     /// carry the platform extension refuses the load with an honest error
     /// instead of silently loading some other `.so`/`.dll` in the folder.
-    fn lib_file_for(plugin: &super::ExternalPlugin) -> Option<PathBuf> {
+    pub(super) fn lib_file_for(plugin: &super::ExternalPlugin) -> Option<PathBuf> {
         if let Some(name) = plugin.library.as_deref() {
-            let path = plugin.dir.join(name);
+            let mut comps = Path::new(name).components();
+            let Some(std::path::Component::Normal(file_name)) = comps.next() else {
+                return None;
+            };
+            if comps.next().is_some() {
+                return None;
+            }
+            let path = plugin.dir.join(file_name);
             let matches_ext = path
                 .extension()
                 .and_then(|s| s.to_str())
                 .is_some_and(|s| s == lib_extension());
-            return if matches_ext && path.is_file() {
+            let is_regular_file = std::fs::symlink_metadata(&path)
+                .is_ok_and(|meta| !meta.file_type().is_symlink() && meta.file_type().is_file());
+            return if matches_ext && is_regular_file {
                 Some(path)
             } else {
                 None
@@ -1093,6 +1194,167 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
                  dispatch flake is a release blocker"
             );
             process.shutdown();
+        }
+    }
+
+    struct ScratchDir(std::path::PathBuf);
+    impl ScratchDir {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("ocs_ext_{label}_{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn plugin_id_validation_rejects_traversal_and_reserved_names() {
+        assert!(is_valid_plugin_id("opencad.my_plugin-1"));
+        assert!(is_valid_plugin_id("A1.b"));
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../evil",
+            "a/b",
+            "a\\b",
+            "C:evil",
+            "foo\0bar",
+            ".hidden",
+            "foo.",
+            "foo..bar",
+            "con",
+            "CON.plugin",
+            "prn",
+            "aux",
+            "nul",
+            "com1",
+            "COM9.extra",
+            "lpt1",
+            "LPT9",
+        ] {
+            assert!(!is_valid_plugin_id(bad), "expected rejection for {bad:?}");
+        }
+        let too_long = "a".repeat(65);
+        assert!(!is_valid_plugin_id(&too_long));
+    }
+
+    #[test]
+    fn parse_plugin_toml_rejects_invalid_and_traversal_ids() {
+        for bad_id in ["../escape", "foo/bar", "CON", ""] {
+            let toml = format!("id = \"{bad_id}\"\napi_version = 14\n");
+            assert!(
+                parse_plugin_toml(&toml).is_none(),
+                "expected rejection for id {bad_id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lib_file_for_rejects_traversal_and_nested_library_paths() {
+        let dir = ScratchDir::new("lib_file_for_guard");
+        let ext = lib_extension();
+        let nested_dir = dir.0.join("nested");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        std::fs::write(nested_dir.join(format!("sub.{ext}")), b"nested").unwrap();
+        let valid_name = format!("good.{ext}");
+        std::fs::write(dir.0.join(&valid_name), b"good").unwrap();
+
+        let base = ExternalPlugin {
+            id: "opencad.test".into(),
+            name: String::new(),
+            version: String::new(),
+            description: String::new(),
+            repository: None,
+            library: Some(valid_name),
+            api_version: 14,
+            acadrust_source: None,
+            acadrust_declared: false,
+            rustc_version: None,
+            rustc_declared: false,
+            ribbon_order: 0,
+            command_prefixes: Vec::new(),
+            dir: dir.0.clone(),
+            lib_present: true,
+            bundled: false,
+        };
+        assert!(loader::lib_file_for(&base).is_some());
+
+        for bad_lib in [
+            format!("../escape.{ext}"),
+            format!("nested/sub.{ext}"),
+            format!("/abs/lib.{ext}"),
+            format!("./good.{ext}"),
+        ] {
+            let mut tampered = base.clone();
+            tampered.library = Some(bad_lib.clone());
+            assert!(
+                loader::lib_file_for(&tampered).is_none(),
+                "expected rejection for library path {bad_lib:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_in_root_rejects_traversal_and_removes_discovered_dir() {
+        let sandbox = ScratchDir::new("uninstall_guard");
+        let plugins_root = sandbox.0.join("plugins");
+        let victim = sandbox.0.join("victim");
+        std::fs::create_dir_all(&plugins_root).unwrap();
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("keep.txt"), b"keep").unwrap();
+
+        assert!(uninstall_in_root(&plugins_root, "../victim").is_err());
+        assert!(victim.exists());
+
+        #[cfg(unix)]
+        {
+            let link = plugins_root.join("opencad.linked");
+            std::os::unix::fs::symlink(&victim, &link).unwrap();
+            assert!(uninstall_in_root(&plugins_root, "opencad.linked").is_err());
+            assert!(victim.join("keep.txt").exists());
+            let _ = std::fs::remove_file(&link);
+        }
+
+        let custom_dir = plugins_root.join("custom-folder");
+        std::fs::create_dir_all(&custom_dir).unwrap();
+        std::fs::write(
+            custom_dir.join("plugin.toml"),
+            "id = \"opencad.custom\"\napi_version = 14\n",
+        )
+        .unwrap();
+        uninstall_in_root(&plugins_root, "opencad.custom").unwrap();
+        assert!(!custom_dir.exists());
+    }
+
+    #[test]
+    fn normalize_repository_rejects_malformed_and_preserves_git_suffix_names() {
+        assert_eq!(
+            normalize_repository("https://github.com/owner/rust"),
+            Some("owner/rust".to_string())
+        );
+        assert_eq!(
+            normalize_repository("https://github.com/owner/demo.git/"),
+            Some("owner/demo".to_string())
+        );
+        for bad in [
+            "../evil",
+            "owner/..",
+            "owner/repo?x=1",
+            "owner/repo#frag",
+            "https://evil.com/owner/repo",
+            "owner/repo/extra",
+        ] {
+            assert_eq!(
+                normalize_repository(bad),
+                None,
+                "expected None for {bad:?}"
+            );
         }
     }
 }

@@ -186,9 +186,12 @@ pub fn bundled_plugins_dir() -> Option<PathBuf> {
 /// session (the library is resident); the removal takes effect on next start.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn uninstall(id: &str) -> Result<(), String> {
-    let dir = plugins_dir()
-        .ok_or("cannot locate the plugins folder")?
-        .join(id);
+    let user_root = plugins_dir().ok_or("cannot locate the plugins folder")?;
+    let dir = discover_from_roots(None, Some(&user_root))
+        .into_iter()
+        .find(|p| p.id == id)
+        .map(|p| p.dir)
+        .unwrap_or_else(|| user_root.join(id));
     if dir.is_dir() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }

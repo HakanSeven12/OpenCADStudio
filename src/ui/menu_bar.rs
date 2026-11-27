@@ -109,6 +109,7 @@ const MENUS: &[(&str, &[Entry])] = &[
             Cmd("Cut", "CUTCLIP", "Ctrl+X"),
             Cmd("Copy", "COPYCLIP", "Ctrl+C"),
             Cmd("Copy with Base Point", "COPYBASE", "Ctrl+Shift+C"),
+            Cmd("Cut with Base Point", "CUTBASE", "Ctrl+Shift+X"),
             Cmd("Copy Link", "COPYLINK", ""),
             Cmd("Paste", "PASTECLIP", "Ctrl+V"),
             Cmd("Paste as Block", "PASTEBLOCK", "Ctrl+Shift+V"),
@@ -1389,5 +1390,17 @@ mod tests {
                 "Help"
             ]
         );
+    }
+
+    #[test]
+    fn the_edit_menu_has_cut_with_base_point() {
+        let (_, edit) = MENUS
+            .iter()
+            .find(|(title, _)| *title == "Edit")
+            .expect("Edit menu");
+        assert!(edit.iter().any(|entry| matches!(
+            entry,
+            super::Entry::Cmd("Cut with Base Point", "CUTBASE", "Ctrl+Shift+X")
+        )));
     }
 }

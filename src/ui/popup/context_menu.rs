@@ -737,6 +737,7 @@ fn idle_rows(
             cmd(t!("Cut").into_owned(), "CUTCLIP").enabled(has_selection),
             cmd(t!("Copy").into_owned(), "COPYCLIP").enabled(has_selection),
             cmd(t!("Copy with Base Point").into_owned(), "COPYBASE").enabled(has_selection),
+            cmd(t!("Cut with Base Point").into_owned(), "CUTBASE").enabled(has_selection),
             cmd(t!("Paste").into_owned(), "PASTECLIP").enabled(clipboard_nonempty),
             cmd(t!("Paste as Block").into_owned(), "PASTEBLOCK").enabled(clipboard_nonempty),
             cmd(
@@ -1251,6 +1252,19 @@ mod tests {
             .find(|s| s.action == MenuAction::Command("CUTCLIP".into()))
             .expect("cut row");
         assert!(!cut.enabled);
+    }
+
+    #[test]
+    fn cut_with_base_point_row_needs_a_selection() {
+        for has_selection in [false, true] {
+            let menu = build_context_menu(&idle_ctx(has_selection), Some(SubmenuId::Clipboard));
+            let row = menu
+                .selectable()
+                .into_iter()
+                .find(|s| s.action == MenuAction::Command("CUTBASE".into()))
+                .expect("cut with base point row");
+            assert_eq!(row.enabled, has_selection);
+        }
     }
 
     #[test]

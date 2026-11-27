@@ -78,6 +78,7 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+C"), "COPYCLIP"),
         (format!("{ACCEL}+SHIFT+C"), "COPYBASE"),
         (format!("{ACCEL}+X"), "CUTCLIP"),
+        (format!("{ACCEL}+SHIFT+X"), "CUTBASE"),
         (format!("{ACCEL}+V"), "PASTECLIP"),
         (format!("{ACCEL}+SHIFT+V"), "PASTEBLOCK"),
         // Group selection on and off (PICKSTYLE bit 1), as in AutoCAD.

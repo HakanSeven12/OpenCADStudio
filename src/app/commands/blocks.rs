@@ -133,6 +133,38 @@ impl OpenCADStudio {
         count
     }
 
+    /// The selected objects a clipboard command takes; a cut leaves out
+    /// those on locked layers, as it cannot erase them.
+    fn clipboard_selection(&self, i: usize, cut: bool) -> Vec<document::Handle> {
+        let scene = &self.tabs[i].scene;
+        scene
+            .selected_entities()
+            .into_iter()
+            .map(|(handle, _)| handle)
+            .filter(|handle| !cut || !scene.is_layer_locked(*handle))
+            .collect()
+    }
+
+    /// Copy `handles` to the clipboard with `base`, then erase them, as one
+    /// undo step named `label`. Returns the count copied and the task that
+    /// puts their picture on the system clipboard.
+    fn cut_entities_to_clipboard(
+        &mut self,
+        i: usize,
+        handles: &[document::Handle],
+        base: glam::DVec3,
+        label: &'static str,
+    ) -> (usize, Task<Message>) {
+        let count = self.copy_entities_to_clipboard(i, handles, base);
+        let svg = self.copy_svg_to_system_clipboard(i, handles);
+        self.push_undo_snapshot(i, label);
+        self.tabs[i].scene.erase_entities(handles);
+        self.tabs[i].scene.deselect_all();
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        (count, svg)
+    }
+
     pub(in crate::app) fn commit_block_definition(&mut self, redefine: bool) -> Task<Message> {
         let Some(state) = self.block_definition.take() else {
             self.active_modal = None;
@@ -380,21 +412,49 @@ impl OpenCADStudio {
                 }
             }
 
-            // Internal: the base point picked by COPYBASE — perform the copy.
-            cmd if cmd.starts_with("COPYBASE_AT ") => {
+            // CUTBASE — cut the selection to the clipboard with a picked base
+            // point. As in AutoCAD, the base point comes first; the objects are
+            // asked for after it when none are selected.
+            "CUTBASE" => {
+                use crate::modules::draw::clipboard::copy_base::CopyBaseCommand;
+                let cmd = CopyBaseCommand::cut();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // Internal: the base point picked by COPYBASE or CUTBASE — perform
+            // the copy, or the cut.
+            cmd if cmd.starts_with("COPYBASE_AT ") || cmd.starts_with("CUTBASE_AT ") => {
+                let cut = cmd.starts_with("CUTBASE_AT ");
                 let coords: Vec<f64> = cmd
-                    .trim_start_matches("COPYBASE_AT")
                     .split_whitespace()
+                    .skip(1)
                     .filter_map(|s| s.parse::<f64>().ok())
                     .collect();
-                let handles: Vec<_> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .map(|(h, _)| h)
-                    .collect();
-                if coords.len() == 3 && !handles.is_empty() {
+                let handles = self.clipboard_selection(i, cut);
+                if cut && coords.len() == 3 && handles.is_empty() {
+                    // CUTBASE with nothing selected: select the objects, then
+                    // come back here with the same base point.
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let select = SelectObjectsCommand::routed("CUTBASE", cmd);
+                    self.command_line.push_info(&select.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(select));
+                } else if coords.len() == 3 && !handles.is_empty() {
                     let base = glam::DVec3::new(coords[0], coords[1], coords[2]);
+                    if cut {
+                        let (count, svg) =
+                            self.cut_entities_to_clipboard(i, &handles, base, "CUTBASE");
+                        self.command_line.push_info(
+                            crate::tf!(
+                                "{} object(s) cut to clipboard (base {:.3},{:.3}).",
+                                count,
+                                base.x,
+                                base.y
+                            )
+                            .as_ref(),
+                        );
+                        return Some(svg);
+                    }
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
                     self.command_line.push_info(
                         crate::tf!(
@@ -410,13 +470,7 @@ impl OpenCADStudio {
             }
 
             "CUTCLIP" => {
-                let handles: Vec<_> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .map(|(h, _)| h)
-                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                    .collect();
+                let handles = self.clipboard_selection(i, true);
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("CUTCLIP");
@@ -427,13 +481,7 @@ impl OpenCADStudio {
                         &self.tabs[i].scene.document,
                         &handles,
                     );
-                    let count = self.copy_entities_to_clipboard(i, &handles, base);
-                    let svg = self.copy_svg_to_system_clipboard(i, &handles);
-                    self.push_undo_snapshot(i, "CUTCLIP");
-                    self.tabs[i].scene.erase_entities(&handles);
-                    self.tabs[i].scene.deselect_all();
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
+                    let (count, svg) = self.cut_entities_to_clipboard(i, &handles, base, "CUTCLIP");
                     self.command_line
                         .push_info(crate::tf!("{} object(s) cut to clipboard.", count).as_ref());
                     return Some(svg);

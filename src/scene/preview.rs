@@ -617,6 +617,14 @@ impl Scene {
             &mut target_entity,
             &opts,
         );
+        if let Some(matched) = crate::entities::match_props::match_text_justification(
+            &source_entity,
+            &target_entity,
+            &self.document,
+            &opts,
+        ) {
+            target_entity = matched;
+        }
 
         // The interactive handler also transfers this hatch-specific xdata
         // outside the shared entity kernel. Mirror it on the preview clone so

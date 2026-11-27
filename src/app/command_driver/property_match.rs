@@ -124,6 +124,21 @@ impl OpenCADStudio {
                         is_hatch = matches!(e, document::EntityType::Hatch(_));
                         crate::entities::match_props::match_properties_kernel(se, e, &match_opts);
                     }
+                    // The justification moves the anchor points with it, so
+                    // it is measured against the document after the kernel.
+                    let doc = &app.tabs[i].scene.document;
+                    if let Some(matched) = doc.get_entity(handle).and_then(|e| {
+                        crate::entities::match_props::match_text_justification(
+                            se,
+                            e,
+                            doc,
+                            &match_opts,
+                        )
+                    }) {
+                        if let Some(e) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                            *e = matched;
+                        }
+                    }
                 }
                 if is_hatch && match_opts.has(MatchOpts::HATCH) {
                     if let Some(values) = &hatch_background_xdata {

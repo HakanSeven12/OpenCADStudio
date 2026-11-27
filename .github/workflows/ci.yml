@@ -2,12 +2,12 @@ name: Tests
 
 # Runs the workspace tests on every push to main and on every pull request,
 # on Linux and Windows; macOS runs on pushes to main only, since its 7 GB
-# runner swaps through the main crate's test build (#3059). A separate lint job reports rustfmt and clippy
-# results without blocking merges until the existing tree has been cleaned up,
-# and a health job reports what each pull request does to the code-health
-# measures (docs/architecture/HEALTH.md) the same way. The architecture job
-# fails a change that adds an upward dependency between the module layers
-# (docs/architecture/RULES.md).
+# runner swaps through the main crate's test build (#3059). A separate lint job
+# blocks pull requests if any touched file introduces clippy warnings or
+# rustfmt diffs (while reporting whole-tree counts without blocking), a health
+# job reports code-health deltas, the architecture job blocks new upward layer
+# dependencies (docs/architecture/RULES.md), and audit/scripts jobs gate
+# advisories and repository check scripts.
 
 on:
   push:
@@ -60,12 +60,11 @@ jobs:
         run: sysctl hw.memsize vm.swapusage
 
   lint:
-    name: lint (informational)
+    name: lint
     runs-on: ubuntu-22.04
-    # Non-blocking until the existing tree is cleaned up. The tree currently has
-    # thousands of rustfmt diffs and several clippy warnings and errors, so
-    # these checks report in the log without failing the job: a job-level
-    # continue-on-error still shows a red check on every pull request.
+    # Whole-tree rustfmt/clippy/kit checks remain informational until existing
+    # backlog is cleared, while Warnings in the files this pull request touches
+    # blocks regressions via `scripts/health.py lint --check`.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -102,16 +101,54 @@ jobs:
         continue-on-error: true
         run: sh docs/ui/audit_counts.sh --check
 
-      # The whole tree has too many warnings for a list to help, so the
-      # summary shows only those in the files this pull request touches.
+      # The whole tree has too many warnings for a list to help, so this gate
+      # fails only on warnings or rustfmt diffs in files this pull request touches.
       - name: Warnings in the files this pull request touches
         if: github.event_name == 'pull_request'
-        continue-on-error: true
         run: |
           cargo clippy --workspace --all-targets --locked --message-format=json > "$RUNNER_TEMP/clippy.json" || true
           cargo fmt --all -- --check -l > "$RUNNER_TEMP/fmt.txt" || true
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
-          python3 scripts/health.py lint "$RUNNER_TEMP/clippy.json" "$RUNNER_TEMP/fmt.txt" "$RUNNER_TEMP/changed.txt" --markdown >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/health.py lint "$RUNNER_TEMP/clippy.json" "$RUNNER_TEMP/fmt.txt" "$RUNNER_TEMP/changed.txt" --markdown --check >> "$GITHUB_STEP_SUMMARY"
+
+  audit:
+    name: security audit
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit
+
+  scripts:
+    name: check scripts
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      # `scripts/test_site.py` already invokes `scripts/test_site.cjs` against
+      # its freshly assembled site directory.
+      - name: Run repository script checks
+        run: |
+          python3 scripts/test_release.py
+          python3 scripts/test_site.py
+          python3 scripts/test_health.py
+          python3 scripts/test_arch_check.py
+          node scripts/test_web_clipboard.cjs
+          node scripts/test_web_locales.cjs
+
+      # Informational until pre-existing duplicate keys / missing entries in
+      # src/locale_catalog.rs are regenerated and cleaned up.
+      - name: Locale catalog check (informational)
+        continue-on-error: true
+        run: python3 scripts/test_locales.py
 
   architecture:
     name: architecture

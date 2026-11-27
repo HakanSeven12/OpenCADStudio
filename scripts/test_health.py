@@ -233,8 +233,24 @@ class Lint(unittest.TestCase):
         (d / "c.json").write_text(clippy_line("src/b.rs", 2, "clippy::len_zero"))
         (d / "fmt.txt").write_text("")
         (d / "changed.txt").write_text("src/a.rs\n")
-        _, out = run_in(d, ["lint", str(d / "c.json"), str(d / "fmt.txt"), str(d / "changed.txt"), "--markdown"])
+        code, out = run_in(d, ["lint", str(d / "c.json"), str(d / "fmt.txt"), str(d / "changed.txt"), "--markdown", "--check"])
+        self.assertEqual(code, 0)
         self.assertIn("None. Thank you", out)
+
+    def test_lint_check_fails_on_touched_warning_or_rustfmt_diff(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "c.json").write_text(clippy_line("src/a.rs", 1, "clippy::len_zero"))
+        (d / "fmt.txt").write_text("")
+        (d / "changed.txt").write_text("src/a.rs\n")
+        with contextlib.redirect_stderr(io.StringIO()):
+            code, _ = run_in(d, ["lint", str(d / "c.json"), str(d / "fmt.txt"), str(d / "changed.txt"), "--markdown", "--check"])
+        self.assertEqual(code, 1)
+
+        (d / "c.json").write_text("")
+        (d / "fmt.txt").write_text("/home/runner/work/x/src/a.rs\n")
+        with contextlib.redirect_stderr(io.StringIO()):
+            code, _ = run_in(d, ["lint", str(d / "c.json"), str(d / "fmt.txt"), str(d / "changed.txt"), "--markdown", "--check"])
+        self.assertEqual(code, 1)
 
 
 def git_repo():

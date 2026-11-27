@@ -6,6 +6,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn face3d_builds_from_three_or_four_corners() {
+        let tri = json!({"type":"Face3D","corners":[[0,0,0],[10,0,0],[0,10,5]]});
+        assert!(build_entity(&tri, None).is_ok());
+        let quad = json!({"type":"Face3D","corners":[[0,0,0],[10,0,0],[10,10,5],[0,10,5]]});
+        assert!(build_entity(&quad, None).is_ok());
+        let bad = json!({"type":"Face3D","corners":[[0,0,0],[10,0,0]]});
+        assert!(build_entity(&bad, None).is_err());
+    }
+
+    #[test]
+    fn polyface_mesh_rejects_out_of_range_face_indices() {
+        let good = json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,2]]});
+        assert!(build_entity(&good, None).is_ok());
+        let bad = json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,5]]});
+        assert!(build_entity(&bad, None).is_err());
+    }
+
+    #[test]
     fn published_examples_build_with_the_real_factory() {
         let document = document::Document::new();
         for kind in TYPES {
@@ -207,6 +225,8 @@ pub const TYPES: &[&str] = &[
     "Hatch",
     "AttDef",
     "Region",
+    "PolyfaceMesh",
+    "Face3D",
 ];
 
 /// Lineweights a drawing can store, in hundredths of a millimetre, with
@@ -354,6 +374,13 @@ fn build_schema(name: &str) -> Result<Value, String> {
                 json!({"type":"Solid","corners":[[0,0,0],[10,0,0],[0,10,0]]}),
             )
         }
+        "Face3D" => {
+            properties["corners"] = json!({"type":"array","minItems":3,"maxItems":4,"items":point(3,3),"description":"Three or four [x,y,z] corners; with three, the fourth repeats the third (a triangle)."});
+            (
+                vec!["corners"],
+                json!({"type":"Face3D","corners":[[0,0,0],[10,0,0],[0,10,5]]}),
+            )
+        }
         "Hatch" => {
             properties["boundary"] = json!({"type":"array","minItems":3,"items":point(2,3),"description":"Closed XY boundary; optional Z is ignored."});
             properties["solid"] = boolean.clone();
@@ -388,6 +415,14 @@ fn build_schema(name: &str) -> Result<Value, String> {
             (
                 vec!["loops"],
                 json!({"type":"Region","loops":[[[0,0],[10,0],[10,10],[0,10]],[[3,3],[7,3],[7,7],[3,7]]]}),
+            )
+        }
+        "PolyfaceMesh" => {
+            properties["vertices"] = json!({"type":"array","minItems":3,"maxItems":32767,"items":point(3,3),"description":"Mesh vertices as [x, y, z]. At most 32767 per mesh (polyface vertex numbers are 16-bit); split larger surfaces across several meshes."});
+            properties["faces"] = json!({"type":"array","minItems":1,"items":{"type":"array","minItems":3,"maxItems":4,"items":{"type":"integer","minimum":0}},"description":"Faces as 0-based indices into vertices: three for a triangle, four for a quad."});
+            (
+                vec!["vertices", "faces"],
+                json!({"type":"PolyfaceMesh","vertices":[[0,0,0],[10,0,0],[10,10,5],[0,10,5]],"faces":[[0,1,2],[0,2,3]]}),
             )
         }
         "Spline" => {
@@ -1105,21 +1140,115 @@ pub(crate) fn build_entity(
             )
         }
         "REGION" => region_from_loops(spec)?,
+        "POLYFACEMESH" => polyface_from_spec(spec)?,
+        "FACE3D" => {
+            let raw_corners = spec["corners"]
+                .as_array()
+                .filter(|v| (3..=4).contains(&v.len()))
+                .ok_or_else(|| failure("invalid_corners", "3D face needs 3 or 4 corners"))?;
+            let corners: Vec<Vector3> = raw_corners
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    if value.as_array().is_none_or(|values| values.len() != 3) {
+                        return Err(failure(
+                            "invalid_corners",
+                            format!("corners[{index}] must be [x,y,z]"),
+                        ));
+                    }
+                    point_value(Some(value), &format!("corners[{index}]"), "invalid_corners")
+                })
+                .collect::<Parsed<_>>()?;
+            let face = match corners.as_slice() {
+                [first, second, third] => document::entities::Face3D::new(*first, *second, *third, *third),
+                [first, second, third, fourth] => document::entities::Face3D::new(*first, *second, *third, *fourth),
+                _ => unreachable!("corner count was validated above"),
+            };
+            EntityType::Face3D(face)
+        }
         other => {
             return Err(failure(
                 "unknown_entity_type",
                 format!(
-                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region"
+                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region, PolyfaceMesh, Face3D"
                 ),
             ))
         }
     };
     let mut entity = entity;
     apply_common_properties(spec, &mut entity, document)?;
+    // A polyface's vertices and faces carry their own layer, color and lineweight:
+    // give them the mesh's so the whole entity lands on the requested layer.
+    if let document::EntityType::PolyfaceMesh(mesh) = &mut entity {
+        let (layer, color, weight) = (mesh.common.layer.clone(), mesh.common.color, mesh.common.line_weight);
+        for vertex in &mut mesh.vertices {
+            vertex.common.layer = layer.clone();
+            vertex.common.color = color;
+            vertex.common.line_weight = weight;
+        }
+        for face in &mut mesh.faces {
+            face.common.layer = layer.clone();
+            face.common.color = color;
+            face.common.line_weight = weight;
+        }
+    }
     let contract = schema(&kind).expect("supported factory type");
     crate::schema_validation::validate_shape(&contract, spec, "")
         .map_err(|error| failure("invalid_entity_definition", error))?;
     Ok(entity)
+}
+
+/// A polyface mesh from `vertices:[[x,y,z],…]` and `faces:[[i,j,k],…]` (0-based
+/// indices; three corners make a triangle, four a quad). Polyface vertex
+/// numbers are 16-bit, so one mesh holds at most 32767 vertices.
+fn polyface_from_spec(spec: &Value) -> Parsed<document::EntityType> {
+    use document::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
+    const MAX_VERTICES: usize = i16::MAX as usize;
+    let invalid = |path: &str, error: String| failure_at("invalid_polyface_mesh", path, error);
+    let points = point_list_field(spec, "vertices", 3).map_err(|_| {
+        invalid("/vertices", "polyface mesh needs at least 3 finite [x,y,z] vertices".to_owned())
+    })?;
+    if points.len() > MAX_VERTICES {
+        return Err(invalid(
+            "/vertices",
+            format!("a polyface mesh holds at most {MAX_VERTICES} vertices; split the surface across several meshes"),
+        ));
+    }
+    let faces = spec["faces"]
+        .as_array()
+        .filter(|faces| !faces.is_empty())
+        .ok_or_else(|| invalid("/faces", "polyface mesh needs faces:[[i,j,k],…]".to_owned()))?;
+    let mut mesh = PolyfaceMesh::new();
+    let ids: Vec<i16> = points
+        .iter()
+        .map(|p| mesh.add_vertex(PolyfaceVertex::new(document::types::Vector3::new(p.x, p.y, p.z))))
+        .collect();
+    for (n, face) in faces.iter().enumerate() {
+        let path = format!("/faces/{n}");
+        let corners = face
+            .as_array()
+            .ok_or_else(|| invalid(&path, format!("faces[{n}] must be a list of vertex indices")))?;
+        let mut corner_ids = Vec::with_capacity(4);
+        for corner in corners {
+            let index = corner
+                .as_u64()
+                .filter(|index| (*index as usize) < ids.len())
+                .ok_or_else(|| {
+                    invalid(&path, format!("faces[{n}] references a vertex outside 0..{}", ids.len()))
+                })?;
+            corner_ids.push(ids[index as usize]);
+        }
+        match corner_ids.len() {
+            3 => {
+                mesh.add_face(PolyfaceFace::triangle(corner_ids[0], corner_ids[1], corner_ids[2]));
+            }
+            4 => {
+                mesh.add_quad(corner_ids[0], corner_ids[1], corner_ids[2], corner_ids[3]);
+            }
+            _ => return Err(invalid(&path, format!("faces[{n}] needs 3 or 4 vertex indices"))),
+        }
+    }
+    Ok(document::EntityType::PolyfaceMesh(mesh))
 }
 
 /// A REGION bounded by closed vertex loops, built by the geometry kernel the

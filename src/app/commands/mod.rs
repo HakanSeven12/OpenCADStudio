@@ -33,6 +33,8 @@ mod block_editor_vars;
 mod bricscad_visibility;
 mod bvisibility;
 mod count;
+#[cfg(test)]
+mod cutbase_tests;
 mod dash;
 mod dgn_import;
 mod geometry_cleanup;

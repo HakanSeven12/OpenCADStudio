@@ -1255,6 +1255,19 @@ mod tests {
     }
 
     #[test]
+    fn cut_with_base_point_row_needs_a_selection() {
+        for has_selection in [false, true] {
+            let menu = build_context_menu(&idle_ctx(has_selection), Some(SubmenuId::Clipboard));
+            let row = menu
+                .selectable()
+                .into_iter()
+                .find(|s| s.action == MenuAction::Command("CUTBASE".into()))
+                .expect("cut with base point row");
+            assert_eq!(row.enabled, has_selection);
+        }
+    }
+
+    #[test]
     fn undo_row_uses_history_label() {
         let menu = build_context_menu(&idle_ctx(false), None);
         let rows = labels(&menu);

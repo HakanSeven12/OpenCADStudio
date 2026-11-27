@@ -1391,4 +1391,16 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn the_edit_menu_has_cut_with_base_point() {
+        let (_, edit) = MENUS
+            .iter()
+            .find(|(title, _)| *title == "Edit")
+            .expect("Edit menu");
+        assert!(edit.iter().any(|entry| matches!(
+            entry,
+            super::Entry::Cmd("Cut with Base Point", "CUTBASE", "Ctrl+Shift+X")
+        )));
+    }
 }

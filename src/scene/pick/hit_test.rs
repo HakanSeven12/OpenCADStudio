@@ -2431,7 +2431,8 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 for start in (0..wire.text_verts.len()).step_by(6) {
                     let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds)
                     else {
-                        continue;
+                        glyphs_inside = false;
+                        break;
                     };
                     if !screen.iter().copied().all(inside) {
                         glyphs_inside = false;
@@ -2629,19 +2630,23 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
 
             let glyphs_present = !wire.text_verts.is_empty();
             let mut glyphs_inside = true;
-            for start in (0..wire.text_verts.len()).step_by(6) {
-                let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
-                    continue;
-                };
-                if !screen.iter().copied().all(|point| {
-                    point.x >= 0.0
-                        && point.x <= bounds.width
-                        && point.y >= 0.0
-                        && point.y <= bounds.height
-                        && point_in_polygon(point, poly)
-                }) {
-                    glyphs_inside = false;
-                    break;
+            if all_inside && glyphs_present {
+                for start in (0..wire.text_verts.len()).step_by(6) {
+                    let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds)
+                    else {
+                        glyphs_inside = false;
+                        break;
+                    };
+                    if !screen.iter().copied().all(|point| {
+                        point.x >= 0.0
+                            && point.x <= bounds.width
+                            && point.y >= 0.0
+                            && point.y <= bounds.height
+                            && point_in_polygon(point, poly)
+                    }) {
+                        glyphs_inside = false;
+                        break;
+                    }
                 }
             }
 
@@ -3946,6 +3951,64 @@ mod behind_eye_tests {
             )
             .is_empty(),
             "a behind-eye mesh must not be crossing-selected by a lasso"
+        );
+    }
+
+    #[test]
+    fn behind_eye_text_is_not_box_or_lasso_selected() {
+        use crate::scene::pipeline::text_gpu::TextVertex;
+
+        let (view, eye, bounds) = perspective_view();
+        let tv = |p: [f32; 3]| TextVertex {
+            pos: p,
+            pos_low: [0.0; 3],
+            uv: [0.0; 2],
+            color: [1.0; 4],
+            draw_depth: 0.0,
+            pen: 0.0,
+        };
+        let quad = |z: f32| -> [TextVertex; 6] {
+            [
+                tv([-5.0, -5.0, z]),
+                tv([5.0, -5.0, z]),
+                tv([5.0, 5.0, z]),
+                tv([-5.0, -5.0, z]),
+                tv([5.0, 5.0, z]),
+                tv([-5.0, 5.0, z]),
+            ]
+        };
+        let make_text_wire = |name: &str, quads: Vec<[TextVertex; 6]>| WireModel {
+            name: name.to_string(),
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                text_verts: quads.into_iter().flatten().collect(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let front_only = vec![make_text_wire("10", vec![quad(-100.0)])];
+        let mixed_behind = vec![make_text_wire("20", vec![quad(-100.0), quad(100.0)])];
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(bounds.width, bounds.height);
+        let lasso = [a, Point::new(b.x, a.y), b, Point::new(a.x, b.y)];
+
+        assert_eq!(
+            box_hit(a, b, false, front_only.as_slice(), view, eye, bounds),
+            vec!["10"],
+            "front-only text must be window box-selected"
+        );
+        assert_eq!(
+            poly_hit(&lasso, false, front_only.as_slice(), view, eye, bounds),
+            vec!["10"],
+            "front-only text must be window lasso-selected"
+        );
+        assert!(
+            box_hit(a, b, false, mixed_behind.as_slice(), view, eye, bounds).is_empty(),
+            "text with any glyph behind the eye must not be window box-selected"
+        );
+        assert!(
+            poly_hit(&lasso, false, mixed_behind.as_slice(), view, eye, bounds).is_empty(),
+            "text with any glyph behind the eye must not be window lasso-selected"
         );
     }
 }

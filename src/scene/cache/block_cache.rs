@@ -23,7 +23,7 @@ use document::{Document, EntityType, Handle};
 use ocs_geom::space::{Plane as KernelPlane, Vec3 as KernelVec3};
 
 use crate::scene::convert::tessellate;
-use crate::scene::model::wire_model::{
+use crate::display::wire_model::{
     decode_pattern_station_map, encode_pattern_stations, pattern_station_values, PatternStationMap,
     PatternStationPiece, PointMarker, SnapHint, TangentGeom, WireModel,
 };
@@ -41,7 +41,7 @@ const INLINE_NESTED_POINT_BUDGET: usize = 128;
 /// — visibly the same image, dramatically fewer wires.
 const MIN_PIXEL_SIZE: f32 = 2.0;
 
-use crate::scene::model::wire_model::DashClosure;
+use crate::display::wire_model::DashClosure;
 
 /// A complex linetype and its name: two linetypes can share a dash pattern, so
 /// the name is what tells them apart in a prototype key.
@@ -93,7 +93,7 @@ pub struct LocalWire {
     /// expand-time transform (`emit_wire`) maps each vertex to world exactly
     /// like `points`, so block-instance text lands at the right place/scale.
     pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
-    pub searchable_text: Vec<crate::scene::model::wire_model::SearchableTextRun>,
+    pub searchable_text: Vec<crate::display::wire_model::SearchableTextRun>,
     pub key_vertices: Vec<[f64; 3]>,
     pub snap_pts: Vec<(glam::DVec3, SnapHint)>,
     pub tangent_geoms: Vec<TangentGeom>,
@@ -346,7 +346,7 @@ pub struct BlockCache {
     /// Uppercase index matching `defns` for O(1) case-insensitive lookup.
     defns_upper: HashMap<String, Arc<BlockDefn>>,
     prototypes_enabled: bool,
-    clip_prototypes: std::sync::Mutex<HashMap<(u64, Vec<u64>), u64>>,
+    clip_prototypes: std::sync::Mutex<lru::LruCache<(u64, Vec<i64>), u64>>,
     cycle_warnings: std::sync::Mutex<HashSet<String>>,
     /// [`crate::catalog::linetypes::defines_complex_lt`] at build time. Drawings with
     /// none pay nothing for the walk: no path is kept and no linetype is looked up.
@@ -535,7 +535,7 @@ enum PrototypeRun {
 
 impl CachedExpansion {
     fn new(translation: [f64; 3], wires: &[WireModel]) -> Self {
-        use crate::scene::model::instance_model::{prototype_aabb, stubbable};
+        use crate::display::instance_model::{prototype_aabb, stubbable};
 
         // Preserve the position of individual surfaces, text and curves
         // in the submission order when replaying a cached cell.
@@ -563,7 +563,7 @@ impl CachedExpansion {
         for run in &self.runs {
             match run {
                 PrototypeRun::Shared(prototype, bounds) => {
-                    let mut stub = crate::scene::model::instance_model::stub_wire(
+                    let mut stub = crate::display::instance_model::stub_wire(
                         Arc::clone(prototype),
                         *bounds,
                         delta,
@@ -596,6 +596,15 @@ fn lookup_ascii_upper<'a, V>(map: &'a HashMap<String, V>, key: &str) -> Option<&
     }
 }
 
+const MAX_CLIP_PROTOTYPES: usize = 4096;
+
+fn quantize_clip_coord(v: f64) -> i64 {
+    if !v.is_finite() {
+        return 0;
+    }
+    (v * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64
+}
+
 impl BlockCache {
     pub(crate) fn disable_prototypes(&mut self) {
         self.prototypes_enabled = false;
@@ -608,22 +617,28 @@ impl BlockCache {
     ) -> u64 {
         let mut shape = Vec::with_capacity(polygon.len() * 2);
         for point in polygon {
-            shape.push((point[0] - translation[0]).to_bits());
-            shape.push((point[1] - translation[1]).to_bits());
+            shape.push(quantize_clip_coord(point[0] - translation[0]));
+            shape.push(quantize_clip_coord(point[1] - translation[1]));
         }
-        *self
+        let mut cache = self
             .clip_prototypes
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .entry((source_id, shape))
-            .or_insert_with(crate::scene::model::instance_model::next_source_id)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(&id) = cache.get(&(source_id, shape.clone())) {
+            return id;
+        }
+        let id = crate::display::instance_model::next_source_id();
+        cache.put((source_id, shape), id);
+        id
     }
     pub fn new() -> Self {
         Self {
             defns: HashMap::default(),
             defns_upper: HashMap::default(),
             prototypes_enabled: true,
-            clip_prototypes: std::sync::Mutex::new(HashMap::default()),
+            clip_prototypes: std::sync::Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(MAX_CLIP_PROTOTYPES).unwrap_or(std::num::NonZeroUsize::MIN),
+            )),
             cycle_warnings: std::sync::Mutex::new(HashSet::default()),
             complex_possible: false,
             viewport: None,
@@ -2437,8 +2452,8 @@ pub(crate) fn expand_insert_with_defn(
         let translation = transform_translation(&xform);
         for wire in &mut wires {
             if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
-                wire.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
-                    source_id: crate::scene::model::instance_model::next_source_id(),
+                wire.render_instance = Some(crate::display::instance_model::RenderInstance {
+                    source_id: crate::display::instance_model::next_source_id(),
                     translation,
                 });
             }
@@ -2845,7 +2860,7 @@ struct BatchEntry {
     pick_tris_low: Vec<[f32; 3]>,
     /// Accumulated SDF glyph quads (world space) for block-instance text.
     text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
-    searchable_text: Vec<crate::scene::model::wire_model::SearchableTextRun>,
+    searchable_text: Vec<crate::display::wire_model::SearchableTextRun>,
     min_x: f32,
     min_y: f32,
     max_x: f32,
@@ -2985,9 +3000,9 @@ impl Batches {
                 // tessellation that produced identical geometry. Skipped when
                 // the resolution is a no-op — a preserved colour with no canvas
                 // fill looks the same under every background.
-                let bg_adapt: crate::scene::model::wire_model::BgAdapt =
+                let bg_adapt: crate::display::wire_model::BgAdapt =
                     (b.canvas_color || !b.preserve_color).then(|| {
-                        Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                        Box::new(crate::display::wire_model::BgAdaptInputs {
                             raw_color: b.color,
                             text_raw_colors: if b.preserve_color {
                                 Vec::new()
@@ -3068,7 +3083,7 @@ impl Batches {
                         snap_pts: b.snap_pts,
                         tangent_geoms: b.tangent_geoms,
                         key_vertices: b.key_vertices,
-                        surfaces: crate::scene::model::wire_model::WireSurfaces {
+                        surfaces: crate::display::wire_model::WireSurfaces {
                             pick_tris: b.pick_tris,
                             pick_tris_low: b.pick_tris_low,
                             fill_tris: b.fill_tris,
@@ -3388,9 +3403,9 @@ fn expand_defn(
                         for wire in &mut wires {
                             if !is_standalone_analytical_curve(wire) {
                                 wire.render_instance =
-                                    Some(crate::scene::model::instance_model::RenderInstance {
+                                    Some(crate::display::instance_model::RenderInstance {
                                         source_id:
-                                            crate::scene::model::instance_model::next_source_id(),
+                                            crate::display::instance_model::next_source_id(),
                                         translation,
                                     });
                             }
@@ -3418,7 +3433,7 @@ fn expand_defn(
                             let depth_delta = nested_range.0 - cached.depth_base;
                             out.extra_wires.extend(cached.wires.iter().map(|wire| {
                                 let mut wire = translated_prototype_wire(wire, "", delta);
-                                crate::scene::model::instance_model::shift_depth(
+                                crate::display::instance_model::shift_depth(
                                     &mut wire,
                                     depth_delta,
                                 );
@@ -3426,7 +3441,7 @@ fn expand_defn(
                             }));
                             if let Some((prototype, aabb)) = &cached.stubbed {
                                 out.extra_wires.push(
-                                    crate::scene::model::instance_model::stub_wire(
+                                    crate::display::instance_model::stub_wire(
                                         Arc::clone(prototype),
                                         *aabb,
                                         delta,
@@ -3452,9 +3467,9 @@ fn expand_defn(
                                     && wire.render_instance.is_none()
                                 {
                                     wire.render_instance =
-                                        Some(crate::scene::model::instance_model::RenderInstance {
+                                        Some(crate::display::instance_model::RenderInstance {
                                             source_id:
-                                                crate::scene::model::instance_model::next_source_id(
+                                                crate::display::instance_model::next_source_id(
                                                 ),
                                             translation,
                                         });
@@ -3465,10 +3480,10 @@ fn expand_defn(
                             // stub instead of a wire per primitive (#1698).
                             let (stubbed, repeated): (Vec<_>, Vec<_>) = wires
                                 .into_iter()
-                                .partition(crate::scene::model::instance_model::stubbable);
+                                .partition(crate::display::instance_model::stubbable);
                             let stubbed = (!stubbed.is_empty()).then(|| {
                                 let aabb =
-                                    crate::scene::model::instance_model::prototype_aabb(&stubbed);
+                                    crate::display::instance_model::prototype_aabb(&stubbed);
                                 (Arc::new(stubbed), aabb)
                             });
                             out.nested_prototypes.insert(
@@ -4291,9 +4306,9 @@ fn emit_wire(
                 } else {
                     crate::scene::view::render::adapt_to_bg(final_color, contrast_bg)
                 };
-                let bg_adapt: crate::scene::model::wire_model::BgAdapt =
+                let bg_adapt: crate::display::wire_model::BgAdapt =
                     (lw.canvas_color || !lw.preserve_color).then(|| {
-                        Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                        Box::new(crate::display::wire_model::BgAdaptInputs {
                             raw_color: final_color,
                             text_raw_colors: Vec::new(),
                             contrast_bg: lw.contrast_bg,
@@ -4852,7 +4867,7 @@ fn emit_wire(
         entry
             .searchable_text
             .extend(lw.searchable_text.iter().cloned());
-        crate::scene::model::wire_model::map_searchable_runs(
+        crate::display::wire_model::map_searchable_runs(
             &mut entry.searchable_text[base_len..],
             &|p| {
                 let v = accum_xform.apply(Vector3::new(p[0], p[1], p[2]));
@@ -5907,5 +5922,20 @@ mod stroke_run_tests {
         };
         let strokes = expand(vec![line(0, RED), line(1, RED), band(2)], level);
         assert_eq!(strokes, vec![(1, rank(3, 0)), (1, rank(3, 1))]);
+    }
+
+    #[test]
+    fn clip_source_id_quantizes_float_jitter_and_caps_entries() {
+        let cache = BlockCache::new();
+        let p1 = [[10.0, 20.0], [30.0, 40.0]];
+        let p2 = [[10.0 + 1e-10, 20.0 - 1e-10], [30.0, 40.0]];
+        let id1 = cache.clip_source_id(7, &p1, [1.0, 2.0, 0.0]);
+        let id2 = cache.clip_source_id(7, &p2, [1.0, 2.0, 0.0]);
+        assert_eq!(id1, id2);
+
+        for i in 0..(MAX_CLIP_PROTOTYPES + 100) {
+            cache.clip_source_id(9, &[[i as f64, 0.0], [i as f64 + 1.0, 1.0]], [0.0; 3]);
+        }
+        assert!(cache.clip_prototypes.lock().unwrap().len() <= MAX_CLIP_PROTOTYPES);
     }
 }

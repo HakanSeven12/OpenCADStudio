@@ -8138,7 +8138,7 @@ pdf-password =
     .refused =
         { $path }
         無法開啟此 PDF 檔案。
-        此檔案已加密，需要密碼。  
+        此檔案已加密，需要密碼。
 
 hyperlink-dialog =
     .title-insert = 插入超連結
@@ -8601,7 +8601,7 @@ mleader-prompt =
     .second-angle = 輸入第二角度條件 <{ $current }>：
     .invalid-input = 無效輸入。
     .invalid-angle = 無效的角度。允許的角度為：0, 15, 30, 45, 60, 90, 180。
-   
+
 mleader-edit =
     .select = 選取一個多重引線：
     .add = 指定引線箭頭位置或 [移除引線(Remove leaders)]：

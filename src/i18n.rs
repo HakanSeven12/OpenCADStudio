@@ -326,7 +326,7 @@ pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
     let source = source.as_ref();
     match catalog_ids(source) {
         Some((message_id, attribute_id)) => {
-            Cow::Borrowed(cached_translation(source, message_id, attribute_id))
+            Cow::Owned(cached_translation(source, message_id, attribute_id).to_string())
         }
         None => Cow::Owned(source.to_string()),
     }
@@ -406,8 +406,12 @@ pub fn language_generation() -> u64 {
 /// translates hundreds of labels and the Properties panel translates dozens
 /// per selected object; without this each hit still walked the Fluent bundles
 /// and allocated a fresh `String`.
-fn cached_translation(source: &str, message_id: &str, attribute_id: &str) -> &'static str {
-    type Labels = RefCell<(u64, rustc_hash::FxHashMap<Box<str>, &'static str>)>;
+fn cached_translation(
+    source: &str,
+    message_id: &str,
+    attribute_id: &str,
+) -> std::sync::Arc<str> {
+    type Labels = RefCell<(u64, rustc_hash::FxHashMap<Box<str>, std::sync::Arc<str>>)>;
     thread_local! {
         static LABELS: Labels = RefCell::new((0, rustc_hash::FxHashMap::default()));
     }
@@ -425,31 +429,32 @@ fn cached_translation(source: &str, message_id: &str, attribute_id: &str) -> &'s
 
 fn cached_translation_with(
     loader: &FluentLanguageLoader,
-    labels: &RefCell<(u64, rustc_hash::FxHashMap<Box<str>, &'static str>)>,
+    labels: &RefCell<(u64, rustc_hash::FxHashMap<Box<str>, std::sync::Arc<str>>)>,
     generation: u64,
     source: &str,
     message_id: &str,
     attribute_id: &str,
-) -> &'static str {
+) -> std::sync::Arc<str> {
     let mut labels = labels.borrow_mut();
     if labels.0 != generation {
         labels.0 = generation;
         labels.1.clear();
     }
-    if let Some(&label) = labels.1.get(source) {
-        return label;
+    if let Some(label) = labels.1.get(source) {
+        return std::sync::Arc::clone(label);
     }
-    let label: &'static str = Box::leak(loader.get_attr(message_id, attribute_id).into_boxed_str());
-    labels.1.insert(source.into(), label);
-    record_option_groups(source, label);
+    let label: std::sync::Arc<str> = loader.get_attr(message_id, attribute_id).into();
+    labels.1.insert(source.into(), std::sync::Arc::clone(&label));
+    record_option_groups_with_gen(generation, source, &label);
     label
 }
 
 thread_local! {
-    /// Translated `[A/B/C]` option list → the source list, recorded as
-    /// prompts are translated, so typed localized keywords can be mapped back.
-    static OPTION_GROUPS: RefCell<rustc_hash::FxHashMap<String, String>> =
-        RefCell::default();
+    /// Translated `[A/B/C]` option list → the source list paired with the
+    /// `LANGUAGE_GENERATION` that populated it, so language switches discard
+    /// stale option mappings cleanly.
+    static OPTION_GROUPS: RefCell<(u64, rustc_hash::FxHashMap<String, String>)> =
+        RefCell::new((0, rustc_hash::FxHashMap::default()));
 }
 
 /// The `[...]` option lists of a prompt, Fluent isolation marks removed.
@@ -461,7 +466,7 @@ fn option_groups(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn record_option_groups(source: &str, translated: &str) {
+fn record_option_groups_with_gen(generation: u64, source: &str, translated: &str) {
     if !source.contains('[') {
         return;
     }
@@ -469,15 +474,19 @@ fn record_option_groups(source: &str, translated: &str) {
     if source.len() != translated.len() {
         return;
     }
-    OPTION_GROUPS.with(|map| {
-        let mut map = map.borrow_mut();
-        if map.len() >= 16_384 {
-            map.clear();
+    OPTION_GROUPS.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        if guard.0 != generation {
+            guard.0 = generation;
+            guard.1.clear();
+        }
+        if guard.1.len() >= 16_384 {
+            guard.1.clear();
         }
         for (source, translated) in source.into_iter().zip(translated) {
             if source != translated && source.split('/').count() == translated.split('/').count()
             {
-                map.insert(translated, source);
+                guard.1.insert(translated, source);
             }
         }
     });
@@ -493,8 +502,14 @@ pub fn source_option(prompt: &str, typed: &str) -> Option<String> {
     if typed.is_empty() || typed.starts_with('_') {
         return None;
     }
-    OPTION_GROUPS.with(|map| {
-        let map = map.borrow();
+    let generation = LANGUAGE_GENERATION.load(Ordering::Acquire);
+    OPTION_GROUPS.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        if guard.0 != generation {
+            guard.0 = generation;
+            guard.1.clear();
+        }
+        let map = &guard.1;
         let mut prefixed = Vec::new();
         for group in option_groups(prompt) {
             let Some(source) = map.get(&group) else {
@@ -1281,7 +1296,7 @@ mod tests {
                     attribute_id,
                 );
                 assert_eq!(
-                    label,
+                    label.as_ref(),
                     loader.get_attr(message_id, attribute_id),
                     "{source} in {language:?}"
                 );
@@ -1313,8 +1328,8 @@ mod tests {
             cached_translation_with(&english, &cache, 0, source, "ribbon-tab", "draw");
         let chinese_label =
             cached_translation_with(&chinese, &cache, 1, source, "ribbon-tab", "draw");
-        assert_eq!(english_label, "Draw");
-        assert_eq!(chinese_label, chinese.get_attr("ribbon-tab", "draw"));
+        assert_eq!(english_label.as_ref(), "Draw");
+        assert_eq!(chinese_label.as_ref(), chinese.get_attr("ribbon-tab", "draw"));
         assert_ne!(
             english_label, chinese_label,
             "the memo must re-render on a language switch"
@@ -1327,5 +1342,17 @@ mod tests {
         let before = LANGUAGE_GENERATION.load(Ordering::Acquire);
         switch_language(&loader, Language::DeDe).expect("German Fluent resources must parse");
         assert!(LANGUAGE_GENERATION.load(Ordering::Acquire) > before);
+    }
+
+    #[test]
+    fn option_groups_invalidate_when_language_generation_changes() {
+        let generation = LANGUAGE_GENERATION.load(Ordering::Acquire);
+        record_option_groups_with_gen(generation, "Select [Yes/No]:", "Select [Oui/Non]:");
+        assert_eq!(
+            source_option("Select [Oui/Non]:", "Oui").as_deref(),
+            Some("Yes")
+        );
+        LANGUAGE_GENERATION.fetch_add(1, Ordering::AcqRel);
+        assert_eq!(source_option("Select [Oui/Non]:", "Oui"), None);
     }
 }

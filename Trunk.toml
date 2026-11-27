@@ -24,4 +24,4 @@ command_arguments = ["scripts/build-web-worker.sh"]
 # Cross-origin isolation headers enable SharedArrayBuffer, which wasm threads
 # (rayon) need. GitHub Pages cannot set these; a self-hosted server (e.g. the
 # Open-AEC host) can. Without them the app still runs single-threaded.
-headers = { "Cross-Origin-Opener-Policy" = "same-origin", "Cross-Origin-Embedder-Policy" = "require-corp" }
+headers = { "Cross-Origin-Opener-Policy" = "same-origin", "Cross-Origin-Embedder-Policy" = "credentialless" }

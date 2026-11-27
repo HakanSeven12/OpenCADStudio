@@ -243,3 +243,38 @@ fn unsaved_dialog_discard_closes_the_tab_it_was_opened_for() {
     assert!(app.pending_close.is_none(), "pending target consumed");
     assert!(app.active_tab < app.tabs.len(), "active tab stays valid");
 }
+
+#[test]
+fn closing_background_tab_preserves_active_tab_document() {
+    let mut app = three_tabs();
+    let bg_id = app.tabs[1].id;
+    let active_id = app.tabs[2].id;
+    app.active_tab = 2;
+
+    let _ = app.update(Message::TabClose(bg_id));
+
+    assert_eq!(app.tabs[app.active_tab].id, active_id);
+}
+
+#[test]
+fn discarding_dirty_active_tab_cleans_mtext_and_resolves_pinned_get_point() {
+    let mut app = three_tabs();
+    app.active_tab = 2;
+    let active_id = app.tabs[2].id;
+    app.tabs[2].dirty = true;
+    app.open_mtext_editor(glam::DVec3::ZERO, None, "hello", 2.5, None);
+    assert!(app.mtext_editor.is_some());
+    app.control.get_point = Some(crate::app::control::UserPointSession {
+        request_id: "req-1".to_string(),
+        document_id: active_id,
+        label: "Pick point".to_string(),
+    });
+
+    let _ = app.update(Message::TabClose(active_id));
+    assert!(app.pending_close.is_some());
+    let _ = app.update(Message::UnsavedDialogDiscard);
+
+    assert!(app.tabs.iter().all(|t| t.id != active_id));
+    assert!(app.mtext_editor.is_none(), "mtext editor cancelled on discard");
+    assert!(app.control.get_point.is_none(), "pinned get_point cleared");
+}

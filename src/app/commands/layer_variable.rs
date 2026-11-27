@@ -79,6 +79,7 @@ impl OpenCADStudio {
         if crate::io::drawing_variable(&self.tabs[i].scene.document, name).as_deref()
             != Some(stored)
         {
+            self.push_undo_snapshot(i, name);
             crate::io::set_drawing_variable(&mut self.tabs[i].scene.document, name, stored);
             self.tabs[i].dirty = true;
         }
@@ -102,5 +103,22 @@ mod tests {
         let _ = app.dispatch_layer_variable("HATCHLAYER Hatches", i);
         assert_eq!(app.new_variable_layer(i, "HATCHLAYER"), "Hatches");
         assert!(app.tabs[i].scene.document.layers.contains("Hatches"));
+    }
+
+    #[test]
+    fn hatchlayer_change_is_undoable() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let _ = app.dispatch_layer_variable("HATCHLAYER Walls", i);
+        assert_eq!(
+            crate::io::drawing_variable(&app.tabs[i].scene.document, "HATCHLAYER").as_deref(),
+            Some("Walls")
+        );
+        app.finish_all_pending_history();
+        app.undo_active_tab();
+        assert_eq!(
+            crate::io::drawing_variable(&app.tabs[i].scene.document, "HATCHLAYER"),
+            None
+        );
     }
 }

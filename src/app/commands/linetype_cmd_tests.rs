@@ -824,7 +824,7 @@ fn file_dir(tag: &str) -> std::path::PathBuf {
 fn loaded_from(path: &std::path::Path) -> Document {
     let mut document = Document::new();
     let text = std::fs::read_to_string(path).unwrap();
-    crate::io::linetypes::populate_document_from_source(&mut document, &text, None);
+    crate::catalog::linetypes::populate_document_from_source(&mut document, &text, None);
     document
 }
 
@@ -985,13 +985,13 @@ fn the_export_prompts_ask_for_names_and_a_file() {
 #[test]
 fn a_saved_linetype_is_offered_at_once_and_a_reload_removes_it() {
     let _guard = library_lock();
-    let library = crate::io::linetypes::writer::library_path().unwrap();
+    let library = crate::catalog::linetypes::writer::library_path().unwrap();
     let _ = std::fs::remove_file(&library);
-    crate::io::linetypes::refresh_catalog();
+    crate::catalog::linetypes::refresh_catalog();
 
     let mut app = fresh();
     run(&mut app, "-LINETYPE CREATE ZZ-SAVED 7,-2,1,-3");
-    assert!(!crate::io::linetypes::catalog_has("ZZ-SAVED"));
+    assert!(!crate::catalog::linetypes::catalog_has("ZZ-SAVED"));
     run(&mut app, "-LINETYPE SAVE ZZ-SAVED");
     assert!(
         output(&app).contains("saved to your library"),
@@ -999,15 +999,15 @@ fn a_saved_linetype_is_offered_at_once_and_a_reload_removes_it() {
         output(&app)
     );
     assert!(
-        crate::io::linetypes::catalog_has("ZZ-SAVED"),
+        crate::catalog::linetypes::catalog_has("ZZ-SAVED"),
         "no restart needed"
     );
 
     let mut other = Document::new();
-    assert!(crate::io::linetypes::catalog_missing_from(&other)
+    assert!(crate::catalog::linetypes::catalog_missing_from(&other)
         .iter()
         .any(|(name, _)| name == "ZZ-SAVED"));
-    assert!(crate::io::linetypes::ensure_catalog_linetype(
+    assert!(crate::catalog::linetypes::ensure_catalog_linetype(
         &mut other, "ZZ-SAVED"
     ));
     assert_eq!(
@@ -1019,14 +1019,14 @@ fn a_saved_linetype_is_offered_at_once_and_a_reload_removes_it() {
     std::fs::remove_file(&library).unwrap();
     run(&mut app, "-LINETYPE RELOAD");
     assert!(output(&app).contains("reloaded"), "{}", output(&app));
-    assert!(!crate::io::linetypes::catalog_has("ZZ-SAVED"));
+    assert!(!crate::catalog::linetypes::catalog_has("ZZ-SAVED"));
     assert_eq!(lengths(&app, "ZZ-SAVED"), vec![7.0, -2.0, 1.0, -3.0]);
 }
 
 #[test]
 fn a_reload_reads_new_files_and_the_bundled_definition_wins_a_clash() {
     let _guard = library_lock();
-    let library = crate::io::linetypes::writer::library_path().unwrap();
+    let library = crate::catalog::linetypes::writer::library_path().unwrap();
     let folder = library.parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&folder).unwrap();
     let dropped = folder.join("zz-dropped.lin");
@@ -1039,13 +1039,13 @@ fn a_reload_reads_new_files_and_the_bundled_definition_wins_a_clash() {
     let mut app = fresh();
     let bundled = Document::new();
     let mut before = bundled.clone();
-    crate::io::linetypes::populate_document(&mut before);
+    crate::catalog::linetypes::populate_document(&mut before);
     let dashed = before.line_types.get("DASHED").unwrap().pattern_length;
 
     run(&mut app, "-LINETYPE RELOAD");
-    assert!(crate::io::linetypes::catalog_has("ZZ-DROPPED"));
+    assert!(crate::catalog::linetypes::catalog_has("ZZ-DROPPED"));
     let mut after = Document::new();
-    crate::io::linetypes::populate_document(&mut after);
+    crate::catalog::linetypes::populate_document(&mut after);
     assert_eq!(
         after.line_types.get("DASHED").unwrap().pattern_length,
         dashed
@@ -1059,14 +1059,14 @@ fn a_reload_reads_new_files_and_the_bundled_definition_wins_a_clash() {
     );
 
     std::fs::remove_file(&dropped).unwrap();
-    crate::io::linetypes::refresh_catalog();
-    assert!(!crate::io::linetypes::catalog_has("ZZ-DROPPED"));
+    crate::catalog::linetypes::refresh_catalog();
+    assert!(!crate::catalog::linetypes::catalog_has("ZZ-DROPPED"));
 }
 
 #[test]
 fn saving_refuses_a_catalog_name_and_reports_what_cannot_be_written() {
     let _guard = library_lock();
-    let library = crate::io::linetypes::writer::library_path().unwrap();
+    let library = crate::catalog::linetypes::writer::library_path().unwrap();
     let _ = std::fs::remove_file(&library);
     let mut app = fresh();
     doc_mut(&mut app)
@@ -1081,3 +1081,77 @@ fn saving_refuses_a_catalog_name_and_reports_what_cannot_be_written() {
     assert!(output(&app).contains("does not exist"), "{}", output(&app));
     assert!(!library.exists());
 }
+
+#[test]
+fn deferred_catalog_linetype_loads_and_undoes_cleanly_for_ribbon_and_layer() {
+    struct CatalogTempFile(std::path::PathBuf);
+    impl Drop for CatalogTempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+            crate::catalog::linetypes::refresh_catalog();
+        }
+    }
+
+    let _guard = library_lock();
+    let mut app = fresh();
+    let i = app.active_tab;
+    let library = crate::catalog::linetypes::writer::library_path().unwrap();
+    let folder = library.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(&folder).unwrap();
+    let dropped = folder.join("zz-undo-cat.lin");
+    let _cleanup = CatalogTempFile(dropped.clone());
+    std::fs::write(&dropped, "*ZZ-UNDO-CAT,Undo test\nA,4,-1\n").unwrap();
+    crate::catalog::linetypes::refresh_catalog();
+    assert!(crate::catalog::linetypes::catalog_has("ZZ-UNDO-CAT"));
+    assert!(doc(&app).line_types.get("ZZ-UNDO-CAT").is_none());
+    let prev_celtype = doc(&app).header.current_linetype_name.clone();
+    let prev_celtype_handle = doc(&app).header.current_linetype_handle;
+
+    let _ = app.update(crate::app::Message::RibbonLinetypeChanged(
+        "ZZ-UNDO-CAT".to_string(),
+    ));
+    assert!(
+        doc(&app).line_types.get("ZZ-UNDO-CAT").is_some(),
+        "ribbon pick must load catalog linetype into the document"
+    );
+    assert_eq!(doc(&app).header.current_linetype_name, "ZZ-UNDO-CAT");
+
+    app.undo_active_tab();
+    assert!(
+        doc(&app).line_types.get("ZZ-UNDO-CAT").is_none(),
+        "UNDO after RibbonLinetypeChanged must remove the auto-loaded catalog linetype"
+    );
+    assert_eq!(doc(&app).header.current_linetype_name, prev_celtype);
+    assert_eq!(
+        doc(&app).header.current_linetype_handle,
+        prev_celtype_handle
+    );
+
+    app.sync_layer_panel(i);
+    let idx = app.tabs[i]
+        .layers
+        .layers
+        .iter()
+        .position(|l| l.name == "0")
+        .expect("layer 0 exists");
+    app.tabs[i].layers.selected = Some(idx);
+    app.tabs[i].layers.selected_multi.clear();
+    let prev_layer_lt = doc(&app).layers.get("0").unwrap().line_type.clone();
+
+    let _ = app.update(crate::app::Message::LayerLinetypeSet(
+        "ZZ-UNDO-CAT".to_string(),
+    ));
+    assert!(
+        doc(&app).line_types.get("ZZ-UNDO-CAT").is_some(),
+        "layer linetype pick must load catalog linetype into the document"
+    );
+    assert_eq!(doc(&app).layers.get("0").unwrap().line_type, "ZZ-UNDO-CAT");
+
+    app.undo_active_tab();
+    assert!(
+        doc(&app).line_types.get("ZZ-UNDO-CAT").is_none(),
+        "UNDO after LayerLinetypeSet must remove the auto-loaded catalog linetype"
+    );
+    assert_eq!(doc(&app).layers.get("0").unwrap().line_type, prev_layer_lt);
+}
+

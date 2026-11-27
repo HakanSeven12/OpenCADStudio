@@ -694,21 +694,6 @@ impl OpenCADStudio {
         if let Some(task) = self.attr_editor_leave_check(&msg) {
             return task;
         }
-        // Pickers offer the catalog linetypes the drawing lacks; the one
-        // picked is loaded before it is assigned.
-        if let Message::LayerLinetypeSet(name)
-        | Message::LayerStateEditorLayerLinetype(_, name)
-        | Message::RibbonLinetypeChanged(name)
-        | Message::PropLinetypeChanged(name)
-        | Message::AttrEditorLinetype(name) = &msg
-        {
-            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                if crate::io::linetypes::ensure_catalog_linetype(&mut tab.scene.document, name) {
-                    tab.scene
-                        .invalidate_linetype_dependencies(std::slice::from_ref(name));
-                }
-            }
-        }
         let from_options = self.active_modal == Some(super::ModalKind::Options);
         // The viewport chip's outline switch can vanish under a resting
         // pointer (another document or layout, a viewport count change, a

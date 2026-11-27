@@ -110,7 +110,7 @@ impl OpenCADStudio {
             ContentKind::TextStyle => {
                 let i = self.active_tab;
                 self.push_undo_snapshot(i, "TEXTSTYLE");
-                let _ = self.on_ribbon_style_changed(StyleKey::TextStyle, name.clone());
+                let _ = self.apply_ribbon_style_changed(StyleKey::TextStyle, name.clone());
                 self.tabs[i].dirty = true;
                 let line = crate::tr!("text-style", "now-current", name = name);
                 self.command_line.push_output(&crate::i18n::plain(line));

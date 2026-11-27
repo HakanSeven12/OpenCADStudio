@@ -1799,7 +1799,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.invalidate_text_style_dependencies(&name);
         let after = self.capture_style_state(false);
         self.commit_style_undo(i, before, after, Vec::new(), dirty_before, None);
-        let _ = self.on_ribbon_style_changed(crate::modules::StyleKey::TextStyle, name.clone());
+        let _ = self.apply_ribbon_style_changed(crate::modules::StyleKey::TextStyle, name.clone());
         self.command_line
             .push_output(&trp!("text-style", "now-current", name = name));
     }
@@ -2016,7 +2016,7 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.invalidate_dim_style_dependencies(&name);
                 self.commit_dim_style_undo(i, undo);
-                let _ = self.on_ribbon_style_changed(crate::modules::StyleKey::DimStyle, name);
+                let _ = self.apply_ribbon_style_changed(crate::modules::StyleKey::DimStyle, name);
             }
             "RESTORE" => {
                 let found = self.tabs[i]
@@ -2113,7 +2113,7 @@ impl OpenCADStudio {
                             .current_dimstyle_name
                             .eq_ignore_ascii_case(&old_name)
                         {
-                            let _ = self.on_ribbon_style_changed(
+                            let _ = self.apply_ribbon_style_changed(
                                 crate::modules::StyleKey::DimStyle,
                                 new_name.clone(),
                             );
@@ -2204,7 +2204,7 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.invalidate_dim_style_dependencies(&style_name);
                 let _ =
-                    self.on_ribbon_style_changed(crate::modules::StyleKey::DimStyle, current);
+                    self.apply_ribbon_style_changed(crate::modules::StyleKey::DimStyle, current);
                 self.command_line.push_output(
                     crate::tf!("DIMSTYLE: '{}' deleted.", style_name).as_ref(),
                 );
@@ -2268,7 +2268,7 @@ impl OpenCADStudio {
                             self.commit_dim_style_undo(i, pending);
                             self.tabs[i].dirty = true;
                             self.tabs[i].scene.invalidate_dim_style_dependencies(&style_name);
-                            let _ = self.on_ribbon_style_changed(
+                            let _ = self.apply_ribbon_style_changed(
                                 crate::modules::StyleKey::DimStyle,
                                 style_name.clone(),
                             );

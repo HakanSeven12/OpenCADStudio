@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Панели инструментов
     .window-elements = Элементы окна
     .color-theme = Цветовая тема
+    .quick-access = Быстрый доступ
     .quick-access-toolbar = Панель быстрого доступа
     .in-title-bar = В заголовке окна
     .before-ribbon-tabs = Перед вкладками ленты

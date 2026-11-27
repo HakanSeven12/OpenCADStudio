@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Thanh công cụ
     .window-elements = Thành phần cửa sổ
     .color-theme = Chủ đề màu
+    .quick-access = Truy cập nhanh
     .quick-access-toolbar = Thanh công cụ truy cập nhanh
     .in-title-bar = Trên thanh tiêu đề
     .before-ribbon-tabs = Trước các thẻ ruy-băng

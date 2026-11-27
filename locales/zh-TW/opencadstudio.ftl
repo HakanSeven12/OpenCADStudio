@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = 工具列
     .window-elements = 視窗元素
     .color-theme = 色彩主題
+    .quick-access = 快速存取
     .quick-access-toolbar = 快速存取工具列
     .in-title-bar = 在標題列中
     .before-ribbon-tabs = 在功能區頁籤之前

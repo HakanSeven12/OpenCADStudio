@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Toolbar
     .window-elements = Window elements
     .color-theme = Color theme
+    .quick-access = Quick Access
     .quick-access-toolbar = Quick Access Toolbar
     .in-title-bar = In title bar
     .before-ribbon-tabs = Before ribbon tabs

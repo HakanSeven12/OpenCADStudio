@@ -265,6 +265,7 @@ interface-settings =
     .toolbar = Eszköztárak
     .window-elements = Ablakelemek
     .color-theme = Színtéma
+    .quick-access = Gyorselérés
     .quick-access-toolbar = Gyorselérési eszköztár
     .in-title-bar = A címsorban
     .before-ribbon-tabs = A lapfülek előtt

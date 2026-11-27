@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = ແຖບເຄື່ອງມື
     .window-elements = ອົງປະກອບຂອງໜ້າຕ່າງ
     .color-theme = ຊຸດສີ
+    .quick-access = ເຂົ້າເຖິງດ່ວນ
     .quick-access-toolbar = ແຖບເຄື່ອງມືເຂົ້າເຖິງດ່ວນ
     .in-title-bar = ໃນແຖບຫົວເລື່ອງ
     .before-ribbon-tabs = ກ່ອນແຖບຂອງໂບ

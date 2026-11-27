@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Werkbalken
     .window-elements = Vensteronderdelen
     .color-theme = Kleurthema
+    .quick-access = Snelle toegang
     .quick-access-toolbar = Werkbalk Snelle toegang
     .in-title-bar = In titelbalk
     .before-ribbon-tabs = Vóór de linttabbladen

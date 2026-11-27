@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = 도구막대
     .window-elements = 창 요소
     .color-theme = 색상 테마
+    .quick-access = 빠른 접근
     .quick-access-toolbar = 빠른 접근 도구막대
     .in-title-bar = 제목 표시줄에
     .before-ribbon-tabs = 리본 탭 앞에

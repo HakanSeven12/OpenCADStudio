@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Asboblar panellari
     .window-elements = Oyna elementlari
     .color-theme = Rang mavzusi
+    .quick-access = Tezkor kiriş
     .quick-access-toolbar = Tezkor kiriş paneli
     .in-title-bar = Sarlavha satrida
     .before-ribbon-tabs = Lenta varaqalaridan oldin

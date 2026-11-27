@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Werkzeugkästen
     .window-elements = Fensterelemente
     .color-theme = Farbschema
+    .quick-access = Schnellzugriff
     .quick-access-toolbar = Schnellzugriff-Werkzeugkasten
     .in-title-bar = In der Titelleiste
     .before-ribbon-tabs = Vor den Registerkarten

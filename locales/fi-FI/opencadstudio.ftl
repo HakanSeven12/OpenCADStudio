@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Työkalurivit
     .window-elements = Ikkunan osat
     .color-theme = Väriteema
+    .quick-access = Pikatyökalut
     .quick-access-toolbar = Pikatyökalurivi
     .in-title-bar = Otsikkorivillä
     .before-ribbon-tabs = Ennen välilehtiä

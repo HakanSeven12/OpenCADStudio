@@ -276,21 +276,23 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         )
     });
     let qat_row = kit::check_select_row(
-        crate::tr!("interface-settings", "quick-access-toolbar"),
+        crate::tr!("interface-settings", "quick-access"),
         snap.qat_shown,
         Some(msg(InterfaceMsg::QatShown(!snap.qat_shown))),
         qat_choice,
         &qat_position_label(qat_shown_position),
     );
-    bands = bands.push(if snap.toolbar_layout && snap.qat_shown {
-        kit::tooltip(
-            qat_row,
-            crate::tr!("interface-settings", "qat-fixed"),
-            kit::TipPosition::Bottom,
+    // The full name, and why the place is fixed with the Toolbar layout.
+    let qat_tip = if snap.toolbar_layout && snap.qat_shown {
+        format!(
+            "{}\n{}",
+            crate::tr!("interface-settings", "quick-access-toolbar"),
+            crate::tr!("interface-settings", "qat-fixed")
         )
     } else {
-        qat_row
-    });
+        crate::tr!("interface-settings", "quick-access-toolbar")
+    };
+    bands = bands.push(kit::tooltip(qat_row, qat_tip, kit::TipPosition::Bottom));
 
     let menu_choice = snap.menu_bar_shown.then(|| {
         choice(

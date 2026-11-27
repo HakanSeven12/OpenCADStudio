@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Barre degli strumenti
     .window-elements = Elementi della finestra
     .color-theme = Tema colori
+    .quick-access = Accesso rapido
     .quick-access-toolbar = Barra di accesso rapido
     .in-title-bar = Nella barra del titolo
     .before-ribbon-tabs = Prima delle schede

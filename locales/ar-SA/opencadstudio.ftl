@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = أشرطة الأدوات
     .window-elements = عناصر النافذة
     .color-theme = سمة الألوان
+    .quick-access = الوصول السريع
     .quick-access-toolbar = شريط أدوات الوصول السريع
     .in-title-bar = في شريط العنوان
     .before-ribbon-tabs = قبل علامات تبويب الشريط

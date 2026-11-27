@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = ツールバー
     .window-elements = ウィンドウ要素
     .color-theme = カラー テーマ
+    .quick-access = クイック アクセス
     .quick-access-toolbar = クイック アクセス ツールバー
     .in-title-bar = タイトル バー内
     .before-ribbon-tabs = リボン タブの前

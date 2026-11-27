@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Ленти с инструменти
     .window-elements = Елементи на прозореца
     .color-theme = Цветова тема
+    .quick-access = Бърз достъп
     .quick-access-toolbar = Лента за бърз достъп
     .in-title-bar = В заглавната лента
     .before-ribbon-tabs = Преди разделите на лентата

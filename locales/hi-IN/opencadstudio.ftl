@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = टूलबार
     .window-elements = विंडो तत्व
     .color-theme = रंग थीम
+    .quick-access = त्वरित पहुँच
     .quick-access-toolbar = त्वरित पहुँच टूलबार
     .in-title-bar = शीर्षक पट्टी में
     .before-ribbon-tabs = रिबन टैब से पहले

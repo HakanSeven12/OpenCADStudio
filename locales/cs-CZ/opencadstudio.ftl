@@ -273,6 +273,7 @@ interface-settings =
     .toolbar = Panely nástrojů
     .window-elements = Prvky okna
     .color-theme = Barevný motiv
+    .quick-access = Rychlý přístup
     .quick-access-toolbar = Panel nástrojů Rychlý přístup
     .in-title-bar = V záhlaví okna
     .before-ribbon-tabs = Před kartami

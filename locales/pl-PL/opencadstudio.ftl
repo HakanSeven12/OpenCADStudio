@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Paski narzędzi
     .window-elements = Elementy okna
     .color-theme = Motyw kolorów
+    .quick-access = Szybki dostęp
     .quick-access-toolbar = Pasek narzędzi szybkiego dostępu
     .in-title-bar = Na pasku tytułu
     .before-ribbon-tabs = Przed kartami wstążki

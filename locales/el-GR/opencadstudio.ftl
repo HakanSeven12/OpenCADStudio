@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Γραμμές εργαλείων
     .window-elements = Στοιχεία παραθύρου
     .color-theme = Θέμα χρωμάτων
+    .quick-access = Γρήγορη πρόσβαση
     .quick-access-toolbar = Γραμμή γρήγορης πρόσβασης
     .in-title-bar = Στη γραμμή τίτλου
     .before-ribbon-tabs = Πριν από τις καρτέλες

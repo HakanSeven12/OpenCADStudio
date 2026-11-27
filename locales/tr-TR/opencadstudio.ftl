@@ -271,6 +271,7 @@ interface-settings =
     .toolbar = Araç çubukları
     .window-elements = Pencere öğeleri
     .color-theme = Renk teması
+    .quick-access = Hızlı Erişim
     .quick-access-toolbar = Hızlı Erişim Araç Çubuğu
     .in-title-bar = Başlık çubuğunda
     .before-ribbon-tabs = Şerit sekmelerinden önce

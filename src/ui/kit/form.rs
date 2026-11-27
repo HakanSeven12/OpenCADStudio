@@ -424,7 +424,8 @@ pub fn hint<'a>(note: impl Into<String>, warn: bool) -> Element<'a, Message> {
     .into()
 }
 
-/// A footer: `buttons` at its right, on the raised surface.
+/// A footer: `buttons` at its right, on the darker grey of the ribbon's
+/// panel-title strip (`chrome::title_bar`).
 pub fn footer<'a>(buttons: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     let mut content = iced::widget::row![Space::new().width(Length::Fill)]
         .spacing(km::FORM_TILE_GAP)

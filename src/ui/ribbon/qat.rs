@@ -1222,7 +1222,7 @@ fn menu_separator<'a>() -> Element<'a, Message> {
 
 /// Where Show Below / Above the Ribbon puts the toolbar: from below the
 /// ribbon back to the title bar, from anywhere else below the ribbon.
-fn place_after(below: bool) -> super::QatPosition {
+pub(super) fn place_after(below: bool) -> super::QatPosition {
     if below {
         super::QatPosition::TitleBar
     } else {

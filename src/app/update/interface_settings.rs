@@ -135,13 +135,12 @@ impl OpenCADStudio {
     /// toolbars, and the first time Toolbar shows the default ones. RIBBON
     /// and RIBBONCLOSE only open or close the ribbon.
     pub(in crate::app) fn set_interface_layout(&mut self, toolbar: bool) {
-        if self.ribbon_closed != toolbar {
-            self.ribbon_closed = toolbar;
-            self.ribbon.closed = toolbar;
-            let origin = self.toolbar_origin();
-            self.ribbon.switch_toolbar_set(toolbar, origin);
-            self.save_config();
-        }
+        self.ribbon_closed = toolbar;
+        self.ribbon.closed = toolbar;
+        // Also when the ribbon was already closed (RIBBONCLOSE): the sets
+        // follow the layout, and Toolbar the first time gets its defaults.
+        let origin = self.toolbar_origin();
+        self.ribbon.switch_toolbar_set(toolbar, origin);
         if toolbar {
             self.show_menu_bar = true;
         }
@@ -284,6 +283,30 @@ mod tests {
             .floating
             .iter()
             .all(|panel| !panel.extras_right));
+    }
+
+    #[test]
+    fn toolbar_after_ribbonclose_still_gets_its_defaults_and_keeps_the_sets_apart() {
+        let mut app = app();
+        app.ribbon.set_window_size((1600.0, 1000.0));
+        app.automation_op(r#"{"op":"new"}"#);
+        // A panel floats in the Ribbon layout, then RIBBONCLOSE.
+        let origin = app.toolbar_origin();
+        assert!(app.ribbon.show_toolbar("draw", "Block", true, origin));
+        let _ = app.run_command_line("RIBBONCLOSE");
+        assert!(app.ribbon_closed);
+
+        // Toolbar: its own defaults, the Ribbon layout's panel set aside.
+        let _ = app.run_command_line("WSCURRENT CLASSIC");
+        assert_eq!(
+            shown_toolbars(&app),
+            ["Draw", "Modify", "Layers", "Properties"]
+        );
+        // Ribbon brings the Ribbon layout's panel back.
+        let _ = app.update(Message::Interface(M::Layout(false)));
+        assert_eq!(shown_toolbars(&app), ["Block"]);
+        let _ = app.update(Message::Interface(M::Layout(true)));
+        assert_eq!(shown_toolbars(&app).len(), 4);
     }
 
     #[test]

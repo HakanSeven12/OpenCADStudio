@@ -123,7 +123,7 @@ pub fn theme_label(name: &str) -> String {
     }
 }
 
-fn qat_position_label(position: QatPosition) -> String {
+pub fn qat_position_label(position: QatPosition) -> String {
     match position {
         QatPosition::TitleBar => crate::tr!("interface-settings", "in-title-bar"),
         QatPosition::BeforeTabs => crate::tr!("interface-settings", "before-ribbon-tabs"),
@@ -131,7 +131,7 @@ fn qat_position_label(position: QatPosition) -> String {
     }
 }
 
-fn menu_bar_position_label(position: MenuBarPosition) -> String {
+pub fn menu_bar_position_label(position: MenuBarPosition) -> String {
     match position {
         MenuBarPosition::TitleBar => crate::tr!("interface-settings", "in-title-bar"),
         MenuBarPosition::OwnRow => crate::tr!("interface-settings", "below-title-bar"),
@@ -379,7 +379,7 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
             ))
             .padding(
                 iced::Padding::ZERO
-                    .top(km::FORM_TILE_PAD)
+                    .top(km::FORM_BUTTON_GAP)
                     .left(km::FORM_LABEL_X),
             ),
         );

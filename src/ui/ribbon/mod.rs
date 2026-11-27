@@ -1822,7 +1822,9 @@ impl Ribbon {
                     .report_width(self.title_qat_w.clone(), TAB_ROW_GAP),
             );
         } else {
-            self.title_qat_w.store(0f32.to_bits(), Ordering::Relaxed);
+            // Not there: unmeasured again for when it comes back.
+            self.title_qat_w
+                .store(f32::NAN.to_bits(), Ordering::Relaxed);
         }
         // Right-clicked, the logo and the toolbar offer where the toolbar
         // shows, as the tab row does; the menus keep their own presses.
@@ -1851,14 +1853,14 @@ impl Ribbon {
             return false;
         }
         let qat = if self.qat_placement(closed) == Some(QatPosition::TitleBar) {
-            // Unmeasured, it is taken as empty: once laid out, the start's
-            // new width asks for a fresh view that knows.
+            // Unmeasured, the menus keep their row for now: once the
+            // toolbar is laid out, the start's new width asks for a fresh
+            // view that knows whether both fit.
             let w = f32::from_bits(self.title_qat_w.load(Ordering::Relaxed));
             if w.is_nan() {
-                0.0
-            } else {
-                w
+                return false;
             }
+            w
         } else {
             0.0
         };

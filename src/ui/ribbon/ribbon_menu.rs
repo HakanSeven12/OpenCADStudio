@@ -319,11 +319,11 @@ impl Ribbon {
             },
             RibbonMenuMsg::ShowMenuBar(!show_menu_bar),
         );
-        let place_row = |label: String, position: super::QatPosition| {
+        let place_row = |label: String, position: super::QatPosition, checked: bool| {
             Some((
                 Row {
                     label,
-                    checked: !self.layout.qat_hidden && self.layout.qat_position == position,
+                    checked,
                     enabled: !ribbon_closed,
                     reason: ribbon_closed
                         .then(|| crate::tr!("ribbon-menu", "qat-place-unavailable")),
@@ -432,17 +432,21 @@ impl Ribbon {
                 let mut rows = ribbon_rows;
                 rows.push(None);
                 use super::QatPosition;
+                let at = |position| !self.layout.qat_hidden && self.layout.qat_position == position;
                 rows.push(place_row(
                     crate::tr!("ribbon-menu", "qat-in-title-bar"),
                     QatPosition::TitleBar,
+                    at(QatPosition::TitleBar),
                 ));
                 rows.push(place_row(
                     crate::tr!("ribbon-menu", "qat-before-tabs"),
                     QatPosition::BeforeTabs,
+                    at(QatPosition::BeforeTabs),
                 ));
                 rows.push(place_row(
                     crate::tr!("ribbon-menu", "qat-show-below"),
                     QatPosition::BelowRibbon,
+                    at(QatPosition::BelowRibbon),
                 ));
                 let hidden = self.layout.qat_hidden;
                 rows.push(Some((
@@ -508,24 +512,16 @@ impl Ribbon {
                 rows.extend([
                     None,
                     {
-                        // From below the ribbon back to the title bar.
                         let below = self.layout.qat_position == super::QatPosition::BelowRibbon;
-                        let mut row = place_row(
+                        place_row(
                             if below {
                                 crate::tr!("ribbon-menu", "show-above")
                             } else {
                                 crate::tr!("ribbon-menu", "show-below")
                             },
-                            if below {
-                                super::QatPosition::TitleBar
-                            } else {
-                                super::QatPosition::BelowRibbon
-                            },
-                        );
-                        if let Some((row, _)) = row.as_mut() {
-                            row.checked = false;
-                        }
-                        row
+                            super::qat::place_after(below),
+                            false,
+                        )
                     },
                     menu_bar_row,
                 ]);

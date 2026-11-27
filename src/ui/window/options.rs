@@ -747,12 +747,7 @@ pub fn view_window<'a>(
             .into_iter()
             .map(|value| Labelled {
                 value,
-                label: match value {
-                    MenuBarPosition::TitleBar => {
-                        crate::tr!("interface-settings", "in-title-bar")
-                    }
-                    MenuBarPosition::OwnRow => crate::tr!("interface-settings", "below-title-bar"),
-                },
+                label: crate::ui::interface_settings::menu_bar_position_label(value),
             })
             .collect();
     let selected_menu_bar_position = menu_bar_positions
@@ -767,11 +762,7 @@ pub fn view_window<'a>(
     .into_iter()
     .map(|value| Labelled {
         value,
-        label: match value {
-            QatPosition::TitleBar => crate::tr!("interface-settings", "in-title-bar"),
-            QatPosition::BeforeTabs => crate::tr!("interface-settings", "before-ribbon-tabs"),
-            QatPosition::BelowRibbon => crate::tr!("interface-settings", "below-ribbon"),
-        },
+        label: crate::ui::interface_settings::qat_position_label(value),
     })
     .collect();
     let selected_qat_position = qat_positions

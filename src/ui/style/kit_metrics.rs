@@ -219,6 +219,8 @@ pub const FORM_TILE_FILL_LIGHT: f32 = 0.10;
 pub const FORM_FOOTER_PAD_Y: f32 = 3.0;
 pub const FORM_FOOTER_PAD_RIGHT: f32 = 10.0;
 pub const FORM_FOOTER_PAD_LEFT: f32 = 8.0;
+/// Room above a text button that follows the rows.
+pub const FORM_BUTTON_GAP: f32 = 4.0;
 /// A text button: height, side padding and corner radius.
 pub const FORM_BUTTON_H: f32 = 22.0;
 pub const FORM_BUTTON_PAD_X: f32 = 8.0;

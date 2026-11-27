@@ -694,6 +694,12 @@ impl AppConfig {
         if self.ribbon.layout.migrate_legacy() && self.settings.show_menu_bar {
             self.settings.menu_bar_position = crate::app::settings::MenuBarPosition::TitleBar;
         }
+        // The toolbars shown belong to the layout shown: the Toolbar layout
+        // while the ribbon is closed.
+        let layout = &mut self.ribbon.layout;
+        if layout.toolbar_sets_for_toolbar.is_none() {
+            layout.toolbar_sets_for_toolbar = Some(self.settings.ribbon_closed);
+        }
     }
 
     /// Persist the config as JSON. Best-effort; silent on unavailable or
@@ -1016,6 +1022,15 @@ mod tests {
         assert!(!old.settings.status_bar_hidden);
         assert!(old.ribbon.layout.floating_other_layout.is_empty());
         assert!(!old.ribbon.layout.toolbar_layout_seeded);
+        assert_eq!(old.ribbon.layout.toolbar_sets_for_toolbar, Some(false));
+
+        // A closed ribbon's floating panels are the Toolbar layout's.
+        let mut old: AppConfig =
+            serde_json::from_str(r#"{"settings":{"ribbon_closed":true},"ribbon":{"floating":[]}}"#)
+                .expect("old config");
+        assert_eq!(old.ribbon.layout.toolbar_sets_for_toolbar, None);
+        old.migrate();
+        assert_eq!(old.ribbon.layout.toolbar_sets_for_toolbar, Some(true));
     }
 
     #[test]

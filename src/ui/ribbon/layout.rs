@@ -252,6 +252,14 @@ pub struct RibbonLayout {
     /// The Toolbar layout was shown once and got its default toolbars, so
     /// closing all of them does not bring them back.
     pub toolbar_layout_seeded: bool,
+    /// Which layout `floating` and `docked` belong to: the Toolbar layout
+    /// (`Some(true)`) or the Ribbon layout (`Some(false)`; `None` until a
+    /// settings file from before it is migrated, see `AppConfig::migrate`).
+    /// RIBBON and RIBBONCLOSE open or close the ribbon without swapping the
+    /// sets, so this, not whether the ribbon is closed, says when a layout
+    /// change swaps them.
+    #[serde(default)]
+    pub toolbar_sets_for_toolbar: Option<bool>,
     /// The panels docked as toolbars at the window's edges, top to bottom.
     pub docked: Vec<DockedToolbar>,
     /// The docked toolbars of the other layout, swapped with `docked` as
@@ -293,6 +301,7 @@ impl Default for RibbonLayout {
             floating: Vec::new(),
             floating_other_layout: Vec::new(),
             toolbar_layout_seeded: false,
+            toolbar_sets_for_toolbar: None,
             docked: Vec::new(),
             docked_other_layout: Vec::new(),
             custom_panels: Vec::new(),

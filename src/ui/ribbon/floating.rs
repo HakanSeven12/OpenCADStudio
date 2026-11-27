@@ -818,17 +818,19 @@ impl Ribbon {
     /// Reset toolbars brings back.
     pub const DEFAULT_TOOLBARS: [&'static str; 4] = ["Draw", "Modify", "Layers", "Properties"];
 
-    /// The layout changes between Ribbon and Toolbar: the floating and
-    /// docked toolbars of the one shown go away with it and those of the
-    /// other come back.
-    /// Going to Toolbar (`toolbar`) the first time with none to show, the
-    /// default toolbars line up from `origin`; every panel ends up inside
-    /// the window.
+    /// Show the toolbars of the Toolbar layout (`toolbar`) or the Ribbon
+    /// layout: when the floating and docked toolbars shown belong to the
+    /// other one, the two sets swap. Going to Toolbar the first time with
+    /// none to show, the default toolbars line up from `origin`; every
+    /// panel ends up inside the window.
     pub fn switch_toolbar_set(&mut self, toolbar: bool, origin: Point) {
-        self.float_ui = Default::default();
         let layout = &mut self.layout;
-        std::mem::swap(&mut layout.floating, &mut layout.floating_other_layout);
-        std::mem::swap(&mut layout.docked, &mut layout.docked_other_layout);
+        if layout.toolbar_sets_for_toolbar.unwrap_or(false) != toolbar {
+            self.float_ui = Default::default();
+            std::mem::swap(&mut layout.floating, &mut layout.floating_other_layout);
+            std::mem::swap(&mut layout.docked, &mut layout.docked_other_layout);
+        }
+        layout.toolbar_sets_for_toolbar = Some(toolbar);
         let first_toolbar = toolbar && !std::mem::replace(&mut layout.toolbar_layout_seeded, true);
         if first_toolbar && self.layout.floating.is_empty() && self.layout.docked.is_empty() {
             self.show_default_toolbars(origin);

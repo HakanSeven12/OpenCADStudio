@@ -3753,6 +3753,7 @@ impl OpenCADStudio {
                                 "full" => S::Full,
                                 "name" => S::Name,
                                 "raw" => S::Raw,
+                                "styles" => S::Styles,
                                 "columns" => S::Columns,
                                 _ => return Err(bad()),
                             })

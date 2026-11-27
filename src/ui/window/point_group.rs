@@ -377,6 +377,14 @@ pub enum ListCol {
     Format,
     GridEasting,
     GridNorthing,
+    Longitude,
+    Latitude,
+    ScaleFactor,
+    Convergence,
+    Style,
+    LabelStyle,
+    Layer,
+    Project,
 }
 
 impl ListCol {
@@ -392,13 +400,21 @@ impl ListCol {
             ListCol::Format => "Description Format",
             ListCol::GridEasting => "Grid Easting",
             ListCol::GridNorthing => "Grid Northing",
+            ListCol::Longitude => "Longitude",
+            ListCol::Latitude => "Latitude",
+            ListCol::ScaleFactor => "Scale Factor",
+            ListCol::Convergence => "Convergence",
+            ListCol::Style => "Style",
+            ListCol::LabelStyle => "Point Label Style",
+            ListCol::Layer => "Point Layer",
+            ListCol::Project => "Project Version",
         }
     }
 
     /// The column a script names: its title in lower case, spaces as `_`.
     pub fn of(name: &str) -> Option<ListCol> {
         use ListCol::*;
-        [Number, Easting, Northing, Elevation, Name, Raw, Full, Format, GridEasting, GridNorthing]
+        [Number, Easting, Northing, Elevation, Name, Raw, Full, Format, GridEasting, GridNorthing, Longitude, Latitude, ScaleFactor, Convergence, Style, LabelStyle, Layer, Project]
             .into_iter()
             .find(|c| c.title().to_lowercase().replace(' ', "_") == name)
     }
@@ -408,21 +424,30 @@ impl ListCol {
             ListCol::Number => 100.0,
             ListCol::Name => 70.0,
             ListCol::Raw | ListCol::Full | ListCol::Format => 100.0,
-            ListCol::GridEasting | ListCol::GridNorthing => 110.0,
+            ListCol::GridEasting | ListCol::GridNorthing | ListCol::Longitude | ListCol::Latitude => 110.0,
+            ListCol::Style | ListCol::LabelStyle | ListCol::Layer | ListCol::Project => 100.0,
             _ => 90.0,
         }
     }
 
     fn numeric(self) -> bool {
-        !matches!(self, ListCol::Name | ListCol::Raw | ListCol::Full | ListCol::Format)
+        !matches!(
+            self,
+            ListCol::Name | ListCol::Raw | ListCol::Full | ListCol::Format | ListCol::Style | ListCol::LabelStyle | ListCol::Layer | ListCol::Project
+        )
     }
 
     /// The cell of point `p`, coordinates with the drawing's unit mark
     /// (measured: `140.0000m`, elevation `5.000m`). The full description
     /// is the raw one in its description key's format; grid coordinates
-    /// are empty without a coordinate system (measured).
+    /// are empty without a coordinate system (measured), as are the
+    /// latitude (`N40° 39' 27.90"`), longitude (`E27° 00' 51.19"`), scale
+    /// factor (`1.000`) and convergence (`0° 00' 33.35"`). Style and label
+    /// style are the point's own (empty when it draws with its group's);
+    /// the project version is empty outside a data project.
     pub fn cell(self, p: &Point, unit: &str) -> String {
-        let grid = |k: usize| p.grid.map(|g| format!("{:.4}{unit}", g[k])).unwrap_or_default();
+        use crate::modules::civil::point_geodetic::{dms, hemisphere};
+        let grid = |k: usize| p.geo.map(|g| format!("{:.4}{unit}", g.grid[k])).unwrap_or_default();
         match self {
             ListCol::Number => p.number.to_string(),
             ListCol::Easting => format!("{:.4}{unit}", p.position[0]),
@@ -440,6 +465,14 @@ impl ListCol {
             ListCol::Raw => p.raw.clone().unwrap_or_default(),
             ListCol::Full => p.full.clone().unwrap_or_default(),
             ListCol::Format => p.format.clone().unwrap_or_default(),
+            ListCol::Longitude => p.geo.map(|g| hemisphere(g.longitude, 'E', 'W')).unwrap_or_default(),
+            ListCol::Latitude => p.geo.map(|g| hemisphere(g.latitude, 'N', 'S')).unwrap_or_default(),
+            ListCol::ScaleFactor => p.geo.map(|g| format!("{:.3}", g.scale)).unwrap_or_default(),
+            ListCol::Convergence => p.geo.map(|g| dms(g.convergence, 2)).unwrap_or_default(),
+            ListCol::Style => p.style.clone(),
+            ListCol::LabelStyle => p.label.clone(),
+            ListCol::Layer => p.layer.clone(),
+            ListCol::Project => String::new(),
         }
     }
 
@@ -448,8 +481,12 @@ impl ListCol {
             ListCol::Number => p.number as f64,
             ListCol::Easting => p.position[0],
             ListCol::Northing => p.position[1],
-            ListCol::GridEasting => p.grid.map_or(f64::NEG_INFINITY, |g| g[0]),
-            ListCol::GridNorthing => p.grid.map_or(f64::NEG_INFINITY, |g| g[1]),
+            ListCol::GridEasting => p.geo.map_or(f64::NEG_INFINITY, |g| g.grid[0]),
+            ListCol::GridNorthing => p.geo.map_or(f64::NEG_INFINITY, |g| g.grid[1]),
+            ListCol::Longitude => p.geo.map_or(f64::NEG_INFINITY, |g| g.longitude),
+            ListCol::Latitude => p.geo.map_or(f64::NEG_INFINITY, |g| g.latitude),
+            ListCol::ScaleFactor => p.geo.map_or(f64::NEG_INFINITY, |g| g.scale),
+            ListCol::Convergence => p.geo.map_or(f64::NEG_INFINITY, |g| g.convergence),
             _ => p.position[2],
         }
     }
@@ -465,6 +502,8 @@ pub struct PointListView {
     pub full: bool,
     pub name: bool,
     pub raw: bool,
+    /// Style, label style, layer and project version.
+    pub styles: bool,
     /// The column switches are open under the toolbar.
     pub columns_open: bool,
     pub picked: Option<u32>,
@@ -480,6 +519,7 @@ impl Default for PointListView {
             full: true,
             name: true,
             raw: true,
+            styles: false,
             columns_open: false,
             picked: None,
         }
@@ -496,6 +536,14 @@ impl PointListView {
             (self.full, ListCol::Format),
             (self.grid, ListCol::GridEasting),
             (self.grid, ListCol::GridNorthing),
+            (self.grid, ListCol::Longitude),
+            (self.grid, ListCol::Latitude),
+            (self.grid, ListCol::ScaleFactor),
+            (self.grid, ListCol::Convergence),
+            (self.styles, ListCol::Style),
+            (self.styles, ListCol::LabelStyle),
+            (self.styles, ListCol::Layer),
+            (self.styles, ListCol::Project),
         ];
         c.extend(optional.into_iter().filter(|o| o.0).map(|o| o.1));
         c
@@ -532,6 +580,7 @@ pub enum ListSwitch {
     Full,
     Name,
     Raw,
+    Styles,
     Columns,
 }
 
@@ -562,6 +611,7 @@ fn point_list<'a>(state: &'a PointGroupWindow) -> Element<'a, Message> {
                 small(t!("Columns:")).style(muted_style),
                 chip(t!("Name").into_owned(), view.name, switch(ListSwitch::Name)),
                 chip(t!("Raw Description").into_owned(), view.raw, switch(ListSwitch::Raw)),
+                chip(t!("Style").into_owned(), view.styles, switch(ListSwitch::Styles)),
             ]
             .spacing(6)
             .align_y(iced::Center),

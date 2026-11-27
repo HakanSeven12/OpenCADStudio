@@ -91,7 +91,12 @@ fn number(text: &str) -> Option<f64> {
 
 /// `deg° mm' ss.ss"` with `places` decimals on the seconds; the sign leads
 /// even when the degrees are zero.
-fn dms(value: f64, places: usize) -> String {
+/// `N40° 39' 27.90"`: the hemisphere letter and the angle's size.
+pub(crate) fn hemisphere(v: f64, pos: char, neg: char) -> String {
+    format!("{}{}", if v < 0.0 { neg } else { pos }, dms(v.abs(), 2))
+}
+
+pub(crate) fn dms(value: f64, places: usize) -> String {
     let scale = 10f64.powi(places as i32);
     let total = (value.abs() * 3600.0 * scale).round() / scale;
     let d = (total / 3600.0).floor();
@@ -147,24 +152,29 @@ impl GeodeticDirectCommand {
         Some((x - at.x).hypot(y - at.y) * self.crs.to_meter())
     }
 
-    /// The four lines describing a local coordinate and its grid coordinate.
-    fn describe(&self, local: DVec3) -> String {
+    /// A local coordinate's grid coordinate, latitude and longitude
+    /// (degrees), point scale and meridian convergence (degrees: the grid
+    /// direction of the meridian).
+    pub fn geodetic(&self, local: DVec3) -> Option<(DVec3, f64, f64, f64, f64)> {
         let at = self.grid(local);
-        let Some((lat, lon)) = self.geographic(at) else { return String::new() };
-        // Convergence: the grid direction of the meridian; scale: grid over
-        // ellipsoid length of a short east step.
-        let step = 1.0;
+        let (lat, lon) = self.geographic(at)?;
+        // Scale: grid over ellipsoid length of a short east step.
         let grid = |la: f64, lo: f64| self.crs.from_base_geographic(lo, la).unwrap_or((at.x, at.y));
-        let (lat2, lon2, _) = self.geodesic.direct(lat, lon, 0.0, step);
+        let (lat2, lon2, _) = self.geodesic.direct(lat, lon, 0.0, 1.0);
         let (n_x, n_y) = grid(lat2, lon2);
         let convergence = -(n_x - at.x).atan2(n_y - at.y).to_degrees();
         let scale = self.point_scale(at).unwrap_or(1.0);
-        let hemi = |v: f64, pos: char, neg: char| format!("{}{}", if v < 0.0 { neg } else { pos }, dms(v.abs(), 2));
+        Some((at, lat, lon, scale, convergence))
+    }
+
+    /// The four lines describing a local coordinate and its grid coordinate.
+    fn describe(&self, local: DVec3) -> String {
+        let Some((at, lat, lon, scale, convergence)) = self.geodetic(local) else { return String::new() };
         [
             crate::tf!("Northing: {:.4}m   Easting: {:.4}m", local.y, local.x).into_owned(),
             crate::tf!("Grid Northing: {:.4}m   Grid Easting: {:.4}m", at.y, at.x).into_owned(),
             crate::tf!("Convergence: {}  Scale Factor: {:.3}", dms(convergence, 2), scale).into_owned(),
-            crate::tf!("Latitude: {}   Longitude: {}", hemi(lat, 'N', 'S'), hemi(lon, 'E', 'W')).into_owned(),
+            crate::tf!("Latitude: {}   Longitude: {}", hemisphere(lat, 'N', 'S'), hemisphere(lon, 'E', 'W')).into_owned(),
         ]
         .join("\n")
     }

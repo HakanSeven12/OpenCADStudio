@@ -5454,6 +5454,19 @@ impl OpenCADStudio {
             }
 
             Message::ViewportLeftRelease => self.on_viewport_left_release(),
+            Message::ViewportLeftReleaseCaptured => {
+                // The press that closed a popup reached the viewport, its
+                // release did not: without this the held press turns every
+                // later move into a lasso that no click can end.
+                let i = self.active_tab;
+                let mut sel = self.tabs[i].scene.selection.borrow_mut();
+                if sel.input.left_down {
+                    sel.clear_left_selection_gesture();
+                    drop(sel);
+                    self.drag_move = None;
+                }
+                Task::none()
+            }
 
             Message::ViewportRightPress => {
                 self.graphic_attributes.open_menu = None;

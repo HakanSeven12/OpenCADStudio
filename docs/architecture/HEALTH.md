@@ -4,7 +4,7 @@ Open CAD Studio measures its own code health on every release and on every pull 
 
 ## Where to see it
 
-- **Code Health wiki page**: the scorecard, the trend over recent releases, thanks to the pull requests that improved a measure, and a list of cleanups anyone can pick up. Rebuilt on every release by `.github/workflows/wiki.yml`.
+- **Code Health wiki page**: the scorecard, the trend over recent releases, what blocks each crate planned in [`TARGET.md`](TARGET.md) (*Crate readiness*), thanks to the pull requests that improved a measure, and a list of cleanups anyone can pick up. Rebuilt on every release by `.github/workflows/wiki.yml`.
 - **Your pull request**: the `health (informational)` job compares your branch with the commit it merges into and lists what got better and what got worse, with the file and line, including the tests you add. If you edit a file that no test runs yet (as of the last release), it says so: a test there counts toward the coverage goal. The lint job lists clippy and rustfmt warnings in the files you touched only, so the list is about your change, not the whole tree.
 
 ## The measures

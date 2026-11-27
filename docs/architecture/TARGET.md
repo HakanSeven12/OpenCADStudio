@@ -18,6 +18,8 @@ This page is the plan. [`RULES.md`](RULES.md) is the rule that holds today; CI e
 | `ocs_ui` | 5 | widgets, ribbon, windows |
 | `opencadstudio` | 6 | the application shell, the plugin host and the front doors (`mcp`, `rest`, `cli`) |
 
+`CRATES` in `scripts/arch_check.py` holds this table as data. A module the table does not name is in the crate of its layer. Layer 2 has three crates: `io` and `ifc_plan` are in `ocs_io`, `scene`, `gpu_backend` and `snap` in `ocs_render`, and `catalog` is in none yet. `python3 scripts/arch_check.py readiness` lists what keeps each crate from building alone, and the [Code Health](https://github.com/HakanSeven12/OpenCADStudio/wiki/Code-Health) page shows it for each release.
+
 ## The order
 
 Each step builds, passes the tests and lands on `main` on its own. A step that moves code changes no behaviour, keeps history (`git mv`) and re-exports the moved items from their old path so callers need not change in the same commit.

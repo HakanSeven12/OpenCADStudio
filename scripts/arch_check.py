@@ -15,11 +15,22 @@ upward dependency.
       any were added or a module has no layer; CI fails the change then (the
       `architecture` job).
 
+  python3 scripts/arch_check.py readiness [--markdown]
+      For each crate planned in docs/architecture/TARGET.md (CRATES below),
+      list what its modules use that is neither in the crate nor in a crate
+      below it. Production code and test code are counted apart, because the
+      tests move with their crate. Never fails.
+
 Counts are files: a file that refers to a higher module five times counts
 once for that pair. Test code is skipped: files named tests.rs,
 test_support.rs or *_tests.rs, files under a tests/ or *_tests/ folder,
 #[cfg(test)] mod blocks, and files declared with `#[cfg(test)] mod name;`.
 Comments and string contents are ignored.
+
+The upward check reads `crate::module` paths only. The readiness report also
+reads what that check does not see: items in the crate root (src/lib.rs),
+`super::` paths that climb out of a top-level module, and the macros that
+src/ exports (`crate::t!` is a use of `i18n`).
 """
 import os
 import re
@@ -57,6 +68,29 @@ SAME_LAYER_UPWARD = {("scene", "io")}
 # Items a lower module may use from a higher one by design. The views in `ui`
 # return the application's message type; that is how iced works.
 ALLOWED = {("ui", "app"): {"Message"}}
+
+# The crates planned in docs/architecture/TARGET.md, lowest first: name,
+# layer, modules. The modules TARGET.md names are in their crate; each other
+# module of layers 0-5 is in the crate of its layer. Layer 2 has three crates:
+# file formats in ocs_io, rendering in ocs_render, and `catalog`, which both
+# use, in none yet. A crate may use the crates of a lower layer and the ones in
+# MAY_USE. Layer 6 is the root package.
+CRATES = [
+    ("ocs_base", 0, ["par", "perf", "i18n", "config", "network", "wildcard", "xml_depth",
+                     "schema_validation", "sys", "sysinfo", "paths", "icon_assets"]),
+    ("ocs_model", 1, ["entities", "parametric", "entity_creation", "filter", "calc", "display", "text"]),
+    ("ocs_io", 2, ["io", "ifc_plan"]),
+    ("ocs_session", 2, []),  # made by splitting `Scene` (TARGET.md, step 6)
+    ("ocs_render", 2, ["scene", "gpu_backend", "snap"]),
+    ("ocs_commands", 3, ["command", "plugin_catalog", "modules"]),
+    ("ocs_ui", 5, ["ui", "input"]),
+]
+
+# Same-layer crates a crate may use: rendering reads a session.
+MAY_USE = {("ocs_render", "ocs_session")}
+
+# The target of a use of an item defined in src/lib.rs.
+CRATE_ROOT = "crate root"
 
 # ---- Reading Rust source -------------------------------------------------
 
@@ -249,13 +283,17 @@ def child_paths(rel: Path, name: str):
     return [base / f"{name}.rs", base / name / "mod.rs"]
 
 
-def measure(root: Path):
-    """Return {pair: {file: first_line}} and the modules with no layer."""
+def read_tree(root: Path):
+    """Read every .rs file under src/. Return the sorted paths, the blanked
+    text of each, the same text with its test blocks blanked too, and the
+    files that are test code because a `#[cfg(test)] mod name;` declares them
+    or a module below one."""
     src = root / "src"
     files = sorted(p.relative_to(src) for p in src.rglob("*.rs"))
-    codes, test_files = {}, set()
+    full, codes, test_files = {}, {}, set()
     for rel in files:
-        code, external = drop_test_blocks(blank((src / rel).read_text(encoding="utf-8", errors="replace")))
+        full[rel] = blank((src / rel).read_text(encoding="utf-8", errors="replace"))
+        code, external = drop_test_blocks(full[rel])
         codes[rel] = code
         for name in external:
             test_files.update(child_paths(rel, name))
@@ -264,7 +302,12 @@ def measure(root: Path):
     prefixes = tuple((t.parent if t.name == "mod.rs" else t.with_suffix("")).as_posix() + "/" for t in test_files)
     if prefixes:
         test_files.update(rel for rel in files if rel.as_posix().startswith(prefixes))
+    return files, full, codes, test_files
 
+
+def measure(root: Path):
+    """Return {pair: {file: first_line}} and the modules with no layer."""
+    files, _, codes, test_files = read_tree(root)
     edges = defaultdict(dict)
     unlayered = set()
     for rel in files:
@@ -282,6 +325,175 @@ def measure(root: Path):
             key = f"src/{rel.as_posix()}"
             edges[pair][key] = min(line, edges[pair].get(key, line))
     return dict(edges), sorted(unlayered)
+
+
+# ---- Crate readiness -------------------------------------------------------
+
+ROOT_MOD = re.compile(r"\bmod\s+([A-Za-z_]\w*)")
+ROOT_USE = re.compile(r"\buse\s+([^;]*);")
+EXPORTED_MACRO = re.compile(r"#\[macro_export\]\s*(?:#\[[^\]]*\]\s*)*macro_rules!\s*([A-Za-z_]\w*)\s*\{")
+# `$crate::x` in a macro means the crate that defines the macro; a plain
+# `crate::x` means the crate of each caller.
+CALLER_PATH = re.compile(r"(?<!\$)\bcrate\s*::\s*([A-Za-z_]\w*)")
+CRATE_PATH = re.compile(r"\bcrate\s*::\s*(\{|[A-Za-z_]\w*)")
+SUPER_PATH = re.compile(r"(?<![\w$])super(?:\s*::\s*super)*\s*::\s*(\{|\*|[A-Za-z_]\w*)")
+INLINE_MOD = re.compile(r"\bmod\s+\w+\s*\{")
+
+
+def depth_zero(code: str):
+    """For each position in code: True where it is outside every brace pair."""
+    out, depth = [], 0
+    for ch in code:
+        if ch == "}":
+            depth -= 1
+        out.append(depth == 0)
+        if ch == "{":
+            depth += 1
+    return out
+
+
+def root_names(lib: str, files, full):
+    """What a `crate::name` path can name. `lib` is the blanked src/lib.rs.
+    Return {"modules": set, "reexports": {name: top module, or None for
+    another crate}, "macros": {name: defining module}, "caller_paths": {macro:
+    the names its plain `crate::` paths use}}."""
+    top = depth_zero(lib)
+    modules = set(LAYERS) | {m for m in map(top_module, files) if m is not None}
+    reexports = {}
+    for m in ROOT_MOD.finditer(lib):
+        if top[m.start()]:
+            modules.add(m.group(1))
+    for m in ROOT_USE.finditer(lib):
+        if not top[m.start()]:
+            continue
+        path = re.sub(r"\s+", "", m.group(1))
+        path = re.sub(r"^(?:crate|self)::", "", path)
+        first = re.match(r"\w*", path).group(0)
+        # The names it brings in: the last segment or the `as` name of each leaf.
+        leaves = re.split(r"[{},]", m.group(1))
+        for leaf in leaves:
+            leaf = leaf.strip()
+            name = re.split(r"\s+as\s+", leaf)[-1].split("::")[-1].strip() if leaf else ""
+            if name and name not in ("self", "*"):
+                reexports[name] = first if first in modules else None
+    macros, caller_paths = {}, {}
+    for rel in files:
+        mod = top_module(rel)
+        if mod is None:
+            continue
+        for m in EXPORTED_MACRO.finditer(full[rel]):
+            macros[m.group(1)] = mod
+            found = {p.group(1) for p in CALLER_PATH.finditer(braced(full[rel], m.end() - 1))}
+            if found:
+                caller_paths[m.group(1)] = found
+    return {"modules": modules, "reexports": reexports, "macros": macros, "caller_paths": caller_paths}
+
+
+def resolve(name: str, names):
+    """The top module that `crate::name` reaches, CRATE_ROOT for an item of
+    src/lib.rs, or None for another crate re-exported there."""
+    if name in names["modules"]:
+        return name
+    if name in names["macros"]:
+        return names["macros"][name]
+    if name in names["reexports"]:
+        return names["reexports"][name]
+    return CRATE_ROOT
+
+
+def module_depth(rel: Path) -> int:
+    """How many modules down a file is: 1 for src/io.rs and src/io/mod.rs."""
+    return len(rel.parts) - (rel.name == "mod.rs")
+
+
+def root_paths(code: str, depth: int):
+    """Yield (name, line) for each path that starts at the crate root: a
+    `crate::` path, and a `super::` path that climbs out of the top-level
+    module. `depth` is module_depth of the file; `mod x { }` blocks add one.
+    A group gives each of its names; a glob of the crate root gives `*`."""
+    def heads(m):
+        line = code.count("\n", 0, m.start()) + 1
+        if m.group(1) == "{":
+            for part in split_top(braced(code, m.end() - 1)):
+                head = re.match(r"[A-Za-z_]\w*", part)
+                if head and head.group(0) != "self":
+                    yield head.group(0), line
+        else:
+            yield m.group(1), line
+
+    for m in CRATE_PATH.finditer(code):
+        yield from heads(m)
+    blocks = None
+    for m in SUPER_PATH.finditer(code):
+        if blocks is None:
+            blocks = [(b.end() - 1, b.end() + len(braced(code, b.end() - 1))) for b in INLINE_MOD.finditer(code)]
+        nested = sum(1 for start, end in blocks if start < m.start() < end)
+        if m.group(0).count("super") >= depth + nested:
+            yield from heads(m)
+
+
+def uses(code: str, depth: int, names):
+    """The set of (top module or CRATE_ROOT, line) that a file uses through
+    the crate root, with the paths of the exported macros it calls."""
+    out = set()
+    for name, line in root_paths(code, depth):
+        if name == "*":
+            out.add((CRATE_ROOT, line))
+        elif (target := resolve(name, names)) is not None:
+            out.add((target, line))
+    for mac, paths in names["caller_paths"].items():
+        for m in re.finditer(rf"(?<![\w$]){mac}\s*!", code):
+            if re.search(r"macro_rules!\s*$", code[max(0, m.start() - 40):m.start()]):
+                continue  # the definition, not a call
+            line = code.count("\n", 0, m.start()) + 1
+            out.update((t, line) for p in paths if (t := resolve(p, names)) is not None)
+    return out
+
+
+def may_use(src: str, dst) -> bool:
+    """Whether crate `src` may use crate `dst` (None: no planned crate)."""
+    if src == dst:
+        return True
+    layer = {name: lay for name, lay, _ in CRATES}
+    return dst is not None and (layer[dst] < layer[src] or (src, dst) in MAY_USE)
+
+
+def readiness(root: Path):
+    """For each planned crate: what its production code and its test code use
+    that the crate may not. Return {"crates": [{"crate", "layer", "modules",
+    "uses": {pair: {file: first_line}}, "test_uses": {...}}], "unplaced":
+    the modules of layers 0-5 in no planned crate}."""
+    files, full, codes, test_files = read_tree(root)
+    lib = root / "src" / "lib.rs"
+    lib_code = full.get(Path("lib.rs"), "") if lib.exists() else ""
+    names = root_names(lib_code, files, full)
+    home = {mod: name for name, _, mods in CRATES for mod in mods}
+    found = {name: {"uses": defaultdict(dict), "test_uses": defaultdict(dict)} for name, _, _ in CRATES}
+    for rel in files:
+        mod = top_module(rel)
+        if mod not in home:
+            continue
+        crate, depth = home[mod], module_depth(rel)
+        test_file = named_as_test(rel) or rel in test_files
+        prod = set() if test_file else uses(codes[rel], depth, names)
+        for kind, hits in (("uses", prod), ("test_uses", uses(full[rel], depth, names) - prod)):
+            for target, line in hits:
+                if target == mod or (target != CRATE_ROOT and may_use(crate, home.get(target))):
+                    continue
+                files_of = found[crate][kind][f"{mod} -> {target}"]
+                key = f"src/{rel.as_posix()}"
+                files_of[key] = min(line, files_of.get(key, line))
+    crates = [{"crate": name, "layer": layer, "modules": list(mods),
+               **{kind: {pair: dict(sorted(fs.items())) for pair, fs in sorted(found[name][kind].items())}
+                  for kind in ("uses", "test_uses")}}
+              for name, layer, mods in CRATES]
+    unplaced = sorted(m for m, lay in LAYERS.items() if lay <= 5 and m not in home)
+    return {"crates": crates, "unplaced": unplaced}
+
+
+def blocked_files(found) -> int:
+    """The number of files behind a crate's `uses` or `test_uses`."""
+    return len({f for fs in found.values() for f in fs})
 
 
 # ---- Output ----------------------------------------------------------------
@@ -364,11 +576,47 @@ def diff(base_dir: str, markdown: bool) -> int:
     return 1 if added or unlayered else 0
 
 
+def readiness_report(markdown: bool) -> int:
+    result = readiness(Path.cwd())
+
+    def status(found, mods):
+        n = blocked_files(found)
+        return "no modules yet" if not mods else "ready" if not n else f"{n} file{'' if n == 1 else 's'}"
+
+    if markdown:
+        print("### Crate readiness\n")
+        print("What the modules of each crate planned in `docs/architecture/TARGET.md` use that is "
+              "neither in the crate nor in a crate below it.\n")
+        print("| Crate | Modules | Production code | Test code |\n| --- | --- | --- | --- |")
+        for c in result["crates"]:
+            mods = ", ".join(f"`{m}`" for m in c["modules"]) or "—"
+            print(f"| `{c['crate']}` | {mods} | {status(c['uses'], c['modules'])} | {status(c['test_uses'], c['modules'])} |")
+        for c in result["crates"]:
+            for kind, label in (("uses", "production code"), ("test_uses", "test code")):
+                if c[kind]:
+                    print(f"\n**`{c['crate']}`, {label}**\n")
+                    for pair, fs in sorted(c[kind].items(), key=lambda kv: (-len(kv[1]), kv[0])):
+                        f, line = next(iter(fs.items()))
+                        print(f"- `{pair}`: {len(fs)} file{'' if len(fs) == 1 else 's'}, first `{f}:{line}`")
+    else:
+        print("Crate readiness (docs/architecture/TARGET.md): uses that are neither in the crate nor below it")
+        for c in result["crates"]:
+            print(f"  {c['crate']:14s}production: {status(c['uses'], c['modules']):16s}tests: {status(c['test_uses'], c['modules'])}")
+            for kind, label in (("uses", ""), ("test_uses", " (tests)")):
+                for pair, fs in sorted(c[kind].items(), key=lambda kv: (-len(kv[1]), kv[0])):
+                    print(f"      {pair + label:40s}{len(fs):>5}")
+    if result["unplaced"]:
+        print(f"\nModules in no planned crate (see CRATES): {', '.join(result['unplaced'])}")
+    return 0
+
+
 def main(argv) -> int:
     args = [a for a in argv if a != "--markdown"]
     markdown = "--markdown" in argv
     if args[:1] == ["report"] or not args:
         return report(markdown)
+    if args[:1] == ["readiness"] and len(args) == 1:
+        return readiness_report(markdown)
     if args[:1] == ["diff"] and len(args) == 2:
         return diff(args[1], markdown)
     print(__doc__)

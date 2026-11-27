@@ -1740,6 +1740,7 @@ impl OpenCADStudio {
                     crate::sys::file_dialog()
                         .set_title(crate::t!("Import OBJ Mesh").as_ref())
                         .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
+                        .add_filter("glTF", &["gltf", "glb", "GLTF", "GLB"])
                         .add_filter(crate::t!("All Files").as_ref(), &["*"])
                         .pick_file()
                         .await
@@ -1760,12 +1761,13 @@ impl OpenCADStudio {
                         let handle = crate::sys::file_dialog()
                             .set_title(crate::t!("Import OBJ Mesh").as_ref())
                             .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
+                        .add_filter("glTF", &["gltf", "glb", "GLTF", "GLB"])
                             .add_filter(crate::t!("All Files").as_ref(), &["*"])
                             .pick_file()
                             .await?;
                         let path = crate::sys::handle_path(&handle);
                         let bytes = handle.read().await;
-                        let result = crate::io::obj::parse_obj(&String::from_utf8_lossy(&bytes))
+                        let result = crate::io::obj::parse_mesh_file(&path, &bytes, None, None)
                             .ok_or_else(|| "no usable geometry in file".to_string());
                         Some((tab_id, path, result))
                     },

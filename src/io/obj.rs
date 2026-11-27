@@ -7,6 +7,22 @@
 use document::entities::mesh::{Mesh, MeshFace};
 use document::types::Vector3;
 
+/// IMPORTOBJ's reader for `path`: glTF/GLB by extension (its metres to the
+/// drawing's `drawing_mm`, external buffers from `dir`), OBJ otherwise.
+pub fn parse_mesh_file(
+    path: &std::path::Path,
+    bytes: &[u8],
+    dir: Option<&std::path::Path>,
+    drawing_mm: Option<f64>,
+) -> Option<Vec<Mesh>> {
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
+    if matches!(ext.as_deref(), Some("gltf" | "glb")) {
+        let scale = drawing_mm.filter(|mm| *mm > 0.0).map_or(1.0, |mm| 1000.0 / mm);
+        return super::gltf::parse_gltf(bytes, dir, scale);
+    }
+    parse_obj(&String::from_utf8_lossy(bytes))
+}
+
 /// Parse OBJ text into one MESH per object.
 /// Returns `None` if the file has no usable geometry.
 pub fn parse_obj(src: &str) -> Option<Vec<Mesh>> {

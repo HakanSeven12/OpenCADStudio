@@ -22,6 +22,7 @@ pub(crate) mod fs_access;
 pub mod geopdf;
 pub mod geopdf_export;
 pub mod georef;
+pub mod gltf;
 pub mod iges_import;
 pub mod iges_surfaces;
 pub mod line_read;

@@ -517,11 +517,15 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         let tab_id = self.tabs[self.active_tab].id;
         let worker_path = path.clone();
+        let drawing_mm = crate::app::properties::insunits_to_mm(
+            self.tabs[self.active_tab].scene.document.header.insertion_units,
+        );
         background_task(
             crate::t!("OBJ import"),
             move || {
-                let src = std::fs::read_to_string(&worker_path).map_err(|e| e.to_string())?;
-                crate::io::obj::parse_obj(&src)
+                let bytes = std::fs::read(&worker_path).map_err(|e| e.to_string())?;
+                let dir = worker_path.parent();
+                crate::io::obj::parse_mesh_file(&worker_path, &bytes, dir, drawing_mm)
                     .ok_or_else(|| "no usable geometry in file".to_string())
             },
             move |result| Message::ObjImportFinished(tab_id, path, result),

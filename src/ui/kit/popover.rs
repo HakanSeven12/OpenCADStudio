@@ -125,24 +125,25 @@ pub fn radio_row<'a, T: Copy + PartialEq + 'a>(
             .height(Length::Fixed(km::CHOICE_TILE_H))
             .padding(0)
             .style(move |theme: &Theme, status| {
+                // The chosen tile: accent edge on the selection fill. The
+                // others: raised, with a lighter edge under the pointer.
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let (fill, edge) = if on {
+                    (chrome::row_selected(theme), chrome::accent(theme))
+                } else if hovered {
+                    (chrome::surface_raised(theme), chrome::hover_border(theme))
+                } else {
+                    (chrome::surface_raised(theme), chrome::surface_raised(theme))
+                };
                 button::Style {
-                    background: Some(Background::Color(if hovered {
-                        chrome::hover(theme)
-                    } else {
-                        chrome::surface_raised(theme)
-                    })),
+                    background: Some(Background::Color(fill)),
                     text_color: if on || hovered {
                         chrome::strong(theme)
                     } else {
                         chrome::text(theme)
                     },
                     border: Border {
-                        color: if on {
-                            chrome::accent(theme)
-                        } else {
-                            chrome::surface_raised(theme)
-                        },
+                        color: edge,
                         width: km::line(),
                         radius: 0.0.into(),
                     },

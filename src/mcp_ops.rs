@@ -637,6 +637,11 @@ pub static WBLOCK: OpDef = OpDef {
             Ty::Bool,
             "Translate exported entities to origin [0,0,0].",
         ),
+        opt(
+            "overwrite",
+            Ty::Bool,
+            "Replace the target file if it already exists.",
+        ),
     ],
     rules: &[],
     example: r#"{"op":"wblock","path":"part.dwg","handles":["2A"]}"#,

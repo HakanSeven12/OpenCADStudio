@@ -10,6 +10,9 @@ autotests = false
 # Opt-in release audit helpers; has no effect in the application executable.
 performance-audit = []
 
+[lints]
+workspace = true
+
 [workspace]
 members = [
     "crates/ocs_solid",
@@ -22,6 +25,11 @@ members = [
     "crates/ocs_geom",
     "crates/ocs_constraints",
 ]
+
+# Clippy warns at an `unsafe` block that has no `// SAFETY:` comment, the
+# rule that the health report counts as "unsafe without a SAFETY comment".
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

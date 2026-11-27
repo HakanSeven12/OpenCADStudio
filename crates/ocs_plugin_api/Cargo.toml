@@ -5,6 +5,9 @@ edition = "2021"
 description = "Stable, dependency-free contract for Open CAD Studio add-on packages: plugin manifest, version handshake, and ribbon/CadModule types."
 license = "GPL-3.0-only"
 
+[lints]
+workspace = true
+
 [dependencies]
 # Serde is used unconditionally by the build-time-generated embedded type
 # registry types (`type_registry_types.rs`). The host feature no longer needs

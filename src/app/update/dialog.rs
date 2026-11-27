@@ -134,7 +134,11 @@ impl OpenCADStudio {
         }
         // Dismiss any open dropdown / collapsed-panel flyout on tool use.
         self.ribbon.close_dropdown();
-        self.ribbon.activate_tool(&tool_id);
+        // An object snap button leaves the running command's tool lit.
+        if !matches!(&event, ModuleEvent::Command(cmd) if crate::app::commands::is_point_modifier_token(cmd))
+        {
+            self.ribbon.activate_tool(&tool_id);
+        }
         match event {
             // `dispatch_command` turns a one-shot tool's highlight off
             // again once nothing is left running (#355).

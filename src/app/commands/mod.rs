@@ -120,6 +120,16 @@ mod xref_attach;
 // the module root to keep that path valid.
 pub(crate) use view::DrawOrderCommand;
 
+/// A point modifier a toolbar button sends (`_ENDP`, `_FROM`, ...): only
+/// these macro words, so a button running INSERT or INTERSECT stays a command.
+pub(in crate::app) fn is_point_modifier_token(cmd: &str) -> bool {
+    const WORDS: [&str; 17] = [
+        "_ENDP", "_MID", "_INT", "_APPINT", "_EXT", "_CEN", "_GCEN", "_QUA", "_TAN", "_PER",
+        "_PAR", "_INS", "_NOD", "_NEA", "_NON", "_FROM", "_M2P",
+    ];
+    WORDS.iter().any(|word| cmd.trim().eq_ignore_ascii_case(word))
+}
+
 impl OpenCADStudio {
     /// First `"{prefix}{n}"` (n ≥ 1) not already used by a block record in the
     /// active drawing. Used to auto-name a paste-as-block definition.
@@ -237,6 +247,15 @@ impl OpenCADStudio {
             return self.dispatch_ribbon_command(&expanded);
         }
         if !cmd.contains(';') {
+            // An object snap button (`_ENDP`, `_FROM`, ...) answers the
+            // running point prompt; with none it does nothing.
+            if is_point_modifier_token(cmd) {
+                return if self.point_modifier_step(self.active_tab) {
+                    self.feed_active_cmd(cmd.trim())
+                } else {
+                    Task::none()
+                };
+            }
             return self.dispatch_command(cmd);
         }
         let i = self.active_tab;

@@ -123,6 +123,13 @@ impl CadModule for ViewModule {
                         RibbonItem::Tool(view_iso::tool()),
                     ],
                 },
+                // ── Object Snap ───────────────────────────────────────────────────
+                // One-shot overrides for the running point prompt; shown as
+                // a toolbar with TOOLBAR "Object Snap".
+                RibbonGroup {
+                    title: "Object Snap",
+                    tools: object_snap_tools(),
+                },
                 // ── Palettes ──────────────────────────────────────────────────────
                 RibbonGroup {
                     title: "Palettes",
@@ -163,4 +170,35 @@ impl CadModule for ViewModule {
             ]
         })
     }
+}
+
+fn object_snap_tools() -> Vec<RibbonItem> {
+    use crate::icon_assets as icons;
+    let tool = |id, label, command: &str, icon| {
+        RibbonItem::Tool(ToolDef {
+            id,
+            label,
+            icon: IconKind::Svg(icon),
+            event: ModuleEvent::Command(command.to_string()),
+        })
+    };
+    vec![
+        tool("OSNAP_FROM", "From", "_FROM", icons::from_icon()),
+        tool("OSNAP_ENDP", "Endpoint", "_ENDP", icons::OSNAP_ENDPOINT),
+        tool("OSNAP_MID", "Midpoint", "_MID", icons::OSNAP_MIDPOINT),
+        tool("OSNAP_INT", "Intersection", "_INT", icons::OSNAP_INTERSECTION),
+        tool("OSNAP_APPINT", "Apparent Intersection", "_APPINT", icons::OSNAP_APPARENT),
+        tool("OSNAP_EXT", "Extension", "_EXT", icons::OSNAP_EXTENSION),
+        tool("OSNAP_CEN", "Center", "_CEN", icons::OSNAP_CENTER),
+        tool("OSNAP_GCEN", "Geometric Center", "_GCEN", icons::OSNAP_GEOMETRIC_CENTER),
+        tool("OSNAP_QUA", "Quadrant", "_QUA", icons::OSNAP_QUADRANT),
+        tool("OSNAP_TAN", "Tangent", "_TAN", icons::OSNAP_TANGENT),
+        tool("OSNAP_PER", "Perpendicular", "_PER", icons::OSNAP_PERPENDICULAR),
+        tool("OSNAP_PAR", "Parallel", "_PAR", icons::OSNAP_PARALLEL),
+        tool("OSNAP_INS", "Insertion", "_INS", icons::OSNAP_INSERTION),
+        tool("OSNAP_NOD", "Node", "_NOD", icons::OSNAP_NODE),
+        tool("OSNAP_NEA", "Nearest", "_NEA", icons::OSNAP_NEAREST),
+        tool("OSNAP_M2P", "Mid Between 2 Points", "_M2P", icons::mtp_icon()),
+        tool("OSNAP_SETTINGS", "Osnap Settings...", "OSNAP", icons::ST_OSNAP),
+    ]
 }

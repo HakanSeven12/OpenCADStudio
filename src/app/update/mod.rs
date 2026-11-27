@@ -1023,6 +1023,17 @@ impl OpenCADStudio {
                         }
                     }
                 }
+                // Esc closes an open date field's calendar first; the next
+                // Esc closes the dialog (and drops what was typed).
+                if self.active_modal == Some(super::ModalKind::PluginDialog)
+                    && (self
+                        .plugin_dialog_state
+                        .as_mut()
+                        .is_some_and(|state| state.open_calendar.take().is_some())
+                        || self.escape_closed_a_calendar())
+                {
+                    return Task::none();
+                }
                 return self.update(Message::CloseModal);
             }
             if self.active_modal == Some(super::ModalKind::BlockDefinition)

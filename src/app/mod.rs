@@ -1526,6 +1526,9 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_icon_hover: Option<crate::ui::dock::PanelId>,
     /// Last pointer position during a dock drag.
     pub(crate) dock_drag_last: Option<iced::Point>,
+    /// When a date field's calendar last closed on its own dismiss (a click
+    /// beside it, or Escape, which the calendar does not keep to itself).
+    pub(crate) calendar_dismissed: Option<iced::time::Instant>,
     /// The edge a press on the icon of its shown group folds, if the press
     /// ends as a plain click.
     pub(crate) dock_fold_on_release: Option<crate::app::config::DockSide>,
@@ -3299,6 +3302,7 @@ impl OpenCADStudio {
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
             dock_drag_last: None,
+            calendar_dismissed: None,
             dock_fold_on_release: None,
             dock_drag_window: None,
             dock_title_hover: None,
@@ -3839,6 +3843,14 @@ impl OpenCADStudio {
     }
 
     /// Dispatch a reactive action event from an open plugin modal dialog to the owning command/plugin.
+    /// Whether an Escape belongs to a date field's calendar that has just
+    /// closed on it: the calendar closes on the key but passes it on.
+    pub(crate) fn escape_closed_a_calendar(&mut self) -> bool {
+        self.calendar_dismissed
+            .take()
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(300))
+    }
+
     pub(crate) fn dispatch_plugin_dialog_action(
         &mut self,
         control_id: String,

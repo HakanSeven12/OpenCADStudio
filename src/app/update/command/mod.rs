@@ -562,6 +562,14 @@ impl OpenCADStudio {
             self.cancel_plugin_run();
             return Task::none();
         }
+        // Escape closes a panel date field's open calendar, and only that.
+        let mut closed_calendar = false;
+        for panel in self.plugin_panels.values_mut() {
+            closed_calendar |= panel.open_calendar.take().is_some();
+        }
+        if closed_calendar || self.escape_closed_a_calendar() {
+            return Task::none();
+        }
         self.table_edit_command_line = false;
         self.tabs[self.active_tab].multiple_cmd = None;
         self.tabs[self.active_tab].measurement.clear();

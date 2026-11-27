@@ -60,6 +60,8 @@ pub struct PluginPanelState {
     /// control id; rebuilt with the state whenever the plugin re-registers or
     /// updates the panel definition.
     pub svg_handles: HashMap<String, iced::widget::svg::Handle>,
+    /// The date field whose calendar is open, and the month it shows.
+    pub open_calendar: crate::ui::window::date_field::OpenCalendar,
 }
 
 impl PluginPanelState {
@@ -83,7 +85,8 @@ impl PluginPanelState {
             cs: &mut HashSet<String>,
         ) {
             match c {
-                DialogControl::Text { id, default, .. } => {
+                DialogControl::Text { id, default, .. }
+                | DialogControl::Date { id, default, .. } => {
                     tv.insert(id.clone(), default.clone());
                 }
                 DialogControl::Number { id, default, .. } => {
@@ -176,6 +179,7 @@ impl PluginPanelState {
             hidden_controls: HashSet::new(),
             dynamic_choice_options: HashMap::new(),
             svg_handles,
+            open_calendar: None,
         }
     }
 
@@ -292,7 +296,7 @@ impl PluginPanelState {
                     DialogControl::Button { id, .. } => {
                         declare_control(id, None, ids, expected, errors);
                     }
-                    DialogControl::Text { id, .. } => {
+                    DialogControl::Text { id, .. } | DialogControl::Date { id, .. } => {
                         declare_control(id, Some(SnapshotValueKind::Text), ids, expected, errors);
                         if let Some(raw) = state.text_values.get(id) {
                             raw_text.insert(id.clone(), capped_text(raw, id, errors));
@@ -590,6 +594,7 @@ impl PluginPanelState {
                 hidden_controls: &self.hidden_controls,
                 dynamic_choice_options: &self.dynamic_choice_options,
                 svg_handles: &self.svg_handles,
+                open_calendar: &self.open_calendar,
             };
             let mut body_col = column![].spacing(FORM_SPACING).width(Fill);
             for control in &self.def.controls {
@@ -645,6 +650,29 @@ impl PluginPanelState {
                 .is_some_and(|id| self.disabled_controls.contains(id));
         let panel_id = self.def.id.clone();
         match control {
+            DialogControl::Date {
+                id, label, format, ..
+            } => {
+                use crate::ui::window::date_field::{calendar_button, with_calendar};
+                let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
+                let pid = panel_id.clone();
+                let cid = id.clone();
+                let input = grid_field(current, is_disabled, move |val| {
+                    Message::PluginPanelTextChange(pid.clone(), cid.clone(), val)
+                });
+                let shown = self
+                    .open_calendar
+                    .as_ref()
+                    .filter(|(open, _, _)| open == id)
+                    .map(|(_, year, month)| (*year, *month));
+                let pid = panel_id.clone();
+                let cid = id.clone();
+                let on_date = move |msg| Message::PluginPanelDate(pid.clone(), cid.clone(), msg);
+                let field = row![input, calendar_button(is_disabled, &on_date)]
+                    .align_y(iced::Alignment::Center)
+                    .into();
+                grid_row(label, with_calendar(field, format, current, shown, on_date))
+            }
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let pid = panel_id.clone();
@@ -743,7 +771,7 @@ impl PluginPanelState {
                 });
                 let browse_btn = button(
                     container(
-                        text("Browse...")
+                        text(crate::tr!("plugin-dialog", "browse"))
                             .size(ui_text::UI)
                             .line_height(ui_text::line()),
                     )
@@ -946,7 +974,8 @@ impl PluginPanelState {
             | DialogControl::Choice { .. }
             | DialogControl::Color { .. }
             | DialogControl::FilePicker { .. }
-            | DialogControl::FolderPicker { .. } => self.view_field_item(control, parent_disabled),
+            | DialogControl::FolderPicker { .. }
+            | DialogControl::Date { .. } => self.view_field_item(control, parent_disabled),
             DialogControl::Fields {
                 id,
                 title,
@@ -1687,6 +1716,31 @@ mod tests {
         assert_eq!(
             snapshot.raw_text.get("out").map(String::as_str),
             Some(" /plots/2026 ")
+        );
+    }
+
+    /// A panel's date field (API v33) reads back as its text.
+    #[test]
+    fn a_date_field_reads_back_as_its_text() {
+        let mut state = panel_state(vec![DialogControl::Date {
+            id: "issued".to_string(),
+            label: "Issued".to_string(),
+            default: "2026-11-26".to_string(),
+            format: String::new(),
+        }]);
+        assert_eq!(state.text_values.get("issued").unwrap(), "2026-11-26");
+        state
+            .text_values
+            .insert("issued".to_string(), "2026-12-0".to_string());
+        let snapshot = state.snapshot(5);
+        assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
+        assert_eq!(
+            snapshot.values.get("issued"),
+            Some(&DialogValue::Text("2026-12-0".to_string()))
+        );
+        assert_eq!(
+            snapshot.raw_text.get("issued").map(String::as_str),
+            Some("2026-12-0")
         );
     }
 }

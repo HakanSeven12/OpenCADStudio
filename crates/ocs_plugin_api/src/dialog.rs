@@ -322,6 +322,21 @@ pub enum DialogControl {
         label: String,
         default_path: String,
     },
+    /// Date field (API v33): a text field with a calendar button beside it.
+    /// The button opens a month calendar under the field; a click on a day
+    /// writes the date into the field as `format` lays it out (`DD` day,
+    /// `MM` month, `YYYY` year, anything else as written; empty: `YYYY-MM-DD`).
+    /// The value is the field's text, a [`DialogValue::Text`]; typing reports
+    /// `"change"` and a day picked in the calendar `"pick"`. Appended for the
+    /// same wire reason as [`DialogControl::StyledText`]: a v32 host cannot
+    /// decode it, so a plugin that sends it declares v33.
+    Date {
+        id: String,
+        label: String,
+        default: String,
+        #[serde(default)]
+        format: String,
+    },
 }
 
 fn default_true() -> bool {
@@ -344,6 +359,7 @@ impl DialogControl {
             | Self::Color { id, .. }
             | Self::FilePicker { id, .. }
             | Self::FolderPicker { id, .. }
+            | Self::Date { id, .. }
             | Self::Fields { id, .. }
             | Self::Table { id, .. }
             | Self::Button { id, .. } => Some(id.as_str()),
@@ -686,7 +702,7 @@ pub enum DialogActionResponse {
 ///
 /// Typed values have the same shapes as [`DialogResponse::Submitted`]:
 ///
-/// - [`DialogControl::Text`] produces [`DialogValue::Text`].
+/// - [`DialogControl::Text`] and [`DialogControl::Date`] produce [`DialogValue::Text`].
 /// - [`DialogControl::Number`] produces [`DialogValue::Number`] when its current text
 ///   is a valid number. Partial or otherwise malformed numeric text is retained in
 ///   [`raw_text`](Self::raw_text) and reported in [`errors`](Self::errors), rather than
@@ -720,9 +736,9 @@ pub struct PanelSnapshot {
     /// An unreadable value is omitted only with a corresponding entry in `errors`;
     /// the host never silently supplies the panel declaration's default instead.
     pub values: HashMap<String, DialogValue>,
-    /// Exact current text of every `Text`, `Number`, `FilePicker` and `FolderPicker`
-    /// control, keyed by control id, including controls reached through nested
-    /// containers. Number text is preserved verbatim even when it is partial or
+    /// Exact current text of every `Text`, `Number`, `Date`, `FilePicker` and
+    /// `FolderPicker` control, keyed by control id, including controls reached
+    /// through nested containers. Number text is preserved verbatim even when it is partial or
     /// malformed.
     pub raw_text: HashMap<String, String>,
     /// Read-back problems, including duplicate or missing fields, values whose shape
@@ -883,6 +899,28 @@ mod tests {
         let bytes = bincode::serialize(&dialog).expect("serialize dialog");
         let restored: DialogDef = bincode::deserialize(&bytes).expect("deserialize dialog");
         assert_eq!(dialog, restored);
+    }
+
+    #[test]
+    fn date_field_roundtrips_and_is_appended_to_the_wire_enum() {
+        // API v33: after FolderPicker (v32), so every older variant keeps its tag.
+        let date = DialogControl::Date {
+            id: "issued".to_string(),
+            label: "Issued".to_string(),
+            default: "26.11.2026".to_string(),
+            format: "DD.MM.YYYY".to_string(),
+        };
+        let bytes = bincode::serialize(&date).expect("serialize control");
+        assert_eq!(u32::from_le_bytes(bytes[..4].try_into().unwrap()), 16);
+        assert_eq!(date.id(), Some("issued"));
+        let dialog = DialogDef::new("Sheet").with_control(date);
+        let bytes = bincode::serialize(&dialog).expect("serialize dialog");
+        let restored: DialogDef = bincode::deserialize(&bytes).expect("deserialize dialog");
+        assert_eq!(dialog, restored);
+        // JSON tooling may leave the format out: the host's default applies.
+        let json = serde_json::json!({ "Date": { "id": "d", "label": "D", "default": "" } });
+        let parsed: DialogControl = serde_json::from_value(json).expect("format defaults");
+        assert!(matches!(parsed, DialogControl::Date { ref format, .. } if format.is_empty()));
     }
 
     #[test]

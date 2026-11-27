@@ -3078,15 +3078,19 @@ bg={bg_ms:.1}ms n={view_count}"
                     let align = crate::ui::ribbon::table_cell_alignments();
                     // Rows and columns, merging and locking, the nine
                     // alignments three to a row, formats, inserts, linked
-                    // data and the cell's text, two to a row.
-                    crate::ui::side_toolbar::view_grid(&[
-                        (&tools[..6], 2),
-                        (&tools[6..9], 2),
-                        (&align[..], 3),
-                        (&tools[9..12], 2),
-                        (&tools[12..16], 2),
-                        (&tools[16..], 2),
-                    ])
+                    // data and the cell's text, two to a row: a panel in the
+                    // hatch panel's style.
+                    crate::ui::side_toolbar::view_panel(
+                        "Table Cell",
+                        &[
+                            ("Rows and Columns", &tools[..6], 2),
+                            ("Merge and Lock", &tools[6..9], 2),
+                            ("Alignment", &align[..], 3),
+                            ("Format", &tools[9..12], 2),
+                            ("Insert", &tools[12..16], 2),
+                            ("Data", &tools[16..], 2),
+                        ],
+                    )
                 }
             } else if self.ribbon.xref_context() {
                 crate::ui::side_toolbar::view(&crate::ui::ribbon::xref_tools())

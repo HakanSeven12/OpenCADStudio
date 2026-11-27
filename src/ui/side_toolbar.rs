@@ -148,38 +148,98 @@ fn sized_button(
     tooltip(btn, tip_panel(t.label), tip).gap(6).into()
 }
 
-/// The tools in `groups` as a grid `per_row` buttons wide (a rule between
-/// groups), floated at the right edge like [`view`] — for tool sets too
-/// long for one column.
-pub fn view_grid(groups: &[(&[ToolDef], usize)]) -> Option<Element<'static, Message>> {
-    if groups.iter().all(|(g, _)| g.is_empty()) {
+/// One tool of a [`view_panel`] section: its icon with the label beside it,
+/// or the icon alone (label in the tip) where three or more share a row.
+fn panel_button(t: &ToolDef, labelled: bool) -> Element<'static, Message> {
+    let face: Element<'static, Message> = if labelled {
+        let label = crate::t!(t.label).replace('\n', " ");
+        iced::widget::row![icon_el(t.icon), text(label).size(11)]
+            .spacing(6)
+            .align_y(iced::Center)
+            .into()
+    } else {
+        container(icon_el(t.icon))
+            .width(Length::Fill)
+            .align_x(iced::Center)
+            .into()
+    };
+    let btn = button(face)
+        .on_press(Message::RibbonToolClick {
+            tool_id: t.id.to_string(),
+            event: t.event.clone(),
+        })
+        .width(Length::Fill)
+        .padding([3, 6])
+        .style(|theme: &Theme, status| {
+            let palette = theme.palette();
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: hovered.then_some(Background::Color(palette.background.strong.color)),
+                border: Border {
+                    radius: 3.0.into(),
+                    ..Default::default()
+                },
+                text_color: palette.background.base.text,
+                ..Default::default()
+            }
+        });
+    if labelled {
+        btn.into()
+    } else {
+        tooltip(btn, tip_panel(t.label), tooltip::Position::Left)
+            .gap(6)
+            .into()
+    }
+}
+
+/// The tools as a titled panel in the hatch panel's style (frame, title,
+/// section labels and rules), floated at the right edge like [`view`]. Each
+/// section is `(label, tools, per_row)`.
+pub fn view_panel(
+    title: &str,
+    sections: &[(&str, &[ToolDef], usize)],
+) -> Option<Element<'static, Message>> {
+    use crate::ui::style::form;
+    if sections.iter().all(|(_, tools, _)| tools.is_empty()) {
         return None;
     }
-    let widest = groups.iter().map(|(_, n)| *n).max().unwrap_or(1);
-    let mut col = column![].spacing(4).align_x(iced::Center);
-    for (index, &(tools, per_row)) in groups.iter().filter(|(g, _)| !g.is_empty()).enumerate() {
+    let width = crate::ui::window::hatch_panel::WIDTH;
+    let mut body = column![text(crate::t!(title).into_owned()).size(13)].spacing(7);
+    for (index, &(label, tools, per_row)) in sections
+        .iter()
+        .filter(|(_, tools, _)| !tools.is_empty())
+        .enumerate()
+    {
         if index > 0 {
-            col = col.push(
-                container(iced::widget::Space::new())
-                    .width(Length::Fixed(BTN_SIZE * widest as f32))
-                    .height(Length::Fixed(1.0))
-                    .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(
-                            theme.palette().background.neutral.color,
-                        )),
-                        ..Default::default()
-                    }),
-            );
+            body = body.push(form::hdivider(Length::Fill));
         }
-        for chunk in tools.chunks(per_row.max(1)) {
+        body = body.push(form::section_label(crate::t!(label).into_owned().into()));
+        let per_row = per_row.max(1);
+        for chunk in tools.chunks(per_row) {
             let mut line = iced::widget::row![].spacing(4);
             for t in chunk {
-                line = line.push(tool_button(t, false));
+                line = line.push(panel_button(t, per_row <= 2));
             }
-            col = col.push(line);
+            // Keep a short last row's buttons the width of the full rows.
+            for _ in chunk.len()..per_row {
+                line = line.push(iced::widget::Space::new().width(Length::Fill));
+            }
+            body = body.push(line);
         }
     }
-    Some(float_right(col))
+    let panel = container(body.padding(10).width(Length::Fixed(width))).style(|theme: &Theme| {
+        container::Style {
+            background: Some(Background::Color(theme.palette().background.base.color)),
+            border: Border {
+                color: theme.palette().background.strong.color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            text_color: Some(theme.palette().background.base.text),
+            ..Default::default()
+        }
+    });
+    Some(pin_right(panel.into()))
 }
 
 /// Build the floating right-edge vertical toolbar from `tools`, vertically
@@ -258,6 +318,12 @@ fn float_right(col: iced::widget::Column<'static, Message>) -> Element<'static, 
         }
     });
 
+    pin_right(panel.into())
+}
+
+/// `panel` pinned to the canvas's right edge, centred below the view cube's
+/// corner; the drawing under it never takes the pointer.
+fn pin_right(panel: Element<'static, Message>) -> Element<'static, Message> {
     // Fill the canvas, pin the panel to the right edge and centre it
     // vertically — no manual size/position math needed.
     container(iced::widget::opaque(panel))

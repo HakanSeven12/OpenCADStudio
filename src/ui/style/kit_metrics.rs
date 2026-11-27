@@ -200,6 +200,9 @@ pub const FORM_W: f32 = 290.0;
 pub const FORM_ROW_H: f32 = 18.0;
 /// Room above a section bar.
 pub const FORM_SECTION_GAP: f32 = 3.0;
+/// Room under a section bar, so its first row (a choice field) does not
+/// touch it.
+pub const FORM_SECTION_GAP_BELOW: f32 = 3.0;
 /// Where a row's label (and a section's) starts.
 pub const FORM_LABEL_X: f32 = 4.0;
 /// Size of a check box.

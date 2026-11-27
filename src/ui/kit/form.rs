@@ -56,8 +56,9 @@ pub fn popover<'a>(
             .right(km::FORM_TITLE_X / 4.0),
     )
     .align_y(iced::Center)
+    // Head and footer: the darker grey of the ribbon's panel-title strip.
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(chrome::bar(theme))),
+        background: Some(Background::Color(chrome::title_bar(theme))),
         text_color: Some(chrome::text(theme)),
         ..Default::default()
     });
@@ -76,8 +77,9 @@ pub fn popover<'a>(
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(chrome::surface(theme))),
             text_color: Some(chrome::text(theme)),
+            // The dark hairline, as under the ribbon.
             border: Border {
-                color: chrome::border(theme),
+                color: chrome::edge(theme),
                 width: km::line(),
                 radius: 0.0.into(),
             },
@@ -95,7 +97,7 @@ pub fn popover<'a>(
 fn hline<'a>() -> Element<'a, Message> {
     container(Space::new().width(Length::Fill).height(km::line()))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::border(theme))),
+            background: Some(Background::Color(chrome::edge(theme))),
             ..Default::default()
         })
         .into()
@@ -119,7 +121,12 @@ pub fn section<'a>(title: impl Into<String>) -> Element<'a, Message> {
         text_color: Some(chrome::text(theme)),
         ..Default::default()
     });
-    column![Space::new().height(km::FORM_SECTION_GAP), bar].into()
+    column![
+        Space::new().height(km::FORM_SECTION_GAP),
+        bar,
+        Space::new().height(km::FORM_SECTION_GAP_BELOW),
+    ]
+    .into()
 }
 
 /// A label on one line in the text colour.
@@ -408,7 +415,7 @@ pub fn footer<'a>(buttons: Vec<Element<'a, Message>>) -> Element<'a, Message> {
             left: km::FORM_FOOTER_PAD_LEFT,
         })
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::surface_raised(theme))),
+            background: Some(Background::Color(chrome::title_bar(theme))),
             text_color: Some(chrome::text(theme)),
             ..Default::default()
         })

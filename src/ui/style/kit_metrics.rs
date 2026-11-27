@@ -110,12 +110,6 @@ pub const BAR_BUTTON: f32 = 18.0;
 pub const BAR_ICON: f32 = 12.0;
 /// Size of a check box in a row.
 pub const CHECK: f32 = 14.0;
-/// Gap between a check box and its label.
-pub const CHECK_GAP: f32 = 4.0;
-/// Where a label starts in a name cell, from the cell's left edge: after a
-/// check box when the row has one, at the same x when it has none, so the
-/// labels of a popover line up.
-pub const CHECK_LABEL_X: f32 = CELL_PAD_X + CHECK + CHECK_GAP;
 
 // ── Drawing-tab bar ───────────────────────────────────────────────────────
 
@@ -197,18 +191,6 @@ mod tests {
         }
     }
 }
-
-// ── Popover (Interface Settings) ──────────────────────────────────────────
-
-/// Width of a settings popover hanging from the title bar.
-pub const POPOVER_W: f32 = 290.0;
-/// Height of a choice tile of a [`crate::ui::kit::radio_row`]: an icon and
-/// its label, taller than a grid row so the choice reads at a glance.
-pub const CHOICE_TILE_H: f32 = 30.0;
-/// Size of the icon on a choice tile.
-pub const CHOICE_ICON: f32 = 20.0;
-/// Gap between the choice tiles, and between a tile's icon and label.
-pub const CHOICE_GAP: f32 = 4.0;
 
 // ── Windows: popovers and dialogs (`kit::form`, mockup B) ─────────────────
 

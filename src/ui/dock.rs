@@ -1455,41 +1455,6 @@ pub fn title_bar_with<'a>(
 /// Room after the last title-bar button.
 const TITLE_PAD_R: f32 = 2.0;
 
-/// The title bar of a popover (Interface Settings): a palette's title bar,
-/// same height, text and close button, but pinned where it hangs, so it
-/// neither drags nor floats; its close sends `close`.
-pub fn popover_title_bar<'a>(title: String, close: Message) -> Element<'a, Message> {
-    use crate::ui::style::{chrome as tokens, kit_metrics as km, text as ui_text};
-    let title = container(
-        text(title.to_uppercase())
-            .size(ui_text::UI_TITLE)
-            .line_height(ui_text::large_line())
-            .wrapping(iced::widget::text::Wrapping::None)
-            .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(tokens::title_text(theme)),
-            }),
-    )
-    .height(Length::Fixed(km::TITLE_H))
-    .padding(iced::Padding::ZERO.top(km::TITLE_TEXT_TOP));
-    let close = title_tip(
-        title_button(title_icon(crate::ui::icons::CLOSE), close),
-        crate::t!("Close").into_owned(),
-        tooltip::Position::Bottom,
-    );
-    container(
-        row![title, Space::new().width(Length::Fill), close]
-            .height(Length::Fixed(km::TITLE_H))
-            .padding(iced::Padding::ZERO.left(km::TITLE_PAD_X).right(TITLE_PAD_R))
-            .align_y(iced::Center),
-    )
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(tokens::surface(theme))),
-        ..Default::default()
-    })
-    .width(Length::Fill)
-    .into()
-}
-
 /// The square button every title-bar control is: `icon` centred in a
 /// `TITLE_BUTTON` square, lit by `chrome::hover` while hovered.
 pub fn title_button<'a>(

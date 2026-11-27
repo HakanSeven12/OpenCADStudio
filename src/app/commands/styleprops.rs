@@ -952,6 +952,7 @@ impl OpenCADStudio {
                     | "COMMANDLINEOPACITY"
                     | "NAVVCUBEOPACITY"
                     | "MENUBAR"
+                    | "STATUSBAR"
                     | "CURSORTYPE"
                     | "SNAPANG"
                     | "TEXTFILL"
@@ -2669,6 +2670,17 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            "STATUSBAR" => match value.as_deref() {
+                                Some(v @ ("0" | "1")) => {
+                                    self.status_bar_hidden = v == "0";
+                                    Ok((format!("STATUSBAR = {v}"), true))
+                                }
+                                Some(_) => Err("SETVAR: 0 or 1 required.".into()),
+                                None => Ok((
+                                    format!("STATUSBAR = {}", u8::from(!self.status_bar_hidden)),
+                                    false,
+                                )),
+                            },
                             "HPASSOC" => match value.as_deref() {
                                 Some(v @ ("0" | "1")) => {
                                     self.hatch_associative = v == "1";
@@ -3880,6 +3892,7 @@ impl OpenCADStudio {
                                         | "COMMANDLINEOPACITY"
                                         | "NAVVCUBEOPACITY"
                                         | "MENUBAR"
+                                        | "STATUSBAR"
                                         | "CURSORTYPE"
                                         | "SNAPANG"
                                         | "CLIPROMPTLINES"

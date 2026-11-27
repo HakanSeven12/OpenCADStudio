@@ -4,8 +4,8 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 
 | | Count |
 |---|---|
-| Registered commands (typed names, `-` command-line forms and internal sub-command tokens) | 700 |
-| System variables | 202 |
+| Registered commands (typed names, `-` command-line forms and internal sub-command tokens) | 701 |
+| System variables | 203 |
 | Command aliases in the default `ocad.pgp` | 247 |
 
 ## How to read this
@@ -609,7 +609,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `SPACEMOUSEPANZOOM` | — | SpaceMouse: pan and zoom. † |
 | `SPACEMOUSEPAUSE` | — | SpaceMouse: pauses input. † |
 
-### System & Utilities (64)
+### System & Utilities (65)
 
 | Command | Aliases | Description |
 |---|---|---|
@@ -637,6 +637,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `HYPERLINKBASE` | — | Sets the base path for relative hyperlinks. † |
 | `HYPERLINKOPTIONS` | — | Sets hyperlink cursor and tooltip display. † |
 | `IM` | — | Alias of IMAGE. † |
+| `INTERFACESETTINGS` | — | Opens the Interface Settings popover (also the button right of the search box in the title bar): Ribbon or Toolbar layout, colour theme, Quick Access Toolbar, menu bar, file tabs, command line, status bar, the ribbon's options and the floating toolbars. |
 | `ISAVEBAK` | — | Dispatched all along, but absent from the registry, so command-line completion never offered them. |
 | `LIMITS` | — | Menu: Drawing Limits. |
 | `MEASUREANGLE` | — | Measures an angle (MEASUREGEOM option). † |
@@ -995,6 +996,7 @@ Type a name to read it and be prompted for a new value (`OSMODE <4133>`). A dash
 | `SPLFRAME` | — | — | — |
 | `SPLINESEGS` | — | — | — |
 | `SPLINETYPE` | — | — | — |
+| `STATUSBAR` | 1 (On) | Boolean Read/Write | Shows (1) or hides (0) the status bar along the bottom of the window. Also in Interface Settings, Options › Display › Window Elements and the Quick Access User Interface menu. |
 | `STARTUP` | 3 | Integer Read/Write | Controls startup behavior when launching OCS (0=blank drawing, 1=Startup dialog box, 2=no drawing, 3=Start tab screen). Tip: Set to 0 to bypass the Start tab and immediately open a default template. |
 | `SURFACEASSOCIATIVITY` | — | — | — |
 | `SURFTYPE` | 6 (Cubic B- spline) | Integer Read/Write | Surface fitting type for smoothed polygon meshes: 5=Quadratic B-spline, 6=Cubic B- spline, 8=Bezier surface. Tip: Used with the EDGECUT and REVSURF mesh modeling tools. |

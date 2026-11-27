@@ -35,6 +35,19 @@ pub enum MinimizePref {
     PanelButtons,
 }
 
+/// Where the Quick Access Toolbar shows while the ribbon is open.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum QatPosition {
+    /// In the app's title bar, after the logo (or at the start of the tab
+    /// row where the app draws no title bar of its own).
+    #[default]
+    TitleBar,
+    /// At the start of the ribbon's tab row, before the tabs.
+    BeforeTabs,
+    /// In a row of its own under the ribbon.
+    BelowRibbon,
+}
+
 /// One item of the Quick Access Toolbar.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum QatItem {
@@ -202,12 +215,25 @@ pub struct RibbonLayout {
     /// settings file.
     #[serde(deserialize_with = "lenient_qat")]
     pub qat: Vec<QatItem>,
-    /// Show the Quick Access Toolbar in its own row below the ribbon.
+    /// Where the Quick Access Toolbar shows while the ribbon is open.
+    pub qat_position: QatPosition,
+    /// The Quick Access Toolbar is hidden everywhere.
+    pub qat_hidden: bool,
+    /// The setting `qat_position` replaced: a settings file that has it
+    /// moves the toolbar below the ribbon (see [`Self::migrate_legacy`]).
+    /// Read, never written.
+    #[serde(skip_serializing)]
     pub qat_below: bool,
     /// Per split item, the command its face runs (the last one chosen).
     pub qat_faces: BTreeMap<String, String>,
     /// The panels floating over the drawing.
     pub floating: Vec<FloatingPanel>,
+    /// The floating panels of the other layout (Ribbon or Toolbar): the two
+    /// sets swap when the layout changes, so each keeps its own toolbars.
+    pub floating_other_layout: Vec<FloatingPanel>,
+    /// The Toolbar layout was shown once and got its default toolbars, so
+    /// closing all of them does not bring them back.
+    pub toolbar_layout_seeded: bool,
     /// The user's own panels, shown on the My Tools tab.
     pub custom_panels: Vec<CustomPanel>,
     /// The tabs and the panels sit in the middle of the ribbon instead of
@@ -237,9 +263,13 @@ impl Default for RibbonLayout {
             pinned_slideouts: BTreeSet::new(),
             search_expanded: true,
             qat: default_qat(),
+            qat_position: QatPosition::TitleBar,
+            qat_hidden: false,
             qat_below: false,
             qat_faces: BTreeMap::new(),
             floating: Vec::new(),
+            floating_other_layout: Vec::new(),
+            toolbar_layout_seeded: false,
             custom_panels: Vec::new(),
             centered: false,
             wheel_switches_tabs: true,
@@ -255,6 +285,17 @@ fn is_key(key: &str, module_id: &str, title: &str) -> bool {
 }
 
 impl RibbonLayout {
+    /// Bring a layout read from an older settings file up to date: the
+    /// toolbar it kept below the ribbon (`qat_below`) keeps its place.
+    /// Whether there was anything to move.
+    pub fn migrate_legacy(&mut self) -> bool {
+        if !std::mem::take(&mut self.qat_below) {
+            return false;
+        }
+        self.qat_position = QatPosition::BelowRibbon;
+        true
+    }
+
     /// `groups` of module `module_id` in the user's order. The panels the
     /// order lists take the places the listed panels have by default, sorted
     /// as listed; a panel it does not list (a new one) keeps its place.

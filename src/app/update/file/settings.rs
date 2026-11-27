@@ -129,6 +129,8 @@ impl OpenCADStudio {
             hatch_path_alignment: self.hatch_prefs.alignment,
             hatch_boundary_warning_off: self.hatch_boundary_warning_off,
             show_menu_bar: self.show_menu_bar,
+            menu_bar_position: self.menu_bar_position,
+            status_bar_hidden: self.status_bar_hidden,
             ribbon_closed: self.ribbon_closed,
             command_line_hidden: self.command_line_hidden,
             layer_columns: crate::ui::window::layers::column_layout_names(),
@@ -367,6 +369,8 @@ impl OpenCADStudio {
         };
         self.hatch_boundary_warning_off = s.hatch_boundary_warning_off;
         self.show_menu_bar = s.show_menu_bar;
+        self.menu_bar_position = s.menu_bar_position;
+        self.status_bar_hidden = s.status_bar_hidden;
         self.ribbon_closed = s.ribbon_closed;
         self.command_line_hidden = s.command_line_hidden;
         crate::ui::window::layers::set_column_layout_names(&s.layer_columns);

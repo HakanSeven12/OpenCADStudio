@@ -19,6 +19,7 @@
 //! | Footer | [`footer`] |
 //! | Frame | [`palette`], [`band`], [`crate::ui::dock::SplitterGrip`] |
 //! | Menus, tooltips | [`crate::ui::kit::menu`], [`tooltip`] |
+//! | Popover | [`popover`] holding [`section_bar`]s, [`check_row`], [`check_select_row`] and [`radio_row`] |
 //!
 //! Dropdowns are [`dropdown`] (a field-style head over a list as wide as
 //! its longest option); menus are [`menu`], whose frame
@@ -48,6 +49,7 @@ mod frame;
 mod grid;
 mod list;
 pub mod menu;
+mod popover;
 mod press;
 mod status;
 mod tabs;
@@ -60,6 +62,7 @@ pub use field::*;
 pub use frame::*;
 pub use grid::*;
 pub use list::*;
+pub use popover::*;
 pub use press::*;
 pub use status::*;
 pub use tabs::*;

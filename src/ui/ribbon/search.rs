@@ -1692,7 +1692,7 @@ mod tests {
         crate::with_headless_ui(|| {
             let mut ribbon = Ribbon::new();
             let mut layout = ribbon.layout.clone();
-            layout.qat_below = true;
+            layout.qat_position = crate::ui::ribbon::QatPosition::BelowRibbon;
             ribbon.set_layout(layout);
             ribbon.set_window_size((900.0, 900.0));
             // Closed, the tab row holds only the logo and the box: measured
@@ -1752,7 +1752,7 @@ mod tests {
         crate::with_headless_ui(|| {
             let mut ribbon = Ribbon::new();
             let mut layout = ribbon.layout.clone();
-            layout.qat_below = true;
+            layout.qat_position = crate::ui::ribbon::QatPosition::BelowRibbon;
             ribbon.set_layout(layout);
             ribbon.set_window_size((4000.0, 900.0));
             lay_out(&ribbon, 4000.0);
@@ -1784,7 +1784,7 @@ mod tests {
             // than `NARROW`; resizing it must not empty the search.
             let mut ribbon = Ribbon::new();
             let mut layout = ribbon.layout.clone();
-            layout.qat_below = true;
+            layout.qat_position = crate::ui::ribbon::QatPosition::BelowRibbon;
             ribbon.set_layout(layout);
             ribbon.set_window_size((1000.0, 900.0));
             lay_out(&ribbon, 1000.0);

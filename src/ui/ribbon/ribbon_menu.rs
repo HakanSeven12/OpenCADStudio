@@ -82,8 +82,10 @@ pub enum RibbonMenuMsg {
     /// Add a separator after the Quick Access item at this index, or take
     /// away the one there.
     QatSeparatorAfter(usize),
-    /// Show the Quick Access Toolbar below the ribbon (`true`) or above.
-    QatBelow(bool),
+    /// Show the Quick Access Toolbar here while the ribbon is open.
+    QatPlace(super::QatPosition),
+    /// Hide the Quick Access Toolbar (`true`) or show it again.
+    QatHide(bool),
     /// Put this command on the My Tools tab, or take it off.
     MyToolsToggle(String),
 }
@@ -157,9 +159,15 @@ impl Ribbon {
                 self.layout.tidy_qat_separators();
                 true
             }
-            RibbonMenuMsg::QatBelow(below) => {
+            RibbonMenuMsg::QatPlace(position) => {
                 self.menu = None;
-                self.layout.qat_below = below;
+                self.layout.qat_position = position;
+                self.layout.qat_hidden = false;
+                true
+            }
+            RibbonMenuMsg::QatHide(hidden) => {
+                self.menu = None;
+                self.layout.qat_hidden = hidden;
                 true
             }
             RibbonMenuMsg::MyToolsToggle(command) => {
@@ -311,16 +319,15 @@ impl Ribbon {
             },
             RibbonMenuMsg::ShowMenuBar(!show_menu_bar),
         );
-        let below = self.layout.qat_below;
-        let place_row = |label: String| {
+        let place_row = |label: String, position: super::QatPosition| {
             Some((
                 Row {
                     label,
-                    checked: false,
+                    checked: !self.layout.qat_hidden && self.layout.qat_position == position,
                     enabled: !ribbon_closed,
                     reason: ribbon_closed
                         .then(|| crate::tr!("ribbon-menu", "qat-place-unavailable")),
-                    action: RibbonMenuMsg::QatBelow(!below),
+                    action: RibbonMenuMsg::QatPlace(position),
                 },
                 None,
             ))
@@ -424,11 +431,30 @@ impl Ribbon {
             MenuTarget::TabRow => {
                 let mut rows = ribbon_rows;
                 rows.push(None);
-                rows.push(place_row(if below {
-                    crate::tr!("ribbon-menu", "qat-show-above")
-                } else {
-                    crate::tr!("ribbon-menu", "qat-show-below")
-                }));
+                use super::QatPosition;
+                rows.push(place_row(
+                    crate::tr!("ribbon-menu", "qat-in-title-bar"),
+                    QatPosition::TitleBar,
+                ));
+                rows.push(place_row(
+                    crate::tr!("ribbon-menu", "qat-before-tabs"),
+                    QatPosition::BeforeTabs,
+                ));
+                rows.push(place_row(
+                    crate::tr!("ribbon-menu", "qat-show-below"),
+                    QatPosition::BelowRibbon,
+                ));
+                let hidden = self.layout.qat_hidden;
+                rows.push(Some((
+                    Row {
+                        label: crate::tr!("ribbon-menu", "hide-qat"),
+                        checked: hidden,
+                        enabled: true,
+                        reason: None,
+                        action: RibbonMenuMsg::QatHide(!hidden),
+                    },
+                    None,
+                )));
                 rows
             }
             MenuTarget::Tool(item) => {
@@ -481,11 +507,26 @@ impl Ribbon {
                 }
                 rows.extend([
                     None,
-                    place_row(if below {
-                        crate::tr!("ribbon-menu", "show-above")
-                    } else {
-                        crate::tr!("ribbon-menu", "show-below")
-                    }),
+                    {
+                        // From below the ribbon back to the title bar.
+                        let below = self.layout.qat_position == super::QatPosition::BelowRibbon;
+                        let mut row = place_row(
+                            if below {
+                                crate::tr!("ribbon-menu", "show-above")
+                            } else {
+                                crate::tr!("ribbon-menu", "show-below")
+                            },
+                            if below {
+                                super::QatPosition::TitleBar
+                            } else {
+                                super::QatPosition::BelowRibbon
+                            },
+                        );
+                        if let Some((row, _)) = row.as_mut() {
+                            row.checked = false;
+                        }
+                        row
+                    },
                     menu_bar_row,
                 ]);
                 rows
@@ -1076,8 +1117,21 @@ mod tests {
         let first = ribbon.layout.qat[0].clone();
         ribbon.on_menu(RibbonMenuMsg::QatRemove(0));
         assert!(!ribbon.layout.qat_has(&first));
-        ribbon.on_menu(RibbonMenuMsg::QatBelow(true));
-        assert!(ribbon.layout.qat_below);
+        ribbon.on_menu(RibbonMenuMsg::QatPlace(
+            super::super::QatPosition::BeforeTabs,
+        ));
+        assert_eq!(
+            ribbon.layout.qat_position,
+            super::super::QatPosition::BeforeTabs
+        );
+        ribbon.on_menu(RibbonMenuMsg::QatHide(true));
+        assert!(ribbon.layout.qat_hidden);
+        assert_eq!(ribbon.qat_placement(false), None);
+        // Placing it shows it again.
+        ribbon.on_menu(RibbonMenuMsg::QatPlace(
+            super::super::QatPosition::BelowRibbon,
+        ));
+        assert!(!ribbon.layout.qat_hidden);
     }
 
     #[test]

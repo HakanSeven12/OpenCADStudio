@@ -96,8 +96,34 @@ pub fn row_view<'a>(
     selected: bool,
     on_select: Option<Message>,
 ) -> Element<'a, Message> {
+    row_view_cols(
+        name,
+        value,
+        selected,
+        on_select,
+        Length::Fixed(km::NAME_COL_W),
+    )
+}
+
+/// A [`row_view`] whose name and value columns each take half the width,
+/// for a narrow popover where the fixed name column would leave a choice
+/// too little room.
+pub fn row_view_half<'a>(
+    name: Element<'a, Message>,
+    value: Element<'a, Message>,
+) -> Element<'a, Message> {
+    row_view_cols(name, value, false, None, Length::Fill)
+}
+
+fn row_view_cols<'a>(
+    name: Element<'a, Message>,
+    value: Element<'a, Message>,
+    selected: bool,
+    on_select: Option<Message>,
+    name_w: Length,
+) -> Element<'a, Message> {
     let name_cell = container(name)
-        .width(Length::Fixed(km::NAME_COL_W))
+        .width(name_w)
         .height(Length::Fixed(km::ROW_H))
         .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
         .align_y(iced::Center)

@@ -8,6 +8,7 @@ pub mod formula_input;
 pub mod hover_zone;
 pub mod icons;
 pub mod ime_zone;
+pub mod interface_settings;
 pub mod kit;
 pub mod live_result;
 pub mod menu_bar;

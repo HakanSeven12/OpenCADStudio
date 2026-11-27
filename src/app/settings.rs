@@ -194,6 +194,17 @@ impl CursorType {
     }
 }
 
+/// Where the classic pull-down menus show (MENUBAR 1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MenuBarPosition {
+    /// In the app's title bar, as long as the window holds them there;
+    /// otherwise in a row of their own.
+    TitleBar,
+    /// In a row of their own under the title bar.
+    #[default]
+    OwnRow,
+}
+
 /// What a right-click in the drawing area does (SHORTCUTMENU in commercial solutions /
 /// "Right-click Customization").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -880,6 +891,10 @@ pub struct UserSettings {
     pub hatch_boundary_warning_off: bool,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
+    /// Where the pull-down menus show while MENUBAR is 1.
+    pub menu_bar_position: MenuBarPosition,
+    /// STATUSBAR 0 hid the status bar along the bottom of the window.
+    pub status_bar_hidden: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
     pub ribbon_closed: bool,
     /// COMMANDLINEHIDE (Ctrl+9) hid the command line; COMMANDLINE shows it.
@@ -1547,6 +1562,8 @@ impl Default for UserSettings {
             hatch_path_alignment: 0,
             hatch_boundary_warning_off: false,
             show_menu_bar: false,
+            menu_bar_position: MenuBarPosition::OwnRow,
+            status_bar_hidden: false,
             ribbon_closed: false,
             command_line_hidden: false,
             layer_columns: Vec::new(),

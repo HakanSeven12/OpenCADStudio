@@ -28,6 +28,9 @@ pub const CAPTION_GAP: f32 = 6.0;
 pub const TRAFFIC_LIGHTS_W: f32 = 78.0;
 /// Room the title bar leaves at its start and before the search box.
 pub const TITLE_BAR_PAD: f32 = 6.0;
+/// Gap between the title bar's search box and the Interface Settings
+/// button after it.
+pub const TITLE_SETTINGS_GAP: f32 = 2.0;
 /// Room kept for the drawing's name before the search box shrinks to its
 /// magnifier.
 pub const TITLE_NAME_ROOM: f32 = 240.0;

@@ -38,6 +38,7 @@ src/ui/window/layers.rs
 src/ui/window/sheet_set.rs
 src/ui/window/plugin_panel.rs
 src/ui/window/assistant.rs
+src/ui/interface_settings.rs
 "
 count() {
     # Comments do not count.

@@ -989,6 +989,12 @@ pub(super) struct OpenCADStudio {
     hatch_boundary_warning: Option<crate::ui::window::hatch_dialogs::BoundaryWarningState>,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     show_menu_bar: bool,
+    /// Where the pull-down menus show while MENUBAR is 1.
+    menu_bar_position: settings::MenuBarPosition,
+    /// STATUSBAR 0 hid the status bar.
+    status_bar_hidden: bool,
+    /// The Interface Settings popover's own state (its open list).
+    interface_settings: crate::ui::interface_settings::State,
     /// The main window is maximized, for the title bar's maximize button.
     main_maximized: bool,
     /// The title bar's empty space is pressed: a move drags the window.
@@ -3041,6 +3047,9 @@ impl OpenCADStudio {
             outline_switch_hover: false,
             hatch_boundary_warning: None,
             show_menu_bar: false,
+            menu_bar_position: settings::MenuBarPosition::OwnRow,
+            status_bar_hidden: false,
+            interface_settings: Default::default(),
             main_maximized: true,
             title_bar_pressed: false,
             ribbon_closed: false,

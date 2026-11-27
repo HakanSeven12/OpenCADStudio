@@ -3610,9 +3610,10 @@ bg={bg_ms:.1}ms n={view_count}"
             // menu bar and status bar stay so commands remain reachable and
             // the mode can be toggled back off.
             let mut col = column![];
-            // With the toolbar below the ribbon, the pull-down menus take its
-            // place in the title bar instead of a row of their own.
+            // The pull-down menus go in the title bar when the user put them
+            // there and they fit; otherwise they keep a row of their own.
             let menus_in_title = self.show_menu_bar
+                && self.menu_bar_position == crate::app::settings::MenuBarPosition::TitleBar
                 && self.ribbon.menus_fit_title_bar(
                     self.ribbon_closed || self.clean_screen,
                     self.tabs[self.active_tab].is_start,
@@ -3633,6 +3634,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     &tab.tab_display_name(),
                     tab.dirty,
                     self.ribbon.title_bar_search(),
+                    self.ribbon.interface_settings_button(),
                     self.ribbon.title_bar_room(),
                     self.main_maximized,
                     self.title_bar_pressed,
@@ -3641,7 +3643,9 @@ bg={bg_ms:.1}ms n={view_count}"
             if self.clean_screen {
                 // Clean screen keeps the menu row, led by the compact logo;
                 // under the app's title bar, which holds both, it is alone.
-                if self.show_menu_bar && self.draws_title_bar() {
+                if menus_in_title {
+                    // They went in the title bar.
+                } else if self.show_menu_bar && self.draws_title_bar() {
                     col = col.push(crate::ui::menu_bar::view(self.menu_context()));
                 } else if self.show_menu_bar {
                     col = col.push(
@@ -3682,8 +3686,12 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.file_tabs_above_docks,
                 ));
             }
-            col.push(center_stack)
-                .push({
+            let col = col.push(center_stack);
+            // STATUSBAR 0 hides the status bar.
+            let col = if self.status_bar_hidden {
+                col
+            } else {
+                col.push({
                     let is_model = tab.scene.current_layout == "Model";
                     let scale_pill_enabled = is_model
                         || tab.scene.active_viewport.is_some()
@@ -3824,8 +3832,8 @@ bg={bg_ms:.1}ms n={view_count}"
                             }),
                     )
                 })
-                .width(Fill)
-                .height(Fill)
+            };
+            col.width(Fill).height(Fill)
         })
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.base.color)),
@@ -3856,6 +3864,15 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::modules::insert::insert_block::GALLERY_ID,
                 crate::ui::window::block_palette::gallery(&self.block_palette),
                 crate::ui::window::block_palette::GALLERY_W,
+                self.win_size.0,
+            )
+        } else if self.interface_settings_open() {
+            self.ribbon.place_popover(
+                crate::ui::interface_settings::INTERFACE_SETTINGS_ID,
+                crate::ui::interface_settings::view(
+                    &self.interface_settings,
+                    &self.interface_snapshot(),
+                ),
                 self.win_size.0,
             )
         } else {

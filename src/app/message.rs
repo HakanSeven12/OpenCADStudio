@@ -346,6 +346,14 @@ pub enum Message {
     KeypadDecimalPointChanged(bool),
     /// Options: show the pull-down menus (MENUBAR).
     MenuBarChanged(bool),
+    /// The Interface Settings popover (INTERFACESETTINGS).
+    Interface(crate::ui::interface_settings::InterfaceMsg),
+    /// Options: where the pull-down menus show.
+    MenuBarPositionChanged(crate::app::settings::MenuBarPosition),
+    /// Options: where the Quick Access Toolbar shows.
+    QatPositionChanged(crate::ui::ribbon::QatPosition),
+    /// Options: show the status bar (STATUSBAR).
+    StatusBarChanged(bool),
     /// Options: show the ribbon (RIBBON / RIBBONCLOSE).
     RibbonVisibleChanged(bool),
     /// Options: center the ribbon's tabs and panels.

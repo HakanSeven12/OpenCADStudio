@@ -1439,6 +1439,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "COMMANDLINEOPACITY",
         "NAVVCUBEOPACITY",
         "MENUBAR",
+        "STATUSBAR",
+        "INTERFACESETTINGS",
         "RIBBON",
         "RIBBONCLOSE",
         "TOOLBAR",

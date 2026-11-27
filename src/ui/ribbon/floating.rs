@@ -791,6 +791,53 @@ impl Ribbon {
         self.float_panel(module, title, x, y)
     }
 
+    /// The Home tab's panels the Toolbar layout shows the first time, and
+    /// Reset toolbars brings back.
+    pub const DEFAULT_TOOLBARS: [&'static str; 4] = ["Draw", "Modify", "Layers", "Properties"];
+
+    /// The layout changes between Ribbon and Toolbar: the floating panels
+    /// of the one shown go away with it and those of the other come back.
+    /// Going to Toolbar (`toolbar`) the first time with none to show, the
+    /// default toolbars line up from `origin`; every panel ends up inside
+    /// the window.
+    pub fn switch_toolbar_set(&mut self, toolbar: bool, origin: Point) {
+        self.float_ui = Default::default();
+        let layout = &mut self.layout;
+        std::mem::swap(&mut layout.floating, &mut layout.floating_other_layout);
+        if toolbar && !std::mem::replace(&mut layout.toolbar_layout_seeded, true) {
+            if self.layout.floating.is_empty() {
+                self.show_default_toolbars(origin);
+            }
+        }
+        self.layout
+            .clamp_floating((self.win_w, self.win_h), Self::floating_size);
+    }
+
+    /// Reset toolbars: only the default toolbars, from `origin`, with their
+    /// titles at the bottom.
+    pub fn reset_toolbars(&mut self, origin: Point) {
+        self.float_ui = Default::default();
+        self.layout.floating.clear();
+        self.show_default_toolbars(origin);
+    }
+
+    fn show_default_toolbars(&mut self, origin: Point) {
+        for title in Self::DEFAULT_TOOLBARS {
+            self.show_toolbar("draw", title, true, origin);
+        }
+    }
+
+    /// Put the titles of all floating toolbars at their side (`true`) or at
+    /// their bottom; whether any changed.
+    pub fn set_toolbar_titles_side(&mut self, side: bool) -> bool {
+        let mut changed = false;
+        for panel in &mut self.layout.floating {
+            changed |= panel.extras_right != side;
+            panel.extras_right = side;
+        }
+        changed
+    }
+
     /// Put floating panel `key` back in its tab's ribbon row, at its old
     /// place there; whether it was floating.
     pub(super) fn dock_floating(&mut self, key: &str) -> bool {

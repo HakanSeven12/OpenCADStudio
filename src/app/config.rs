@@ -670,8 +670,20 @@ impl AppConfig {
             .and_then(|window| window.local_storage().ok().flatten())
             .and_then(|storage| storage.get_item(WEB_CONFIG_KEY).ok().flatten());
 
-        body.and_then(|body| serde_json::from_str(&body).ok())
-            .unwrap_or_default()
+        let mut config: Self = body
+            .and_then(|body| serde_json::from_str(&body).ok())
+            .unwrap_or_default();
+        config.migrate();
+        config
+    }
+
+    /// Bring settings read from an older file up to date, so they look the
+    /// same after an update. A toolbar kept below the ribbon showed the
+    /// pull-down menus in the title bar: they stay there.
+    pub fn migrate(&mut self) {
+        if self.ribbon.layout.migrate_legacy() && self.settings.show_menu_bar {
+            self.settings.menu_bar_position = crate::app::settings::MenuBarPosition::TitleBar;
+        }
     }
 
     /// Persist the config as JSON. Best-effort; silent on unavailable or
@@ -915,7 +927,10 @@ mod tests {
         let old: AppConfig =
             serde_json::from_str(r#"{"ribbon":{"search_expanded":false}}"#).expect("old config");
         assert_eq!(old.ribbon.layout.qat, crate::ui::ribbon::default_qat());
-        assert!(!old.ribbon.layout.qat_below);
+        assert_eq!(
+            old.ribbon.layout.qat_position,
+            crate::ui::ribbon::QatPosition::TitleBar
+        );
         assert!(old.ribbon.layout.qat_faces.is_empty());
 
         let mut original = AppConfig::default();
@@ -927,7 +942,7 @@ mod tests {
             QatItem::Command("ZOOM E".into()),
             QatItem::Builtin(QatBuiltin::DimStyle),
         ];
-        layout.qat_below = true;
+        layout.qat_position = crate::ui::ribbon::QatPosition::BeforeTabs;
         layout
             .qat_faces
             .insert("MEASURE_MENU".into(), "AREA".into());
@@ -937,9 +952,51 @@ mod tests {
         assert_eq!(value["ribbon"]["qat"][1], "Separator");
         assert_eq!(value["ribbon"]["qat"][2]["Builtin"], "LayerCombo");
         assert_eq!(value["ribbon"]["qat"][4]["Builtin"], "DimStyle");
-        assert_eq!(value["ribbon"]["qat_below"], true);
+        assert_eq!(value["ribbon"]["qat_position"], "BeforeTabs");
+        // The setting it replaced is no longer written.
+        assert!(value["ribbon"].get("qat_below").is_none());
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
+    fn an_old_toolbar_below_the_ribbon_keeps_its_look_after_the_update() {
+        use crate::app::settings::MenuBarPosition;
+        use crate::ui::ribbon::QatPosition;
+
+        // Toolbar below the ribbon and the menu bar on: the menus showed in
+        // the title bar, and still do.
+        let mut old: AppConfig = serde_json::from_str(
+            r#"{"settings":{"show_menu_bar":true},"ribbon":{"qat_below":true}}"#,
+        )
+        .expect("old config");
+        old.migrate();
+        assert_eq!(old.ribbon.layout.qat_position, QatPosition::BelowRibbon);
+        assert_eq!(old.settings.menu_bar_position, MenuBarPosition::TitleBar);
+        assert!(!old.ribbon.layout.qat_below);
+        // Migrating twice changes nothing more.
+        let once = old.clone();
+        old.migrate();
+        assert!(old.ribbon == once.ribbon);
+
+        // Below the ribbon without the menu bar: the menus keep their row.
+        let mut old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"qat_below":true}}"#).expect("old config");
+        old.migrate();
+        assert_eq!(old.ribbon.layout.qat_position, QatPosition::BelowRibbon);
+        assert_eq!(old.settings.menu_bar_position, MenuBarPosition::OwnRow);
+
+        // A file without the field takes the defaults.
+        let mut old: AppConfig =
+            serde_json::from_str(r#"{"settings":{"show_menu_bar":true},"ribbon":{}}"#)
+                .expect("old config");
+        old.migrate();
+        assert_eq!(old.ribbon.layout.qat_position, QatPosition::TitleBar);
+        assert!(!old.ribbon.layout.qat_hidden);
+        assert_eq!(old.settings.menu_bar_position, MenuBarPosition::OwnRow);
+        assert!(!old.settings.status_bar_hidden);
+        assert!(old.ribbon.layout.floating_other_layout.is_empty());
+        assert!(!old.ribbon.layout.toolbar_layout_seeded);
     }
 
     #[test]

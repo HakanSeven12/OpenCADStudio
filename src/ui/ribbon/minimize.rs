@@ -114,6 +114,24 @@ impl Ribbon {
         self.layout.minimize
     }
 
+    /// Interface Settings' Minimize to: what the minimize button does from
+    /// now on, and the ribbon goes to that state at once (Cycle through
+    /// all leaves it as it is). Unlike the button it keeps an open dropdown
+    /// open: the popover it is picked from is one.
+    pub fn set_minimize_to(&mut self, pref: MinimizePref) {
+        self.layout.minimize_pref = pref;
+        let state = match pref {
+            MinimizePref::Cycle => return,
+            MinimizePref::Tabs => RibbonMinimize::Tabs,
+            MinimizePref::PanelTitles => RibbonMinimize::PanelTitles,
+            MinimizePref::PanelButtons => RibbonMinimize::PanelButtons,
+        };
+        if self.layout.minimize != state {
+            self.close_popup();
+            self.layout.minimize = state;
+        }
+    }
+
     fn set_minimize(&mut self, minimize: RibbonMinimize) {
         self.close_popup();
         self.close_dropdown();

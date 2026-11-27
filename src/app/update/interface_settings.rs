@@ -76,9 +76,10 @@ impl OpenCADStudio {
                 self.status_bar_hidden = !shown;
                 self.persist_settings_if_changed();
             }
-            InterfaceMsg::MinimizeTo(pref) => self.edit_ribbon_layout(|layout| {
-                layout.minimize_pref = pref;
-            }),
+            InterfaceMsg::MinimizeTo(pref) => {
+                self.ribbon.set_minimize_to(pref);
+                self.save_config();
+            }
             InterfaceMsg::PanelTitles(on) => self.edit_ribbon_layout(|layout| {
                 layout.show_panel_titles = on;
             }),
@@ -369,9 +370,18 @@ mod tests {
         )));
         let _ = app.update(Message::Interface(M::FileTabsAbove(true)));
         let _ = app.update(Message::Interface(M::PanelTitles(false)));
-        let _ = app.update(Message::Interface(M::MinimizeTo(
-            crate::ui::ribbon::MinimizePref::PanelTitles,
-        )));
+        // Minimize to puts the ribbon in that state at once, with the
+        // popover still open; Cycle through all leaves the state.
+        use crate::ui::ribbon::{MinimizePref, RibbonMinimize};
+        let _ = app.update(Message::Interface(M::Open));
+        let _ = app.update(Message::Interface(M::MinimizeTo(MinimizePref::Tabs)));
+        assert_eq!(app.ribbon.minimize(), RibbonMinimize::Tabs);
+        assert!(app.interface_settings_open());
+        let _ = app.update(Message::Interface(M::MinimizeTo(MinimizePref::Cycle)));
+        assert_eq!(app.ribbon.minimize(), RibbonMinimize::Tabs);
+        assert_eq!(app.ribbon.layout().minimize_pref, MinimizePref::Cycle);
+        let _ = app.update(Message::Interface(M::MinimizeTo(MinimizePref::PanelTitles)));
+        assert_eq!(app.ribbon.minimize(), RibbonMinimize::PanelTitles);
         let saved = app.current_config();
         assert!(saved.settings.status_bar_hidden);
         assert!(saved.settings.command_line_hidden);

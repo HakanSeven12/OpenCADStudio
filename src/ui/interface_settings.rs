@@ -436,11 +436,15 @@ pub fn view<'a>(state: &State, snap: &Snapshot) -> Element<'a, Message> {
         ));
     }
     bands = bands.push(kit::gap());
-    bands = bands.push(kit::footer(kit::text_button(
-        crate::tr!("interface-settings", "options"),
-        Some(msg(InterfaceMsg::Options)),
-        false,
-    )));
+    // Options… ends the popover as a button at the right of its footer.
+    bands = bands.push(kit::footer(iced::widget::row![
+        iced::widget::Space::new().width(iced::Length::Fill),
+        kit::text_button(
+            crate::tr!("interface-settings", "options"),
+            Some(msg(InterfaceMsg::Options)),
+            false,
+        ),
+    ]));
 
     kit::popover(title_bar, bands, km::POPOVER_W)
 }

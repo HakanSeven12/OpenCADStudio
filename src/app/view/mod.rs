@@ -3544,6 +3544,16 @@ bg={bg_ms:.1}ms n={view_count}"
         if let Some(e) = left_edge {
             parts.push(e);
         }
+        // Ribbon panels docked as toolbars sit between the pallets and the
+        // drawing, which gives them their room.
+        let docked_toolbar = |edge| {
+            (!self.clean_screen && !tab.is_start)
+                .then(|| self.ribbon.docked_toolbars(edge))
+                .flatten()
+        };
+        if let Some(e) = docked_toolbar(crate::ui::ribbon::ToolbarEdge::Left) {
+            parts.push(e);
+        }
         let viewport: Element<'_, Message> =
             crate::ui::wrap_bar::PosReport::new(VIEWPORT_CAPTURE_BOUNDS_ID, viewport_stack).into();
         // The drawing tabs sit over the drawing, between the docks, unless
@@ -3611,6 +3621,9 @@ bg={bg_ms:.1}ms n={view_count}"
                 .into()
         };
         parts.push(center);
+        if let Some(e) = docked_toolbar(crate::ui::ribbon::ToolbarEdge::Right) {
+            parts.push(e);
+        }
         if let Some(e) = right_edge {
             parts.push(e);
         }

@@ -40,6 +40,7 @@ mod collapse;
 mod floating;
 mod keytips;
 pub(crate) use keytips::text_width;
+mod docked;
 mod layout;
 mod locate;
 mod minimize;
@@ -67,7 +68,8 @@ pub use keytips::{
 };
 pub use layout::CustomPanel;
 pub use layout::{
-    default_qat, FloatingPanel, MinimizePref, QatBuiltin, QatItem, RibbonLayout, RibbonMinimize,
+    default_qat, DockedToolbar, FloatingPanel, MinimizePref, QatBuiltin, QatItem, RibbonLayout,
+    RibbonMinimize, ToolbarEdge,
 };
 pub use minimize::{MinimizeMsg, Opener};
 pub(crate) use qat::{list_source as qat_list_source, QAT_SWITCH_ID};
@@ -1101,6 +1103,7 @@ impl Ribbon {
         groups.retain(|group| {
             !self.layout.panel_hidden(module_id, group.title)
                 && self.layout.floating_panel(module_id, group.title).is_none()
+                && self.layout.docked_toolbar(module_id, group.title).is_none()
         });
         groups.into_iter()
     }

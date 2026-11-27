@@ -17,7 +17,7 @@ use iced::{
 };
 
 use super::draw_panel::{self, SlideLook};
-use super::layout::FloatingPanel;
+use super::layout::{FloatingPanel, ToolbarEdge};
 use super::{extras, floating_id, panel_frame, render_group, Ribbon, Strip};
 use crate::app::Message;
 use crate::modules::RibbonGroup;
@@ -617,6 +617,7 @@ impl Ribbon {
             }
             FloatMsg::Return(_) if self.closed => false,
             FloatMsg::Return(key) => self.dock_floating(&key),
+            FloatMsg::Undock(key) => self.float_docked(&key),
             FloatMsg::ToggleOrientation(key) => {
                 self.float_ui.strip_hover = None;
                 self.float_ui.tab_hover = None;
@@ -724,6 +725,22 @@ impl Ribbon {
                     Some(drag) if moved && drag.over_ribbon => {
                         self.dock_floating_at(&drag.key, drag.at.x)
                     }
+                    // Dropped at the window's side: a toolbar docked there.
+                    Some(drag) if moved && self.drop_edge(drag.at).is_some() => {
+                        let edge = self.drop_edge(drag.at).unwrap_or(ToolbarEdge::Left);
+                        let module = self
+                            .layout
+                            .floating
+                            .iter()
+                            .find(|panel| panel.key == drag.key)
+                            .map(|panel| panel.module_id.clone());
+                        let title = drag
+                            .key
+                            .split_once('/')
+                            .map_or(drag.key.as_str(), |(_, title)| title)
+                            .to_string();
+                        module.is_some_and(|module| self.dock_toolbar(&module, &title, edge))
+                    }
                     Some(_) => moved,
                     None => false,
                 };
@@ -744,7 +761,11 @@ impl Ribbon {
                 let shown = self
                     .layout
                     .floating_panel(module.id(), group.title)
-                    .is_some();
+                    .is_some()
+                    || self
+                        .layout
+                        .docked_toolbar(module.id(), group.title)
+                        .is_some();
                 out.push((module.id(), group.title, shown));
             }
         }
@@ -773,8 +794,10 @@ impl Ribbon {
     /// line up from `origin` (the drawing's top-left corner) to the right.
     /// Whether anything changed.
     pub fn show_toolbar(&mut self, module: &str, title: &str, show: bool, origin: Point) -> bool {
+        let key = extras::panel_key(module, title);
+        let undocked = self.undock_toolbar(&key);
         if !show {
-            return self.dock_floating(&extras::panel_key(module, title));
+            return self.dock_floating(&key) | undocked;
         }
         // Along the top, left to right, wrapping before the window's edge.
         let (left, mut x, mut y) = (origin.x, origin.x, origin.y);
@@ -788,7 +811,7 @@ impl Ribbon {
                 y += h + 6.0;
             }
         }
-        self.float_panel(module, title, x, y)
+        self.float_panel(module, title, x, y) | undocked
     }
 
     /// Put floating panel `key` back in its tab's ribbon row, at its old
@@ -895,6 +918,8 @@ pub enum FloatMsg {
     ToggleOrientation(String),
     /// Return to ribbon: the panel goes back to its tab, in its old place.
     Return(String),
+    /// A click on a docked toolbar's grip: it floats again.
+    Undock(String),
     /// The pointer entered or left the panel's title strip (or footer).
     StripHover { key: String, over: bool },
     /// The pointer entered or left the tab above the panel's corner.

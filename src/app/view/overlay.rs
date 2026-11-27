@@ -869,7 +869,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
         scale: 1.0,
         content_h: size.1,
         ruler: ed.ruler.then(|| {
-            let width = ed.rect_width as f32;
+            let width = ed.frame_width() as f32;
             let growth = ed.box_growth();
             let left = if growth == 2.0 {
                 -width * 0.5
@@ -1386,7 +1386,7 @@ fn mtext_editor_content<'a>(
         // none (the status bar's field still sets the width). The box grows
         // from its attachment: rightwards, both ways or leftwards.
         let ruler = (rotation == (1.0, 0.0)).then(|| {
-            let width = ed.rect_width as f32;
+            let width = ed.frame_width() as f32;
             let growth = ed.box_growth();
             let (left, right) = if growth == 2.0 {
                 (-width * 0.5, width * 0.5)

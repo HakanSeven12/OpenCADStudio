@@ -3448,7 +3448,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         }
                         let angle = overlay::editor_angle(ed);
                         let (sin, cos) = angle.sin_cos();
-                        let width = (ed.rect_width as f32).max(0.001);
+                        let width = (ed.frame_width() as f32).max(0.001);
                         let padding = ed.height_value() as f32 * 0.5;
                         let top = ed
                             .glyph_boxes

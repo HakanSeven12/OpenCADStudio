@@ -77,13 +77,27 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
     Ok(tokens)
 }
 
+const MAX_INPUT_LEN: usize = 4096;
+const MAX_RECURSION: usize = 128;
+
 struct Parser<'a> {
     tokens: Vec<Token>,
     at: usize,
+    depth: usize,
     var: &'a dyn Fn(&str) -> Option<f64>,
 }
 
 impl Parser<'_> {
+    fn descend<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<T, String> {
+        if self.depth >= MAX_RECURSION {
+            return Err("expression is nested too deeply".to_owned());
+        }
+        self.depth += 1;
+        let result = f(self);
+        self.depth -= 1;
+        result
+    }
+
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.at)
     }
@@ -109,9 +123,9 @@ impl Parser<'_> {
         if !self.eat("?") {
             return Ok(test);
         }
-        let then = self.conditional()?;
+        let then = self.descend(|p| p.conditional())?;
         self.expect(":")?;
-        let otherwise = self.conditional()?;
+        let otherwise = self.descend(|p| p.conditional())?;
         Ok(if test.truth() { then } else { otherwise })
     }
 
@@ -185,13 +199,13 @@ impl Parser<'_> {
 
     fn unary(&mut self) -> Result<Val, String> {
         if self.eat("-") {
-            return Ok(Val::Num(-self.unary()?.num()));
+            return Ok(Val::Num(-self.descend(|p| p.unary())?.num()));
         }
         if self.eat("+") {
-            return Ok(Val::Num(self.unary()?.num()));
+            return Ok(Val::Num(self.descend(|p| p.unary())?.num()));
         }
         if self.eat("!") {
-            return Ok(Val::Bool(!self.unary()?.truth()));
+            return Ok(Val::Bool(!self.descend(|p| p.unary())?.truth()));
         }
         self.power()
     }
@@ -201,7 +215,9 @@ impl Parser<'_> {
         if self.eat("^") {
             // Right-associative, and binds tighter than a leading minus on
             // its right: 2^-1 = 0.5.
-            return Ok(Val::Num(base.num().powf(self.unary()?.num())));
+            return Ok(Val::Num(
+                base.num().powf(self.descend(|p| p.unary())?.num()),
+            ));
         }
         Ok(base)
     }
@@ -214,7 +230,7 @@ impl Parser<'_> {
             }
             Some(Token::Op("(")) => {
                 self.at += 1;
-                let value = self.conditional()?;
+                let value = self.descend(|p| p.conditional())?;
                 self.expect(")")?;
                 Ok(value)
             }
@@ -224,7 +240,7 @@ impl Parser<'_> {
                     let mut args = Vec::new();
                     if !self.eat(")") {
                         loop {
-                            args.push(self.conditional()?);
+                            args.push(self.descend(|p| p.conditional())?);
                             if self.eat(")") {
                                 break;
                             }
@@ -312,7 +328,15 @@ fn call(name: &str, args: &[Val]) -> Result<Val, String> {
 
 /// Evaluates `source`, reading names through `var`.
 pub fn eval(source: &str, var: &dyn Fn(&str) -> Option<f64>) -> Result<Val, String> {
-    let mut parser = Parser { tokens: tokenize(source)?, at: 0, var };
+    if source.len() > MAX_INPUT_LEN {
+        return Err(format!("expression exceeds {MAX_INPUT_LEN} bytes"));
+    }
+    let mut parser = Parser {
+        tokens: tokenize(source)?,
+        at: 0,
+        depth: 0,
+        var,
+    };
     let value = parser.conditional()?;
     match parser.peek() {
         None => Ok(value),
@@ -350,5 +374,23 @@ mod tests {
         assert_eq!(run("0.1 + 0.2 == 0.3"), Val::Bool(true));
         assert!(eval("a +", &|_| None).is_err());
         assert!(eval("q", &|_| None).is_err());
+    }
+
+    #[test]
+    fn excessive_length_and_nesting_fail_without_stack_overflow() {
+        let too_long = "1+".repeat(2500) + "1";
+        assert!(eval(&too_long, &|_| None).is_err());
+
+        let deep_parens = format!("{}1{}", "(".repeat(200), ")".repeat(200));
+        assert!(eval(&deep_parens, &|_| None).is_err());
+
+        let deep_unary = format!("{}1", "-".repeat(200));
+        assert!(eval(&deep_unary, &|_| None).is_err());
+
+        let deep_ternary = format!("{}0", "1 ? 2 : ".repeat(200));
+        assert!(eval(&deep_ternary, &|_| None).is_err());
+
+        let deep_power = format!("{}2", "2 ^ ".repeat(200));
+        assert!(eval(&deep_power, &|_| None).is_err());
     }
 }

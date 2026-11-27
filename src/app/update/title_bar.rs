@@ -75,10 +75,11 @@ mod tests {
             std::hint::black_box(app.view_main());
             let _ = app.update_root(Message::OptionsCloseDiscard);
         }
-        // The toolbar below the ribbon: the menus take its place on top.
+        // The toolbar below the ribbon and the menus in the title bar.
         app.show_menu_bar = true;
+        app.menu_bar_position = crate::app::settings::MenuBarPosition::TitleBar;
         let mut layout = app.ribbon.layout().clone();
-        layout.qat_below = true;
+        layout.qat_position = crate::ui::ribbon::QatPosition::BelowRibbon;
         app.ribbon.set_layout(layout);
         std::hint::black_box(app.view_main());
         // A clean screen with the menu bar keeps the title bar on top.

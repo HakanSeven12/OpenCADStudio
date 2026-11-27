@@ -88,14 +88,17 @@ pub enum TitleBarMsg {
 }
 
 /// The title bar: `start` (logo and toolbar), the drawing `name` with a dot
-/// while it has unsaved changes, `search`, and the window buttons.
+/// while it has unsaved changes, `search`, the Interface Settings button
+/// (`settings`) and the window buttons.
 /// `pressed`: its empty space is held down (see [`grab`]).
 /// `room`: the widths around the name, which keep it in place.
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     start: Element<'a, Message>,
     name: &str,
     dirty: bool,
     search: Element<'a, Message>,
+    settings: Element<'a, Message>,
     room: Room,
     maximized: bool,
     pressed: bool,
@@ -153,7 +156,15 @@ pub fn view<'a>(
             ..Padding::ZERO
         }),
         container(grab).width(Fill).height(Fill),
-        container(search).padding([0.0, metrics::TITLE_BAR_PAD]),
+        container(search).padding(Padding {
+            left: metrics::TITLE_BAR_PAD,
+            right: metrics::TITLE_SETTINGS_GAP,
+            ..Padding::ZERO
+        }),
+        container(settings).padding(Padding {
+            right: metrics::TITLE_BAR_PAD,
+            ..Padding::ZERO
+        }),
         captions(buttons, &buttons.right, maximized, Side::Right),
     ]
     .align_y(iced::Center)
@@ -221,7 +232,11 @@ fn ends(start: f32, search: f32) -> f32 {
     let buttons = layout();
     let group = |n| platform::group_width(buttons.style, n);
     let left = group(buttons.left.len()) + leading_inset() + start;
-    let right = search + 2.0 * metrics::TITLE_BAR_PAD + group(buttons.right.len());
+    let right = search
+        + 2.0 * metrics::TITLE_BAR_PAD
+        + metrics::TITLE_SETTINGS_GAP
+        + metrics::QAT_BUTTON
+        + group(buttons.right.len());
     left.max(right) + metrics::TITLE_BAR_PAD
 }
 

@@ -11754,6 +11754,20 @@ impl OpenCADStudio {
 
             Message::TitleBar(msg) => self.on_title_bar(msg),
 
+            Message::Interface(msg) => self.on_interface(msg),
+
+            Message::MenuBarPositionChanged(position) => self.on_interface(
+                crate::ui::interface_settings::InterfaceMsg::MenuBarPosition(position),
+            ),
+
+            Message::QatPositionChanged(position) => self.on_interface(
+                crate::ui::interface_settings::InterfaceMsg::QatPosition(position),
+            ),
+
+            Message::StatusBarChanged(shown) => self.on_interface(
+                crate::ui::interface_settings::InterfaceMsg::StatusBarShown(shown),
+            ),
+
             Message::RibbonVisibleChanged(shown) => {
                 self.ribbon_closed = !shown;
                 self.persist_settings_if_changed();

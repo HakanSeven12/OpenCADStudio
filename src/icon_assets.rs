@@ -147,6 +147,9 @@ pub static PRINT: &[u8] = include_bytes!("../assets/icons/ui/print.svg");
 pub static HEART: &[u8] = include_bytes!("../assets/icons/ui/heart.svg");
 
 pub static GEAR: &[u8] = include_bytes!("../assets/icons/ui/gear.svg");
+/// The Ribbon and Toolbar layouts, as Interface Settings offers them.
+pub static LAYOUT_RIBBON: &[u8] = include_bytes!("../assets/icons/ui/layout_ribbon.svg");
+pub static LAYOUT_TOOLBAR: &[u8] = include_bytes!("../assets/icons/ui/layout_toolbar.svg");
 
 pub static DOT: &[u8] = include_bytes!("../assets/icons/ui/dot.svg");
 

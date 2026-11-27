@@ -739,22 +739,9 @@ impl OpenCADStudio {
                     .trim()
                     .to_ascii_uppercase();
                 match value.as_str() {
-                    "CLASSIC" | "C" => {
-                        self.ribbon_closed = true;
-                        self.show_menu_bar = true;
-                        if !self.ribbon.toolbars().iter().any(|(_, _, shown)| *shown) {
-                            let origin = self.toolbar_origin();
-                            for title in ["Draw", "Modify", "Layers", "Properties"] {
-                                self.ribbon.show_toolbar("draw", title, true, origin);
-                            }
-                        }
-                        self.persist_settings_if_changed();
-                        self.save_config();
-                    }
-                    "RIBBON" | "R" => {
-                        self.ribbon_closed = false;
-                        self.persist_settings_if_changed();
-                    }
+                    // The Toolbar and Ribbon layouts of Interface Settings.
+                    "CLASSIC" | "C" => self.set_interface_layout(true),
+                    "RIBBON" | "R" => self.set_interface_layout(false),
                     _ => {
                         let current = if self.ribbon_closed {
                             "Classic"
@@ -769,6 +756,10 @@ impl OpenCADStudio {
                     }
                 }
                 return Some(Task::none());
+            }
+            // ── INTERFACESETTINGS — the Interface Settings popover ──────────────
+            "INTERFACESETTINGS" => {
+                return Some(self.on_interface(crate::ui::interface_settings::InterfaceMsg::Open));
             }
             // ── RIBBON / RIBBONCLOSE — show or hide the ribbon ───────────────────
             "RIBBON" | "RIBBONCLOSE" => {

@@ -303,6 +303,9 @@ impl OpenCADStudio {
             );
         }
         let settled = self.settle_tool_windows();
+        // The Quick Access User Interface menu shows these as switches.
+        self.ribbon.command_line_hidden = self.command_line_hidden;
+        self.ribbon.status_bar_hidden = self.status_bar_hidden;
         Task::batch([task, settled])
     }
 

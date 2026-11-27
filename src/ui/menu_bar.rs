@@ -31,6 +31,18 @@ enum Entry {
 
 use Entry::{Cmd, Sep, Sub};
 
+/// Where the classic pull-down menus show (MENUBAR 1). Kept with the menu
+/// bar, so the views that offer the choice need nothing from the app.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MenuBarPosition {
+    /// In the app's title bar, as long as the window holds them there;
+    /// otherwise in a row of their own.
+    TitleBar,
+    /// In a row of their own under the title bar.
+    #[default]
+    OwnRow,
+}
+
 /// The Toolbars submenu: each entry shows that ribbon panel as a toolbar
 /// over the drawing, or puts it back. `TOOLBAR` alone lists them all.
 const TOOLBARS: &[Entry] = &[

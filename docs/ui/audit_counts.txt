@@ -21,3 +21,4 @@ src/ui/window/layers.rs 0 0
 src/ui/window/sheet_set.rs 0 124
 src/ui/window/plugin_panel.rs 1 0
 src/ui/window/assistant.rs 0 0
+src/ui/interface_settings.rs 0 0

@@ -64,8 +64,14 @@ pub struct AppPrefs {
     pub command_line_font_size: u16,
     /// MENUBAR: the pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
+    /// Where the pull-down menus show while MENUBAR is 1.
+    pub menu_bar_position: crate::ui::menu_bar::MenuBarPosition,
     /// The ribbon shows (RIBBON / RIBBONCLOSE).
     pub show_ribbon: bool,
+    /// Where the Quick Access Toolbar shows while the ribbon is open.
+    pub qat_position: crate::ui::ribbon::QatPosition,
+    /// STATUSBAR: the status bar shows.
+    pub show_status_bar: bool,
     /// The ribbon's tabs and panels sit in its middle.
     pub ribbon_centered: bool,
     /// The mouse wheel over the ribbon steps through its tabs.
@@ -733,6 +739,37 @@ pub fn view_window<'a>(
             label: format!("ACI {}", model_space.grip_hover),
         });
 
+    // Window Elements: the same choices as Interface Settings.
+    use crate::ui::menu_bar::MenuBarPosition;
+    use crate::ui::ribbon::QatPosition;
+    let menu_bar_positions: Vec<Labelled<MenuBarPosition>> =
+        [MenuBarPosition::TitleBar, MenuBarPosition::OwnRow]
+            .into_iter()
+            .map(|value| Labelled {
+                value,
+                label: crate::ui::interface_settings::menu_bar_position_label(value),
+            })
+            .collect();
+    let selected_menu_bar_position = menu_bar_positions
+        .iter()
+        .find(|choice| choice.value == prefs.menu_bar_position)
+        .cloned();
+    let qat_positions: Vec<Labelled<QatPosition>> = [
+        QatPosition::TitleBar,
+        QatPosition::BeforeTabs,
+        QatPosition::BelowRibbon,
+    ]
+    .into_iter()
+    .map(|value| Labelled {
+        value,
+        label: crate::ui::interface_settings::qat_position_label(value),
+    })
+    .collect();
+    let selected_qat_position = qat_positions
+        .iter()
+        .find(|choice| choice.value == prefs.qat_position)
+        .cloned();
+
     let mut display = column![
         text(crate::tr!("options", "theme-section")).size(15),
         Space::new().height(10),
@@ -1003,10 +1040,55 @@ pub fn view_window<'a>(
         .push(Space::new().height(8))
         .push(
             row![
+                text(crate::tr!("interface-settings", "menu-bar-position-label"))
+                    .size(12)
+                    .width(150),
+                crate::ui::dropdown_list::pick_list(
+                    selected_menu_bar_position,
+                    menu_bar_positions,
+                    |choice| choice.label.clone(),
+                )
+                .on_select(|choice| Message::MenuBarPositionChanged(choice.value))
+                .width(sizing.width),
+            ]
+            .spacing(12)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(8))
+        .push(
+            row![
                 iced::widget::checkbox(prefs.show_ribbon)
                     .on_toggle(Message::RibbonVisibleChanged)
                     .size(15),
                 text(crate::t!("Show the ribbon (RIBBON / RIBBONCLOSE)")).size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(8))
+        .push(
+            row![
+                text(crate::tr!("interface-settings", "qat-position-label"))
+                    .size(12)
+                    .width(150),
+                crate::ui::dropdown_list::pick_list(
+                    selected_qat_position,
+                    qat_positions,
+                    |choice| choice.label.clone(),
+                )
+                .on_select(|choice| Message::QatPositionChanged(choice.value))
+                .width(sizing.width),
+            ]
+            .spacing(12)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(8))
+        .push(
+            row![
+                iced::widget::checkbox(prefs.show_status_bar)
+                    .on_toggle(Message::StatusBarChanged)
+                    .size(15),
+                text(crate::tr!("interface-settings", "show-status-bar")).size(12),
             ]
             .spacing(8)
             .align_y(iced::Center),

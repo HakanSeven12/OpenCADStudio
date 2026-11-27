@@ -477,7 +477,8 @@ impl Ribbon {
         } else {
             crate::tr!("ribbon-menu", "show-menu-bar")
         };
-        let place = if self.layout.qat_below {
+        let below = self.layout.qat_position == super::QatPosition::BelowRibbon;
+        let place = if below {
             crate::tr!("ribbon-menu", "show-above")
         } else {
             crate::tr!("ribbon-menu", "show-below")
@@ -518,14 +519,14 @@ impl Ribbon {
             menu_bar,
             mb_msg,
         ));
-        let place_el = place_row(place.clone(), self.layout.qat_below, ribbon_closed);
+        let place_el = place_row(place.clone(), below, ribbon_closed);
         if ribbon_closed {
             items.push(DropdownRow::header(place_el));
         } else {
             items.push(DropdownRow::item(
                 place_el,
                 place,
-                Message::RibbonQat(QatMsg::SetBelow(!self.layout.qat_below)),
+                Message::RibbonQat(QatMsg::SetPosition(place_after(below))),
             ));
         }
         let list = DropdownList::new(items).on_escape(Message::CloseRibbonDropdown);
@@ -879,6 +880,21 @@ impl Ribbon {
         super::keytips::anchor_with(move || anchor, PosReport::new(id, btn))
     }
 
+    /// The Interface Settings button, right of the search box in the app's
+    /// title bar: a toolbar button that opens the popover under it.
+    pub fn interface_settings_button(&self) -> Element<'_, Message> {
+        use crate::ui::interface_settings::{InterfaceMsg, INTERFACE_SETTINGS_ID};
+        let open = self.open_dropdown.as_deref() == Some(INTERFACE_SETTINGS_ID);
+        let btn = button(container(icons::line_icon(USER_INTERFACE_ICON, SMALL_ICON)).center(Fill))
+            .on_press(Message::Interface(InterfaceMsg::Toggle))
+            .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, open, status))
+            .width(Length::Fixed(metrics::QAT_BUTTON))
+            .height(metrics::QAT_BUTTON)
+            .padding(0);
+        let btn = tipped(btn, crate::tr!("interface-settings", "title"), open);
+        PosReport::new(INTERFACE_SETTINGS_ID, btn).into()
+    }
+
     /// The open Quick Access list or menu `open_id`, if it is one: a split
     /// item's variants, the layer list, the open drawings or the user
     /// interface switches. None of them opens on the Start tab.
@@ -941,13 +957,24 @@ impl Ribbon {
                         "LAYOUTTAB",
                         self.show_layout_tabs,
                     ),
-                    // OCS has no switch for these yet: greyed out.
                     (
                         crate::tr!("ribbon-menu", "command-line"),
-                        "COMMANDLINE",
-                        false,
+                        if self.command_line_hidden {
+                            "COMMANDLINE"
+                        } else {
+                            "COMMANDLINEHIDE"
+                        },
+                        !self.command_line_hidden,
                     ),
-                    (crate::tr!("ribbon-menu", "status-bar"), "STATUSBAR", false),
+                    (
+                        crate::tr!("ribbon-menu", "status-bar"),
+                        if self.status_bar_hidden {
+                            "STATUSBAR 1"
+                        } else {
+                            "STATUSBAR 0"
+                        },
+                        !self.status_bar_hidden,
+                    ),
                 ]
                 .into_iter()
                 .map(|(label, cmd, on)| {
@@ -1018,9 +1045,10 @@ impl Ribbon {
                     ..QatOutcome::default()
                 }
             }
-            QatMsg::SetBelow(below) => {
+            QatMsg::SetPosition(position) => {
                 self.close_dropdown();
-                self.layout.qat_below = below;
+                self.layout.qat_position = position;
+                self.layout.qat_hidden = false;
                 QatOutcome {
                     save: true,
                     ..QatOutcome::default()
@@ -1073,8 +1101,8 @@ pub enum QatMsg {
     Pick { item: String, cmd: &'static str },
     /// Add the item to the end of the toolbar, or take it off.
     Toggle(QatItem),
-    /// Show the toolbar below the ribbon (`true`) or in the tab row.
-    SetBelow(bool),
+    /// Show the toolbar here while the ribbon is open.
+    SetPosition(super::QatPosition),
     /// Open More Commands.
     OpenPicker,
     /// More Commands' query.
@@ -1192,12 +1220,22 @@ fn menu_separator<'a>() -> Element<'a, Message> {
     .into()
 }
 
+/// Where Show Below / Above the Ribbon puts the toolbar: from below the
+/// ribbon back to the title bar, from anywhere else below the ribbon.
+pub(super) fn place_after(below: bool) -> super::QatPosition {
+    if below {
+        super::QatPosition::TitleBar
+    } else {
+        super::QatPosition::BelowRibbon
+    }
+}
+
 /// Show Below / Above the Ribbon: disabled while the ribbon is closed.
 fn place_row<'a>(label: String, below: bool, ribbon_closed: bool) -> Element<'a, Message> {
     let row = check_row(
         label,
         false,
-        (!ribbon_closed).then_some(Message::RibbonQat(QatMsg::SetBelow(!below))),
+        (!ribbon_closed).then_some(Message::RibbonQat(QatMsg::SetPosition(place_after(below)))),
     );
     if ribbon_closed {
         crate::ui::kit::tooltip(
@@ -1497,8 +1535,15 @@ mod tests {
     #[test]
     fn the_toolbar_moves_below_the_ribbon() {
         let mut ribbon = Ribbon::default();
-        assert!(ribbon.on_qat(QatMsg::SetBelow(true)).save);
-        assert!(ribbon.layout.qat_below);
+        assert!(
+            ribbon
+                .on_qat(QatMsg::SetPosition(super::super::QatPosition::BelowRibbon))
+                .save
+        );
+        assert_eq!(
+            ribbon.layout.qat_position,
+            super::super::QatPosition::BelowRibbon
+        );
     }
 
     #[test]

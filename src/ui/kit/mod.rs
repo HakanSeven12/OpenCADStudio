@@ -20,6 +20,11 @@
 //! | Frame | [`palette`], [`band`], [`crate::ui::dock::SplitterGrip`] |
 //! | Menus, tooltips | [`crate::ui::kit::menu`], [`tooltip`] |
 //!
+//! That stack is for palettes. Windows (popovers, dialogs) are built from
+//! [`form`] instead: labels and controls straight on the surface, no grid
+//! lines or cell backgrounds, label and control each half a row. Palettes
+//! use `grid.rs`, windows `form.rs`.
+//!
 //! Dropdowns are [`dropdown`] (a field-style head over a list as wide as
 //! its longest option); menus are [`menu`], whose frame
 //! ([`menu::frame_style`], [`menu::inset`]) every popup list shares.
@@ -44,6 +49,7 @@
 
 mod dropdown;
 mod field;
+pub mod form;
 mod frame;
 mod grid;
 mod list;

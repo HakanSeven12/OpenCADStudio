@@ -1111,6 +1111,9 @@ pub fn start_allowed(cmd: &str) -> bool {
             // command that opens the same dialog belongs here too.
             | "OPTIONS"
             | "OP"
+            // The popover is reachable from the title bar on the Start tab
+            // too.
+            | "INTERFACESETTINGS"
         )
 }
 
@@ -1503,6 +1506,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "COMMANDLINEOPACITY",
         "NAVVCUBEOPACITY",
         "MENUBAR",
+        "STATUSBAR",
+        "INTERFACESETTINGS",
         "RIBBON",
         "RIBBONCLOSE",
         "TOOLBAR",

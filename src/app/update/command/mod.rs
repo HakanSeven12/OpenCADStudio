@@ -588,6 +588,13 @@ impl OpenCADStudio {
             self.resolve_user_select(false);
             return Task::none();
         }
+        // Esc closes the Interface Settings popover (a list of it first).
+        if self.interface_settings_open() {
+            if self.interface_settings.open_list.take().is_none() {
+                self.ribbon.close_dropdown();
+            }
+            return Task::none();
+        }
         if self.ribbon.escape_search()
             || self.ribbon.close_menu()
             || self.ribbon.close_app_menu()

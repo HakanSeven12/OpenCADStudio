@@ -67,8 +67,8 @@ pub use keytips::{
 };
 pub use layout::CustomPanel;
 pub use layout::{
-    default_qat, DockedToolbar, FloatingPanel, MinimizePref, QatBuiltin, QatItem, RibbonLayout,
-    RibbonMinimize, ToolbarEdge,
+    default_qat, DockedToolbar, FloatingPanel, MinimizePref, QatBuiltin, QatItem, QatPosition,
+    RibbonLayout, RibbonMinimize, ToolbarEdge,
 };
 pub use minimize::{MinimizeMsg, Opener};
 pub(crate) use qat::{list_source as qat_list_source, QAT_SWITCH_ID};
@@ -242,6 +242,8 @@ const RIBBON_ID: &str = "ribbon_whole";
 const TAB_ROW_LOGO_ID: &str = "ribbon_tab_row_logo";
 const TAB_ROW_SEARCH_ID: &str = "ribbon_tab_row_search";
 const TITLE_START_ID: &str = "ribbon_title_bar_start";
+/// The Quick Access Toolbar in the app's title bar, to measure its width.
+const TITLE_QAT_ID: &str = "ribbon_title_bar_qat";
 /// The gap between the tab row's blocks, and the tab row's right padding.
 const TAB_ROW_GAP: f32 = 6.0;
 const TAB_BAR_PAD_RIGHT: f32 = 6.0;
@@ -379,6 +381,11 @@ pub struct Ribbon {
     pub show_parameters_manager: bool,
     /// File tabs (FILETAB) visibility — drives the File Tabs button highlight.
     pub show_file_tabs: bool,
+    /// The command line is hidden (COMMANDLINEHIDE), for the Quick Access
+    /// User Interface menu; the app's state, mirrored after each update.
+    pub command_line_hidden: bool,
+    /// The status bar is hidden (STATUSBAR 0), mirrored like the above.
+    pub status_bar_hidden: bool,
     /// Layout tabs (LAYOUTTAB) visibility — drives the Layout Tabs button highlight.
     pub show_layout_tabs: bool,
     /// PICKSTYLE group selection of the drawing — drives the Group Selection
@@ -437,6 +444,10 @@ pub struct Ribbon {
     title_start_w: Arc<AtomicU32>,
     /// The start's width the name was last placed for (`f32` bits).
     title_start_used: AtomicU32,
+    /// The width the Quick Access Toolbar takes in the title bar, its gap
+    /// included (`f32` bits): 0 while it shows elsewhere, NaN before the
+    /// first layout. The pull-down menus go beside it only if both fit.
+    title_qat_w: Arc<AtomicU32>,
     /// The app draws the main window's title bar, which holds the logo, the
     /// Quick Access Toolbar and the search box; the tab row holds the tabs.
     in_title_bar: bool,
@@ -614,6 +625,8 @@ impl Ribbon {
             show_authoring_palettes: false,
             show_parameters_manager: false,
             show_file_tabs: true,
+            command_line_hidden: false,
+            status_bar_hidden: false,
             show_layout_tabs: true,
             group_selection: true,
             open_dropdown: None,
@@ -652,6 +665,7 @@ impl Ribbon {
             in_title_bar: cfg!(not(test)) && crate::ui::title_bar::drawn(),
             title_start_w: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             title_start_used: AtomicU32::new(0f32.to_bits()),
+            title_qat_w: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             narrow_shown: AtomicBool::new(false),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
@@ -1477,12 +1491,20 @@ impl Ribbon {
     ) -> Element<'a, Message> {
         // ── Quick Access Toolbar, one flow ───────────────────────────────
         // Below the ribbon it has a row of its own, except while the ribbon
-        // is closed, when it comes back to the top row.
-        let qat_below = self.layout.qat_below && !closed;
-        let lead: Element<'_, Message> = if qat_below || self.in_title_bar {
-            Space::new().into()
-        } else {
+        // is closed, when it comes back to the top row. Before the tabs it
+        // leads the tab row; in the title bar it leads the tab row only
+        // where the app draws no title bar of its own.
+        let placement = self.qat_placement(closed);
+        let qat_below = placement == Some(QatPosition::BelowRibbon);
+        let qat_leads = match placement {
+            Some(QatPosition::BeforeTabs) => true,
+            Some(QatPosition::TitleBar) => !self.in_title_bar,
+            _ => false,
+        };
+        let lead: Element<'_, Message> = if qat_leads {
             self.qat_row(is_start, undo_count, redo_count)
+        } else {
+            Space::new().into()
         };
 
         // The quick-access flow and the tabs flow each flex-wrap; WrapBar stacks
@@ -1643,11 +1665,7 @@ impl Ribbon {
                 // Under the app's title bar the tabs keep the same margin from
                 // the window's edge whether the toolbar is above or below.
                 WrapBar::new(lead, tabs.into())
-                    .spacing(if qat_below && !self.in_title_bar {
-                        0.0
-                    } else {
-                        6.0
-                    })
+                    .spacing(if qat_leads { 6.0 } else { 0.0 })
                     .center_trail(self.layout.centered)
                     .center_span(span.clone())
                     .report_natural_width(self.tab_flow_natural.clone())
@@ -1769,11 +1787,25 @@ impl Ribbon {
         .into()
     }
 
-    /// The start of the app's title bar: the compact logo and, unless it
-    /// shows below the ribbon, the Quick Access Toolbar.
+    /// Where the Quick Access Toolbar shows, `None` while it is hidden. A
+    /// `closed` ribbon (RIBBONCLOSE, or a clean screen) keeps it in the
+    /// title bar, whatever the chosen place; the choice stays for later.
+    pub fn qat_placement(&self, closed: bool) -> Option<QatPosition> {
+        if self.layout.qat_hidden {
+            return None;
+        }
+        Some(if closed {
+            QatPosition::TitleBar
+        } else {
+            self.layout.qat_position
+        })
+    }
+
+    /// The start of the app's title bar: the compact logo and, while it
+    /// shows there, the Quick Access Toolbar.
     ///
-    /// `menus`: the pull-down menus, which take the toolbar's place while it
-    /// shows below the ribbon (see [`Self::menus_fit_title_bar`]).
+    /// `menus`: the pull-down menus, which follow the toolbar when the user
+    /// wants them there and they fit (see [`Self::menus_fit_title_bar`]).
     pub fn title_bar_start<'a>(
         &'a self,
         closed: bool,
@@ -1784,8 +1816,15 @@ impl Ribbon {
     ) -> Element<'a, Message> {
         let logo = PosReport::new(TAB_ROW_LOGO_ID, self.logo_button(false));
         let mut own = row![logo].spacing(TAB_ROW_GAP).align_y(iced::Center);
-        if !(self.layout.qat_below && !closed) {
-            own = own.push(self.qat_row(is_start, undo_count, redo_count));
+        if self.qat_placement(closed) == Some(QatPosition::TitleBar) {
+            own = own.push(
+                PosReport::new(TITLE_QAT_ID, self.qat_row(is_start, undo_count, redo_count))
+                    .report_width(self.title_qat_w.clone(), TAB_ROW_GAP),
+            );
+        } else {
+            // Not there: unmeasured again for when it comes back.
+            self.title_qat_w
+                .store(f32::NAN.to_bits(), Ordering::Relaxed);
         }
         // Right-clicked, the logo and the toolbar offer where the toolbar
         // shows, as the tab row does; the menus keep their own presses.
@@ -1804,15 +1843,29 @@ impl Ribbon {
             .into()
     }
 
-    /// Whether the pull-down menus go in the app's title bar: where the
-    /// toolbar was, now that it shows below the ribbon, as long as the
-    /// window holds them beside the logo, the search magnifier, the window
-    /// buttons and a little of the drawing's name.
+    /// Whether the pull-down menus, which the user wants in the app's title
+    /// bar, go there: as long as the window holds them beside the logo, the
+    /// Quick Access Toolbar when it shows there too, the search magnifier,
+    /// the window buttons and a little of the drawing's name. Otherwise they
+    /// keep a row of their own.
     pub fn menus_fit_title_bar(&self, closed: bool, is_start: bool) -> bool {
-        if !(self.in_title_bar && self.layout.qat_below && !closed) {
+        if !self.in_title_bar {
             return false;
         }
-        let start = app_menu::COMPACT_W + TAB_ROW_GAP + crate::ui::menu_bar::menus_width(is_start);
+        let qat = if self.qat_placement(closed) == Some(QatPosition::TitleBar) {
+            // Unmeasured, the menus keep their row for now: once the
+            // toolbar is laid out, the start's new width asks for a fresh
+            // view that knows whether both fit.
+            let w = f32::from_bits(self.title_qat_w.load(Ordering::Relaxed));
+            if w.is_nan() {
+                return false;
+            }
+            w
+        } else {
+            0.0
+        };
+        let start =
+            app_menu::COMPACT_W + TAB_ROW_GAP + qat + crate::ui::menu_bar::menus_width(is_start);
         crate::ui::title_bar::name_room(self.win_w, start, search::MAGNIFIER_W)
             >= metrics::TITLE_NAME_MIN
     }
@@ -2034,6 +2087,24 @@ impl Ribbon {
     ) -> Element<'a, Message> {
         let (align_right, h_pad, top) = self.dd_anchor(id, w, win_w);
         dropdown_backdrop(position_ribbon_dropdown(panel, align_right, h_pad, top))
+    }
+
+    /// A popover `panel` hanging under the button `id`, its right edge
+    /// lined up with the button's; without the button (no title bar of the
+    /// app's own), under the search box. A press outside it closes it.
+    pub fn place_popover<'a>(
+        &self,
+        id: &str,
+        panel: Element<'a, Message>,
+        win_w: f32,
+    ) -> Element<'a, Message> {
+        let bounds = crate::ui::wrap_bar::dropdown_bounds(id)
+            .or_else(|| crate::ui::wrap_bar::dropdown_bounds(TAB_ROW_SEARCH_ID));
+        let (right, top) = match bounds {
+            Some(b) => ((win_w - (b.x + b.width)).max(0.0), b.y + b.height),
+            None => (0.0, self.tab_bar_height()),
+        };
+        dropdown_backdrop(position_ribbon_dropdown(panel, true, right, top))
     }
 
     pub fn dropdown_overlay(
@@ -3120,7 +3191,9 @@ impl Default for Ribbon {
 #[cfg(test)]
 mod tests {
     use super::widgets::is_active_tool;
-    use super::{panel_measure_key_at, CollapseMode, Ribbon, RibbonLayout, StyleContext};
+    use super::{
+        panel_measure_key_at, CollapseMode, QatPosition, Ribbon, RibbonLayout, StyleContext,
+    };
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
 
@@ -3329,7 +3402,7 @@ mod tests {
         use super::layout::{QatBuiltin, QatItem};
         let mut ribbon = Ribbon::default();
         let mut layout = RibbonLayout {
-            qat_below: true,
+            qat_position: QatPosition::BelowRibbon,
             ..RibbonLayout::default()
         };
         layout.qat.push(QatItem::Separator);
@@ -3353,28 +3426,41 @@ mod tests {
     fn the_ribbon_under_the_app_title_bar_builds_in_every_state() {
         let mut ribbon = Ribbon::default();
         ribbon.set_in_title_bar(true);
-        for qat_below in [false, true] {
+        let places = [
+            (QatPosition::TitleBar, false),
+            (QatPosition::BeforeTabs, false),
+            (QatPosition::BelowRibbon, false),
+            (QatPosition::TitleBar, true),
+        ];
+        for (qat_position, qat_hidden) in places {
             ribbon.set_layout(RibbonLayout {
-                qat_below,
+                qat_position,
+                qat_hidden,
                 ..RibbonLayout::default()
             });
             for closed in [false, true] {
                 std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1, None));
                 let menus = iced::widget::text("File").into();
                 std::hint::black_box(ribbon.title_bar_start(closed, false, 3, 1, Some(menus)));
-                // The menus go up only while the toolbar is below the ribbon,
-                // and only where the window holds them.
+                let qat_in_title = ribbon.qat_placement(closed) == Some(QatPosition::TitleBar);
+                // The menus go up where the window holds them, beside the
+                // toolbar when that is up there too.
                 ribbon.set_window_size((1920.0, 1080.0));
-                assert_eq!(
-                    ribbon.menus_fit_title_bar(closed, false),
-                    qat_below && !closed
-                );
+                ribbon
+                    .title_qat_w
+                    .store(0f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                assert!(ribbon.menus_fit_title_bar(closed, false));
+                ribbon
+                    .title_qat_w
+                    .store(1500f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                assert_eq!(ribbon.menus_fit_title_bar(closed, false), !qat_in_title);
+                ribbon
+                    .title_qat_w
+                    .store(0f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
                 ribbon.set_window_size((640.0, 1080.0));
                 assert!(!ribbon.menus_fit_title_bar(closed, false));
                 // The Start tab's three menus fit where all twelve do not.
-                if qat_below && !closed {
-                    assert!(ribbon.menus_fit_title_bar(closed, true));
-                }
+                assert!(ribbon.menus_fit_title_bar(closed, true));
                 std::hint::black_box(ribbon.title_bar_search());
                 std::hint::black_box(ribbon.view(None, closed, false, false, 3, 1, false, None));
                 let menu_row = iced::widget::text("File").into();

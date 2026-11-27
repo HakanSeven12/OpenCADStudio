@@ -910,6 +910,10 @@ impl Ribbon {
     /// codes, every other item takes the next free one (`qat_codes`).
     pub(super) fn qat_tips(&self) -> Vec<Tip> {
         use super::layout::{QatBuiltin, QatItem};
+        // A hidden toolbar has no buttons to point at.
+        if self.layout.qat_hidden {
+            return Vec::new();
+        }
         use super::qat::{QAT_SWITCH_ID, QAT_UI_ID};
         let open = |id: &str| Action::Open(Message::ToggleRibbonDropdown(id.to_string()));
         let codes = qat_codes(&self.layout.qat);
@@ -1751,6 +1755,10 @@ mod tests {
         );
         let tips = ribbon.qat_tips();
         assert_eq!(tips.len(), 3);
+        // A hidden toolbar offers no key tips.
+        ribbon.layout.qat_hidden = true;
+        assert!(ribbon.qat_tips().is_empty());
+        ribbon.layout.qat_hidden = false;
         let mut anchors: Vec<&str> = tips.iter().map(|tip| tip.anchor.as_str()).collect();
         anchors.sort_unstable();
         anchors.dedup();

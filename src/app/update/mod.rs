@@ -164,6 +164,7 @@ mod dialog;
 mod dynamic;
 pub(in crate::app) mod file;
 mod graphic_attributes;
+mod interface_settings;
 mod keytips;
 pub(in crate::app) mod linetype_manager;
 pub(in crate::app) mod mleader_style;

@@ -61,10 +61,35 @@ pub fn params_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 const MAX_CLIP_PLANES: usize = 6;
 const PARAMS: usize = 12 + 4 * MAX_CLIP_PLANES;
 
-struct CloudBuffer {
-    key: u64,
+struct CloudChunk {
     buffer: wgpu::Buffer,
     count: u32,
+}
+
+struct CloudBuffer {
+    key: u64,
+    chunks: Vec<CloudChunk>,
+    total_count: u32,
+}
+
+/// Remaining instance budget for `fraction` of `total_count` (`>= 1` when non-empty).
+fn initial_draw_budget(total_count: u32, fraction: f32) -> u32 {
+    if total_count == 0 {
+        return 0;
+    }
+    let fraction = if fraction.is_finite() {
+        fraction.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    ((total_count as f32 * fraction).ceil() as u32).clamp(1, total_count)
+}
+
+/// Draw instance count for one chunk given `chunk_size` and the mutable `remaining` budget.
+fn next_chunk_draw_count(chunk_size: u32, remaining: &mut u32) -> u32 {
+    let count = (*remaining).min(chunk_size);
+    *remaining -= count;
+    count
 }
 
 /// The resident point clouds of one viewport pipeline.
@@ -84,7 +109,8 @@ impl PointCloudGpu {
             + self
                 .clouds
                 .iter()
-                .map(|cloud| counter.buffer(&cloud.buffer))
+                .flat_map(|cloud| cloud.chunks.iter())
+                .map(|chunk| counter.buffer(&chunk.buffer))
                 .sum::<u64>()
     }
 
@@ -119,6 +145,7 @@ impl PointCloudGpu {
 
     /// Make `set` resident, keeping the buffers of clouds it already had.
     pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, set: &PointCloudSet) {
+        let chunk_cap = super::gpu_budget::max_elements::<PointInstance>(device).min(u32::MAX as usize);
         let mut old = std::mem::take(&mut self.clouds);
         for cloud in set
             .clouds
@@ -129,16 +156,24 @@ impl PointCloudGpu {
                 self.clouds.push(old.swap_remove(at));
                 continue;
             }
+            let chunks = cloud
+                .instances
+                .chunks(chunk_cap)
+                .map(|slice| CloudChunk {
+                    buffer: super::gpu_upload::upload_buffer(
+                        device,
+                        queue,
+                        "point_cloud.instances",
+                        slice,
+                        wgpu::BufferUsages::VERTEX,
+                    ),
+                    count: slice.len() as u32,
+                })
+                .collect();
             self.clouds.push(CloudBuffer {
                 key: cloud.key,
-                buffer: super::gpu_upload::upload_buffer(
-                    device,
-                    queue,
-                    "point_cloud.instances",
-                    &cloud.instances,
-                    wgpu::BufferUsages::VERTEX,
-                ),
-                count: cloud.instances.len() as u32,
+                chunks,
+                total_count: u32::try_from(cloud.instances.len()).unwrap_or(u32::MAX),
             });
         }
         self.point_size = set.point_size;
@@ -168,9 +203,50 @@ impl PointCloudGpu {
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_bind_group(1, &self.bind_group, &[]);
         for cloud in &self.clouds {
-            pass.set_vertex_buffer(0, cloud.buffer.slice(..));
-            let count = ((cloud.count as f32 * self.fraction).ceil() as u32).clamp(1, cloud.count);
-            pass.draw(0..6, 0..count);
+            let mut remaining = initial_draw_budget(cloud.total_count, self.fraction);
+            if remaining == 0 {
+                continue;
+            }
+            for chunk in &cloud.chunks {
+                let count = next_chunk_draw_count(chunk.count, &mut remaining);
+                if count == 0 {
+                    if remaining == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                pass.set_vertex_buffer(0, chunk.buffer.slice(..));
+                pass.draw(0..6, 0..count);
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{initial_draw_budget, next_chunk_draw_count};
+
+    fn draw_chunk_counts(chunk_sizes: &[u32], total_count: u32, fraction: f32) -> Vec<u32> {
+        let mut remaining = initial_draw_budget(total_count, fraction);
+        let mut counts = Vec::with_capacity(chunk_sizes.len());
+        for &size in chunk_sizes {
+            let draw_n = next_chunk_draw_count(size, &mut remaining);
+            if draw_n == 0 {
+                if remaining == 0 {
+                    break;
+                }
+                continue;
+            }
+            counts.push(draw_n);
+        }
+        counts
+    }
+
+    #[test]
+    fn draw_chunk_counts_respects_chunk_boundaries_and_fraction() {
+        assert!(draw_chunk_counts(&[], 0, 1.0).is_empty());
+        assert_eq!(draw_chunk_counts(&[10, 10, 5], 25, 1.0), vec![10, 10, 5]);
+        assert_eq!(draw_chunk_counts(&[10, 10, 5], 25, 0.5), vec![10, 3]);
+        assert_eq!(draw_chunk_counts(&[10, 10, 5], 25, 0.0), vec![1]);
     }
 }

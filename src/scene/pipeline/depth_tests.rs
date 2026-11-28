@@ -379,6 +379,7 @@ fn all_draw_order_shaders_validate() {
         draw_order_shader!("hatch_texture.wgsl"),
         draw_order_shader!("image.wgsl"),
         draw_order_shader!("wipeout.wgsl"),
+        include_str!("../../shaders/mesh.wgsl"),
     ] {
         let module = naga::front::wgsl::parse_str(source).expect("composed shader parses");
         naga::valid::Validator::new(

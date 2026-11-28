@@ -101,6 +101,9 @@ fn acquire_headless_context() -> Result<HeadlessGpuContext, String> {
             || info.name.to_ascii_lowercase().contains("swiftshader");
         match try_create_device(&adapter) {
             Ok((device, queue)) => {
+                device.on_uncaptured_error(std::sync::Arc::new(|err: wgpu::Error| {
+                    eprintln!("[offscreen-gpu] uncaptured wgpu error: {err}");
+                }));
                 // OCS shaders emit sRGB-encoded floats directly (GAMMA_CORRECTION=false),
                 // so target format MUST be non-sRGB Rgba8Unorm.
                 let pipeline =
@@ -127,143 +130,175 @@ fn execute_job(ctx: &mut HeadlessGpuContext, job: &GpuJob) -> Result<GpuRenderOu
     if width == 0 || height == 0 {
         return Err("Off-screen capture dimensions must be non-zero".to_string());
     }
-
-    let error_scope = ctx
-        .device
-        .push_error_scope(wgpu::ErrorFilter::Validation);
-
-    let extent = wgpu::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-    };
-    let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("ocs-offscreen-color"),
-        size: extent,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = texture.create_view(&Default::default());
-
-    let bounds = iced::Rectangle {
-        x: 0.0,
-        y: 0.0,
-        width: width as f32,
-        height: height as f32,
-    };
-    let clip = iced::Rectangle {
-        x: 0,
-        y: 0,
-        width,
-        height,
-    };
-
-    job.primitive
-        .prepare_offscreen(&mut ctx.pipeline, &ctx.device, &ctx.queue, &bounds);
-
-    let mut encoder = ctx
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("ocs-offscreen-encoder"),
-        });
-
-    {
-        let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("ocs-offscreen-clear"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(job.clear_color[0]),
-                        g: f64::from(job.clear_color[1]),
-                        b: f64::from(job.clear_color[2]),
-                        a: f64::from(job.clear_color[3]),
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
+    let limits = ctx.device.limits();
+    let max_dim = limits.max_texture_dimension_2d;
+    if width > max_dim || height > max_dim {
+        return Err(format!(
+            "Off-screen capture {width}x{height} exceeds max texture dimension {max_dim}"
+        ));
     }
-
-    job.primitive
-        .render_offscreen(&ctx.pipeline, &mut encoder, &view, &clip);
-
     let unpadded_bpr = width
         .checked_mul(4)
         .ok_or_else(|| "Image byte width overflow".to_string())?;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bpr = unpadded_bpr.div_ceil(align) * align;
-    let buffer_size = u64::from(padded_bpr) * u64::from(height);
+    let padded_bpr = unpadded_bpr
+        .div_ceil(align)
+        .checked_mul(align)
+        .ok_or_else(|| "Padded image row stride overflow".to_string())?;
+    let buffer_size = u64::from(padded_bpr)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| "Image readback buffer size overflow".to_string())?;
+    if buffer_size > limits.max_buffer_size {
+        return Err(format!(
+            "Off-screen capture readback buffer {buffer_size} exceeds device max_buffer_size {}",
+            limits.max_buffer_size
+        ));
+    }
 
-    let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ocs-offscreen-readback"),
-        size: buffer_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let validation_scope = ctx.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let oom_scope = ctx.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let internal_scope = ctx.device.push_error_scope(wgpu::ErrorFilter::Internal);
 
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bpr),
-                rows_per_image: Some(height),
-            },
-        },
-        extent,
-    );
-
-    ctx.queue.submit([encoder.finish()]);
-
-    let (map_tx, map_rx) = mpsc::channel();
-    readback
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |res| {
-            let _ = map_tx.send(res);
+    let render_res = (|| -> Result<Vec<u8>, String> {
+        let extent = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ocs-offscreen-color"),
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         });
-    ctx.device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .map_err(|e| format!("wgpu device poll failed: {e}"))?;
-    map_rx
-        .recv()
-        .map_err(|e| format!("wgpu readback channel failed: {e}"))?
-        .map_err(|e| format!("wgpu buffer map failed: {e}"))?;
+        let view = texture.create_view(&Default::default());
 
-    let packed = {
-        let view = readback.slice(..).get_mapped_range();
-        let row_bytes = unpadded_bpr as usize;
-        let stride = padded_bpr as usize;
-        let mut out = vec![0u8; row_bytes * height as usize];
-        for row in 0..height as usize {
-            let src_start = row * stride;
-            let dst_start = row * row_bytes;
-            out[dst_start..dst_start + row_bytes]
-                .copy_from_slice(&view[src_start..src_start + row_bytes]);
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: height as f32,
+        };
+        let clip = iced::Rectangle {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+
+        job.primitive
+            .prepare_offscreen(&mut ctx.pipeline, &ctx.device, &ctx.queue, &bounds);
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("ocs-offscreen-encoder"),
+            });
+
+        {
+            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("ocs-offscreen-clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(job.clear_color[0]),
+                            g: f64::from(job.clear_color[1]),
+                            b: f64::from(job.clear_color[2]),
+                            a: f64::from(job.clear_color[3]),
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
         }
-        out
-    };
-    readback.unmap();
 
-    if let Some(err) = pollster::block_on(error_scope.pop()) {
+        job.primitive
+            .render_offscreen(&ctx.pipeline, &mut encoder, &view, &clip);
+
+        let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ocs-offscreen-readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bpr),
+                    rows_per_image: Some(height),
+                },
+            },
+            extent,
+        );
+
+        ctx.queue.submit([encoder.finish()]);
+
+        let (map_tx, map_rx) = mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |res| {
+                let _ = map_tx.send(res);
+            });
+        ctx.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| format!("wgpu device poll failed: {e}"))?;
+        map_rx
+            .recv()
+            .map_err(|e| format!("wgpu readback channel failed: {e}"))?
+            .map_err(|e| format!("wgpu buffer map failed: {e}"))?;
+
+        let packed = {
+            let view = readback.slice(..).get_mapped_range();
+            let row_bytes = unpadded_bpr as usize;
+            let stride = padded_bpr as usize;
+            let mut out = vec![0u8; row_bytes * height as usize];
+            for row in 0..height as usize {
+                let src_start = row * stride;
+                let dst_start = row * row_bytes;
+                out[dst_start..dst_start + row_bytes]
+                    .copy_from_slice(&view[src_start..src_start + row_bytes]);
+            }
+            out
+        };
+        readback.unmap();
+        Ok(packed)
+    })();
+
+    // Always pop pushed error scopes in reverse LIFO order even when the body returns early.
+    let internal_err = pollster::block_on(internal_scope.pop());
+    let oom_err = pollster::block_on(oom_scope.pop());
+    let validation_err = pollster::block_on(validation_scope.pop());
+
+    if let Some(err) = oom_err {
+        return Err(format!("wgpu out-of-memory error: {err}"));
+    }
+    if let Some(err) = internal_err {
+        return Err(format!("wgpu internal error: {err}"));
+    }
+    if let Some(err) = validation_err {
         return Err(format!("wgpu validation error: {err}"));
     }
+    let packed = render_res?;
 
     let image = image::RgbaImage::from_raw(width, height, packed)
         .ok_or_else(|| "Rendered GPU image buffer size mismatch".to_string())?;

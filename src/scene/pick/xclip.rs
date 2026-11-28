@@ -499,14 +499,19 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
             let station_data = pattern_station_values(&w.pattern_stations, w.points.len());
             let source_length = station_data.map(|(_, source_length)| source_length);
             let station_map = decode_pattern_station_map(&w.pattern_stations, w.points.len());
-            let (clipped, clipped_stations, clipped_segments) = clip_polyline_stationed(
-                &local,
-                &lpoly,
-                station_data.map(|(stations, _)| stations),
-                station_map
-                    .as_ref()
-                    .map(|map| map.point_segments.as_slice()),
-            );
+            let has_taper =
+                !w.taper_widths.is_empty() && w.taper_widths.len() == w.points.len();
+            let taper_data = has_taper.then_some(w.taper_widths.as_slice());
+            let (clipped, clipped_stations, clipped_segments, clipped_taper_widths) =
+                clip_polyline_stationed(
+                    &local,
+                    &lpoly,
+                    station_data.map(|(stations, _)| stations),
+                    station_map
+                        .as_ref()
+                        .map(|map| map.point_segments.as_slice()),
+                    taper_data,
+                );
             // Local → absolute, re-split into double-single high/low.
             let mut hi = Vec::with_capacity(clipped.len());
             let mut lo = Vec::with_capacity(clipped.len());
@@ -537,6 +542,11 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
             } else {
                 w.pattern_stations.clear();
             }
+            w.taper_widths = if has_taper {
+                clipped_taper_widths
+            } else {
+                Vec::new()
+            };
             if !w.tangent_geoms.is_empty() {
                 w.tangent_geoms.clear();
             }
@@ -889,7 +899,7 @@ fn point_in_poly(x: f32, y: f32, poly: &[[f32; 2]]) -> bool {
 /// of only the inside portions.
 #[cfg(test)]
 fn clip_polyline(pts: &[[f32; 3]], poly: &[[f32; 2]]) -> Vec<[f32; 3]> {
-    clip_polyline_stationed(pts, poly, None, None).0
+    clip_polyline_stationed(pts, poly, None, None, None).0
 }
 
 fn clip_polyline_stationed(
@@ -897,10 +907,12 @@ fn clip_polyline_stationed(
     poly: &[[f32; 2]],
     stations: Option<&[f32]>,
     point_segments: Option<&[i32]>,
-) -> (Vec<[f32; 3]>, Vec<f32>, Vec<i32>) {
+    taper_widths: Option<&[f32]>,
+) -> (Vec<[f32; 3]>, Vec<f32>, Vec<i32>, Vec<f32>) {
     let mut out: Vec<[f32; 3]> = Vec::new();
     let mut out_stations = Vec::new();
     let mut out_segments = Vec::new();
+    let mut out_taper_widths = Vec::new();
     let mut i = 0;
     while i < pts.len() {
         if !pts[i][0].is_finite() || !pts[i][1].is_finite() {
@@ -930,6 +942,12 @@ fn clip_polyline_stationed(
                         a + (values[start + j + 1] - a) * t
                     })
                 };
+                let taper_width = |t: f32| {
+                    taper_widths.map_or(0.0, |widths| {
+                        let w0 = widths[start + j];
+                        w0 + (widths[start + j + 1] - w0) * t
+                    })
+                };
                 let contiguous = last
                     .is_some_and(|l| (l[0] - a[0]).abs() <= 1e-4 && (l[1] - a[1]).abs() <= 1e-4);
                 if !contiguous {
@@ -941,6 +959,9 @@ fn clip_polyline_stationed(
                         if point_segments.is_some() {
                             out_segments.push(-1);
                         }
+                        if taper_widths.is_some() {
+                            out_taper_widths.push(0.0);
+                        }
                     }
                     out.push(a);
                     if stations.is_some() {
@@ -948,6 +969,9 @@ fn clip_polyline_stationed(
                     }
                     if let Some(segments) = point_segments {
                         out_segments.push(segments[start + j]);
+                    }
+                    if taper_widths.is_some() {
+                        out_taper_widths.push(taper_width(ta));
                     }
                 }
                 out.push(b);
@@ -957,11 +981,14 @@ fn clip_polyline_stationed(
                 if let Some(segments) = point_segments {
                     out_segments.push(segments[start + j]);
                 }
+                if taper_widths.is_some() {
+                    out_taper_widths.push(taper_width(tb));
+                }
                 last = Some(b);
             }
         }
     }
-    (out, out_stations, out_segments)
+    (out, out_stations, out_segments, out_taper_widths)
 }
 
 /// Return the inside-the-polygon sub-segments of `p0`→`p1` as endpoint pairs.
@@ -1335,5 +1362,27 @@ mod tests {
         let out = clip_triangles(&tri, &square());
         assert!(!out.is_empty());
         assert!(out.iter().all(|p| p[0] <= 10.0 + 1e-3));
+    }
+
+    #[test]
+    fn polyline_clip_preserves_interpolated_taper_widths() {
+        let mut wires = vec![WireModel {
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 5.0, 0.0], [20.0, 5.0, 0.0]],
+                taper_widths: vec![2.0, 6.0],
+                ..crate::scene::WireGeom::default()
+            }),
+            ..Default::default()
+        }];
+        let poly: Vec<[f64; 2]> = square()
+            .into_iter()
+            .map(|[x, y]| [f64::from(x), f64::from(y)])
+            .collect();
+        clip_wires(&mut wires, &poly);
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].points.len(), 2);
+        assert_eq!(wires[0].taper_widths.len(), wires[0].points.len());
+        assert!((wires[0].taper_widths[0] - 2.0).abs() < 1e-4);
+        assert!((wires[0].taper_widths[1] - 4.0).abs() < 1e-4);
     }
 }

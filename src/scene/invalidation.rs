@@ -1525,6 +1525,7 @@ impl Scene {
                 push_name(name);
             }
         }
+        let mut entity_to_defs: Option<HashMap<Handle, Vec<&str>>> = None;
         for (handle, _) in changes {
             let mut matched_marker = false;
             if let Some(&name) = def_by_marker.get(handle) {
@@ -1545,9 +1546,19 @@ impl Scene {
                 }
             }
             if !matched_marker {
-                for record in &def_records {
-                    if record.entity_handles.contains(handle) {
-                        push_name(&record.name);
+                let index = entity_to_defs.get_or_insert_with(|| {
+                    let mut map: HashMap<Handle, Vec<&str>> = HashMap::default();
+                    for record in &def_records {
+                        let name = record.name.as_str();
+                        for &entity_handle in &record.entity_handles {
+                            map.entry(entity_handle).or_default().push(name);
+                        }
+                    }
+                    map
+                });
+                if let Some(def_names) = index.get(handle) {
+                    for &name in def_names {
+                        push_name(name);
                     }
                 }
             }

@@ -11,13 +11,14 @@ Open CAD Studio measures its own code health on every release and on every pull 
 
 Goals, baselines and the reason for each measure are in [`health-goals.json`](health-goals.json). Goals are milestones: each count's next milestone is half the previous one, so progress shows release by release. Changing a goal is a reviewed pull request, like changing the layer rules.
 
-The source measures (size, robustness) and coverage read the root package's code: `src/` and each crate of [`TARGET.md`](TARGET.md) that exists under `crates/`, such as `crates/ocs_base`. Code that moves into one of these crates is still counted, so a move does not change a value. The other workspace crates are not counted. The upward dependencies are counted in `src/` only: between crates, Cargo enforces the layers.
+The source measures (size, robustness, process-wide state) and coverage read the root package's code: `src/` and each crate of [`TARGET.md`](TARGET.md) that exists under `crates/`, such as `crates/ocs_base`. Code that moves into one of these crates is still counted, so a move does not change a value. The other workspace crates are not counted. The upward dependencies are counted in `src/` only: between crates, Cargo enforces the layers.
 
 ### Structure
 
 - **Upward dependencies**: code that uses a module in a higher layer, counted in files and in module pairs. The layers and how they are counted are in [`RULES.md`](RULES.md).
 - <a id="modules-that-use-each-other"></a>**Modules that use each other**: top-level modules A and B where A uses B and B uses A (any reference, not only upward ones). Such modules can only be changed and understood together.
 - <a id="size"></a>**Files over 3,000 lines** and **functions over 150 lines** (from `fn` to the closing brace, production code only). Large units are hard to review and collect merge conflicts. Generated files (an opening comment that says `Generated` or `@generated`, such as `src/locale_catalog.rs`) are left out of both size measures: their size comes from the generator. **Top-level `Message` variants** counts the variants of the app's message enum.
+- <a id="process-wide-state"></a>**Process-wide mutable statics** and **`thread_local!` blocks**: state held for the whole process or for one thread, in production code. A static counts when its value can change after start: `static mut`, or a type with `Atomic…`, `Mutex`, `RwLock`, `OnceLock`, `OnceCell`, `Cell`, `RefCell`, `UnsafeCell` or `Condvar` in it. A constant table (`static NAMES: &[&str]`) does not count. Each `thread_local!` block counts once; the statics inside it are not counted again. Step 3 of [`TARGET.md`](TARGET.md) moves this state into the session or the app state. The wiki page lists it by module.
 
 ### Robustness
 

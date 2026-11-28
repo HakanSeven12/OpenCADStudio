@@ -2525,3 +2525,161 @@ fn review_mode_leaves_the_display_of_count_mode_alone() {
     assert!(!app.geometry_cleanup.review_shown);
     assert!(app.tabs[i].scene.count_display.is_none());
 }
+
+/// The height that `element` takes in a list `width` wide.
+fn laid_out_height(element: iced::Element<'_, Message>, width: f32) -> f32 {
+    laid_out(element, width).0
+}
+
+/// The height that `element` takes in a list `width` wide, and the number
+/// of its children.
+fn laid_out(mut element: iced::Element<'_, Message>, width: f32) -> (f32, usize) {
+    use iced::advanced::{layout, widget};
+    let _one = crate::headless_ui_lock();
+    let renderer = iced_test::futures::futures::executor::block_on(
+        <iced::Renderer as iced_test::core::renderer::Headless>::new(
+            iced_test::core::renderer::Settings::default(),
+            std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+        ),
+    )
+    .expect("headless renderer");
+    let mut tree = widget::Tree::new(element.as_widget());
+    tree.diff(element.as_widget_mut());
+    let limits = layout::Limits::new(iced::Size::ZERO, iced::Size::new(width, f32::INFINITY));
+    let node = element
+        .as_widget_mut()
+        .layout(&mut tree, &renderer, &limits);
+    (node.size().height, node.children().len())
+}
+
+#[test]
+fn each_line_of_the_list_is_as_tall_as_the_list_counts_it() {
+    use crate::ui::window::geometry_cleanup::{line_view, Line};
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let gap = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(gap));
+    app.geometry_cleanup.kept_open = true;
+    let palette = &app.geometry_cleanup;
+    let scan = palette.scan.as_ref().unwrap();
+    let error = (0..scan.findings.len())
+        .find(|&n| scan.findings[n].kind == ErrorType::Overshoot)
+        .unwrap();
+    for line in [
+        Line::Count,
+        Line::NoErrors,
+        Line::Type(ErrorType::Overshoot, 1),
+        Line::Type(ErrorType::Gap, 1),
+        Line::Error(error),
+        Line::Kept,
+        Line::RestoreAll,
+        Line::KeptError(0),
+    ] {
+        let height = laid_out_height(line_view(palette, scan, line), 280.0);
+        assert_eq!(height, line.height(), "{line:?}");
+    }
+}
+
+/// A list of a count line and `errors` error rows.
+fn long_list(errors: usize) -> Vec<crate::ui::window::geometry_cleanup::Line> {
+    use crate::ui::window::geometry_cleanup::Line;
+    std::iter::once(Line::Count)
+        .chain((0..errors).map(Line::Error))
+        .collect()
+}
+
+#[test]
+fn only_the_lines_in_view_are_built() {
+    use crate::ui::window::geometry_cleanup::shown_lines;
+    let lines = long_list(5000);
+    let total: f32 = lines.iter().map(|line| line.height()).sum();
+    // 180 px of the list, 2000 rows down.
+    let top = lines[..2001].iter().map(|line| line.height()).sum::<f32>();
+    let shown = shown_lines(&lines, top, 180.0);
+    assert!(shown.range.contains(&2001), "{shown:?}");
+    assert!(shown.range.contains(&2010), "{shown:?}");
+    assert!(
+        shown.range.contains(&1995),
+        "spare rows above the viewport: {shown:?}"
+    );
+    assert!(shown.range.len() < 40, "{shown:?}");
+    let built: f32 = lines[shown.range.clone()].iter().map(|l| l.height()).sum();
+    assert!((shown.above + built + shown.below - total).abs() < 0.01);
+    let above: f32 = lines[..shown.range.start].iter().map(|l| l.height()).sum();
+    assert!(
+        (shown.above - above).abs() < 0.01,
+        "the rows sit where the whole list puts them"
+    );
+}
+
+#[test]
+fn an_offset_past_the_end_of_a_shorter_list_shows_its_end() {
+    use crate::ui::window::geometry_cleanup::shown_lines;
+    let lines = long_list(300);
+    let shown = shown_lines(&lines, 1.0e6, 180.0);
+    assert_eq!(shown.range.end, lines.len());
+    assert!(shown.range.start > 0);
+    assert_eq!(shown.below, 0.0);
+}
+
+#[test]
+fn a_list_that_has_not_reported_its_height_builds_a_screenful() {
+    use crate::ui::window::geometry_cleanup::shown_lines;
+    let lines = long_list(5000);
+    let shown = shown_lines(&lines, 0.0, 0.0);
+    assert_eq!(shown.range.start, 0);
+    assert!((50..200).contains(&shown.range.len()), "{shown:?}");
+}
+
+#[test]
+fn a_short_list_is_built_whole() {
+    use crate::ui::window::geometry_cleanup::shown_lines;
+    let lines = long_list(4);
+    let shown = shown_lines(&lines, 0.0, 400.0);
+    assert_eq!(shown.range, 0..lines.len());
+    assert_eq!((shown.above, shown.below), (0.0, 0.0));
+}
+
+#[test]
+fn the_list_keeps_its_scroll_offset() {
+    let (mut app, _) = app();
+    cleanup_msg(
+        &mut app,
+        GeometryCleanupMsg::Scrolled {
+            offset: 360.0,
+            height: 240.0,
+        },
+    );
+    assert_eq!(app.geometry_cleanup.scroll, (360.0, 240.0));
+}
+
+#[test]
+fn the_list_is_as_tall_as_all_its_lines_and_builds_only_those_in_view() {
+    use crate::ui::window::geometry_cleanup::{lines, list_view};
+    let (mut app, _) = app();
+    // 300 gaps, 200 apart, at 17.3°.
+    let (sin, cos) = 17.3f64.to_radians().sin_cos();
+    let mut objects = Vec::new();
+    for k in 0..300 {
+        let (x, y) = (k as f64 * 200.0 + 0.31, 0.17);
+        let at = |t: f64| [x + cos * t, y + sin * t];
+        objects.push(line(&mut app, at(0.0), at(10.0)));
+        objects.push(line(&mut app, at(10.05), at(20.05)));
+    }
+    scan(&mut app, &objects);
+    assert_eq!(findings(&app).len(), 300);
+    cleanup_msg(
+        &mut app,
+        GeometryCleanupMsg::Scrolled {
+            offset: 2000.0,
+            height: 300.0,
+        },
+    );
+    let palette = &app.geometry_cleanup;
+    let scan = palette.scan.as_ref().unwrap();
+    let total: f32 = lines(palette, scan).iter().map(|line| line.height()).sum();
+    let (height, children) = laid_out(list_view(palette, scan), 280.0);
+    assert!((height - total).abs() < 0.5, "{height} for {total}");
+    assert!(children < 50, "{children} children built");
+}

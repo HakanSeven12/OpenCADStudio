@@ -156,6 +156,9 @@ pub enum Extent {
 impl Extent {
     /// Whether `t` is on the curve rather than on its extension.
     pub fn holds(&self, t: f64) -> bool {
+        if !t.is_finite() {
+            return false;
+        }
         const SLACK: f64 = 1e-9;
         match self {
             Self::Bounded => (-SLACK..=1.0 + SLACK).contains(&t),
@@ -714,5 +717,14 @@ mod tests {
         let empty = Curve::Polyline(Polyline::new());
         assert!(close(empty.point_at(0.5), [0.0, 0.0]));
         assert!(empty.tessellate(20.0).is_empty());
+    }
+
+    #[test]
+    fn extent_holds_rejects_non_finite_parameters() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!Extent::Bounded.holds(bad));
+            assert!(!Extent::Forward.holds(bad));
+            assert!(!Extent::Infinite.holds(bad));
+        }
     }
 }

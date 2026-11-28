@@ -304,6 +304,9 @@ pub struct GeometryCleanupPalette {
     /// GEOMETRYCLEANUPZOOMPAN 0: a pick zooms only when the error is not in
     /// view. Kept in the user profile.
     pub auto_zoom_off: bool,
+    /// The list's scroll offset and the height of its viewport, as it last
+    /// reported them: only the lines in view are built.
+    pub scroll: (f32, f32),
 }
 
 #[derive(Debug, Clone)]
@@ -349,6 +352,11 @@ pub enum GeometryCleanupMsg {
     SettingsCancel,
     /// Save the settings, close the dialog and scan.
     SettingsScan,
+    /// The list scrolled: its offset and the height of its viewport.
+    Scrolled {
+        offset: f32,
+        height: f32,
+    },
 }
 
 /// The errors of a scan by type, in the order of the tree: each type with
@@ -375,6 +383,113 @@ pub fn rows(palette: &GeometryCleanupPalette, scan: &Scan) -> Vec<usize> {
         .filter(|(kind, _)| !palette.folded.contains(kind))
         .flat_map(|(_, indices)| indices)
         .collect()
+}
+
+/// One line of the palette's list. Each line kind has a fixed height, so
+/// the place of every line is known without a layout, and only the lines
+/// in view are built: a scan can list many thousands of errors.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Line {
+    /// "Remaining Errors: N".
+    Count,
+    /// "No errors found."
+    NoErrors,
+    /// The bar of an error type, with its number of errors.
+    Type(ErrorType, usize),
+    /// An error, by its index in the scan's findings.
+    Error(usize),
+    /// The bar of the kept errors.
+    Kept,
+    /// Restore All, under the open bar of the kept errors.
+    RestoreAll,
+    /// A kept error, by its index in the scan's kept errors.
+    KeptError(usize),
+}
+
+impl Line {
+    pub fn height(self) -> f32 {
+        match self {
+            Line::Count => crate::ui::style::text::UI_LINE,
+            Line::NoErrors => crate::ui::style::text::UI_LINE + 2.0 * km::TOOL_GAP,
+            Line::Type(..) | Line::Kept => km::CATEGORY_GAP + km::CATEGORY_H,
+            Line::Error(_) | Line::KeptError(_) => km::ROW_H,
+            Line::RestoreAll => km::TOOL_H,
+        }
+    }
+}
+
+/// The lines of the list, top to bottom.
+pub fn lines(palette: &GeometryCleanupPalette, scan: &Scan) -> Vec<Line> {
+    let mut lines = vec![if scan.findings.is_empty() {
+        Line::NoErrors
+    } else {
+        Line::Count
+    }];
+    for (kind, indices) in groups(scan) {
+        lines.push(Line::Type(kind, indices.len()));
+        if !palette.folded.contains(&kind) {
+            lines.extend(indices.into_iter().map(Line::Error));
+        }
+    }
+    if !scan.kept.is_empty() {
+        lines.push(Line::Kept);
+        if palette.kept_open {
+            lines.push(Line::RestoreAll);
+            lines.extend((0..scan.kept.len()).map(Line::KeptError));
+        }
+    }
+    lines
+}
+
+/// The viewport height assumed until the list first reports its own.
+const UNKNOWN_HEIGHT: f32 = 1600.0;
+
+/// The room built above and below the viewport, so that a short scroll
+/// does not show a gap before the list catches up.
+const SPARE: f32 = 10.0 * km::ROW_H;
+
+/// The lines to build, and the room above and below them that the lines
+/// not built take.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shown {
+    pub range: std::ops::Range<usize>,
+    pub above: f32,
+    pub below: f32,
+}
+
+/// The lines in a viewport `height` tall, scrolled `offset` down, with
+/// [`SPARE`] room either side. An offset past the end (reported for a
+/// longer list) shows the end, as the scroll area does.
+pub fn shown_lines(lines: &[Line], offset: f32, height: f32) -> Shown {
+    let height = f64::from(if height > 0.0 { height } else { UNKNOWN_HEIGHT });
+    let total: f64 = lines.iter().map(|line| f64::from(line.height())).sum();
+    let offset = f64::from(offset).clamp(0.0, (total - height).max(0.0));
+    let (from, to) = (
+        offset - f64::from(SPARE),
+        offset + height + f64::from(SPARE),
+    );
+    let (mut start, mut end) = (lines.len(), lines.len());
+    let (mut top, mut above, mut built) = (0.0, 0.0, 0.0);
+    for (n, line) in lines.iter().enumerate() {
+        if top >= to {
+            end = n;
+            break;
+        }
+        let bottom = top + f64::from(line.height());
+        if start == lines.len() && bottom > from {
+            start = n;
+            above = top;
+        }
+        if start != lines.len() {
+            built += f64::from(line.height());
+        }
+        top = bottom;
+    }
+    Shown {
+        range: start.min(end)..end,
+        above: above as f32,
+        below: (total - above - built) as f32,
+    }
 }
 
 fn msg(m: GeometryCleanupMsg) -> Message {
@@ -432,90 +547,105 @@ pub fn view<'a>(
         );
     };
 
-    let mut list = column![];
-    if scan.findings.is_empty() {
-        list = list.push(kit::empty_state(crate::t!("No errors found.")));
-    } else {
-        list = list.push(kit::name_text(
-            crate::tf!("Remaining Errors: {}", scan.findings.len()).into_owned(),
-        ));
-    }
-    for (kind, indices) in groups(scan) {
-        let folded = palette.folded.contains(&kind);
-        // A length type shows its tolerance; an angle type has one for
-        // each angle.
-        let label = match kind.end_kind() {
-            Some(end) => format!(
-                "{}: {} ({})",
-                crate::t!(kind.label()),
-                indices.len(),
-                scan.tolerances.get(end).unwrap_or_default()
-            ),
-            None => format!("{}: {}", crate::t!(kind.label()), indices.len()),
-        };
-        list = list.push(kit::category_bar(
-            label,
-            folded,
-            msg(GeometryCleanupMsg::Fold(kind)),
-        ));
-        if folded {
-            continue;
-        }
-        for index in indices {
-            let finding = &scan.findings[index];
-            list = list.push(
-                kit::tree_row(place(finding))
-                    .depth(1)
-                    .selected(palette.picked == Some(index))
-                    .trailing(fix_buttons(index, finding))
-                    .on_press(msg(GeometryCleanupMsg::Pick(index)))
-                    .view(),
-            );
-        }
-    }
+    let list = kit::scroll_area_reporting(list_view(palette, scan), |viewport| {
+        msg(GeometryCleanupMsg::Scrolled {
+            offset: viewport.absolute_offset().y,
+            height: viewport.bounds().height,
+        })
+    });
+    let body = column![kit::band(tools), container(list).height(Fill)];
+    kit::palette(title_bar, body, width)
+}
 
-    if !scan.kept.is_empty() {
-        list = list.push(kit::category_bar(
+/// The list as far as it is in view: the lines in view, and spaces that
+/// stand in for the lines that are not built, so the list keeps its height
+/// and its scroll position.
+pub fn list_view<'a>(palette: &'a GeometryCleanupPalette, scan: &'a Scan) -> Element<'a, Message> {
+    let lines = lines(palette, scan);
+    let (offset, height) = palette.scroll;
+    let shown = shown_lines(&lines, offset, height);
+    let mut list = column![];
+    if shown.above > 0.0 {
+        list = list.push(Space::new().height(shown.above));
+    }
+    for &line in &lines[shown.range] {
+        list = list.push(container(line_view(palette, scan, line)).height(line.height()));
+    }
+    if shown.below > 0.0 {
+        list = list.push(Space::new().height(shown.below));
+    }
+    list.into()
+}
+
+/// One line of the list.
+pub fn line_view<'a>(
+    palette: &'a GeometryCleanupPalette,
+    scan: &'a Scan,
+    line: Line,
+) -> Element<'a, Message> {
+    match line {
+        Line::Count => {
+            kit::name_text(crate::tf!("Remaining Errors: {}", scan.findings.len()).into_owned())
+        }
+        Line::NoErrors => kit::empty_state(crate::t!("No errors found.")),
+        Line::Type(kind, count) => {
+            // A length type shows its tolerance; an angle type has one for
+            // each angle.
+            let label = match kind.end_kind() {
+                Some(end) => format!(
+                    "{}: {} ({})",
+                    crate::t!(kind.label()),
+                    count,
+                    scan.tolerances.get(end).unwrap_or_default()
+                ),
+                None => format!("{}: {}", crate::t!(kind.label()), count),
+            };
+            kit::category_bar(
+                label,
+                palette.folded.contains(&kind),
+                msg(GeometryCleanupMsg::Fold(kind)),
+            )
+        }
+        Line::Error(index) => {
+            let finding = &scan.findings[index];
+            kit::tree_row(place(finding))
+                .depth(1)
+                .selected(palette.picked == Some(index))
+                .trailing(fix_buttons(index, finding))
+                .on_press(msg(GeometryCleanupMsg::Pick(index)))
+                .view()
+        }
+        Line::Kept => kit::category_bar(
             crate::tf!("Kept as Designed: {}", scan.kept.len()).into_owned(),
             !palette.kept_open,
             msg(GeometryCleanupMsg::FoldKept),
-        ));
-        if palette.kept_open {
-            list = list.push(
-                row![
-                    Space::new().width(Fill),
-                    kit::text_button(
-                        crate::t!("Restore All").into_owned(),
-                        Some(msg(GeometryCleanupMsg::RestoreAll)),
-                        false,
-                    ),
-                ]
-                .align_y(iced::Center),
-            );
-            for (index, finding) in scan.kept.iter().enumerate() {
-                list = list.push(
-                    kit::tree_row(format!(
-                        "{}: {}",
-                        crate::t!(finding.kind.label()),
-                        place(finding)
-                    ))
-                    .depth(1)
-                    .trailing(row_button(
-                        crate::t!("Restore").into_owned(),
-                        crate::t!("List this error again.").into_owned(),
-                        msg(GeometryCleanupMsg::Restore(index)),
-                    ))
-                    .view(),
-                );
-            }
+        ),
+        Line::RestoreAll => row![
+            Space::new().width(Fill),
+            kit::text_button(
+                crate::t!("Restore All").into_owned(),
+                Some(msg(GeometryCleanupMsg::RestoreAll)),
+                false,
+            ),
+        ]
+        .align_y(iced::Center)
+        .into(),
+        Line::KeptError(index) => {
+            let finding = &scan.kept[index];
+            kit::tree_row(format!(
+                "{}: {}",
+                crate::t!(finding.kind.label()),
+                place(finding)
+            ))
+            .depth(1)
+            .trailing(row_button(
+                crate::t!("Restore").into_owned(),
+                crate::t!("List this error again.").into_owned(),
+                msg(GeometryCleanupMsg::Restore(index)),
+            ))
+            .view()
         }
     }
-
-    let body = column![
-        kit::band(tools),
-        container(kit::scroll_area(list)).height(Fill),
-    ];
-    kit::palette(title_bar, body, width)
 }
 
 /// Where an error is, for its row.

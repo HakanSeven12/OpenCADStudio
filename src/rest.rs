@@ -27,13 +27,13 @@
 //! so both `--http` modes serve the identical surface.
 
 use crate::app::OpenCADStudio;
-use crate::io::line_read::{is_line_too_long, read_line_capped};
+use crate::io::line_read::{is_line_too_long, read_line_capped, DeadlineStream};
 use serde_json::{json, Value};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
 
@@ -55,49 +55,15 @@ const MAX_HEADER_BYTES: usize = 64 * 1024;
 static PASSTHROUGH_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 /// Connections served at once. A client that connects and stalls pins one
-/// thread until its idle timeout, not the whole listener.
-const MAX_CONNECTIONS: usize = 8;
+/// thread until its deadline, not the whole listener.
+const MAX_CONNECTIONS: usize = 16;
 
-/// How long one connection may sit between bytes before the server gives up
-/// on it (a client that opened a socket and never sent the request). Bounded
-/// so a stuck client cannot pin a thread forever.
+/// Wall-clock budget to receive the request line and full header block.
+const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long one connection may take to transmit its request body or wait for
+/// idle socket teardown.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Ops that go through the protocol-1 control envelope when posted via the
-/// generic `POST /api/v1/{op}` passthrough. Everything else runs legacy.
-const ENVELOPE_OPS: &[&str] = &[
-    "entities_create",
-    "entities_set",
-    "xref_reload",
-    "xref_unload",
-    "xref_detach",
-    "xref_bind",
-    "xref_set_path",
-    "xref_set_type",
-    "entities_delete",
-    "entities_transform",
-    "node_graph",
-    "block_define",
-    "block_delete",
-    "file_identity",
-    "xdata_set",
-    "view_focus",
-    "wblock",
-    "plot",
-    "capture",
-    "embed_image",
-    "dgn_import",
-    "set_properties",
-    "property",
-    "activate",
-    "get_selection",
-    "getpoint",
-    "layout_create",
-    "layout_rename",
-    "layout_activate",
-    "layout_delete",
-    "page_setup_set",
-];
 
 /// Loopback REST channel hosted by the GUI process: `OpenCADStudio.exe
 /// "<file>" --http <port>` boots the editor with a bridge that forwards
@@ -155,18 +121,16 @@ pub(crate) fn announce_token() {
     }
 }
 
+/// Constant-time equality comparison for shared tokens and proofs.
+pub(crate) use crate::sys::constant_time_eq;
+
 /// Whether `presented` is the session's token, compared in constant time.
 pub(crate) fn token_matches(presented: Option<&str>) -> bool {
     let expected = api_token().as_bytes();
     let Some(presented) = presented.map(str::as_bytes) else {
         return false;
     };
-    presented.len() == expected.len()
-        && presented
-            .iter()
-            .zip(expected)
-            .fold(0u8, |difference, (a, b)| difference | (a ^ b))
-            == 0
+    constant_time_eq(presented, expected)
 }
 
 /// The answer to a request without the session's token.
@@ -194,8 +158,11 @@ impl HttpRequest {
             .map(|(_, v)| v.as_str())
     }
 
-    pub(crate) fn json(&self) -> Value {
-        serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    pub(crate) fn parse_json(&self) -> Result<Value, String> {
+        if self.body.is_empty() || self.body.iter().all(|b| b.is_ascii_whitespace()) {
+            return Ok(Value::Null);
+        }
+        serde_json::from_slice(&self.body).map_err(|e| e.to_string())
     }
 
     pub(crate) fn authorized(&self) -> bool {
@@ -292,25 +259,43 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
     }
 }
 
+fn refuse_error(
+    stream: &mut TcpStream,
+    status: u16,
+    code: &str,
+    message: &str,
+) -> std::io::Result<Option<HttpRequest>> {
+    let body = json!({
+        "ok": false,
+        "code": code,
+        "error": message,
+    });
+    let _ = write_response(stream, status, &body);
+    Ok(None)
+}
+
 /// Answer a peer whose request line or header block blew a size cap — RFC
 /// 9110's `431` — then hand the caller `Ok(None)` so it closes without
 /// dispatching. Writing the refusal from here keeps the headless `--http`
 /// server and the GUI-hosted bridge (`app::control::http_bridge`), which both
 /// call `read_request`, answering identically.
 fn refuse_oversized(stream: &mut TcpStream) -> std::io::Result<Option<HttpRequest>> {
-    let body = json!({
-        "ok": false,
-        "code": "header_too_large",
-        "error": "Request line or headers exceed the size limit.",
-    });
-    let _ = write_response(stream, 431, &body);
-    Ok(None)
+    refuse_error(
+        stream,
+        431,
+        "header_too_large",
+        "Request line or headers exceed the size limit.",
+    )
 }
 
 /// Parse one HTTP/1.1 request. `Ok(None)` = the peer hung up cleanly, or the
-/// request blew a size cap (a `431` has already been written in that case).
+/// request failed validation / auth (the corresponding HTTP error response has
+/// already been written).
 pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<HttpRequest>> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut reader = BufReader::new(DeadlineStream::new(
+        stream.try_clone()?,
+        Instant::now() + HEADER_TIMEOUT,
+    ));
     let mut line = String::new();
     match read_line_capped(&mut reader, &mut line, MAX_LINE) {
         Ok(0) => return Ok(None),
@@ -319,14 +304,19 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
         Err(error) => return Err(error),
     }
     let mut parts = line.split_whitespace();
-    let method = parts.next().unwrap_or("").to_ascii_uppercase();
-    let target = parts.next().unwrap_or("/").to_string();
-    let (path, query) = match target.split_once('?') {
-        Some((path, query)) => (path.to_string(), parse_query(query)),
-        None => (target, Vec::new()),
+    let Some(method_raw) = parts.next() else {
+        return refuse_error(stream, 400, "malformed_request", "Missing HTTP method");
+    };
+    let Some(target_raw) = parts.next() else {
+        return refuse_error(stream, 400, "malformed_request", "Missing HTTP target");
+    };
+    let method = method_raw.to_ascii_uppercase();
+    let (path, raw_query) = match target_raw.split_once('?') {
+        Some((path, query)) => (path.to_string(), Some(query.to_string())),
+        None => (target_raw.to_string(), None),
     };
 
-    let mut content_length = 0usize;
+    let mut content_length: Option<usize> = None;
     let mut header_bytes = 0usize;
     let mut bearer = None;
     loop {
@@ -345,32 +335,73 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
         if header.is_empty() {
             break;
         }
-        if let Some(value) = header
-            .strip_prefix("Content-Length:")
-            .or_else(|| header.strip_prefix("content-length:"))
-        {
-            content_length = value.trim().parse().unwrap_or(0);
-        }
-        if let Some((name, value)) = header.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("authorization") {
-                bearer = value
-                    .trim()
-                    .strip_prefix("Bearer ")
-                    .map(|token| token.trim().to_owned());
+        let Some((name, value)) = header.split_once(':') else {
+            return refuse_error(stream, 400, "malformed_header", "Malformed HTTP header line");
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if name.eq_ignore_ascii_case("transfer-encoding") {
+            return refuse_error(
+                stream,
+                501,
+                "unsupported_transfer_encoding",
+                "Transfer-Encoding is not supported; send a bounded Content-Length instead",
+            );
+        } else if name.eq_ignore_ascii_case("content-length") {
+            let Ok(parsed) = value.parse::<usize>() else {
+                return refuse_error(
+                    stream,
+                    400,
+                    "invalid_content_length",
+                    "Invalid Content-Length header",
+                );
+            };
+            if let Some(prev) = content_length {
+                if prev != parsed {
+                    return refuse_error(
+                        stream,
+                        400,
+                        "conflicting_content_length",
+                        "Conflicting Content-Length headers",
+                    );
+                }
             }
+            content_length = Some(parsed);
+        } else if name.eq_ignore_ascii_case("authorization")
+            && value.get(..7).is_some_and(|prefix| prefix.eq_ignore_ascii_case("bearer "))
+        {
+            bearer = Some(value[7..].trim().to_owned());
         }
     }
-    if content_length > MAX_BODY {
-        return Ok(Some(HttpRequest {
-            method,
-            path,
-            query,
-            body: Vec::new(),
-            bearer,
-        }));
+
+    if !token_matches(bearer.as_deref()) {
+        let _ = write_response(stream, 401, &unauthorized());
+        return Ok(None);
     }
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 {
+
+    let query = match raw_query {
+        Some(raw) => match parse_query_strict(&raw) {
+            Ok(query) => query,
+            Err(error) => return refuse_error(stream, 400, "invalid_uri", &error),
+        },
+        None => Vec::new(),
+    };
+
+    let len = content_length.unwrap_or(0);
+    if len > MAX_BODY {
+        return refuse_error(
+            stream,
+            413,
+            "payload_too_large",
+            &format!("Request body exceeds {MAX_BODY} byte limit"),
+        );
+    }
+
+    reader
+        .get_mut()
+        .set_deadline(Instant::now() + IDLE_TIMEOUT);
+    let mut body = vec![0u8; len];
+    if len > 0 {
         reader.read_exact(&mut body)?;
     }
     Ok(Some(HttpRequest {
@@ -382,35 +413,44 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
     }))
 }
 
-fn parse_query(raw: &str) -> Vec<(String, String)> {
-    raw.split('&')
-        .filter(|pair| !pair.is_empty())
-        .map(|pair| match pair.split_once('=') {
-            Some((key, value)) => (percent_decode(key), percent_decode(value)),
-            None => (percent_decode(pair), String::new()),
-        })
-        .collect()
+fn parse_query_strict(raw: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    for pair in raw.split('&').filter(|pair| !pair.is_empty()) {
+        match pair.split_once('=') {
+            Some((key, value)) => out.push((
+                percent_decode_strict(key, true)?,
+                percent_decode_strict(value, true)?,
+            )),
+            None => out.push((percent_decode_strict(pair, true)?, String::new())),
+        }
+    }
+    Ok(out)
 }
 
-fn percent_decode(raw: &str) -> String {
-    let bytes = raw.replace('+', " ").into_bytes();
+fn percent_decode_strict(raw: &str, plus_as_space: bool) -> Result<String, String> {
+    let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
-            if hex.len() == 2 {
-                if let Ok(byte) = u8::from_str_radix(hex, 16) {
-                    out.push(byte);
-                    index += 3;
-                    continue;
-                }
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return Err(format!("truncated percent-encoding in `{raw}`"));
             }
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3])
+                .map_err(|_| format!("invalid percent-encoding in `{raw}`"))?;
+            let byte = u8::from_str_radix(hex, 16)
+                .map_err(|_| format!("invalid hex escape `%{hex}` in `{raw}`"))?;
+            out.push(byte);
+            index += 3;
+        } else if plus_as_space && bytes[index] == b'+' {
+            out.push(b' ');
+            index += 1;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
         }
-        out.push(bytes[index]);
-        index += 1;
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8(out).map_err(|_| format!("non-UTF-8 percent-encoded sequence in `{raw}`"))
 }
 
 pub(crate) fn write_response(
@@ -433,7 +473,10 @@ pub(crate) fn write_response(
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        413 => "Payload Too Large",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
         503 => "Service Unavailable",
         _ => "OK",
     };
@@ -484,13 +527,37 @@ impl Plan {
     }
 }
 
+fn decode_segment(raw: &str) -> Result<String, Plan> {
+    percent_decode_strict(raw, false).map_err(|error| {
+        Plan::Local(
+            400,
+            json!({"ok": false, "code": "invalid_encoding", "error": error}),
+        )
+    })
+}
+
 /// The whole REST surface: map (method, path) to the automation request it
 /// runs. The caller splits `/api/v1` off already; the remaining segments
 /// select the arm.
 pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
-    let raw = request.json();
-    let body = if raw.is_object() { raw } else { json!({}) };
-    match (method, rest) {
+    match plan_inner(method, rest, request) {
+        Ok(planned) | Err(planned) => planned,
+    }
+}
+
+fn plan_inner(method: &str, rest: &[&str], request: &HttpRequest) -> Result<Plan, Plan> {
+    let raw = request.parse_json().map_err(|error| {
+        Plan::Local(
+            400,
+            json!({"ok": false, "code": "invalid_json", "error": format!("invalid JSON body: {error}")}),
+        )
+    })?;
+    let body = if raw.is_object() {
+        raw.clone()
+    } else {
+        json!({})
+    };
+    Ok(match (method, rest) {
         ("GET", ["ready"]) | ("GET", []) | ("GET", [""]) => Plan::Ready,
         ("GET", ["capabilities"]) => Plan::Run {
             request: json!({"op":"capabilities"}),
@@ -570,26 +637,26 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
         },
         ("PATCH", ["layouts", name]) => Plan::Mutate {
             op: "layout_rename".into(),
-            fields: json!({"name": percent_decode(name), "new_name": body["new_name"]}),
+            fields: json!({"name": decode_segment(name)?, "new_name": body["new_name"]}),
             created: 200,
         },
         ("DELETE", ["layouts", name]) => Plan::Mutate {
             op: "layout_delete".into(),
-            fields: json!({"name": percent_decode(name)}),
+            fields: json!({"name": decode_segment(name)?}),
             created: 200,
         },
         ("POST", ["layouts", name, "activate"]) => Plan::Mutate {
             op: "layout_activate".into(),
-            fields: json!({"name": percent_decode(name)}),
+            fields: json!({"name": decode_segment(name)?}),
             created: 200,
         },
         ("GET", ["layouts", layout, "page-setup"]) => Plan::Run {
-            request: json!({"op":"page_setup_get","layout":percent_decode(layout)}),
+            request: json!({"op":"page_setup_get","layout":decode_segment(layout)?}),
             created: 200,
         },
         ("PUT", ["layouts", layout, "page-setup"]) => {
             let mut fields = body;
-            fields["layout"] = json!(percent_decode(layout));
+            fields["layout"] = json!(decode_segment(layout)?);
             Plan::Mutate {
                 op: "page_setup_set".into(),
                 fields,
@@ -617,7 +684,7 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
                 .is_some_and(|v| v == "true" || v == "1");
             Plan::Mutate {
                 op: "selection_set_load".into(),
-                fields: json!({"name": name, "select": select}),
+                fields: json!({"name": decode_segment(name)?, "select": select}),
                 created: 200,
             }
         }
@@ -668,10 +735,10 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
                 match serde_json::from_str::<Value>(v) {
                     Ok(filters) => request_json["where"] = filters,
                     Err(error) => {
-                        return Plan::Local(
+                        return Ok(Plan::Local(
                             400,
                             json!({"ok": false, "code": "invalid_where", "error": format!("where must be a JSON array: {error}")}),
-                        )
+                        ))
                     }
                 }
             }
@@ -716,17 +783,16 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             }
         }
         ("PUT", ["entities", handle, "xdata", app_name]) => {
-            let data = request.json();
-            let data = if data.is_null() { json!([]) } else { data };
+            let data = if raw.is_null() { json!([]) } else { raw };
             Plan::Mutate {
                 op: "xdata_set".into(),
-                fields: json!({"handles":[handle], "app": app_name, "data": data}),
+                fields: json!({"handles":[handle], "app": decode_segment(app_name)?, "data": data}),
                 created: 200,
             }
         }
         ("DELETE", ["entities", handle, "xdata", app_name]) => Plan::Mutate {
             op: "xdata_set".into(),
-            fields: json!({"handles":[handle], "app": app_name, "data": []}),
+            fields: json!({"handles":[handle], "app": decode_segment(app_name)?, "data": []}),
             created: 200,
         },
         ("POST", ["blocks"]) => Plan::Mutate {
@@ -737,7 +803,7 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
         ("DELETE", ["blocks", name]) => {
             // `?force=true` mirrors the control op: it erases the referencing
             // inserts instead of refusing a referenced definition.
-            let mut fields = json!({"name": name});
+            let mut fields = json!({"name": decode_segment(name)?});
             if request
                 .param("force")
                 .is_some_and(|value| value == "true" || value == "1")
@@ -837,8 +903,8 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             200,
             serde_json::from_str(include_str!("rest_openapi.json")).unwrap_or(json!({})),
         ),
-        ("POST", [op]) if ENVELOPE_OPS.contains(op) => Plan::Mutate {
-            op: op.to_string(),
+        ("POST", [op]) if crate::mcp_ops::is_rest_envelope_op(op) => Plan::Mutate {
+            op: (*op).to_string(),
             fields: body,
             created: 200,
         },
@@ -875,7 +941,7 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             405,
             json!({"ok": false, "code": "method_not_allowed", "error": format!("{method} not supported here")}),
         ),
-    }
+    })
 }
 
 /// The headless executor: run a resolved plan against this server's private
@@ -1076,9 +1142,21 @@ mod tests {
 
     #[test]
     fn percent_decode_handles_escaped_and_plus_spaces() {
-        assert_eq!(percent_decode("Walls%20and%2BFloors"), "Walls and+Floors");
-        assert_eq!(percent_decode("plain"), "plain");
-        assert_eq!(percent_decode("bad%2"), "bad%2");
+        assert_eq!(
+            percent_decode_strict("Walls%20and%2BFloors", true).as_deref(),
+            Ok("Walls and+Floors")
+        );
+        assert_eq!(
+            percent_decode_strict("A+B", true).as_deref(),
+            Ok("A B")
+        );
+        assert_eq!(
+            percent_decode_strict("A+B", false).as_deref(),
+            Ok("A+B")
+        );
+        assert_eq!(percent_decode_strict("plain", false).as_deref(), Ok("plain"));
+        assert!(percent_decode_strict("bad%2", false).is_err());
+        assert!(percent_decode_strict("%FF", false).is_err());
     }
 
     #[test]
@@ -1993,5 +2071,103 @@ mod tests {
         );
         assert_eq!(status, 200, "{body}");
         assert_eq!(body["ok"], true, "{body}");
+    }
+
+    #[test]
+    fn read_request_enforces_headers_auth_and_payload_limits() {
+        let auth = format!("Authorization: bearer {}\r\n", api_token());
+
+        // Mixed-case Content-Length succeeds when authorized.
+        let (client, mut server) = loopback_pair();
+        let writer = spawn_writer(
+            &client,
+            format!("POST /api/v1/state HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth}CONTENT-LENGTH: 2\r\n\r\n{{}}")
+                .into_bytes(),
+        );
+        let parsed = read_request(&mut server).unwrap().expect("valid request");
+        assert_eq!(parsed.body, b"{}");
+        drop(server);
+        writer.join().unwrap();
+
+        // Invalid Content-Length returns 400.
+        let (client, mut server) = loopback_pair();
+        let writer = spawn_writer(
+            &client,
+            format!("POST /api/v1/state HTTP/1.1\r\n{auth}Content-Length: abc\r\n\r\n")
+                .into_bytes(),
+        );
+        assert!(read_request(&mut server).unwrap().is_none());
+        assert!(read_status(client).contains("400"));
+        drop(server);
+        writer.join().unwrap();
+
+        // Conflicting Content-Length returns 400.
+        let (client, mut server) = loopback_pair();
+        let writer = spawn_writer(
+            &client,
+            format!("POST /api/v1/state HTTP/1.1\r\n{auth}Content-Length: 2\r\nContent-Length: 4\r\n\r\n")
+                .into_bytes(),
+        );
+        assert!(read_request(&mut server).unwrap().is_none());
+        assert!(read_status(client).contains("400"));
+        drop(server);
+        writer.join().unwrap();
+
+        // Transfer-Encoding returns 501.
+        let (client, mut server) = loopback_pair();
+        let writer = spawn_writer(
+            &client,
+            format!("POST /api/v1/state HTTP/1.1\r\n{auth}Transfer-Encoding: chunked\r\n\r\n")
+                .into_bytes(),
+        );
+        assert!(read_request(&mut server).unwrap().is_none());
+        assert!(read_status(client).contains("501"));
+        drop(server);
+        writer.join().unwrap();
+
+        // Authorized Content-Length > MAX_BODY returns 413 without dispatching.
+        let (client, mut server) = loopback_pair();
+        let writer = spawn_writer(
+            &client,
+            format!(
+                "POST /api/v1/state HTTP/1.1\r\n{auth}Content-Length: {}\r\n\r\n",
+                MAX_BODY + 1
+            )
+            .into_bytes(),
+        );
+        assert!(read_request(&mut server).unwrap().is_none());
+        assert!(read_status(client).contains("413"));
+        drop(server);
+        writer.join().unwrap();
+
+        // Unauthorized large Content-Length returns 401 without reading body.
+        let (client, mut server) = loopback_pair();
+        let writer = spawn_writer(
+            &client,
+            format!(
+                "POST /api/v1/state HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+                MAX_BODY
+            )
+            .into_bytes(),
+        );
+        assert!(read_request(&mut server).unwrap().is_none());
+        assert!(read_status(client).contains("401"));
+        drop(server);
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn plan_rejects_invalid_utf8_and_covers_all_envelope_ops() {
+        match plan("GET", &["layouts", "%FF", "page-setup"], &request("GET", "/api/v1/layouts/%FF/page-setup", "")) {
+            Plan::Local(status, body) => {
+                assert_eq!(status, 400);
+                assert_eq!(body["code"], "invalid_encoding");
+            }
+            _ => panic!("invalid UTF-8 layout must return 400"),
+        }
+        match plan("POST", &["text_replace"], &request("POST", "/api/v1/text_replace", r#"{"find":"a","replace":"b"}"#)) {
+            Plan::Mutate { op, .. } => assert_eq!(op, "text_replace"),
+            _ => panic!("text_replace must route through Plan::Mutate"),
+        }
     }
 }

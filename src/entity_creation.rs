@@ -245,6 +245,18 @@ fn point(min: usize, max: usize) -> Value {
     json!({"type":"array","items":{"type":"number"},"minItems":min,"maxItems":max})
 }
 
+fn canonical_type(name: &str) -> Option<&'static str> {
+    let lookup = if name.eq_ignore_ascii_case("Polyline") {
+        "LwPolyline"
+    } else {
+        name
+    };
+    TYPES
+        .iter()
+        .copied()
+        .find(|kind| kind.eq_ignore_ascii_case(lookup))
+}
+
 /// Contracts are built once and shared by discovery, preflight and execution.
 pub fn schema(name: &str) -> Result<Value, String> {
     use std::sync::OnceLock;
@@ -461,8 +473,16 @@ pub fn validate_entity(spec: &Value, path: &str) -> Result<(), String> {
     let kind = spec["type"]
         .as_str()
         .ok_or_else(|| format!("{path}/type: expected entity type string"))?;
-    let contract = schema(kind).map_err(|e| format!("{path}{e}"))?;
-    crate::schema_validation::validate_shape(&contract, spec, path)?;
+    if let Some(canonical) = canonical_type(kind) {
+        crate::schema_validation::validate_static_schema(
+            canonical,
+            || schema(canonical),
+            spec,
+            path,
+        )?;
+    } else {
+        schema(kind).map_err(|e| format!("{path}{e}"))?;
+    }
     build_entity(spec, None).map(|_| ()).map_err(|error| {
         format!(
             "{path}{}: {}",
@@ -1192,9 +1212,20 @@ pub(crate) fn build_entity(
             face.common.line_weight = weight;
         }
     }
-    let contract = schema(&kind).expect("supported factory type");
-    crate::schema_validation::validate_shape(&contract, spec, "")
+    if let Some(canonical) = canonical_type(&kind) {
+        crate::schema_validation::validate_static_schema(
+            canonical,
+            || schema(canonical),
+            spec,
+            "",
+        )
         .map_err(|error| failure("invalid_entity_definition", error))?;
+    } else {
+        let contract =
+            schema(&kind).map_err(|error| failure("invalid_entity_definition", error))?;
+        crate::schema_validation::validate_shape(&contract, spec, "")
+            .map_err(|error| failure("invalid_entity_definition", error))?;
+    }
     Ok(entity)
 }
 

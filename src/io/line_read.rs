@@ -102,3 +102,86 @@ impl<R: BufRead> Iterator for CappedLines<R> {
         }
     }
 }
+
+/// Read adapter enforcing a single wall-clock deadline across all `read()` calls
+/// on a `TcpStream`. Defeats slow-loris / trickle peers that reset per-read
+/// `SO_RCVTIMEO` by dripping one byte every few seconds.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct DeadlineStream {
+    stream: std::net::TcpStream,
+    deadline: std::time::Instant,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl DeadlineStream {
+    pub fn new(stream: std::net::TcpStream, deadline: std::time::Instant) -> Self {
+        Self { stream, deadline }
+    }
+
+    pub fn set_deadline(&mut self, deadline: std::time::Instant) {
+        self.deadline = deadline;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Read for DeadlineStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let now = std::time::Instant::now();
+        if now >= self.deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "read deadline exceeded",
+            ));
+        }
+        let remaining = self
+            .deadline
+            .saturating_duration_since(now)
+            .max(std::time::Duration::from_millis(1));
+        let _ = self.stream.set_read_timeout(Some(remaining));
+        self.stream.read(buf)
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use std::io::{BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn deadline_stream_aborts_slow_trickle_peer() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let writer = std::thread::spawn(move || {
+            let mut client = TcpStream::connect(addr).unwrap();
+            for _ in 0..20 {
+                if client.write_all(b"a").is_err() || client.flush().is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+        });
+        let (server, _) = listener.accept().unwrap();
+        let deadline = Instant::now() + Duration::from_millis(150);
+        let mut reader = BufReader::new(DeadlineStream::new(server, deadline));
+        let mut line = String::new();
+        let start = Instant::now();
+        let err = read_line_capped(&mut reader, &mut line, 4096)
+            .expect_err("slow trickle must time out before completion");
+        assert!(
+            matches!(
+                err.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ),
+            "expected timeout, got {err:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_millis(600),
+            "took too long: {:?}",
+            start.elapsed()
+        );
+        drop(reader);
+        let _ = writer.join();
+    }
+}

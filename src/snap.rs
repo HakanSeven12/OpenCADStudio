@@ -67,6 +67,9 @@ pub(crate) const DEFAULT_OSNAP_RADIUS_PX: f32 = 25.0;
 /// APERTURE bounds: the object-snap capture radius in screen pixels.
 pub(crate) const MIN_OSNAP_RADIUS_PX: f32 = 4.0;
 pub(crate) const MAX_OSNAP_RADIUS_PX: f32 = 40.0;
+/// Maximum number of acquired object-snap tracking points. Raised from 4 so
+/// temporary TT points can coexist with dwell-acquired corners.
+pub const MAX_TRACKING_POINTS: usize = 7;
 
 // ── Snap type ─────────────────────────────────────────────────────────────
 
@@ -399,6 +402,13 @@ pub struct Snapper {
     /// consumed by Extension snap and extended-intersection logic. These rays
     /// belong only to OTRACK when Perpendicular OSNAP is enabled. (#695)
     pub tracking_perp_dirs: Vec<Vec<DVec3>>,
+    /// Parallel to `tracking_points`: true for points acquired explicitly by
+    /// the typed TT modifier. Temporary points survive point commits and are
+    /// drawn with a distinct marker until the command ends.
+    pub tracking_temp: Vec<bool>,
+    /// Oldest point dropped by the 7-point acquisition cap, kept so the
+    /// overlay can mark it as evicted.
+    pub tracking_evicted: Option<DVec3>,
     /// Perpendicular direction carried from a point placed by typed distance
     /// along an Extension/OTRACK ray. It survives only until the next point
     /// commit, so the source ray can still drive a perpendicular construction
@@ -488,6 +498,8 @@ impl Default for Snapper {
             tracking_points: Vec::new(),
             tracking_dirs: Vec::new(),
             tracking_perp_dirs: Vec::new(),
+            tracking_temp: Vec::new(),
+            tracking_evicted: None,
             post_distance_perp_dir: None,
             last_snap_world: None,
             dwell_since: None,
@@ -956,10 +968,57 @@ impl Snapper {
         if index < self.tracking_perp_dirs.len() {
             self.tracking_perp_dirs.remove(index);
         }
+        if index < self.tracking_temp.len() {
+            self.tracking_temp.remove(index);
+        }
+    }
+
+    /// Remove only dwell-acquired points, keeping explicitly acquired TT
+    /// points across a point commit.
+    pub fn clear_acquired_tracking_points(&mut self) {
+        // Walk backwards so removing an earlier index cannot shift the flags
+        // of the points still to be examined.
+        let mut i = self.tracking_points.len();
+        while i > 0 {
+            i -= 1;
+            if !self.tracking_temp.get(i).copied().unwrap_or(false) {
+                self.release_tracking_point(i);
+            }
+        }
+    }
+
+    /// Acquire a temporary tracking point from the typed TT modifier. This
+    /// bypasses dwell and the endpoint-only filter: the user asked for this
+    /// exact point. It follows the same 7-point cap and reports the evicted
+    /// point so the overlay can mark it.
+    pub fn acquire_temporary_tracking_point(&mut self, p: DVec3) {
+        if !p.is_finite() {
+            return;
+        }
+        if self
+            .tracking_points
+            .iter()
+            .any(|t| (*t - p).length() <= tracking_point_tolerance(p))
+        {
+            return;
+        }
+        self.evict_oldest_tracking_point();
+        self.tracking_points.push(p);
+        self.tracking_dirs.push(Vec::new());
+        self.tracking_perp_dirs.push(Vec::new());
+        self.tracking_temp.push(true);
+    }
+
+    fn evict_oldest_tracking_point(&mut self) {
+        if self.tracking_points.len() < MAX_TRACKING_POINTS {
+            return;
+        }
+        self.tracking_evicted = self.tracking_points.first().copied();
+        self.release_tracking_point(0);
     }
 
     /// Add `p` as a tracking point (capturing its corner edge directions) unless
-    /// it is already tracked; drops the oldest when the 4-point cap is reached.
+    /// it is already tracked; drops the oldest when the 7-point cap is reached.
     /// Edge directions are scanned once here, at acquisition, so OTRACK can align
     /// to a segment's extension without rescanning geometry per move (#219).
     fn acquire_tracking_point<W: WireSource + ?Sized>(
@@ -982,20 +1041,11 @@ impl Snapper {
         if endpoints_only && dirs.is_empty() {
             return;
         }
-        if self.tracking_points.len() >= 4 {
-            self.tracking_points.remove(0);
-
-            if !self.tracking_dirs.is_empty() {
-                self.tracking_dirs.remove(0);
-            }
-
-            if !self.tracking_perp_dirs.is_empty() {
-                self.tracking_perp_dirs.remove(0);
-            }
-        }
+        self.evict_oldest_tracking_point();
         self.tracking_points.push(p);
         self.tracking_dirs.push(dirs);
         self.tracking_perp_dirs.push(perp_dirs);
+        self.tracking_temp.push(false);
     }
 
     /// If the cursor dwelt on a snap point long enough but the in-place check
@@ -1383,6 +1433,8 @@ impl Snapper {
         self.tracking_points.clear();
         self.tracking_dirs.clear();
         self.tracking_perp_dirs.clear();
+        self.tracking_temp.clear();
+        self.tracking_evicted = None;
         self.post_distance_perp_dir = None;
         self.parallel_ref = None;
         self.parallel_dwell = None;
@@ -1526,6 +1578,8 @@ impl Snapper {
             tracking_points: Vec::new(),
             tracking_dirs: Vec::new(),
             tracking_perp_dirs: Vec::new(),
+            tracking_temp: Vec::new(),
+            tracking_evicted: None,
             post_distance_perp_dir: None,
             last_snap_world: None,
             dwell_since: None,

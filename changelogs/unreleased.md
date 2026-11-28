@@ -5,6 +5,7 @@
 ### Precision input
 
 * **Deferred TAN/PER first points.** `LINE` resolves a tangent or perpendicular picked as the first point from the second point (or from a typed `@distance<angle` direction) with a pure solver; a typed non-perpendicular direction is refused instead of being silently shortened.
+* **Seven object-snap tracking points.** The acquisition cap rises from four to seven; the oldest point dropped by the cap stays visible with a faded marker.
 
 ### ⚡ Performance
 

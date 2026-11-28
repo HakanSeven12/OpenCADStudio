@@ -1735,20 +1735,46 @@ bg={bg_ms:.1}ms n={view_count}"
                     let (base, tip) = ost_project_ray(origin, dir, rot, eye, rect)?;
                     Some(iced::Point::new(tip.x - base.x, tip.y - base.y))
                 });
-            let ost_points: Vec<crate::ui::overlay::OstTrackPoint> =
+            let mut ost_points: Vec<crate::ui::overlay::OstTrackPoint> =
                 if let Some((view_rot, eye, ob)) = otrack_proj {
                     self.snapper
                         .tracking_points
                         .iter()
-                        .filter_map(|&wp| {
+                        .enumerate()
+                        .filter_map(|(index, &wp)| {
                             let s = ost_project(wp, view_rot, eye, ob);
-                            (s.x.is_finite() && s.y.is_finite())
-                                .then_some(crate::ui::overlay::OstTrackPoint { screen: s })
+                            let temporary = self
+                                .snapper
+                                .tracking_temp
+                                .get(index)
+                                .copied()
+                                .unwrap_or(false);
+                            (s.x.is_finite() && s.y.is_finite()).then_some(
+                                crate::ui::overlay::OstTrackPoint {
+                                    screen: s,
+                                    temporary,
+                                    evicted: false,
+                                },
+                            )
                         })
                         .collect()
                 } else {
                     vec![]
                 };
+            // The point evicted by the 7-point cap stays visible briefly so
+            // the user can see that an acquisition was dropped.
+            if let (Some((view_rot, eye, ob)), Some(wp)) =
+                (otrack_proj, self.snapper.tracking_evicted)
+            {
+                let s = ost_project(wp, view_rot, eye, ob);
+                if s.x.is_finite() && s.y.is_finite() {
+                    ost_points.push(crate::ui::overlay::OstTrackPoint {
+                        screen: s,
+                        temporary: false,
+                        evicted: true,
+                    });
+                }
+            }
             // The active alignment vector: a dashed guide from the acquired
             // tracking point through the locked cursor, so the user sees the
             // extension / tracking line they are snapped to (#219).

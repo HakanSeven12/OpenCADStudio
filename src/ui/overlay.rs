@@ -1339,6 +1339,10 @@ pub struct UcsIconParams {
 #[derive(Clone, Debug, PartialEq)]
 pub struct OstTrackPoint {
     pub screen: Point,
+    /// Acquired by the typed TT modifier rather than by cursor dwell.
+    pub temporary: bool,
+    /// The oldest point dropped by the acquisition cap.
+    pub evicted: bool,
 }
 
 pub fn grid_overlay<'a>(grid: Vec<GridParams>, style: GridStyle) -> Element<'a, Message> {
@@ -3822,8 +3826,17 @@ impl canvas::Program<Message> for SelectionCanvas {
                 frame_bounds,
                 &tracking_key,
                 |frame| {
-                    let track_color = theme.palette().primary.base.color.scale_alpha(0.7);
+                    let base_color = theme.palette().primary.base.color;
                     for ost in &self.ost_points {
+                        // Temporary TT points read as a distinct colour, and
+                        // the point dropped by the cap fades out.
+                        let track_color = if ost.evicted {
+                            base_color.scale_alpha(0.25)
+                        } else if ost.temporary {
+                            theme.palette().warning.base.color.scale_alpha(0.9)
+                        } else {
+                            base_color.scale_alpha(0.7)
+                        };
                         let tp = ost.screen;
                         let stroke = canvas::Stroke::default()
                             .with_color(track_color)
@@ -6911,6 +6924,8 @@ mod selection_canvas_state_tests {
             palette,
             ost_points: vec![OstTrackPoint {
                 screen: Point::new(10.0, 20.0),
+                temporary: false,
+                evicted: false,
             }],
         };
         assert!(!should_reuse_layer(None::<&TrackingMarksLayerKey>, &key));
@@ -6918,6 +6933,8 @@ mod selection_canvas_state_tests {
         let moved = TrackingMarksLayerKey {
             ost_points: vec![OstTrackPoint {
                 screen: Point::new(11.0, 20.0),
+                temporary: false,
+                evicted: false,
             }],
             ..key.clone()
         };
@@ -7043,11 +7060,15 @@ mod selection_canvas_state_tests {
             palette,
             ost_points: vec![OstTrackPoint {
                 screen: Point::new(5.0, 5.0),
+                temporary: false,
+                evicted: false,
             }],
         };
         let mut grown = key.clone();
         grown.ost_points.push(OstTrackPoint {
             screen: Point::new(6.0, 6.0),
+            temporary: false,
+            evicted: false,
         });
         assert_ne!(key, grown);
     }

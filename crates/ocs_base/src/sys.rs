@@ -1158,31 +1158,70 @@ pub mod web_diag {
                      padding:8px 12px;max-height:40vh;overflow:auto;\
                      user-select:text;cursor:text;",
                 );
-                overlay.set_inner_html(
-                    "<div><b id=\"ocs-err-title\"></b> \
-                     <button id=\"ocs-err-copy\" style=\"margin-left:8px\" onclick=\"navigator.clipboard.writeText(\
-                     document.getElementById('ocs-err-text').innerText)\"></button> \
-                     <button id=\"ocs-err-dismiss\" onclick=\"document.getElementById('ocs-err').remove()\"></button></div>\
-                     <pre id=\"ocs-err-text\" style=\"margin:6px 0 0;\
-                     white-space:pre-wrap;user-select:text;\"></pre>",
+                let Ok(header) = doc.create_element("div") else {
+                    return;
+                };
+                let Ok(title) = doc.create_element("b") else {
+                    return;
+                };
+                title.set_id("ocs-err-title");
+                title.set_text_content(Some(
+                    crate::t!("OpenCADStudio renderer error — copy this into a bug report:")
+                        .as_ref(),
+                ));
+                let Ok(copy_btn) = doc.create_element("button") else {
+                    return;
+                };
+                copy_btn.set_id("ocs-err-copy");
+                let _ = copy_btn.set_attribute("type", "button");
+                let _ = copy_btn.set_attribute("style", "margin-left:8px");
+                copy_btn.set_text_content(Some(crate::t!("Copy").as_ref()));
+
+                let Ok(dismiss_btn) = doc.create_element("button") else {
+                    return;
+                };
+                dismiss_btn.set_id("ocs-err-dismiss");
+                let _ = dismiss_btn.set_attribute("type", "button");
+                let _ = dismiss_btn.set_attribute("style", "margin-left:4px");
+                dismiss_btn.set_text_content(Some(crate::t!("Dismiss").as_ref()));
+
+                let Ok(pre) = doc.create_element("pre") else {
+                    return;
+                };
+                pre.set_id("ocs-err-text");
+                let _ = pre.set_attribute(
+                    "style",
+                    "margin:6px 0 0;white-space:pre-wrap;user-select:text;",
                 );
+
+                let pre_for_copy = pre.clone();
+                let on_copy = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+                    let text = pre_for_copy.text_content().unwrap_or_default();
+                    super::write_clipboard_text(&text);
+                });
+                let _ = copy_btn.add_event_listener_with_callback(
+                    "click",
+                    wasm_bindgen::JsCast::unchecked_ref(on_copy.as_ref()),
+                );
+                on_copy.forget();
+
+                let overlay_for_dismiss = overlay.clone();
+                let on_dismiss = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+                    overlay_for_dismiss.remove();
+                });
+                let _ = dismiss_btn.add_event_listener_with_callback(
+                    "click",
+                    wasm_bindgen::JsCast::unchecked_ref(on_dismiss.as_ref()),
+                );
+                on_dismiss.forget();
+
+                let _ = header.append_child(&title);
+                let _ = header.append_child(&copy_btn);
+                let _ = header.append_child(&dismiss_btn);
+                let _ = overlay.append_child(&header);
+                let _ = overlay.append_child(&pre);
                 let _ = body.append_child(&overlay);
-                for (id, label) in [
-                    (
-                        "ocs-err-title",
-                        crate::t!("OpenCADStudio renderer error — copy this into a bug report:"),
-                    ),
-                    ("ocs-err-copy", crate::t!("Copy")),
-                    ("ocs-err-dismiss", crate::t!("Dismiss")),
-                ] {
-                    if let Some(element) = doc.get_element_by_id(id) {
-                        element.set_text_content(Some(label.as_ref()));
-                    }
-                }
-                match doc.get_element_by_id("ocs-err-text") {
-                    Some(pre) => pre,
-                    None => return,
-                }
+                pre
             }
         };
         // Collapse repeats: an error thrown every frame becomes one line with

@@ -235,61 +235,7 @@ impl OpenCADStudio {
                 let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
                     return Task::batch([close_win, self.continue_tab_close_queue()]);
                 };
-                // …and, on the web, its retained in-place save handle — the
-                // same hook on_tab_close runs: the user declined the save,
-                // so the picked file must never receive a later write, and
-                // the next tab to reuse this id must start with a fresh
-                // pick instead of silently writing over the discarded
-                // drawing's file.
-                #[cfg(target_arch = "wasm32")]
-                crate::io::fs_access::drop_handle(tab_id);
-                // Discarded — drop this tab's autosave recovery copy.
-                #[cfg(not(target_arch = "wasm32"))]
-                let _ = std::fs::remove_file(self.autosave_target(idx));
-                // Web counterpart: the OPFS snapshot must go too, or the
-                // drawing the user just declined to save is offered back at
-                // the next boot. A snapshot round still writing this tab's key
-                // would resurrect it after the remove, so defer to the round's
-                // end (the same guard the save flow uses).
-                #[cfg(target_arch = "wasm32")]
-                if !crate::io::host_bridge::is_embed_mode() {
-                    let key = Self::web_autosave_key(&self.tabs[idx]);
-                    if self.web_autosave_in_flight {
-                        self.web_autosave_clear_after.push(key);
-                    } else {
-                        wasm_bindgen_futures::spawn_local(async move {
-                            let _ = crate::io::web_autosave::remove(&key).await;
-                        });
-                    }
-                }
-                if self.tabs.len() == 1 {
-                    self.tab_counter += 1;
-                    self.tabs[0] =
-                        crate::app::tab_document::DocumentTab::new_drawing(self.tab_counter);
-                    self.active_tab = 0;
-                    self.apply_display_defaults(0);
-                } else {
-                    self.tabs.remove(idx);
-                    if self.active_tab >= self.tabs.len() {
-                        self.active_tab = self.tabs.len() - 1;
-                    }
-                }
-                // Discarded for good: the positions this drawing had placed
-                // go with it, so a later drawing cannot inherit them.
-                crate::modules::draw::draw::attdef::session().forget_place_of(tab_id);
-                crate::modules::annotate::text::forget_place_of(tab_id);
-                // The active tab is now a fresh blank or a
-                // different existing tab; sync ribbon chips so
-                // they don't keep showing the discarded tab's
-                // last selection. #21.
-                self.sync_ribbon_layers();
-                self.sync_ribbon_from_selection();
-                #[cfg(not(target_arch = "wasm32"))]
-                crate::plugin::v4_support::on_tab_closed(tab_id);
-                // The tab list just shrank: refresh the remembered
-                // session list (web session memory).
-                #[cfg(target_arch = "wasm32")]
-                self.persist_web_session();
+                self.close_tab_at(idx, None, true);
                 return Task::batch([close_win, self.continue_tab_close_queue()]);
             }
             Some(crate::app::PendingClose::Quit) => {

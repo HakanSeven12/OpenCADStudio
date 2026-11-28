@@ -125,6 +125,7 @@ impl OpenCADStudio {
                                     file.name,
                                     file.bytes,
                                     file.restore_key,
+                                    file.cache_recent,
                                 ))
                             })
                             .unwrap_or_else(Task::none)
@@ -733,6 +734,8 @@ impl OpenCADStudio {
 
             Message::OpenCancel => {
                 #[cfg(target_arch = "wasm32")]
+                crate::io::cancel_active_parse_workers();
+                #[cfg(target_arch = "wasm32")]
                 let cancelled_id = self.opening.as_ref().map(|opening| opening.id);
                 if let Some(p) = self.opening.take() {
                     self.command_line
@@ -756,7 +759,7 @@ impl OpenCADStudio {
             }
 
             #[cfg(target_arch = "wasm32")]
-            Message::WebFileDropped(name, bytes, restore_key) => {
+            Message::WebFileDropped(name, bytes, restore_key, cache_recent) => {
                 // Bytes are already in hand (no picker round-trip), so this is
                 // `on_open_file`'s web branch with the real name and size on
                 // the overlay from the start. An open already in flight must
@@ -768,7 +771,8 @@ impl OpenCADStudio {
                     // surface for rejections by design — see QUEUE_CAP).
                     let _ = match restore_key {
                         Some(key) => crate::io::web_drop::enqueue_restore(name, bytes, key),
-                        None => crate::io::web_drop::enqueue_open(name, bytes),
+                        None if cache_recent => crate::io::web_drop::enqueue_open(name, bytes),
+                        None => crate::io::web_drop::enqueue_open_uncached(name, bytes),
                     };
                     return Task::none();
                 }
@@ -793,7 +797,7 @@ impl OpenCADStudio {
                     recovery_bytes: None,
                 });
                 Task::perform(
-                    crate::io::web_drop::open_dropped(name, bytes, state),
+                    crate::io::web_drop::open_dropped(name, bytes, state, cache_recent),
                     move |outcome| Message::WebFileOpened(open_id, outcome),
                 )
             }
@@ -4738,7 +4742,15 @@ impl OpenCADStudio {
                 state.name.clone_from(&name);
                 state.description = state.description.trim().to_string();
                 let description = state.description.clone();
+                let linetypes: Vec<String> = state
+                    .layers
+                    .iter()
+                    .map(|layer| layer.line_type.clone())
+                    .collect();
                 self.push_undo_snapshot(i, "LAYERSTATE EDIT");
+                for lt in &linetypes {
+                    let _ = self.ensure_tab_catalog_linetype(i, lt);
+                }
                 if let Some(old_name) = old_name.as_deref() {
                     if !old_name.eq_ignore_ascii_case(&name) {
                         self.tabs[i]
@@ -5138,21 +5150,44 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let names = self.selected_layer_names(i);
                 if !names.is_empty() {
-                    let undo = self.begin_layer_undo(i, "LAYER LINETYPE", &names);
-                    for name in &names {
-                        if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
-                            dl.line_type = lt.clone();
+                    let needs_catalog = !self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .any(|entry| entry.name.eq_ignore_ascii_case(&lt));
+                    if needs_catalog {
+                        self.push_undo_snapshot(i, "LAYER LINETYPE");
+                        let _ = self.ensure_tab_catalog_linetype(i, &lt);
+                        for name in &names {
+                            if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                dl.line_type = lt.clone();
+                            }
                         }
-                    }
-                    for pl in self.tabs[i].layers.layers.iter_mut() {
-                        if names.contains(&pl.name) {
-                            pl.linetype = lt.clone();
+                        for pl in self.tabs[i].layers.layers.iter_mut() {
+                            if names.contains(&pl.name) {
+                                pl.linetype = lt.clone();
+                            }
                         }
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    } else {
+                        let undo = self.begin_layer_undo(i, "LAYER LINETYPE", &names);
+                        for name in &names {
+                            if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                dl.line_type = lt.clone();
+                            }
+                        }
+                        for pl in self.tabs[i].layers.layers.iter_mut() {
+                            if names.contains(&pl.name) {
+                                pl.linetype = lt.clone();
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.commit_layer_undo(i, undo);
+                        // Linetype is baked into the cached wires; repaint.
+                        self.tabs[i].scene.invalidate_layer_dependencies(&names);
                     }
-                    self.tabs[i].dirty = true;
-                    self.commit_layer_undo(i, undo);
-                    // Linetype is baked into the cached wires; repaint.
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
                 }
                 Task::none()
             }
@@ -9450,7 +9485,12 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     return task;
                 }
+                let mut catalog_checked = false;
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if !catalog_checked {
+                        catalog_checked = true;
+                        let _ = app.ensure_tab_catalog_linetype(i, &lt);
+                    }
                     if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
                         crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
                     }

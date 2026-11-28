@@ -9,6 +9,35 @@ function preferredLocale(language) {
   return SITE_LOCALES.find(locale => locale.split("-")[0] === base) || "en-US";
 }
 
+function isSafeGitHubUrl(raw) {
+  if (typeof raw !== "string" || !raw) return false;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:") return false;
+    return (
+      parsed.hostname === "github.com" ||
+      parsed.hostname === "objects.githubusercontent.com" ||
+      parsed.hostname === "release-assets.githubusercontent.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeRelease(release) {
+  if (!release || typeof release !== "object" || !isSafeGitHubUrl(release.url)) return null;
+  return {
+    tag: String(release.tag || ""),
+    url: release.url,
+    published: String(release.published || ""),
+    assets: Array.isArray(release.assets)
+      ? release.assets
+          .filter(asset => asset && typeof asset.name === "string" && isSafeGitHubUrl(asset.url))
+          .map(asset => ({ name: asset.name, url: asset.url, size: Number(asset.size) || 0 }))
+      : [],
+  };
+}
+
 (() => {
   const storageKey = "ocs.site.language";
   let saved;
@@ -50,19 +79,23 @@ function preferredLocale(language) {
     const loadRelease = async () => {
       try {
         const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
-        if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.release;
+        if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
+          const clean = sanitizeRelease(cached.release);
+          if (clean) return clean;
+        }
       } catch {}
       const response = await fetch(page.dataset.releaseApi, { headers: { Accept: "application/vnd.github+json" } });
       if (!response.ok) throw new Error(`release lookup ${response.status}`);
       const data = await response.json();
-      const release = {
+      const release = sanitizeRelease({
         tag: data.tag_name,
         url: data.html_url,
         published: data.published_at,
         assets: (data.assets || [])
           .filter(asset => asset.size > 0 && asset.state === "uploaded")
           .map(asset => ({ name: asset.name, url: asset.browser_download_url, size: asset.size })),
-      };
+      });
+      if (!release) throw new Error("unsafe release metadata");
       try { sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), release })); } catch {}
       return release;
     };

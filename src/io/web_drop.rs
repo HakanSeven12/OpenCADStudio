@@ -15,6 +15,8 @@ use wasm_bindgen_futures::JsFuture;
 /// rejected with a console warning instead of being silently dropped.
 /// Entries are just name+bytes; 32 drawings is a realistic folder drop.
 const QUEUE_CAP: usize = 32;
+const MAX_WEB_DROP_DRAWING_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_WEB_DROP_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// One queued open. `restore_key` tags an autosave-restore file so its
 /// snapshot is deleted only when THIS open succeeds — matching by identity,
@@ -23,6 +25,7 @@ pub struct QueuedOpen {
     pub name: String,
     pub bytes: Vec<u8>,
     pub restore_key: Option<String>,
+    pub cache_recent: bool,
 }
 
 static DROPPED: Mutex<VecDeque<QueuedOpen>> = Mutex::new(VecDeque::new());
@@ -70,6 +73,19 @@ pub fn enqueue_open(name: String, bytes: Vec<u8>) -> bool {
         name,
         bytes,
         restore_key: None,
+        cache_recent: true,
+    })
+}
+
+/// Queue drawing bytes without writing to the OPFS recent-files store (used
+/// for cross-origin deep links so external URLs cannot overwrite local files
+/// of the same name).
+pub fn enqueue_open_uncached(name: String, bytes: Vec<u8>) -> bool {
+    push(QueuedOpen {
+        name,
+        bytes,
+        restore_key: None,
+        cache_recent: false,
     })
 }
 
@@ -108,6 +124,7 @@ pub fn enqueue_restore(name: String, bytes: Vec<u8>, restore_key: String) -> boo
         name,
         bytes,
         restore_key: Some(restore_key),
+        cache_recent: true,
     })
 }
 
@@ -143,6 +160,7 @@ pub async fn open_dropped(
     name: String,
     bytes: Vec<u8>,
     progress: std::sync::Arc<crate::io::OpenProgressState>,
+    cache_recent: bool,
 ) -> crate::io::WebOpenOutcome {
     // The dropped drawing's bytes also enter the xref registry (name-keyed,
     // like dropped raster images): another drawing may reference it by
@@ -157,7 +175,7 @@ pub async fn open_dropped(
         .as_ref()
         .err()
         .is_some_and(|error| error.recovery_available);
-    let cache_bytes = (result.is_ok() && !super::host_bridge::is_embed_mode())
+    let cache_bytes = (cache_recent && result.is_ok() && !super::host_bridge::is_embed_mode())
         .then(|| std::sync::Arc::clone(&bytes));
     crate::io::WebOpenOutcome {
         name,
@@ -217,12 +235,25 @@ pub fn install() {
                     continue;
                 };
                 let name = file.name();
+                let size = file.size();
                 // A drop has no picker filter: accept the formats the web Open
                 // dialog accepts, plus the raster formats the IMAGE command
                 // accepts; anything else is logged, never parsed.
                 if is_drawing_name(&name) {
+                    if size > MAX_WEB_DROP_DRAWING_BYTES as f64 {
+                        warn(&format!(
+                            "ocs: ignoring oversized dropped drawing \"{name}\""
+                        ));
+                        continue;
+                    }
                     reads.push((name, file.array_buffer()));
                 } else if is_image_name(&name) {
+                    if size > MAX_WEB_DROP_IMAGE_BYTES as f64 {
+                        warn(&format!(
+                            "ocs: ignoring oversized dropped image \"{name}\""
+                        ));
+                        continue;
+                    }
                     image_reads.push((name, file.array_buffer()));
                 } else {
                     warn(&format!(

@@ -2033,26 +2033,42 @@ mod web_fetch {
         use wasm_bindgen::JsCast;
         use wasm_bindgen_futures::JsFuture;
 
+        struct TimeoutGuard {
+            window: web_sys::Window,
+            id: i32,
+        }
+        impl Drop for TimeoutGuard {
+            fn drop(&mut self) {
+                self.window.clear_timeout_with_handle(self.id);
+            }
+        }
+
         let window = web_sys::window().ok_or(RemoteFetchError::Network)?;
         let controller = web_sys::AbortController::new().map_err(|_| RemoteFetchError::Network)?;
         let init = web_sys::RequestInit::new();
         init.set_method("GET");
+        let _ = js_sys::Reflect::set(
+            &init,
+            &wasm_bindgen::JsValue::from_str("credentials"),
+            &wasm_bindgen::JsValue::from_str("omit"),
+        );
         init.set_signal(Some(&controller.signal()));
         let request = web_sys::Request::new_with_str_and_init(url, &init)
             .map_err(|_| RemoteFetchError::Network)?;
-        // Arm the deadline. The one-shot closure outlives the await on
-        // purpose: aborting a settled request is a no-op, and clearing the
-        // timer would need a handle threaded through the error paths for no
-        // behavioural gain.
+        // Arm the deadline and clear the timer on every exit path via TimeoutGuard.
         let abort = wasm_bindgen::closure::Closure::once_into_js(move || controller.abort());
         let abort = js_sys::Function::from(abort);
-        window
+        let timer_id = window
             .set_timeout_with_callback_and_timeout_and_arguments(
                 abort.as_ref(),
                 TIMEOUT_MS,
                 &js_sys::Array::new(),
             )
             .map_err(|_| RemoteFetchError::Network)?;
+        let _timeout_guard = TimeoutGuard {
+            window: window.clone(),
+            id: timer_id,
+        };
 
         let response = JsFuture::from(window.fetch_with_request(&request))
             .await

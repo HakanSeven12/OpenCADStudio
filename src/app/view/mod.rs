@@ -3076,6 +3076,12 @@ bg={bg_ms:.1}ms n={view_count}"
                 {
                     let tools = crate::ui::ribbon::table_cell_tools();
                     let align = crate::ui::ribbon::table_cell_alignments();
+                    // Rows and columns side by side: above | left,
+                    // below | right, delete rows | delete columns.
+                    let rows_cols: Vec<_> = [0, 3, 1, 4, 2, 5]
+                        .iter()
+                        .map(|&i| tools[i].clone())
+                        .collect();
                     // Rows and columns, merging and locking, the nine
                     // alignments three to a row, formats, inserts, linked
                     // data and the cell's text, two to a row: a panel in the
@@ -3083,7 +3089,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     crate::ui::side_toolbar::view_panel(
                         "Table Cell",
                         &[
-                            ("Rows and Columns", &tools[..6], 2),
+                            ("Rows and Columns", &rows_cols[..], 2),
                             ("Merge and Lock", &tools[6..9], 2),
                             ("Alignment", &align[..], 3),
                             ("Format", &tools[9..12], 2),

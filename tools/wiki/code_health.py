@@ -203,6 +203,27 @@ def crate_readiness(cur, commit):
     return out
 
 
+def process_state(cur, commit):
+    """The process-wide state of each top-level module (TARGET.md, step 3),
+    most first. Nothing when the release has no data or no state."""
+    d = cur["details"]
+    state = d.get("process_state")
+    if not state:
+        return []
+    first = {}
+    for x in d.get("process_statics", []) + d.get("thread_local_blocks", []):
+        first.setdefault(x["module"], x)
+    out = ["## Process-wide state", "",
+           "State held for the whole process, by module: statics whose value can change after start (atomics, "
+           "mutexes, `OnceLock`, cells) and `thread_local!` blocks. Step 3 of "
+           f"[TARGET.md]({BLOB}/main/docs/architecture/TARGET.md) moves it into the session or the app state.", "",
+           "| Module | Mutable statics | `thread_local!` blocks | For example |", "| --- | ---: | ---: | --- |"]
+    for mod, n in state.items():
+        x = first.get(mod)
+        out.append(f"| `{mod}` | {n['statics']:,} | {n['thread_local_blocks']:,} | {link(x['file'], commit, x['line']) if x else '—'} |")
+    return out + [""]
+
+
 def cleanup_tasks(cur, commit):
     d = cur["details"]
     out = []
@@ -329,6 +350,7 @@ def render(cur, goals, history, credits, release):
         lines.append("")
     lines += coverage_by_layer(cur, prev, history)
     lines += crate_readiness(cur, commit)
+    lines += process_state(cur, commit)
     lines += ["## Thanks", "", "Contributors whose merged work improved a measure in this release, in alphabetical order:", ""] + thanks(credits)
     lines += ["## Pick up a cleanup", ""] + cleanup_tasks(cur, commit)
     recent = history[-6:][::-1]

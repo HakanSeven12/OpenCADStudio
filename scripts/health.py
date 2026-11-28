@@ -78,12 +78,17 @@ TEST_FN = re.compile(r"#\[test\]")
 TEST_ROOTS = ("src", "tests", "crates")   # where test functions are counted
 GOALS = Path(__file__).resolve().parent.parent / "docs" / "architecture" / "health-goals.json"
 FILE_LOAD = ("io/",)      # file import and export: a panic here is a crash on a bad file
+# Process-wide state (TARGET.md, step 3): a static item whose type can change
+# after start, and each thread_local! block.
+STATIC_ITEM = re.compile(r"^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?static[ \t]+(mut[ \t]+)?([A-Za-z_]\w*)[ \t]*:([^=;]*)", re.M)
+MUTABLE_TYPE = re.compile(r"\b(?:Atomic\w+|Mutex|RwLock|OnceLock|OnceCell|Cell|RefCell|UnsafeCell|Condvar)\b")
+THREAD_LOCAL = re.compile(r"\bthread_local!\s*[{(]")
 
 # Source measures: fast, per pull request, credited to the pull request.
 SOURCE_MEASURES = [
     "upward_pairs", "upward_files", "mutual_pairs", "large_files", "long_functions",
     "message_variants", "panic_sites", "panic_sites_file_load", "unsafe_undocumented",
-    "test_functions",
+    "process_statics", "thread_local_blocks", "test_functions",
 ]
 # Measures where a higher number is better; every other measure should fall.
 UP_MEASURES = {"test_functions", "tests", "coverage_core", "coverage_all"}
@@ -91,10 +96,30 @@ UP_MEASURES = {"test_functions", "tests", "coverage_core", "coverage_all"}
 
 # ---- Reading a checkout ------------------------------------------------------
 
+def source_roots(root: Path):
+    """The folders that hold the root package's code, relative to the
+    checkout: src/ and each crate of TARGET.md (arch_check.CRATES) that
+    exists under crates/. Code that moves into one of these crates is still
+    measured; the other workspace crates are not."""
+    roots = [Path("src")]
+    for name, _, _ in arch_check.CRATES:
+        if (root / "crates" / name / "src").is_dir():
+            roots.append(Path("crates") / name / "src")
+    return roots
+
+
 def production_files(root: Path):
-    """(rel, top module, raw text, code) for each production .rs file;
-    code has comments, strings and #[cfg(test)] blocks blanked, keeping lines."""
-    src = root / "src"
+    """(path, top module, raw text, code) for each production .rs file in
+    source_roots; path is relative to the checkout. code has comments,
+    strings and #[cfg(test)] blocks blanked, keeping lines."""
+    out = []
+    for base in source_roots(root):
+        out += [(base / rel, mod, raw, code) for rel, mod, raw, code in _production_files(root / base)]
+    return out
+
+
+def _production_files(src: Path):
+    """production_files for one source folder; rel is relative to it."""
     files = sorted(p.relative_to(src) for p in src.rglob("*.rs"))
     raw, codes, test_files = {}, {}, set()
     for rel in files:
@@ -212,7 +237,7 @@ def module_graph(root: Path, files=None):
             continue
         for dst, _, _ in arch_check.references(code):
             if dst != mod and dst in arch_check.LAYERS:
-                graph[(mod, dst)].add(f"src/{rel.as_posix()}")
+                graph[(mod, dst)].add(rel.as_posix())
     return graph
 
 
@@ -231,6 +256,38 @@ def line_findings(code: str, raw: str):
     return tuple(panics), tuple(unsafe_undoc)
 
 
+def group_end(code: str, start: int) -> int:
+    """The index after the bracket that closes the one at code[start]
+    (`{` or `(`), counting only that kind of bracket."""
+    open_, close = code[start], "}" if code[start] == "{" else ")"
+    depth, j = 1, start + 1
+    while j < len(code) and depth:
+        depth += (code[j] == open_) - (code[j] == close)
+        j += 1
+    return j
+
+
+@cached
+def state_findings(code: str, raw: str):
+    """One file's process-wide state: the mutable statics as (line, name,
+    text) and the thread_local! blocks as (line, text). A static inside a
+    thread_local! block belongs to the block and is not counted again."""
+    raw_lines = raw.split("\n")
+    blocks, spans = [], []
+    for m in THREAD_LOCAL.finditer(code):
+        line = line_of(code, m.start())
+        blocks.append((line, raw_lines[line - 1].strip()[:160]))
+        spans.append((m.end() - 1, group_end(code, m.end() - 1)))
+    statics = []
+    for m in STATIC_ITEM.finditer(code):
+        if any(a <= m.start() < b for a, b in spans):
+            continue
+        if m.group(1) or MUTABLE_TYPE.search(m.group(3)):
+            line = line_of(code, m.start())
+            statics.append((line, m.group(2), raw_lines[line - 1].strip()[:160]))
+    return tuple(statics), tuple(blocks)
+
+
 def measure_source(root: Path):
     """The source measures, with the findings behind each."""
     edges, unlayered = arch_check.measure(root)
@@ -239,9 +296,10 @@ def measure_source(root: Path):
     mutual = sorted({tuple(sorted(p)) for p in graph if (p[1], p[0]) in graph})
 
     large, long_fns, panics, unsafe_undoc, skipped = {}, [], [], [], []
-    for p in sorted((root / "src").rglob("*.rs")):
+    statics, thread_locals, state = [], [], defaultdict(lambda: {"statics": 0, "thread_local_blocks": 0})
+    for p in sorted(p for base in source_roots(root) for p in (root / base).rglob("*.rs")):
         text = p.read_text(encoding="utf-8", errors="replace")
-        key = f"src/{p.relative_to(root / 'src').as_posix()}"
+        key = p.relative_to(root).as_posix()
         if generated(text):
             skipped.append(key)
             continue
@@ -249,7 +307,7 @@ def measure_source(root: Path):
         if n > LARGE_FILE:
             large[key] = n
     for rel, mod, raw, code in prod:
-        key = f"src/{rel.as_posix()}"
+        key = rel.as_posix()
         if key not in skipped:
             for name, start, n in functions(code):
                 if n > LONG_FUNCTION:
@@ -257,6 +315,14 @@ def measure_source(root: Path):
         file_panics, file_unsafe = line_findings(code, raw)
         panics += [{"file": key, "line": line, "text": text} for line, text in file_panics]
         unsafe_undoc += [{"file": key, "line": line, "text": text} for line, text in file_unsafe]
+        file_statics, file_blocks = state_findings(code, raw)
+        owner = mod or key
+        statics += [{"file": key, "line": line, "name": name, "text": text, "module": owner}
+                    for line, name, text in file_statics]
+        thread_locals += [{"file": key, "line": line, "text": text, "module": owner} for line, text in file_blocks]
+        if file_statics or file_blocks:
+            state[owner]["statics"] += len(file_statics)
+            state[owner]["thread_local_blocks"] += len(file_blocks)
 
     file_load = [x for x in panics if x["file"].startswith(tuple("src/" + p for p in FILE_LOAD))]
     test_fns = count_test_functions(root)
@@ -270,6 +336,8 @@ def measure_source(root: Path):
         "panic_sites": len(panics),
         "panic_sites_file_load": len(file_load),
         "unsafe_undocumented": len(unsafe_undoc),
+        "process_statics": len(statics),
+        "thread_local_blocks": len(thread_locals),
         "test_functions": sum(test_fns.values()),
     }
     details = {
@@ -282,6 +350,10 @@ def measure_source(root: Path):
         "long_functions": sorted(long_fns, key=lambda f: -f["lines"]),
         "panic_sites": panics,
         "unsafe_undocumented": unsafe_undoc,
+        "process_statics": statics,
+        "thread_local_blocks": thread_locals,
+        # {top module: {"statics": n, "thread_local_blocks": n}}, most first.
+        "process_state": dict(sorted(state.items(), key=lambda kv: (-sum(kv[1].values()), kv[0]))),
         "test_functions": test_fns,
     }
     return values, details
@@ -343,7 +415,7 @@ def upward_items(root: Path, files=None):
         for dst, items, paths, line in references_with_paths(code):
             if dst == mod or not arch_check.upward(mod, dst) or arch_check.allowed(mod, dst, items):
                 continue
-            entry = out[f"{mod} -> {dst}"].setdefault(f"src/{rel.as_posix()}", {"line": line, "items": []})
+            entry = out[f"{mod} -> {dst}"].setdefault(rel.as_posix(), {"line": line, "items": []})
             entry["line"] = min(entry["line"], line)
             for i in paths:
                 i = i or "(module)"
@@ -481,12 +553,12 @@ def coverage_from_lcov(root: Path, text: str, cfg):
     for path, lines in parse_lcov(text).items():
         p = Path(path)
         try:
-            rel = (p if p.is_absolute() else root / p).resolve().relative_to((root / "src").resolve())
+            rel = (p if p.is_absolute() else root / p).resolve().relative_to(root.resolve())
         except ValueError:
-            continue                      # another workspace crate
+            continue                      # outside the checkout
         cov[rel] = lines
     files, all_lines, all_hit = {}, 0, 0
-    for rel, mod, raw, code in production_files(root):
+    for rel, mod, raw, code in production_files(root):      # other workspace crates are not in it
         if rel not in cov or generated(raw):
             continue
         kept = code.split("\n")
@@ -494,7 +566,7 @@ def coverage_from_lcov(root: Path, text: str, cfg):
         da = {n: c for n, c in cov[rel].items() if n not in test_lines}
         n, hit = len(da), sum(1 for c in da.values() if c)
         all_lines, all_hit = all_lines + n, all_hit + hit
-        key = f"src/{rel.as_posix()}"
+        key = rel.as_posix()
         layer = arch_check.LAYERS.get(mod) if mod else None
         if layer in cfg["layers"] and not excluded(key, cfg["exclude"]) and n:
             files[key] = {"layer": layer, "lines": n, "covered": hit,
@@ -515,8 +587,9 @@ def coverage_from_lcov(root: Path, text: str, cfg):
 
 
 def churn(root: Path, days: int = 28):
-    """{src file: landings on main's first-parent line} in the `days` days
-    before HEAD's commit date (a merged pull request counts once)."""
+    """{source file (source_roots): landings on main's first-parent line} in
+    the `days` days before HEAD's commit date (a merged pull request counts
+    once)."""
     # The commit time in seconds: `%cI` gives `Z` for a UTC commit (the
     # release bot's), which `fromisoformat` rejects before Python 3.11.
     head = run(["git", "log", "-1", "--format=%ct", "HEAD"], root).stdout.strip()
@@ -525,7 +598,7 @@ def churn(root: Path, days: int = 28):
     from datetime import datetime, timedelta, timezone
     since = (datetime.fromtimestamp(int(head), timezone.utc) - timedelta(days=days)).isoformat()
     log = run(["git", "log", "--first-parent", "--diff-merges=first-parent", "--no-renames", f"--since={since}",
-               "--numstat", "--format=@%H", "HEAD", "--", "src"], root).stdout
+               "--numstat", "--format=@%H", "HEAD", "--", *(b.as_posix() for b in source_roots(root))], root).stdout
     out = Counter()
     for line in log.splitlines():
         parts = line.split("\t")
@@ -557,6 +630,7 @@ LABELS = {
     "panic_sites": "unwrap/expect/panic! in production code",
     "panic_sites_file_load": "unwrap/expect/panic! in file import and export (src/io)",
     "unsafe_undocumented": "unsafe without a SAFETY comment",
+    "process_statics": "process-wide mutable statics", "thread_local_blocks": "thread_local! blocks",
     "test_functions": "test functions (#[test])",
 }
 
@@ -585,6 +659,8 @@ def compare(base, head):
                          if f not in bd["upward"].get(p, {})),
         "panic_sites": new_lines(bd["panic_sites"], hd["panic_sites"]),
         "unsafe_undocumented": new_lines(bd["unsafe_undocumented"], hd["unsafe_undocumented"]),
+        "process_statics": new_lines(bd["process_statics"], hd["process_statics"], key=lambda x: (x["file"], x["name"])),
+        "thread_local_blocks": new_lines(bd["thread_local_blocks"], hd["thread_local_blocks"]),
         # Only functions that crossed the limit: one that was already long and
         # grew is the existing debt, not this change's.
         "long_functions": new_lines(bd["long_functions"], hd["long_functions"],
@@ -603,9 +679,10 @@ def better(k, a, b):
 
 
 def edited_files(base_root: Path, head_root: Path):
-    """src files that differ between the two checkouts (added or changed)."""
+    """Source files (source_roots) that differ between the two checkouts
+    (added or changed)."""
     out = []
-    for p in sorted((head_root / "src").rglob("*.rs")):
+    for p in sorted(p for base in source_roots(head_root) for p in (head_root / base).rglob("*.rs")):
         rel = p.relative_to(head_root)
         other = base_root / rel
         if not other.exists() or other.read_bytes() != p.read_bytes():
@@ -644,6 +721,8 @@ def diff(base_dir: str, markdown: bool, untested_file=None) -> int:
             ("New upward dependencies", [f"`{f}:{l}` ({p})" for p, f, l in added["upward"]]),
             ("New unwrap/expect/panic!", [f"`{x['file']}:{x['line']}`" for x in added["panic_sites"]]),
             ("New unsafe without a SAFETY comment", [f"`{x['file']}:{x['line']}`" for x in added["unsafe_undocumented"]]),
+            ("New process-wide mutable statics", [f"`{x['file']}:{x['line']}` `{x['name']}`" for x in added["process_statics"]]),
+            ("New thread_local! blocks", [f"`{x['file']}:{x['line']}`" for x in added["thread_local_blocks"]]),
             ("Functions now over 150 lines", [f"`{x['file']}:{x['line']}` `{x['name']}` ({x['lines']} lines)" for x in added["long_functions"]]),
             ("Files now over 3,000 lines", [f"`{f}` ({head['details']['large_files'][f]:,} lines)" for f in added["large_files"]]),
             ("Modules that now use each other", [f"`{a}` and `{b}`" for a, b in added["mutual_pairs"]]),

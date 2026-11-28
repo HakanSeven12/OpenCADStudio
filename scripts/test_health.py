@@ -334,6 +334,112 @@ class TestFunctions(unittest.TestCase):
         self.assertIn("`tests/t.rs`: 2 → 1", out)
 
 
+class PlannedCrates(unittest.TestCase):
+    """Code that moves from src/ into a crate of TARGET.md is still measured."""
+    moved = {
+        "i18n.rs": "fn g() { a.unwrap(); }\nfn h() { unsafe { x() } }\n" + body(200) + "\n" * 3000,
+        "io/a.rs": "fn f() { b.expect(\"x\"); }\n",
+    }
+
+    def test_a_move_into_a_planned_crate_keeps_the_values(self):
+        before = full_tree({f"src/{k}": v for k, v in self.moved.items()})
+        after = full_tree({"src/io/a.rs": self.moved["io/a.rs"], "crates/ocs_base/src/i18n.rs": self.moved["i18n.rs"]})
+        (v0, d0), (v1, d1) = health.measure_source(before), health.measure_source(after)
+        for key in ("large_files", "long_functions", "panic_sites", "panic_sites_file_load", "unsafe_undocumented"):
+            self.assertEqual(v1[key], v0[key], key)
+        self.assertEqual((v1["panic_sites"], v1["unsafe_undocumented"]), (2, 1))
+        self.assertEqual([x["file"] for x in d1["panic_sites"]], ["src/io/a.rs", "crates/ocs_base/src/i18n.rs"])
+        self.assertEqual(list(d1["large_files"]), ["crates/ocs_base/src/i18n.rs"])
+
+    def test_other_workspace_crates_are_not_measured(self):
+        root = full_tree({"src/io/a.rs": "fn f() {}\n", "crates/ocs_solid/src/lib.rs": "fn g() { a.unwrap(); }\n"})
+        self.assertEqual(health.measure_source(root)[0]["panic_sites"], 0)
+
+    def test_coverage_counts_a_planned_crate_by_the_layer_of_its_module(self):
+        root = full_tree({"src/io/a.rs": "fn i() {}\n", "crates/ocs_base/src/i18n.rs": "fn t() {}\nfn u() {}\n",
+                          "crates/ocs_solid/src/lib.rs": "fn s() {}\n"})
+        text = lcov({str(root / "src/io/a.rs"): {1: 1}, str(root / "crates/ocs_base/src/i18n.rs"): {1: 1, 2: 0},
+                     str(root / "crates/ocs_solid/src/lib.rs"): {1: 0}})
+        v, d = health.coverage_from_lcov(root, text, {"layers": {0, 1, 2, 3, 4}, "exclude": []})
+        self.assertEqual(d["coverage_files"]["crates/ocs_base/src/i18n.rs"],
+                         {"layer": 0, "lines": 2, "covered": 1, "uncovered_lines": [2]})
+        self.assertEqual(set(d["coverage_files"]), {"src/io/a.rs", "crates/ocs_base/src/i18n.rs"})
+        self.assertEqual((v["coverage_layer_0"], v["coverage_core"], v["coverage_all"]), (50.0, 66.7, 66.7))
+
+    def test_churn_and_edited_files_include_a_planned_crate(self):
+        root = git_repo()
+        for n in (1, 2):
+            path = root / "crates/ocs_base/src/i18n.rs"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fn t() {{ {n}; }}\n")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=M", "-c", "user.email=m@example.com", "commit", "-q", "-m", f"i18n {n}"],
+                           cwd=root, check=True, capture_output=True)
+        self.assertEqual(health.churn(root)["crates/ocs_base/src/i18n.rs"], 2)
+        base = full_tree({"src/io/a.rs": "fn f() {}\n", "crates/ocs_base/src/i18n.rs": "fn t() {}\n"})
+        head = full_tree({"src/io/a.rs": "fn f() {}\n", "crates/ocs_base/src/i18n.rs": "fn t() { }\n",
+                          "crates/ocs_solid/src/lib.rs": "fn s() {}\n"})
+        self.assertEqual(health.edited_files(base, head), ["crates/ocs_base/src/i18n.rs"])
+
+
+class ProcessState(unittest.TestCase):
+    def test_mutable_statics_and_thread_local_blocks(self):
+        v, d = health.measure_source(tree({
+            "app/a.rs": textwrap.dedent("""\
+                static NAMES: &[&str] = &["a"];
+                static ON: AtomicBool = AtomicBool::new(false);
+                pub(crate) static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+                static mut COUNT: u32 = 0;
+                static CONFIG: OnceLock<String> = OnceLock::new();
+                static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("x").unwrap());
+                fn f() -> &'static str { "static X: Mutex<u8> = 0" }
+                // static Y: AtomicU8 = AtomicU8::new(0);
+                thread_local! {
+                    static A: RefCell<u8> = RefCell::new(0);
+                    static B: Cell<u8> = Cell::new(0);
+                }
+                #[cfg(test)]
+                mod tests {
+                    static T: AtomicU8 = AtomicU8::new(0);
+                    thread_local!(static U: Cell<u8> = Cell::new(0));
+                }
+                """),
+            "scene/b.rs": "fn g() {\n    thread_local!(static DUE: Cell<f64> = const { Cell::new(0.0) });\n}\n"
+                          "thread_local!(\n    static C: Cell<u8> = Cell::new(0)\n);\n"
+                          "static AFTER: AtomicU8 = AtomicU8::new(0);\n",
+        }))
+        self.assertEqual((v["process_statics"], v["thread_local_blocks"]), (5, 3))
+        self.assertEqual([x["name"] for x in d["process_statics"]], ["ON", "LOG", "COUNT", "CONFIG", "AFTER"])
+        self.assertEqual([(x["file"], x["line"]) for x in d["thread_local_blocks"]], [("src/app/a.rs", 9), ("src/scene/b.rs", 2), ("src/scene/b.rs", 4)])
+        self.assertEqual(d["process_state"], {"app": {"statics": 4, "thread_local_blocks": 1},
+                                              "scene": {"statics": 1, "thread_local_blocks": 2}})
+
+    def test_a_new_static_is_listed_and_a_removed_one_thanked(self):
+        base = tree({"app/a.rs": "static ON: AtomicBool = AtomicBool::new(false);\n"})
+        head = tree({"app/a.rs": "fn f() {}\nstatic LOG: Mutex<u8> = Mutex::new(0);\nthread_local! { static A: Cell<u8> = Cell::new(0); }\n"})
+        _, out = run_in(head, ["diff", str(base), "--markdown"])
+        self.assertIn("thread_local! blocks: 0 → 1", out)
+        self.assertIn("New process-wide mutable statics (1)", out)
+        self.assertIn("- `src/app/a.rs:2` `LOG`", out)
+        self.assertIn("New thread_local! blocks (1)", out)
+        _, out = run_in(base, ["diff", str(head), "--markdown"])
+        self.assertIn("Thank you: this pull request improves", out)
+        self.assertIn("thread_local! blocks: 1 → 0", out)
+
+    def test_page_lists_the_state_by_module(self):
+        root = tree({"app/a.rs": "fn f() {}\nstatic ON: AtomicBool = AtomicBool::new(false);\n",
+                     "ui/b.rs": "thread_local! { static A: Cell<u8> = Cell::new(0); }\nstatic L: Mutex<u8> = Mutex::new(0);\n"
+                                "static M: Mutex<u8> = Mutex::new(0);\n"})
+        cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(root)))}
+        goals = json.loads(code_health.GOALS.read_text())
+        page = code_health.render(cur, goals, [], [], "v1")
+        self.assertLess(page.index("## Process-wide state"), page.index("## Thanks"))
+        self.assertIn(f"| `ui` | 2 | 1 | [`src/ui/b.rs:2`]({code_health.BLOB}/{'a' * 40}/src/ui/b.rs#L2) |", page)
+        self.assertIn("| `app` | 1 | 0 |", page)
+        self.assertLess(page.index("| `ui` |"), page.index("| `app` |"))
+        cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(tree({"io/a.rs": "fn f() {}\n"}))))}
+        self.assertNotIn("## Process-wide state", code_health.render(cur, goals, [], [], "v1"))
+
 def lcov(records):
     """lcov text from {path: {line: hits}}."""
     out = []

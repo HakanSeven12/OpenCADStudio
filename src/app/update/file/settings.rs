@@ -914,6 +914,12 @@ impl OpenCADStudio {
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn install_task(&self, repo: String, tag: String) -> Task<Message> {
         let label = repo.clone();
+        let expected_sha256 = self
+            .plugin_registry
+            .iter()
+            .find(|entry| entry.repo == repo)
+            .map(|entry| entry.sha256.clone())
+            .filter(|hashes| !hashes.is_empty());
         Task::perform(
             async move {
                 on_worker_thread(move || {
@@ -922,7 +928,11 @@ impl OpenCADStudio {
                         .into_iter()
                         .find(|r| r.tag == tag)
                         .ok_or_else(|| format!("release {tag} not found"))?;
-                    crate::plugin::marketplace::install(&rel, &repo)
+                    crate::plugin::marketplace::install_verified(
+                        &rel,
+                        &repo,
+                        expected_sha256.as_ref(),
+                    )
                 })
                 .await
                 .unwrap_or_else(|| Err("install thread died".into()))

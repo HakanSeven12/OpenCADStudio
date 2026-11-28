@@ -30,16 +30,40 @@ impl OpenCADStudio {
             .iter()
             .map(|p| {
                 let error = self.plugin_load_errors.get(&p.id);
-                let status = InstalledStatus::of(
+                let trust = crate::plugin::external::evaluate_plugin_trust_on_disk(p);
+                let trust_label = match &trust {
+                    crate::plugin::external::PluginTrustState::Bundled => "bundled",
+                    crate::plugin::external::PluginTrustState::Approved { .. } => "approved",
+                    crate::plugin::external::PluginTrustState::Unapproved { .. } => "unapproved",
+                    crate::plugin::external::PluginTrustState::HashMismatch { .. } => {
+                        "hash_mismatch"
+                    }
+                    crate::plugin::external::PluginTrustState::Unverifiable(_) => "unverifiable",
+                };
+                let mut status = InstalledStatus::of(
                     p,
                     self.loaded_plugin_ids.contains(&p.id),
                     self.disabled_plugins.contains(&p.id),
                     error.map(String::as_str),
                 );
+                if status == InstalledStatus::RestartToLoad {
+                    match &trust {
+                        crate::plugin::external::PluginTrustState::Unapproved { .. } => {
+                            status = InstalledStatus::AwaitingApproval;
+                        }
+                        crate::plugin::external::PluginTrustState::HashMismatch { .. } => {
+                            status = InstalledStatus::HashMismatch;
+                        }
+                        crate::plugin::external::PluginTrustState::Unverifiable(_) => {
+                            status = InstalledStatus::LoadFailed;
+                        }
+                        _ => {}
+                    }
+                }
                 json!({
                     "id":p.id,"name":p.name,"version":p.version,"api_version":p.api_version,
                     "repository":p.repository,"description":p.description,
-                    "commands":p.command_prefixes,"bundled":p.bundled,
+                    "commands":p.command_prefixes,"bundled":p.bundled,"trust":trust_label,
                     "status":status.key(),"error":error,
                     "tools":self.plugin_tools.get(&p.id).map(|tools| tools.iter().map(|tool| json!({
                         "name":tool.name,"description":tool.description,

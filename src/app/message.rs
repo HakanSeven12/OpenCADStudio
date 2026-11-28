@@ -2112,6 +2112,10 @@ pub enum Message {
     PluginRestart,
     /// Delete an installed plugin's folder (effective next restart).
     PluginUninstall(String),
+    /// Approve (record SHA-256 into `plugin.lock.json`) and load a third-party plugin.
+    PluginApprove(String),
+    /// Keep unapproved third-party plugins blocked and dismiss the consent prompt.
+    PluginConsentDismiss,
     // ── Point Style (DDPTYPE) dialog ──────────────────────────────────────
     /// Set the full PDMODE value from a glyph-grid cell.
     PointStyleSetMode(i16),

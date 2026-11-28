@@ -89,22 +89,62 @@ fn is_allowed_github_url(url: &str, expected_repo: Option<&str>) -> bool {
 }
 
 /// Fetch the curated plugin registry (`plugins/registry.json`).
+fn parse_registry_sha256(value: &serde_json::Value) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut map = std::collections::BTreeMap::new();
+    if value.is_null() {
+        return Ok(map);
+    }
+    if let Some(hex) = value.as_str() {
+        let trimmed = hex.trim();
+        if !external::is_valid_sha256_hex(trimmed) {
+            return Err(format!("invalid registry sha256 `{trimmed}`"));
+        }
+        map.insert("*".to_string(), trimmed.to_ascii_lowercase());
+        return Ok(map);
+    }
+    if let Some(obj) = value.as_object() {
+        for (key, val) in obj {
+            let Some(hex) = val.as_str() else {
+                return Err(format!("registry sha256 for `{key}` must be a hex string"));
+            };
+            let trimmed = hex.trim();
+            if !external::is_valid_sha256_hex(trimmed) {
+                return Err(format!("invalid registry sha256 `{trimmed}` for `{key}`"));
+            }
+            map.insert(key.clone(), trimmed.to_ascii_lowercase());
+        }
+        return Ok(map);
+    }
+    Err("registry sha256 must be a string or map".to_string())
+}
+
 pub fn fetch_registry() -> Result<Vec<RegistryEntry>, String> {
     let body = download_string(REGISTRY_URL)?;
     let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     let arr = json.as_array().ok_or("registry is not a JSON array")?;
-    Ok(arr
-        .iter()
-        .filter_map(|e| {
-            let raw_repo = e["repo"].as_str()?;
-            let repo = external::normalize_repository(raw_repo)?;
-            Some(RegistryEntry {
-                repo,
-                name: e["name"].as_str().unwrap_or_default().to_string(),
-                description: e["description"].as_str().unwrap_or_default().to_string(),
-            })
-        })
-        .collect())
+    let mut entries = Vec::new();
+    for e in arr {
+        let Some(raw_repo) = e["repo"].as_str() else {
+            continue;
+        };
+        let Some(repo) = external::normalize_repository(raw_repo) else {
+            continue;
+        };
+        let sha256 = parse_registry_sha256(&e["sha256"])?;
+        let signature = e["signature"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        entries.push(RegistryEntry {
+            repo,
+            name: e["name"].as_str().unwrap_or_default().to_string(),
+            description: e["description"].as_str().unwrap_or_default().to_string(),
+            sha256,
+            signature,
+        });
+    }
+    Ok(entries)
 }
 
 /// One release of a linked repo.
@@ -423,11 +463,102 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+fn parse_sha256_list_for_asset(text: &str, asset_name: &str) -> Option<String> {
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let Some(hex) = parts.next() else {
+            continue;
+        };
+        if !external::is_valid_sha256_hex(hex) {
+            continue;
+        }
+        match parts.next() {
+            None => return Some(hex.to_ascii_lowercase()),
+            Some(name) => {
+                let clean = name.trim_start_matches('*');
+                let base = Path::new(clean)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(clean);
+                if clean == asset_name || base == asset_name {
+                    return Some(hex.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn verify_asset_sha256(
+    asset_name: &str,
+    release: &Release,
+    repository: &str,
+    bytes: &[u8],
+    expected_sha256: Option<&std::collections::BTreeMap<String, String>>,
+) -> Result<(), String> {
+    let actual = external::sha256_bytes(bytes);
+    if let Some(map) = expected_sha256 {
+        if let Some(expected) = map
+            .get(asset_name)
+            .or_else(|| map.get(&release.tag))
+            .or_else(|| map.get("*"))
+        {
+            if !external::is_valid_sha256_hex(expected) {
+                return Err(format!("invalid expected sha256 for `{asset_name}`"));
+            }
+            let expected_lower = expected.to_ascii_lowercase();
+            if !external::constant_time_eq(expected_lower.as_bytes(), actual.as_bytes()) {
+                return Err(format!(
+                    "SHA-256 mismatch for `{asset_name}`: expected {expected_lower}, got {actual}"
+                ));
+            }
+        }
+    }
+    let checksum_asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == format!("{asset_name}.sha256"))
+        .or_else(|| {
+            release
+                .assets
+                .iter()
+                .find(|a| a.name == "SHA256SUMS" || a.name == "SHA256SUMS.txt")
+        });
+    if let Some(checksum) = checksum_asset {
+        if !is_allowed_github_url(&checksum.url, Some(repository)) {
+            return Err(format!("checksum asset `{}` has disallowed URL", checksum.name));
+        }
+        let body = download_string(&checksum.url)?;
+        if let Some(expected) = parse_sha256_list_for_asset(&body, asset_name) {
+            if !external::constant_time_eq(expected.as_bytes(), actual.as_bytes()) {
+                return Err(format!(
+                    "release checksum mismatch for `{asset_name}`: expected {expected}, got {actual}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Download and install a release's packages into the plugins folder: its
 /// library + `plugin.toml`, and every plugin in its platform bundles. Each
 /// `plugin.toml` passes the API-version (and, before v14, ABI) checks before
 /// anything is written. Returns the installed plugin ids, comma-separated.
 pub fn install(release: &Release, repository: &str) -> Result<String, String> {
+    install_verified(release, repository, None)
+}
+
+/// Download, verify optional registry/release SHA-256 checksums, install
+/// packages into the plugins folder, and record the library hash in `plugin.lock.json`.
+pub fn install_verified(
+    release: &Release,
+    repository: &str,
+    expected_sha256: Option<&std::collections::BTreeMap<String, String>>,
+) -> Result<String, String> {
     let repository = normalize_repo_arg(repository)?;
     let mut packages = Vec::new();
     if let (Some(lib), Some(toml)) = (release.lib_asset(), release.toml_asset()) {
@@ -439,24 +570,38 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
         }
         let toml_text = download_string(&toml.url)?;
         let id = checked_manifest(&toml_text)?.id;
+        let lib_bytes = download_bytes(&lib.url)?;
+        verify_asset_sha256(&lib.name, release, &repository, &lib_bytes, expected_sha256)?;
         packages.push(Package {
             id,
             toml_text,
-            files: vec![(PathBuf::from(&lib.name), download_bytes(&lib.url)?)],
+            files: vec![(PathBuf::from(&lib.name), lib_bytes)],
         });
     }
     for bundle in release.bundle_assets() {
         if !is_allowed_github_url(&bundle.url, Some(&repository)) {
             return Err("release bundle has disallowed URL".to_string());
         }
-        packages.extend(bundle_packages(&download_bytes(&bundle.url)?)?);
+        let bundle_bytes = download_bytes(&bundle.url)?;
+        verify_asset_sha256(
+            &bundle.name,
+            release,
+            &repository,
+            &bundle_bytes,
+            expected_sha256,
+        )?;
+        packages.extend(bundle_packages(&bundle_bytes)?);
     }
     if packages.is_empty() {
         return Err("no package for this platform".to_string());
     }
     let mut ids = Vec::new();
     for package in packages {
-        ids.push(write_package(package, &repository)?);
+        ids.push(write_package_with_tag(
+            package,
+            &repository,
+            Some(&release.tag),
+        )?);
     }
     Ok(ids.join(", "))
 }
@@ -659,10 +804,14 @@ fn checked_manifest(toml_text: &str) -> Result<external::ExternalPlugin, String>
 
 /// Write one package into `plugins/<id>/`; its library replaces the resident
 /// one even while that is loaded.
-fn write_package(package: Package, repository: &str) -> Result<String, String> {
+fn write_package_with_tag(
+    package: Package,
+    repository: &str,
+    release_tag: Option<&str>,
+) -> Result<String, String> {
     let plugins_root = external::plugins_dir().ok_or("cannot locate the plugins folder")?;
     std::fs::create_dir_all(&plugins_root).map_err(|e| e.to_string())?;
-    write_package_in_root(&plugins_root, package, repository)
+    write_package_in_root_with_tag(&plugins_root, package, repository, release_tag)
 }
 
 fn ensure_contained_write_target(dir_canon: &Path, rel: &Path) -> Result<PathBuf, String> {
@@ -706,10 +855,20 @@ fn ensure_contained_write_target(dir_canon: &Path, rel: &Path) -> Result<PathBuf
     Ok(target)
 }
 
+#[cfg(test)]
 fn write_package_in_root(
     plugins_root: &Path,
     package: Package,
     repository: &str,
+) -> Result<String, String> {
+    write_package_in_root_with_tag(plugins_root, package, repository, None)
+}
+
+fn write_package_in_root_with_tag(
+    plugins_root: &Path,
+    package: Package,
+    repository: &str,
+    release_tag: Option<&str>,
 ) -> Result<String, String> {
     if !external::is_valid_plugin_id(&package.id) {
         return Err(format!("invalid plugin id `{}`", package.id));
@@ -756,6 +915,23 @@ fn write_package_in_root(
         .map_err(|e| e.to_string())?;
     std::fs::write(dir_canon.join(".source_repo"), format!("{repository}\n"))
         .map_err(|e| e.to_string())?;
+    let parsed_version = external::parse_plugin_toml(&package.toml_text)
+        .map(|m| m.version)
+        .filter(|v| !v.is_empty());
+    let lib_file_name = lib_name
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| lib_name.to_string_lossy().into_owned());
+    let lib_sha256 = external::sha256_bytes(lib_bytes);
+    external::record_lock_entry_in_root(
+        &root_canon,
+        &package.id,
+        &lib_file_name,
+        &lib_sha256,
+        parsed_version.as_deref(),
+        Some(&repository),
+        release_tag,
+    )?;
     Ok(package.id)
 }
 
@@ -1034,5 +1210,79 @@ mod tests {
         assert!(install(&rel, "owner/repo").is_err());
         assert!(fetch_releases("../bad").is_err());
         assert!(fetch_readme("https://evil.com/owner/repo").is_err());
+    }
+
+    #[test]
+    fn write_package_in_root_records_sha256_in_plugin_lock() {
+        let dir = scratch("write_lock");
+        let plugins_root = dir.join("plugins");
+        let ext = external_lib_ext();
+        let lib_name = format!("demo.{ext}");
+        let pkg = Package {
+            id: "opencad.lockdemo".into(),
+            toml_text: valid_test_toml("opencad.lockdemo", "version = \"1.2.3\"\n"),
+            files: vec![(PathBuf::from(&lib_name), b"LOCKED-BIN".to_vec())],
+        };
+        write_package_in_root_with_tag(&plugins_root, pkg, "owner/demo", Some("v1.2.3")).unwrap();
+
+        let lock_path = crate::plugin::external::lockfile_path_in(&plugins_root);
+        let lock = crate::plugin::external::load_lockfile_from(&lock_path);
+        let entry = lock.as_ref().unwrap().plugins.get("opencad.lockdemo").unwrap();
+        assert_eq!(entry.library, lib_name);
+        assert_eq!(entry.sha256, external::sha256_bytes(b"LOCKED-BIN"));
+        assert_eq!(entry.version.as_deref(), Some("1.2.3"));
+        assert_eq!(entry.release_tag.as_deref(), Some("v1.2.3"));
+        let discovered_pkg = crate::plugin::external::ExternalPlugin {
+            id: "opencad.lockdemo".into(),
+            name: "Lock Demo".into(),
+            version: "1.2.3".into(),
+            description: String::new(),
+            repository: Some("owner/demo".into()),
+            api_version: ocs_plugin_api::manifest::API_VERSION,
+            acadrust_source: Some(ocs_plugin_api::version_info::host_acadrust_source().to_string()),
+            acadrust_declared: true,
+            rustc_version: Some(ocs_plugin_api::version_info::host_rustc_version().to_string()),
+            rustc_declared: true,
+            ribbon_order: 0,
+            command_prefixes: Vec::new(),
+            dir: plugins_root.join("opencad.lockdemo"),
+            bundled: false,
+            lib_present: true,
+            library: Some(lib_name),
+        };
+        assert_eq!(
+            crate::plugin::external::evaluate_plugin_trust(&discovered_pkg, &lock),
+            crate::plugin::external::PluginTrustState::Approved {
+                sha256: external::sha256_bytes(b"LOCKED-BIN"),
+            }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_asset_sha256_rejects_mismatched_registry_digest() {
+        let rel = Release {
+            tag: "v1.0.0".into(),
+            assets: Vec::new(),
+        };
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            "demo.so".to_string(),
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        );
+        assert!(verify_asset_sha256("demo.so", &rel, "owner/repo", b"actual", Some(&map)).is_err());
+
+        let mut good = std::collections::BTreeMap::new();
+        good.insert("demo.so".to_string(), external::sha256_bytes(b"actual"));
+        assert!(verify_asset_sha256("demo.so", &rel, "owner/repo", b"actual", Some(&good)).is_ok());
+    }
+
+    #[test]
+    fn parse_registry_sha256_rejects_invalid_hex_and_accepts_valid_metadata() {
+        let valid_hex = external::sha256_bytes(b"ok");
+        assert!(parse_registry_sha256(&serde_json::json!(valid_hex)).is_ok());
+        assert!(parse_registry_sha256(&serde_json::json!({"v1.0": valid_hex})).is_ok());
+        assert!(parse_registry_sha256(&serde_json::json!("not-hex")).is_err());
+        assert!(parse_registry_sha256(&serde_json::json!({"v1.0": "short"})).is_err());
     }
 }

@@ -268,10 +268,7 @@ fn a_fix_after_the_drawing_changed_changes_nothing() {
     let objects = errors_drawing(&mut app);
     scan(&mut app, &objects);
     // The overshooting line is moved away after the scan.
-    if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(objects[1]) {
-        line.start.x -= 50.0;
-        line.end.x -= 50.0;
-    }
+    shift(&mut app, objects[1], -50.0);
     let before = ends(&app, objects[1]);
     let undo = app.tabs[i].history.undo_stack.len();
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
@@ -456,6 +453,9 @@ fn a_repair_that_fails_keeps_the_pick() {
     if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(objects[1]) {
         line.end.x = 10.0;
     }
+    app.tabs[i]
+        .scene
+        .bump_entities(&[(objects[1], crate::scene::ChangeKind::Modified)]);
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
     assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
 }

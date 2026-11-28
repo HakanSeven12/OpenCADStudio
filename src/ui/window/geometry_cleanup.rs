@@ -187,7 +187,7 @@ pub struct AngleFinding {
 
 /// An error that the user keeps as designed: what identifies it across
 /// scans, in one drawing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct KeptError {
     pub kind: ErrorType,
     pub handle: u64,
@@ -260,12 +260,30 @@ pub struct Scan {
     pub epoch: u64,
     /// The objects that were selected for the scan.
     pub objects: Vec<Handle>,
+    /// The same objects, to find a changed object among them quickly.
+    pub object_set: std::collections::HashSet<Handle>,
     pub tolerances: Tolerances,
     pub angles: AngleTolerances,
+    /// All the errors found, listed and kept, in the order of the scan: a
+    /// Keep or a Restore splits them again without a scan.
+    pub found: Vec<Finding>,
     pub findings: Vec<Finding>,
     /// The errors found that the user keeps as designed: not listed with
     /// the others, and not repaired.
     pub kept: Vec<Finding>,
+}
+
+impl Scan {
+    /// Split the errors found into those listed and those kept by `marks`.
+    pub fn split(&mut self, marks: &std::collections::HashSet<KeptError>) {
+        let (kept, findings) = self
+            .found
+            .iter()
+            .copied()
+            .partition(|finding| marks.contains(&finding.identity()));
+        self.kept = kept;
+        self.findings = findings;
+    }
 }
 
 #[derive(Debug, Default)]

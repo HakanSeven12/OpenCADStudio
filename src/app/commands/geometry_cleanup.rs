@@ -17,6 +17,7 @@ use ocs_geom::geom2d::cleanup::{
     angle_errors, end_errors, proposed_tolerance, AngleTolerances, Tolerances,
 };
 use ocs_geom::geom2d::{Curve, Tolerance};
+use std::collections::HashSet;
 
 /// Ends nearer than this meet: they are not an error.
 const WELD: f64 = 1e-6;
@@ -26,6 +27,12 @@ const SYSVARS: &[&str] = &["GEOMETRYCLEANUPSTATE", "GEOMETRYCLEANUPZOOMPAN"];
 
 /// The colour index of the picked error's objects in review mode (red).
 const REVIEW_COLOR: i16 = 1;
+
+#[cfg(test)]
+thread_local! {
+    /// The scans of the drawing on this thread, for the tests.
+    pub(super) static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 impl OpenCADStudio {
     pub(super) fn dispatch_geometry_cleanup(
@@ -144,9 +151,7 @@ impl OpenCADStudio {
         }
         self.geometry_cleanup.review_shown = display.is_some();
         // The colours change, not the geometry: the scan is still true.
-        let fresh = self
-            .geometry_cleanup_scan_here(i)
-            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        let fresh = self.geometry_cleanup_scan_current(i);
         self.tabs[i].scene.set_count_display(display);
         let epoch = self.tabs[i].scene.geometry_epoch;
         if let Some(scan) = self.geometry_cleanup.scan.as_mut().filter(|_| fresh) {
@@ -206,6 +211,8 @@ impl OpenCADStudio {
         tolerances: Tolerances,
         angles: &AngleTolerances,
     ) -> Vec<Finding> {
+        #[cfg(test)]
+        SCANS.with(|scans| scans.set(scans.get() + 1));
         let kept = self.geometry_cleanup_curves(i, objects);
         let curves: Vec<Curve> = kept.iter().map(|(_, curve)| curve.clone()).collect();
         let ends = end_errors(&curves, tolerances, Tolerance::new(WELD))
@@ -294,55 +301,76 @@ impl OpenCADStudio {
         });
         let found = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
         let marks = self.geometry_cleanup_kept_marks(i);
-        let (kept, findings): (Vec<Finding>, Vec<Finding>) = found
-            .into_iter()
-            .partition(|f| marks.contains(&f.identity()));
+        let mut scan = Scan {
+            tab: self.tabs[i].id,
+            epoch: self.tabs[i].scene.geometry_epoch,
+            object_set: objects.iter().copied().collect(),
+            objects,
+            tolerances,
+            angles,
+            found,
+            findings: Vec::new(),
+            kept: Vec::new(),
+        };
+        scan.split(&marks);
         if report {
             self.command_line.push_output(&crate::tf!(
                 "Geometry Cleanup: {} error(s) found.",
-                findings.len()
+                scan.findings.len()
             ));
         }
         let picked = self
-            .geometry_cleanup_scan_here(i)
-            .zip(self.geometry_cleanup.picked)
-            .and_then(|(scan, index)| scan.findings.get(index).copied())
+            .geometry_cleanup_picked()
             .filter(|_| rescan)
-            .and_then(|old| findings.iter().position(|f| f.same_error(&old)));
+            .and_then(|old| scan.findings.iter().position(|f| f.same_error(&old)));
         if !rescan {
             // A new selection ends review mode.
             self.geometry_cleanup.review = false;
         }
-        self.geometry_cleanup.scan = Some(Scan {
-            tab: self.tabs[i].id,
-            epoch: self.tabs[i].scene.geometry_epoch,
-            objects,
-            tolerances,
-            angles,
-            findings,
-            kept,
-        });
+        self.geometry_cleanup.scan = Some(scan);
         self.geometry_cleanup.picked = picked;
         self.geometry_cleanup_review_display(i);
     }
 
+    /// The picked error of the palette's scan.
+    fn geometry_cleanup_picked(&self) -> Option<Finding> {
+        let scan = self.geometry_cleanup.scan.as_ref()?;
+        scan.findings.get(self.geometry_cleanup.picked?).copied()
+    }
+
+    /// Whether the palette's scan of tab `i` is still true: no object that
+    /// it read has changed since. A change that the scene cannot name (an
+    /// undo, a file open) counts as a change.
+    fn geometry_cleanup_scan_current(&self, i: usize) -> bool {
+        let Some(scan) = self.geometry_cleanup_scan_here(i) else {
+            return false;
+        };
+        let scene = &self.tabs[i].scene;
+        scan.epoch == scene.geometry_epoch
+            || scene.replay_since(scan.epoch).is_some_and(|changes| {
+                changes
+                    .iter()
+                    .all(|(handle, _)| !scan.object_set.contains(handle))
+            })
+    }
+
     /// The errors kept as designed in the drawing of tab `i`. Marks of
     /// objects that are no longer in the drawing are dropped first.
-    fn geometry_cleanup_kept_marks(&mut self, i: usize) -> Vec<KeptError> {
+    fn geometry_cleanup_kept_marks(&mut self, i: usize) -> HashSet<KeptError> {
         let document = &self.tabs[i].scene.document;
         let id = &document.header.fingerprint_guid;
         if id.is_empty() {
-            return Vec::new();
+            return HashSet::new();
         }
         let Some(marks) = self.geometry_cleanup.kept.get_mut(id) else {
-            return Vec::new();
+            return HashSet::new();
         };
         marks.retain(|mark| document.get_entity(Handle::new(mark.handle)).is_some());
         if marks.is_empty() {
             self.geometry_cleanup.kept.remove(id);
-            return Vec::new();
+            return HashSet::new();
         }
-        marks.clone()
+        marks.iter().copied().collect()
     }
 
     /// The FINGERPRINTGUID of the drawing of tab `i`, which names its kept
@@ -463,9 +491,7 @@ impl OpenCADStudio {
                 .contains(&fix)
                 .then(|| self.geometry_cleanup_edits(i, &finding, fix))?
         });
-        let fresh = self
-            .geometry_cleanup_scan_here(i)
-            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        let fresh = self.geometry_cleanup_scan_current(i);
         let scene = &mut self.tabs[i].scene;
         match edits.filter(|edits| !edits.is_empty()) {
             Some(edits) => {
@@ -486,12 +512,30 @@ impl OpenCADStudio {
         }
     }
 
-    /// Scan the objects of the palette's scan again, with its tolerances.
-    fn geometry_cleanup_rescan(&mut self, i: usize) {
-        if let Some(scan) = self.geometry_cleanup_scan_here(i) {
-            let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
-            self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
+    /// List the errors again after a Keep or a Restore: the kept errors
+    /// changed, not the drawing. A scan that is still true is split again
+    /// with no scan; one that is not is scanned again.
+    fn geometry_cleanup_relist(&mut self, i: usize) {
+        // The rows change: a menu or a preview of the old list is wrong.
+        self.geometry_cleanup_close_menu(i);
+        if !self.geometry_cleanup_scan_current(i) {
+            if let Some(scan) = self.geometry_cleanup_scan_here(i) {
+                let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
+                self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
+            }
+            return;
         }
+        let marks = self.geometry_cleanup_kept_marks(i);
+        let old = self.geometry_cleanup_picked();
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        let Some(scan) = self.geometry_cleanup.scan.as_mut() else {
+            return;
+        };
+        scan.epoch = epoch;
+        scan.split(&marks);
+        self.geometry_cleanup.picked =
+            old.and_then(|old| scan.findings.iter().position(|f| f.same_error(&old)));
+        self.geometry_cleanup_review_display(i);
     }
 
     /// After the drawing changes, the open palette scans its objects again:
@@ -507,7 +551,15 @@ impl OpenCADStudio {
         let Some(scan) = self.geometry_cleanup_scan_here(i) else {
             return;
         };
-        if scan.epoch == self.tabs[i].scene.geometry_epoch {
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if scan.epoch == epoch {
+            return;
+        }
+        if self.geometry_cleanup_scan_current(i) {
+            // Only objects that the scan did not read changed.
+            if let Some(scan) = self.geometry_cleanup.scan.as_mut() {
+                scan.epoch = epoch;
+            }
             return;
         }
         let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
@@ -562,7 +614,7 @@ impl OpenCADStudio {
                 if !marks.contains(&picked.identity()) {
                     marks.push(picked.identity());
                 }
-                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_relist(i);
                 self.geometry_cleanup_pick_next(i, &after);
             }
             GeometryCleanupMsg::Restore(index) => {
@@ -580,12 +632,12 @@ impl OpenCADStudio {
                         self.geometry_cleanup.kept.remove(id);
                     }
                 }
-                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_relist(i);
             }
             GeometryCleanupMsg::RestoreAll => {
                 let id = &self.tabs[i].scene.document.header.fingerprint_guid;
                 self.geometry_cleanup.kept.remove(id);
-                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_relist(i);
             }
             GeometryCleanupMsg::FoldKept => {
                 self.geometry_cleanup.kept_open = !self.geometry_cleanup.kept_open;
@@ -897,8 +949,8 @@ impl OpenCADStudio {
 
     /// Repair one error as one undo step; `false` when nothing changed. The
     /// drawing can have changed since the scan (an undo, an edit), so the
-    /// error is looked up again first; an error that is gone changes
-    /// nothing.
+    /// error is looked up again first when an object of the scan changed;
+    /// an error that is gone changes nothing.
     fn geometry_cleanup_fix(
         &mut self,
         i: usize,
@@ -907,11 +959,14 @@ impl OpenCADStudio {
         objects: &[Handle],
         (tolerances, angles): &(Tolerances, AngleTolerances),
     ) -> bool {
-        let Some(finding) = self
-            .geometry_cleanup_findings(i, objects, *tolerances, angles)
-            .into_iter()
-            .find(|f| f.same_error(&picked))
-        else {
+        let finding = if self.geometry_cleanup_scan_current(i) {
+            Some(picked)
+        } else {
+            self.geometry_cleanup_findings(i, objects, *tolerances, angles)
+                .into_iter()
+                .find(|f| f.same_error(&picked))
+        };
+        let Some(finding) = finding else {
             self.command_line
                 .push_error(&crate::t!("The error is no longer in the drawing."));
             return false;

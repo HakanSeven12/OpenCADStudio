@@ -1021,13 +1021,18 @@ mod xps {
         (v.len() == 6).then(|| [v[0], v[1], v[2], v[3], v[4], v[5]])
     }
 
-    fn parse_color(text: &str) -> Option<[u8; 3]> {
+    pub(super) fn parse_color(text: &str) -> Option<[u8; 3]> {
         let hex = text.trim().strip_prefix('#')?;
-        let hex = if hex.len() == 8 { &hex[2..] } else { hex };
-        (hex.len() == 6).then(|| {
-            let v = u32::from_str_radix(hex, 16).unwrap_or(0);
-            [(v >> 16) as u8, (v >> 8) as u8, v as u8]
-        })
+        if !hex.is_ascii() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let hex = match hex.len() {
+            8 => &hex[2..],
+            6 => hex,
+            _ => return None,
+        };
+        let v = u32::from_str_radix(hex, 16).ok()?;
+        Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
     }
 
     /// The fixed page's paths and text in model units, and the plotted view.
@@ -1950,5 +1955,19 @@ mod w2d_string_tests {
 
         let read: Vec<&str> = texts.iter().map(|text| text.text.as_str()).collect();
         assert_eq!(read, vec!["ROOM 12", "na\u{ef}ve"]);
+    }
+
+    #[test]
+    fn xps_parse_color_rejects_multibyte_and_invalid_hex() {
+        assert_eq!(super::xps::parse_color("#112233"), Some([0x11, 0x22, 0x33]));
+        assert_eq!(
+            super::xps::parse_color("#80112233"),
+            Some([0x11, 0x22, 0x33])
+        );
+        // 8-byte UTF-8 payloads must not panic on `&hex[2..]`.
+        assert_eq!(super::xps::parse_color("#éééé"), None);
+        assert_eq!(super::xps::parse_color("#日本語ab"), None);
+        assert_eq!(super::xps::parse_color("#ZZZZZZ"), None);
+        assert_eq!(super::xps::parse_color("#ZZZZZZZZ"), None);
     }
 }

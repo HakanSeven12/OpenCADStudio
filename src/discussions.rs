@@ -22,6 +22,13 @@ pub struct DiscussionEntry {
     pub pinned: bool,
 }
 
+const DISCUSSION_PREFIX: &str = "https://github.com/HakanSeven12/OpenCADStudio/discussions/";
+
+fn is_valid_discussion_url(url: &str) -> bool {
+    url.strip_prefix(DISCUSSION_PREFIX)
+        .is_some_and(|tail| !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()))
+}
+
 fn sort_entries(entries: &mut [DiscussionEntry]) {
     entries.sort_by(|a, b| {
         b.pinned
@@ -37,7 +44,7 @@ fn parse_json(body: &str) -> Result<Vec<DiscussionEntry>, String> {
     entries.retain(|entry| {
         entry.number > 0
             && !entry.title.trim().is_empty()
-            && entry.url.starts_with("https://github.com/")
+            && is_valid_discussion_url(&entry.url)
     });
     sort_entries(&mut entries);
     Ok(entries)
@@ -73,11 +80,11 @@ pub fn fetch_discussions() -> Result<Vec<DiscussionEntry>, String> {
     sort_entries(&mut entries);
 
     if let Some(path) = cache_path() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
         if let Ok(body) = serde_json::to_string(&entries) {
-            let _ = std::fs::write(path, body);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = crate::io::write_file_atomic(&path, body.as_bytes());
         }
     }
     Ok(entries)
@@ -111,7 +118,10 @@ fn parse_atom(feed: &str) -> Vec<DiscussionEntry> {
                 + "href=\"".len();
             let url_tail = &entry[url_start..];
             let url = url_tail.split_once('"')?.0.to_string();
-            let number = url.rsplit('/').next()?.parse().ok()?;
+            if !is_valid_discussion_url(&url) {
+                return None;
+            }
+            let number = url.strip_prefix(DISCUSSION_PREFIX)?.parse().ok()?;
             let title = xml_text(entry, "title")?;
             let author_block = entry.split_once("<author>")?.1.split_once("</author>")?.0;
             let author = xml_text(author_block, "name").unwrap_or_default();
@@ -232,5 +242,17 @@ mod tests {
 
         assert_eq!(entries[0].number, 1);
         assert_eq!(entries[1].title, "New & recent");
+    }
+
+    #[test]
+    fn rejects_non_repo_or_injected_discussion_urls() {
+        let json = r#"[
+            {"number": 1, "title": "Good", "url": "https://github.com/HakanSeven12/OpenCADStudio/discussions/42", "author": "a", "updated_at": "2026-07-28T10:00:00Z"},
+            {"number": 2, "title": "Other repo", "url": "https://github.com/evil/repo/discussions/2", "author": "b", "updated_at": "2026-07-28T10:00:00Z"},
+            {"number": 3, "title": "Injected", "url": "https://github.com/HakanSeven12/OpenCADStudio/discussions/3?foo=bar", "author": "c", "updated_at": "2026-07-28T10:00:00Z"}
+        ]"#;
+        let parsed = parse_json(json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].number, 1);
     }
 }

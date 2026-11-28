@@ -1,4 +1,5 @@
 use super::super::Message;
+use crate::scene::pick::selection_state::MenuPlacement;
 mod mtext_menu;
 #[cfg(test)]
 mod mtext_tests;
@@ -1581,6 +1582,28 @@ pub(super) fn position_canvas_overlay_clamped<'a>(
         gap: 0.0,
         offset,
         passive: false,
+        placed: None,
+    })
+}
+
+/// As [`position_canvas_overlay_clamped`], fitted once: the spot is kept in
+/// `placed` and later layouts reuse it, moving the panel only as far as it
+/// must to stay inside the safe area.
+pub(super) fn position_canvas_overlay_placed<'a>(
+    anchor: iced::Point,
+    bottom_inset: f32,
+    offset: Vector,
+    placed: MenuPlacement,
+    panel: Element<'a, Message>,
+) -> Element<'a, Message> {
+    Element::new(ClampedPin {
+        content: iced::widget::opaque(panel),
+        anchor,
+        bottom_inset: bottom_inset.max(0.0),
+        gap: 0.0,
+        offset,
+        passive: false,
+        placed: Some(placed),
     })
 }
 
@@ -1598,6 +1621,7 @@ pub(super) fn position_canvas_overlay_near_cursor<'a>(
         gap: 12.0,
         offset: Vector::ZERO,
         passive: false,
+        placed: None,
     })
 }
 
@@ -1622,6 +1646,7 @@ pub(super) fn grip_tip_overlay<'a>(
         gap: 12.0,
         offset: Vector::ZERO,
         passive: true,
+        placed: None,
     })
 }
 
@@ -1663,6 +1688,7 @@ pub(super) fn measurement_overlay<'a>(
         gap: 18.0,
         offset: Vector::ZERO,
         passive: true,
+        placed: None,
     })
 }
 
@@ -1675,6 +1701,8 @@ struct ClampedPin<'a> {
     offset: Vector,
     /// Readouts prefer above the cursor and never participate in input.
     passive: bool,
+    /// Where the popup was first fitted: once set, it stays there.
+    placed: Option<MenuPlacement>,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
@@ -1742,6 +1770,19 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
         // A cursor over the command-line inset can put even the "above"
         // candidate below the safe area. Keep this passive readout inside it.
         let y = if self.passive { y.min(max_y) } else { y };
+        // A placed popup keeps its first spot, moved only as far as needed
+        // to stay inside the safe area (#194: it jumped when the
+        // notifications above the command line faded or a submenu opened).
+        let (x, y) = match self.placed.as_ref() {
+            Some(placed) => match placed.get() {
+                Some(at) => (at.x.min(max_x).max(MARGIN), at.y.min(max_y).max(MARGIN)),
+                None => {
+                    placed.set(Some(iced::Point::new(x, y)));
+                    (x, y)
+                }
+            },
+            None => (x, y),
+        };
         node = node.move_to(iced::Point::new(x, y));
         let size = limits.resolve(Length::Fill, Length::Fill, node.size());
         layout::Node::with_children(size, vec![node])
@@ -1901,6 +1942,7 @@ pub(super) fn viewport_context_menu_overlay(
     bottom_inset: f32,
     menu: &ContextMenu,
     highlighted: Option<usize>,
+    placed: MenuPlacement,
 ) -> Element<'static, Message> {
     // The kit menu's separator: a hairline centred in the separator
     // height the model counts (`MENU_SEP_H`).
@@ -1995,7 +2037,7 @@ pub(super) fn viewport_context_menu_overlay(
         -MENU_CURSOR_INSET_X,
         -(menu.default_row_y() + MENU_ROW_H * 0.5),
     );
-    position_canvas_overlay_clamped(pos, bottom_inset, offset, panel.into())
+    position_canvas_overlay_placed(pos, bottom_inset, offset, placed, panel.into())
 }
 
 /// The right-click menu turned into its editor, where it was: every row
@@ -3526,5 +3568,71 @@ mod quad_view_tests {
             bounds.width < 300.0,
             "the card must not stretch across the viewport"
         );
+    }
+}
+
+#[cfg(test)]
+mod placed_tests {
+    use super::*;
+    use crate::scene::pick::selection_state::SelectionMenu;
+
+    /// Top edge of a 100-wide `height`-tall popup anchored at (200, 420) in an
+    /// 800x600 drawing whose command line takes `inset` at the bottom.
+    fn popup_top(placed: &MenuPlacement, inset: f32, height: f32) -> f32 {
+        use iced::futures::executor::block_on;
+        use iced_test::core::renderer::Headless;
+        let _guard = crate::headless_ui_lock();
+        let renderer = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .expect("headless renderer");
+        let mut popup = position_canvas_overlay_placed(
+            iced::Point::new(200.0, 420.0),
+            inset,
+            Vector::new(0.0, -20.0),
+            placed.clone(),
+            Space::new().width(100.0).height(height).into(),
+        );
+        let mut tree = widget::Tree::new(&popup);
+        let node = popup.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(800.0, 600.0)),
+        );
+        node.children()[0].bounds().y
+    }
+
+    /// The right-click menu stays where it opened: when the notifications
+    /// above the command line fade (the inset shrinks) it does not drop, and
+    /// when a submenu opens (the menu grows) it does not flip above the
+    /// pointer; it moves only as far as it must to stay on screen.
+    #[test]
+    fn an_open_menu_keeps_its_place_when_the_inset_or_its_height_changes() {
+        let placed = MenuPlacement::default();
+        let first = popup_top(&placed, 88.0, 150.0);
+        assert_eq!(
+            first, 270.0,
+            "first fit: above the pointer, clear of the notifications"
+        );
+        assert_eq!(
+            popup_top(&placed, 34.0, 150.0),
+            first,
+            "notifications faded"
+        );
+        assert_eq!(popup_top(&placed, 34.0, 250.0), first, "submenu opened");
+        assert_eq!(
+            popup_top(&placed, 34.0, 350.0),
+            600.0 - 34.0 - 4.0 - 350.0,
+            "too tall: moved up only as far as needed"
+        );
+
+        let mut menu = SelectionMenu::default();
+        menu.placed.set(Some(iced::Point::new(1.0, 2.0)));
+        menu.open(iced::Point::new(5.0, 5.0));
+        assert_eq!(menu.placed.get(), None, "a new menu is fitted afresh");
+        menu.placed.set(Some(iced::Point::new(1.0, 2.0)));
+        menu.close();
+        assert_eq!(menu.placed.get(), None);
     }
 }

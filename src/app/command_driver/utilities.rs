@@ -2463,6 +2463,10 @@ impl OpenCADStudio {
             self.start_tracking_modifier(i);
             return Task::none();
         }
+        if crate::command::is_temporary_tracking_token(token) && self.point_modifier_step(i) {
+            self.start_temporary_tracking_modifier(i);
+            return Task::none();
+        }
         if let Some(filter) =
             crate::command::PointFilter::parse(token).filter(|_| self.point_modifier_step(i))
         {

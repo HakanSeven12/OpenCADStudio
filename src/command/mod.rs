@@ -1183,6 +1183,41 @@ pub fn is_tracking_token(token: &str) -> bool {
     )
 }
 
+/// `TT` typed at a point prompt: acquire one temporary object-snap tracking
+/// point, then resume the parked command without placing a point.
+pub fn is_temporary_tracking_token(token: &str) -> bool {
+    matches!(
+        token.trim().trim_start_matches('_').to_ascii_uppercase().as_str(),
+        "TT" | "TEMPTRACK"
+    )
+}
+
+/// Point-entry modifier that acquires a single temporary tracking point.
+#[derive(Debug)]
+pub struct TemporaryTrackingCommand;
+
+impl CadCommand for TemporaryTrackingCommand {
+    fn name(&self) -> &'static str {
+        "TEMPORARYTRACKING"
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!("Specify temporary OTRACK point:").into_owned()
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        CmdResult::AcquireTrackingPoint(pt)
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
+
 /// Point-entry modifier for tracking: a first tracking point, then any number
 /// of next points, each kept on the plane axis through the previous one that
 /// it lies nearest. Enter returns the last tracking point to the parked command.
@@ -2910,6 +2945,9 @@ pub enum CmdResult {
     SetTexteditMode(bool),
     /// Return a resolved point back to a suspended parent command (e.g. MTP / M2P).
     ReturnPoint(DVec3),
+    /// Acquire this point as a temporary TT tracking point, then resume the
+    /// parked command without committing it as a command point.
+    AcquireTrackingPoint(DVec3),
     /// Import a DGN model (DGNIMPORT); ends the command.
     DgnImport(requests::DgnImportRequest),
 }

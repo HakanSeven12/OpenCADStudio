@@ -1417,7 +1417,9 @@ impl OpenCADStudio {
         // A typed `<angle` and a Shift axis lock hold for the next point only.
         self.angle_override = None;
         self.axis_lock_dir = None;
-        self.snapper.clear_tracking();
+        // TT points are explicit and survive point commits; only the
+        // dwell-acquired corners are dropped here. Command end clears all.
+        self.snapper.clear_acquired_tracking_points();
         self.snapper.end_cycle();
         self.otrack_active = None;
         self.otrack_cross = None;

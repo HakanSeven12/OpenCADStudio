@@ -734,7 +734,9 @@ impl Snapper {
     /// only from an acquired endpoint, and works independently of OTRACK's
     /// on/off state (#262).
     pub fn tracking_active(&self) -> bool {
-        self.otrack_enabled || (self.snap_enabled && self.is_on(SnapType::Extension))
+        self.otrack_enabled
+            || (self.snap_enabled && self.is_on(SnapType::Extension))
+            || self.tracking_temp.iter().any(|t| *t)
     }
 
     /// Whether an alignment guide may be on screen — tracking (above) OR a
@@ -1137,7 +1139,10 @@ impl Snapper {
             None
         };
 
-        if (!self.otrack_enabled || self.tracking_points.is_empty()) && carried_perp.is_none() {
+        let has_temporary = self.tracking_temp.iter().any(|t| *t);
+        if ((!self.otrack_enabled && !has_temporary) || self.tracking_points.is_empty())
+            && carried_perp.is_none()
+        {
             return None;
         }
 
@@ -7539,5 +7544,79 @@ mod ext_tests {
         assert_eq!(parse_snap_override("@5<45"), None);
         assert_eq!(parse_snap_override("undo"), None);
         assert_eq!(parse_snap_override("close"), None);
+    }
+}
+
+#[cfg(test)]
+mod temporary_tracking_tests {
+    use super::*;
+    use crate::command::{is_temporary_tracking_token, CadCommand, CmdResult, TemporaryTrackingCommand};
+
+    fn pt(x: f64, y: f64) -> DVec3 {
+        DVec3::new(x, y, 0.0)
+    }
+
+    #[test]
+    fn tt_token_recognises_temporary_tracking() {
+        assert!(is_temporary_tracking_token("TT"));
+        assert!(is_temporary_tracking_token(" tt "));
+        assert!(is_temporary_tracking_token("_temptRack"));
+        assert!(!is_temporary_tracking_token("TK"));
+    }
+
+    #[test]
+    fn tt_modifier_asks_for_one_point_and_reprompts() {
+        let mut cmd = TemporaryTrackingCommand;
+        assert!(cmd.prompt().contains("temporary"));
+        assert!(matches!(
+            cmd.on_point(pt(3.0, 4.0)),
+            CmdResult::AcquireTrackingPoint(p) if p == pt(3.0, 4.0)
+        ));
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
+    }
+
+    #[test]
+    fn temporary_points_are_marked_and_visible_without_otrack() {
+        let mut s = Snapper::default();
+        assert!(!s.tracking_active());
+        s.acquire_temporary_tracking_point(pt(3.0, 4.0));
+        assert!(s.tracking_active());
+        assert_eq!(s.tracking_points, vec![pt(3.0, 4.0)]);
+        assert_eq!(s.tracking_temp, vec![true]);
+        assert!(s.tracking_dirs[0].is_empty(), "TT bypasses edge scanning");
+    }
+
+    #[test]
+    fn temporary_points_survive_point_commits_but_clear_on_command_end() {
+        let mut s = Snapper::default();
+        s.otrack_enabled = true;
+        s.tracking_points.push(pt(1.0, 0.0));
+        s.tracking_dirs.push(vec![DVec3::X]);
+        s.tracking_perp_dirs.push(vec![DVec3::Y]);
+        s.tracking_temp.push(false);
+        s.acquire_temporary_tracking_point(pt(5.0, 0.0));
+        assert_eq!(s.tracking_points.len(), 2);
+
+        s.clear_acquired_tracking_points();
+        assert_eq!(s.tracking_points, vec![pt(5.0, 0.0)]);
+        assert_eq!(s.tracking_temp, vec![true]);
+
+        s.clear_tracking();
+        assert!(s.tracking_points.is_empty());
+        assert!(s.tracking_temp.is_empty());
+        assert!(s.tracking_evicted.is_none());
+    }
+
+    #[test]
+    fn tracking_cap_is_seven_with_an_explicit_eviction_mark() {
+        let mut s = Snapper::default();
+        let first = pt(0.0, 0.0);
+        for i in 0..=MAX_TRACKING_POINTS {
+            s.acquire_temporary_tracking_point(pt(i as f64 * 10.0, 0.0));
+        }
+        assert_eq!(s.tracking_points.len(), MAX_TRACKING_POINTS);
+        assert_eq!(s.tracking_temp.len(), MAX_TRACKING_POINTS);
+        assert_eq!(s.tracking_evicted, Some(first));
+        assert!(s.tracking_dirs.iter().all(Vec::is_empty));
     }
 }

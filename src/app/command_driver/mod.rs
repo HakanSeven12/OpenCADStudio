@@ -556,6 +556,24 @@ impl OpenCADStudio {
         self.refresh_active_cmd_preview(i);
     }
 
+    /// `TT` at a point prompt: park the command and ask for one temporary
+    /// tracking point. The point is acquired by `AcquireTrackingPoint`, then
+    /// the parked command resumes with its prompt unchanged.
+    pub(in crate::app) fn start_temporary_tracking_modifier(&mut self, i: usize) {
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::TemporaryTrackingCommand;
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.refresh_active_cmd_preview(i);
+    }
+
     pub(in crate::app) fn relative_input_base(&self, i: usize) -> Option<glam::DVec3> {
         self.tabs[i]
             .active_cmd
@@ -684,6 +702,10 @@ impl OpenCADStudio {
                 if let Some(task) = self.handle_need_point() {
                     return task;
                 }
+            }
+            CmdResult::AcquireTrackingPoint(pt) => {
+                self.snapper.acquire_temporary_tracking_point(pt);
+                self.handle_done();
             }
             CmdResult::Preview(wire) => {
                 self.handle_preview(wire);

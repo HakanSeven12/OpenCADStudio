@@ -621,6 +621,74 @@ fn rotate_rgba90(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     rotated
 }
 
+/// Maximum number of media entries accepted from `DeviceCapabilitiesW` so a
+/// corrupted printer driver cannot force an unbounded allocation.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_PRINTER_MEDIA_ENTRIES: usize = 65_536;
+
+/// Maximum serialized `DEVMODEW` buffer accepted from `DocumentPropertiesW`.
+#[cfg(target_os = "windows")]
+const MAX_DEVMODE_BYTES: usize = 16 * 1024 * 1024;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn checked_device_cap_count(raw: i32) -> Option<usize> {
+    let n = usize::try_from(raw).ok()?;
+    (n > 0 && n <= MAX_PRINTER_MEDIA_ENTRIES).then_some(n)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn safe_viewer_path(path: &std::path::Path) -> std::path::PathBuf {
+    if path.is_relative() && path.to_string_lossy().starts_with('-') {
+        std::path::Path::new(".").join(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn sanitize_windows_printer_name(printer: &str) -> Result<&str, String> {
+    let trimmed = printer.trim();
+    if trimmed.is_empty() {
+        return Err("No printer was specified.".into());
+    }
+    if trimmed.chars().any(|c| c == '"' || c.is_control()) {
+        return Err("Printer name contains invalid characters.".into());
+    }
+    Ok(trimmed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn validate_unix_printer_name(printer: &str) -> Result<&str, String> {
+    let trimmed = printer.trim();
+    if trimmed.is_empty() {
+        return Err("No printer was specified.".into());
+    }
+    if trimmed.starts_with('-') || trimmed.chars().any(char::is_control) {
+        return Err("Printer name contains invalid characters.".into());
+    }
+    Ok(trimmed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn validate_cups_driver_option(key: &str, value: &str) -> Result<(), String> {
+    if key.is_empty()
+        || key.starts_with('-')
+        || key.contains('=')
+        || key.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(format!("Invalid printer option key: {key:?}"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(format!("Invalid printer option value for {key:?}"));
+    }
+    Ok(())
+}
+
 /// Open `device`, fetch the driver's default DEVMODE (public struct plus the
 /// driver's private data behind it) and let `edit` change it while the
 /// printer is still open — a change has to be reconciled by the driver
@@ -629,12 +697,15 @@ fn rotate_rgba90(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
 #[cfg(target_os = "windows")]
 fn with_printer_devmode(
     device_wide: &[u16],
-    edit: impl FnOnce(windows_sys::Win32::Graphics::Printing::PRINTER_HANDLE, &mut Vec<u8>) -> bool,
-) -> Option<Vec<u8>> {
+    edit: impl FnOnce(windows_sys::Win32::Graphics::Printing::PRINTER_HANDLE, &mut Vec<u32>) -> bool,
+) -> Option<Vec<u32>> {
     use windows_sys::Win32::Graphics::Gdi::{DEVMODEW, DM_OUT_BUFFER};
     use windows_sys::Win32::Graphics::Printing::{
         ClosePrinter, DocumentPropertiesW, OpenPrinterW, PRINTER_HANDLE,
     };
+    const _: () = assert!(std::mem::align_of::<DEVMODEW>() <= std::mem::align_of::<u32>());
+    // SAFETY: `device_wide` is NUL-terminated; `OpenPrinterW` initializes `handle`,
+    // which is unconditionally closed via `ClosePrinter`.
     unsafe {
         let mut handle = PRINTER_HANDLE::default();
         if OpenPrinterW(device_wide.as_ptr(), &mut handle, std::ptr::null()) == 0 {
@@ -653,11 +724,11 @@ fn with_printer_devmode(
                 std::ptr::null(),
                 0,
             );
-            if needed <= 0 {
-                return None;
-            }
-            let mut buf = vec![0u8; needed as usize];
-            let dm = buf.as_mut_ptr() as *mut DEVMODEW;
+            let needed = usize::try_from(needed)
+                .ok()
+                .filter(|&n| n >= std::mem::size_of::<DEVMODEW>() && n <= MAX_DEVMODE_BYTES)?;
+            let mut buf = vec![0u32; needed.div_ceil(std::mem::size_of::<u32>())];
+            let dm = buf.as_mut_ptr().cast::<DEVMODEW>();
             if DocumentPropertiesW(
                 std::ptr::null_mut(),
                 handle,
@@ -669,11 +740,14 @@ fn with_printer_devmode(
             {
                 return None;
             }
+            let byte_len = buf.len() * std::mem::size_of::<u32>();
             // The driver's own dmSize locates its private data
             // (dmDriverExtra) behind the public struct; only a driver that
             // left it zero gets the public size.
             if (*dm).dmSize == 0 {
                 (*dm).dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            } else if usize::from((*dm).dmSize) > byte_len {
+                return None;
             }
             edit(handle, &mut buf).then_some(buf)
         })();
@@ -696,58 +770,61 @@ enum DevmodeSheet {
 
 /// Fetch the printer driver's DEVMODE, flip its orientation to match the
 /// plot's aspect (`landscape` = image wider than tall) and, when a sheet is
-/// given, select it. The merged DEVMODE is returned as raw bytes (drivers
-/// append private data after the struct). A driver that rejects the sheet
-/// is asked again for the orientation alone; `None` when the driver could
-/// not be queried — CreateDC then falls back to the driver default.
+/// given, select it. The merged DEVMODE is returned as 4-byte-aligned words
+/// (drivers append private data after the struct). A driver that rejects the
+/// sheet is asked again for the orientation alone; `None` when the driver
+/// could not be queried — CreateDC then falls back to the driver default.
 #[cfg(target_os = "windows")]
 fn oriented_printer_devmode(
     device_wide: &[u16],
     landscape: bool,
     sheet: Option<DevmodeSheet>,
-) -> Option<Vec<u8>> {
+) -> Option<Vec<u32>> {
     use windows_sys::Win32::Graphics::Gdi::{
         DEVMODEW, DMORIENT_LANDSCAPE, DMORIENT_PORTRAIT, DM_IN_BUFFER, DM_ORIENTATION,
         DM_OUT_BUFFER, DM_PAPERLENGTH, DM_PAPERSIZE, DM_PAPERWIDTH,
     };
     use windows_sys::Win32::Graphics::Printing::DocumentPropertiesW;
     let attempt = |sheet: Option<DevmodeSheet>| {
-        with_printer_devmode(device_wide, |handle, buf| unsafe {
-            let dm = buf.as_mut_ptr() as *mut DEVMODEW;
-            (*dm).dmFields |= DM_ORIENTATION;
-            (*dm).Anonymous1.Anonymous1.dmOrientation = if landscape {
-                DMORIENT_LANDSCAPE as i16
-            } else {
-                DMORIENT_PORTRAIT as i16
-            };
-            match sheet {
-                Some(DevmodeSheet::Id(id)) => {
-                    (*dm).dmFields |= DM_PAPERSIZE;
-                    (*dm).dmFields &= !(DM_PAPERWIDTH | DM_PAPERLENGTH);
-                    (*dm).Anonymous1.Anonymous1.dmPaperSize = id as i16;
+        with_printer_devmode(device_wide, |handle, buf| {
+            // SAFETY: `with_printer_devmode` guarantees `buf` is at least `DEVMODEW`-sized and 4-byte aligned.
+            unsafe {
+                let dm = buf.as_mut_ptr().cast::<DEVMODEW>();
+                (*dm).dmFields |= DM_ORIENTATION;
+                (*dm).Anonymous1.Anonymous1.dmOrientation = if landscape {
+                    DMORIENT_LANDSCAPE as i16
+                } else {
+                    DMORIENT_PORTRAIT as i16
+                };
+                match sheet {
+                    Some(DevmodeSheet::Id(id)) => {
+                        (*dm).dmFields |= DM_PAPERSIZE;
+                        (*dm).dmFields &= !(DM_PAPERWIDTH | DM_PAPERLENGTH);
+                        (*dm).Anonymous1.Anonymous1.dmPaperSize = id as i16;
+                    }
+                    Some(DevmodeSheet::UserMm {
+                        width_tenths,
+                        length_tenths,
+                    }) => {
+                        (*dm).dmFields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
+                        (*dm).Anonymous1.Anonymous1.dmPaperSize =
+                            crate::io::windows_media::DMPAPER_USER as i16;
+                        (*dm).Anonymous1.Anonymous1.dmPaperWidth = width_tenths;
+                        (*dm).Anonymous1.Anonymous1.dmPaperLength = length_tenths;
+                    }
+                    None => {}
                 }
-                Some(DevmodeSheet::UserMm {
-                    width_tenths,
-                    length_tenths,
-                }) => {
-                    (*dm).dmFields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
-                    (*dm).Anonymous1.Anonymous1.dmPaperSize =
-                        crate::io::windows_media::DMPAPER_USER as i16;
-                    (*dm).Anonymous1.Anonymous1.dmPaperWidth = width_tenths;
-                    (*dm).Anonymous1.Anonymous1.dmPaperLength = length_tenths;
-                }
-                None => {}
+                // Let the driver reconcile fields that depend on orientation and
+                // sheet (paper dimensions, imageable area) before we print with it.
+                DocumentPropertiesW(
+                    std::ptr::null_mut(),
+                    handle,
+                    device_wide.as_ptr(),
+                    dm,
+                    dm,
+                    DM_IN_BUFFER | DM_OUT_BUFFER,
+                ) > 0
             }
-            // Let the driver reconcile fields that depend on orientation and
-            // sheet (paper dimensions, imageable area) before we print with it.
-            DocumentPropertiesW(
-                std::ptr::null_mut(),
-                handle,
-                device_wide.as_ptr(),
-                dm,
-                dm,
-                DM_IN_BUFFER | DM_OUT_BUFFER,
-            ) > 0
         })
     };
     match sheet {
@@ -825,44 +902,54 @@ pub(crate) fn windows_printer_media(
                 std::ptr::null(),
             )
         };
-        (n > 0).then_some(n as usize)
+        checked_device_cap_count(n)
     };
-    // The three tables are parallel; a driver that disagrees on their
-    // lengths is read up to the shortest.
-    let count = count(DC_PAPERS)?
-        .min(count(DC_PAPERSIZE)?)
-        .min(count(DC_PAPERNAMES)?);
-    let mut ids = vec![0u16; count];
-    let mut sizes = vec![POINT { x: 0, y: 0 }; count];
-    let mut names = vec![0u16; count * PAPER_NAME_CHARS];
-    // SAFETY: each buffer holds `count` entries of the type the capability
-    // writes (WORD, POINT, 64 WCHARs); the calls fill at most that many.
-    let filled = unsafe {
-        DeviceCapabilitiesW(
-            device_wide.as_ptr(),
-            std::ptr::null(),
-            DC_PAPERS,
-            ids.as_mut_ptr(),
-            std::ptr::null(),
-        ) > 0
-            && DeviceCapabilitiesW(
+    // Query and allocate each table independently: `DeviceCapabilitiesW` ignores
+    // any caller limit and fills every entry of the queried capability.
+    let n_papers = count(DC_PAPERS)?;
+    let n_sizes = count(DC_PAPERSIZE)?;
+    let n_names = count(DC_PAPERNAMES)?;
+    let mut ids = vec![0u16; n_papers];
+    let mut sizes = vec![POINT { x: 0, y: 0 }; n_sizes];
+    let names_len = n_names.checked_mul(PAPER_NAME_CHARS)?;
+    let mut names = vec![0u16; names_len];
+    // SAFETY: each buffer holds its own queried entry count of the type the
+    // capability writes (WORD, POINT, 64 WCHARs); counts are re-validated below.
+    let (got_papers, got_sizes, got_names) = unsafe {
+        (
+            DeviceCapabilitiesW(
+                device_wide.as_ptr(),
+                std::ptr::null(),
+                DC_PAPERS,
+                ids.as_mut_ptr(),
+                std::ptr::null(),
+            ),
+            DeviceCapabilitiesW(
                 device_wide.as_ptr(),
                 std::ptr::null(),
                 DC_PAPERSIZE,
                 sizes.as_mut_ptr().cast::<u16>(),
                 std::ptr::null(),
-            ) > 0
-            && DeviceCapabilitiesW(
+            ),
+            DeviceCapabilitiesW(
                 device_wide.as_ptr(),
                 std::ptr::null(),
                 DC_PAPERNAMES,
                 names.as_mut_ptr(),
                 std::ptr::null(),
-            ) > 0
+            ),
+        )
     };
-    if !filled {
+    let got_papers = checked_device_cap_count(got_papers)?;
+    let got_sizes = checked_device_cap_count(got_sizes)?;
+    let got_names = checked_device_cap_count(got_names)?;
+    if got_papers > n_papers || got_sizes > n_sizes || got_names > n_names {
         return None;
     }
+    let common = got_papers.min(got_sizes).min(got_names);
+    ids.truncate(common);
+    sizes.truncate(common);
+    names.truncate(common * PAPER_NAME_CHARS);
 
     // The driver's default sheet, from its default DEVMODE — which also
     // makes the margin DC start portrait and on that sheet.
@@ -1178,28 +1265,29 @@ pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
 /// Open a file with the OS default application (used for print preview).
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
-    let p = path.to_string_lossy().to_string();
     #[cfg(target_os = "windows")]
-    let mut cmd = {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", "", &p]);
-        c
-    };
-    #[cfg(target_os = "macos")]
-    let mut cmd = {
-        let mut c = std::process::Command::new("open");
-        c.arg(&p);
-        c
-    };
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let mut cmd = {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(&p);
-        c
-    };
-    cmd.spawn()
-        .map(|_| ())
-        .map_err(|e| format!("Could not open preview: {e}"))
+    {
+        open::that_detached(path).map_err(|e| format!("Could not open preview: {e}"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let safe_path = safe_viewer_path(path);
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let mut c = std::process::Command::new("open");
+            c.arg(&safe_path);
+            c
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = {
+            let mut c = std::process::Command::new("xdg-open");
+            c.arg(&safe_path);
+            c
+        };
+        cmd.spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Could not open preview: {e}"))
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1232,6 +1320,7 @@ fn shell_print_to(path: &std::path::Path, printer: &str, copies: u32) -> Result<
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
+    let printer = sanitize_windows_printer_name(printer)?;
     let wide = |s: &str| -> Vec<u16> { OsStr::new(s).encode_wide().chain(Some(0)).collect() };
     let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let verb = wide("printto");
@@ -1413,12 +1502,17 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
 
     #[cfg(not(target_os = "windows"))]
     {
+        let validated_printer = opts
+            .printer
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(validate_unix_printer_name)
+            .transpose()?;
         let path_str = path.to_string_lossy();
         let mut cmd = std::process::Command::new("lp");
-        if let Some(p) = opts.printer.as_deref() {
-            if !p.is_empty() {
-                cmd.arg("-d").arg(p);
-            }
+        if let Some(p) = validated_printer {
+            cmd.arg("-d").arg(p);
         }
         let copies = opts.copies.max(1);
         if copies > 1 {
@@ -1435,6 +1529,7 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
         }
         // The driver's own options, exactly as the PPD names them.
         for (key, value) in &opts.driver_options {
+            validate_cups_driver_option(key, value)?;
             cmd.arg("-o").arg(format!("{key}={value}"));
         }
         // The plot PDF is already the sheet at size; a driver default of
@@ -1462,13 +1557,14 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
         }
 
         let mut fallback = std::process::Command::new("lpr");
-        if let Some(printer) = opts.printer.as_deref().filter(|name| !name.is_empty()) {
+        if let Some(printer) = validated_printer {
             fallback.arg("-P").arg(printer);
         }
         if copies > 1 {
             fallback.arg(format!("-#{copies}"));
         }
         let out = fallback
+            .arg("--")
             .arg(path_str.as_ref())
             .output()
             .map_err(|error| match lp_result {
@@ -1479,9 +1575,8 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
                 Err(ref lp) => format!("lp could not launch: {lp}; lpr could not launch: {error}"),
             })?;
         if out.status.success() {
-            Ok(opts
-                .printer
-                .clone()
+            Ok(validated_printer
+                .map(str::to_string)
                 .unwrap_or_else(|| "default printer".into()))
         } else {
             Err(format!(
@@ -1846,16 +1941,21 @@ mod printer_properties_tests {
             .collect();
         let devmode = super::with_printer_devmode(&device, |_, _| true)
             .expect("the driver must report a DEVMODE for an installed printer");
+        let byte_len = devmode.len() * std::mem::size_of::<u32>();
         assert!(
-            devmode.len() >= std::mem::size_of::<DEVMODEW>(),
-            "DEVMODE buffer is {} bytes, shorter than the public struct",
-            devmode.len()
+            devmode.as_ptr().cast::<DEVMODEW>().is_aligned(),
+            "DEVMODE buffer must be aligned for DEVMODEW"
         );
-        // SAFETY: the buffer holds at least a public DEVMODEW, just checked.
+        assert!(
+            byte_len >= std::mem::size_of::<DEVMODEW>(),
+            "DEVMODE buffer is {} bytes, shorter than the public struct",
+            byte_len
+        );
+        // SAFETY: the buffer is 4-byte aligned and holds at least a public DEVMODEW, just checked.
         let named = unsafe { (*(devmode.as_ptr() as *const DEVMODEW)).dmSize } as usize;
         assert!(
-            named > 0 && named <= devmode.len(),
-            "dmSize {named} outside the buffer"
+            named > 0 && named <= byte_len,
+            "dmSize {named} outside the {byte_len}-byte buffer"
         );
 
         // And the symptom the lost DEVMODE produced: the driver's default
@@ -2020,6 +2120,7 @@ impl PrinterOption {
 /// The sheet (`PageSize`) is left out: the plot dialog chooses it.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
 pub fn printer_options(printer: &str) -> Result<Vec<PrinterOption>, String> {
+    let printer = validate_unix_printer_name(printer)?;
     let output = std::process::Command::new("lpoptions")
         .args(["-p", printer, "-l"])
         .output()
@@ -2197,5 +2298,79 @@ Broken line without colon\n";
             "Photographic Semi Gloss"
         );
         assert_eq!(humanize_keyword("A4"), "A4");
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod security_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn device_cap_count_rejects_non_positive_and_huge_values() {
+        assert_eq!(checked_device_cap_count(-1), None);
+        assert_eq!(checked_device_cap_count(0), None);
+        assert_eq!(checked_device_cap_count(1), Some(1));
+        assert_eq!(checked_device_cap_count(65_536), Some(65_536));
+        assert_eq!(checked_device_cap_count(65_537), None);
+    }
+
+    #[test]
+    fn windows_printer_name_sanitization_blocks_quotes_and_control_chars() {
+        assert_eq!(
+            sanitize_windows_printer_name("  Office LaserJet  ").as_deref(),
+            Ok("Office LaserJet")
+        );
+        assert_eq!(
+            sanitize_windows_printer_name("Εκτυπωτής").as_deref(),
+            Ok("Εκτυπωτής")
+        );
+        assert!(sanitize_windows_printer_name("").is_err());
+        assert!(sanitize_windows_printer_name("   ").is_err());
+        assert!(sanitize_windows_printer_name("Bad\"Printer").is_err());
+        assert!(sanitize_windows_printer_name("Bad\nPrinter").is_err());
+        assert!(sanitize_windows_printer_name("Bad\rPrinter").is_err());
+        assert!(sanitize_windows_printer_name("Bad\0Printer").is_err());
+    }
+
+    #[test]
+    fn unix_printer_name_rejects_flags_and_control_chars() {
+        assert_eq!(
+            validate_unix_printer_name("  Office_HP  ").as_deref(),
+            Ok("Office_HP")
+        );
+        assert!(validate_unix_printer_name("").is_err());
+        assert!(validate_unix_printer_name("-E").is_err());
+        assert!(validate_unix_printer_name("--help").is_err());
+        assert!(validate_unix_printer_name("HP\nLaser").is_err());
+        assert!(validate_unix_printer_name("HP\0Laser").is_err());
+    }
+
+    #[test]
+    fn cups_driver_options_reject_flag_and_control_injection() {
+        assert!(validate_cups_driver_option("ColorModel", "Gray").is_ok());
+        assert!(validate_cups_driver_option("print-scaling", "none").is_ok());
+        assert!(validate_cups_driver_option("", "val").is_err());
+        assert!(validate_cups_driver_option("-d", "evil").is_err());
+        assert!(validate_cups_driver_option("a=b", "c").is_err());
+        assert!(validate_cups_driver_option("bad key", "val").is_err());
+        assert!(validate_cups_driver_option("ColorModel", "Gray\n-o").is_err());
+        assert!(validate_cups_driver_option("ColorModel", "Gray\0").is_err());
+    }
+
+    #[test]
+    fn viewer_path_shields_leading_dash_relative_paths() {
+        assert_eq!(
+            safe_viewer_path(Path::new("-evil.pdf")),
+            Path::new("./-evil.pdf")
+        );
+        assert_eq!(
+            safe_viewer_path(Path::new("/tmp/-ok.pdf")),
+            Path::new("/tmp/-ok.pdf")
+        );
+        assert_eq!(
+            safe_viewer_path(Path::new("normal.pdf")),
+            Path::new("normal.pdf")
+        );
     }
 }

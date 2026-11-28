@@ -11,6 +11,8 @@ Open CAD Studio measures its own code health on every release and on every pull 
 
 Goals, baselines and the reason for each measure are in [`health-goals.json`](health-goals.json). Goals are milestones: each count's next milestone is half the previous one, so progress shows release by release. Changing a goal is a reviewed pull request, like changing the layer rules.
 
+The source measures (size, robustness) and coverage read the root package's code: `src/` and each crate of [`TARGET.md`](TARGET.md) that exists under `crates/`, such as `crates/ocs_base`. Code that moves into one of these crates is still counted, so a move does not change a value. The other workspace crates are not counted. The upward dependencies are counted in `src/` only: between crates, Cargo enforces the layers.
+
 ### Structure
 
 - **Upward dependencies**: code that uses a module in a higher layer, counted in files and in module pairs. The layers and how they are counted are in [`RULES.md`](RULES.md).

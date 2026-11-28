@@ -91,10 +91,30 @@ UP_MEASURES = {"test_functions", "tests", "coverage_core", "coverage_all"}
 
 # ---- Reading a checkout ------------------------------------------------------
 
+def source_roots(root: Path):
+    """The folders that hold the root package's code, relative to the
+    checkout: src/ and each crate of TARGET.md (arch_check.CRATES) that
+    exists under crates/. Code that moves into one of these crates is still
+    measured; the other workspace crates are not."""
+    roots = [Path("src")]
+    for name, _, _ in arch_check.CRATES:
+        if (root / "crates" / name / "src").is_dir():
+            roots.append(Path("crates") / name / "src")
+    return roots
+
+
 def production_files(root: Path):
-    """(rel, top module, raw text, code) for each production .rs file;
-    code has comments, strings and #[cfg(test)] blocks blanked, keeping lines."""
-    src = root / "src"
+    """(path, top module, raw text, code) for each production .rs file in
+    source_roots; path is relative to the checkout. code has comments,
+    strings and #[cfg(test)] blocks blanked, keeping lines."""
+    out = []
+    for base in source_roots(root):
+        out += [(base / rel, mod, raw, code) for rel, mod, raw, code in _production_files(root / base)]
+    return out
+
+
+def _production_files(src: Path):
+    """production_files for one source folder; rel is relative to it."""
     files = sorted(p.relative_to(src) for p in src.rglob("*.rs"))
     raw, codes, test_files = {}, {}, set()
     for rel in files:
@@ -212,7 +232,7 @@ def module_graph(root: Path, files=None):
             continue
         for dst, _, _ in arch_check.references(code):
             if dst != mod and dst in arch_check.LAYERS:
-                graph[(mod, dst)].add(f"src/{rel.as_posix()}")
+                graph[(mod, dst)].add(rel.as_posix())
     return graph
 
 
@@ -239,9 +259,9 @@ def measure_source(root: Path):
     mutual = sorted({tuple(sorted(p)) for p in graph if (p[1], p[0]) in graph})
 
     large, long_fns, panics, unsafe_undoc, skipped = {}, [], [], [], []
-    for p in sorted((root / "src").rglob("*.rs")):
+    for p in sorted(p for base in source_roots(root) for p in (root / base).rglob("*.rs")):
         text = p.read_text(encoding="utf-8", errors="replace")
-        key = f"src/{p.relative_to(root / 'src').as_posix()}"
+        key = p.relative_to(root).as_posix()
         if generated(text):
             skipped.append(key)
             continue
@@ -249,7 +269,7 @@ def measure_source(root: Path):
         if n > LARGE_FILE:
             large[key] = n
     for rel, mod, raw, code in prod:
-        key = f"src/{rel.as_posix()}"
+        key = rel.as_posix()
         if key not in skipped:
             for name, start, n in functions(code):
                 if n > LONG_FUNCTION:
@@ -343,7 +363,7 @@ def upward_items(root: Path, files=None):
         for dst, items, paths, line in references_with_paths(code):
             if dst == mod or not arch_check.upward(mod, dst) or arch_check.allowed(mod, dst, items):
                 continue
-            entry = out[f"{mod} -> {dst}"].setdefault(f"src/{rel.as_posix()}", {"line": line, "items": []})
+            entry = out[f"{mod} -> {dst}"].setdefault(rel.as_posix(), {"line": line, "items": []})
             entry["line"] = min(entry["line"], line)
             for i in paths:
                 i = i or "(module)"
@@ -481,12 +501,12 @@ def coverage_from_lcov(root: Path, text: str, cfg):
     for path, lines in parse_lcov(text).items():
         p = Path(path)
         try:
-            rel = (p if p.is_absolute() else root / p).resolve().relative_to((root / "src").resolve())
+            rel = (p if p.is_absolute() else root / p).resolve().relative_to(root.resolve())
         except ValueError:
-            continue                      # another workspace crate
+            continue                      # outside the checkout
         cov[rel] = lines
     files, all_lines, all_hit = {}, 0, 0
-    for rel, mod, raw, code in production_files(root):
+    for rel, mod, raw, code in production_files(root):      # other workspace crates are not in it
         if rel not in cov or generated(raw):
             continue
         kept = code.split("\n")
@@ -494,7 +514,7 @@ def coverage_from_lcov(root: Path, text: str, cfg):
         da = {n: c for n, c in cov[rel].items() if n not in test_lines}
         n, hit = len(da), sum(1 for c in da.values() if c)
         all_lines, all_hit = all_lines + n, all_hit + hit
-        key = f"src/{rel.as_posix()}"
+        key = rel.as_posix()
         layer = arch_check.LAYERS.get(mod) if mod else None
         if layer in cfg["layers"] and not excluded(key, cfg["exclude"]) and n:
             files[key] = {"layer": layer, "lines": n, "covered": hit,
@@ -515,8 +535,9 @@ def coverage_from_lcov(root: Path, text: str, cfg):
 
 
 def churn(root: Path, days: int = 28):
-    """{src file: landings on main's first-parent line} in the `days` days
-    before HEAD's commit date (a merged pull request counts once)."""
+    """{source file (source_roots): landings on main's first-parent line} in
+    the `days` days before HEAD's commit date (a merged pull request counts
+    once)."""
     # The commit time in seconds: `%cI` gives `Z` for a UTC commit (the
     # release bot's), which `fromisoformat` rejects before Python 3.11.
     head = run(["git", "log", "-1", "--format=%ct", "HEAD"], root).stdout.strip()
@@ -525,7 +546,7 @@ def churn(root: Path, days: int = 28):
     from datetime import datetime, timedelta, timezone
     since = (datetime.fromtimestamp(int(head), timezone.utc) - timedelta(days=days)).isoformat()
     log = run(["git", "log", "--first-parent", "--diff-merges=first-parent", "--no-renames", f"--since={since}",
-               "--numstat", "--format=@%H", "HEAD", "--", "src"], root).stdout
+               "--numstat", "--format=@%H", "HEAD", "--", *(b.as_posix() for b in source_roots(root))], root).stdout
     out = Counter()
     for line in log.splitlines():
         parts = line.split("\t")
@@ -603,9 +624,10 @@ def better(k, a, b):
 
 
 def edited_files(base_root: Path, head_root: Path):
-    """src files that differ between the two checkouts (added or changed)."""
+    """Source files (source_roots) that differ between the two checkouts
+    (added or changed)."""
     out = []
-    for p in sorted((head_root / "src").rglob("*.rs")):
+    for p in sorted(p for base in source_roots(head_root) for p in (head_root / base).rglob("*.rs")):
         rel = p.relative_to(head_root)
         other = base_root / rel
         if not other.exists() or other.read_bytes() != p.read_bytes():

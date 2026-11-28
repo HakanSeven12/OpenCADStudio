@@ -12050,6 +12050,8 @@ impl Scene {
         // temporary body so every visual style shows the identical live cut.
         if let Some(section) = self.active_live_section(block_handle) {
             let handles: Vec<Handle> = self.meshes.keys().copied().collect();
+            let mut replaced_names: HashSet<String> = HashSet::default();
+            let mut replacements: Vec<WireModel> = Vec::new();
             for handle in handles {
                 if only.is_some_and(|only| !only.contains(&handle)) {
                     continue;
@@ -12081,9 +12083,12 @@ impl Scene {
                 let Some(replacement) = replacement else {
                     continue;
                 };
-                let name = handle.value().to_string();
-                wires.retain(|wire| wire.name != name);
-                wires.extend(replacement);
+                replaced_names.insert(handle.value().to_string());
+                replacements.extend(replacement);
+            }
+            if !replaced_names.is_empty() {
+                wires.retain(|wire| !replaced_names.contains(&wire.name));
+                wires.extend(replacements);
             }
         }
         let build_ms = crate::perf::elapsed_ms(t_build);

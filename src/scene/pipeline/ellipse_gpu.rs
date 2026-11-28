@@ -202,11 +202,11 @@ pub fn create_pipelines(
 
 /// Helper to extract an analytical ellipse instance from a single `TangentGeom`.
 pub fn extract_ellipse_instance_from_geom(
-    geom: &crate::scene::model::wire_model::TangentGeom,
+    geom: &crate::display::wire_model::TangentGeom,
     wire: &crate::scene::WireModel,
     draw_depth: f32,
 ) -> Option<EllipseInstance> {
-    let crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+    let crate::display::wire_model::TangentGeom::PlanarEllipse {
         center,
         major_axis,
         normal,
@@ -284,21 +284,27 @@ pub fn extract_ellipse_instances(
     }
 }
 
-/// Allocation-free check whether this wire consists entirely of analytical ellipse instances.
-pub fn can_extract_ellipse_instances(wire: &crate::scene::WireModel) -> bool {
+/// Shared eligibility check so `can_extract_ellipse_instances` and
+/// `extract_ellipse_instances_into` never diverge on what belongs on the
+/// analytical ellipse pipeline vs the wire pipeline.
+fn wire_eligible_for_ellipse_instances(wire: &crate::scene::WireModel) -> bool {
     // A dashed ellipse stays on the wire pipeline with the circle (`circle_gpu`):
     // the dash layout lives there.
-    if wire.pattern_length > 0.0
-        || wire.tangent_geoms.is_empty()
-        || !wire.fill_tris.is_empty()
-        || wire.fill_is_3d
-        || !wire.text_verts.is_empty()
-        || wire.render_instance.is_some()
-    {
+    wire.pattern_length <= 0.0
+        && !wire.tangent_geoms.is_empty()
+        && wire.fill_tris.is_empty()
+        && !wire.fill_is_3d
+        && wire.text_verts.is_empty()
+        && wire.render_instance.is_none()
+}
+
+/// Allocation-free check whether this wire consists entirely of analytical ellipse instances.
+pub fn can_extract_ellipse_instances(wire: &crate::scene::WireModel) -> bool {
+    if !wire_eligible_for_ellipse_instances(wire) {
         return false;
     }
     wire.tangent_geoms.iter().all(|geom| match *geom {
-        crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+        crate::display::wire_model::TangentGeom::PlanarEllipse {
             major_axis,
             normal,
             minor_axis_ratio,
@@ -331,12 +337,7 @@ pub fn extract_ellipse_instances_into(
     draw_depth: f32,
     out: &mut Vec<EllipseInstance>,
 ) -> bool {
-    if wire.tangent_geoms.is_empty()
-        || !wire.fill_tris.is_empty()
-        || wire.fill_is_3d
-        || !wire.text_verts.is_empty()
-        || wire.render_instance.is_some()
-    {
+    if !wire_eligible_for_ellipse_instances(wire) {
         return false;
     }
 
@@ -385,6 +386,27 @@ mod tests {
     }
 
     #[test]
+    fn dashed_ellipse_is_rejected_by_both_predicates() {
+        let mut wire = crate::scene::WireModel::default();
+        wire.tangent_geoms.push(
+            crate::display::wire_model::TangentGeom::PlanarEllipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [10.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.5,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            },
+        );
+        wire.pattern_length = 4.0;
+        assert!(!can_extract_ellipse_instances(&wire));
+        let mut out = Vec::new();
+        assert!(!extract_ellipse_instances_into(&wire, 0.0, &mut out));
+        assert!(out.is_empty());
+        assert!(extract_ellipse_instances(&wire, 0.0).is_none());
+    }
+
+    #[test]
     fn ellipse_shader_validates_with_naga() {
         let source = draw_order_shader!("ellipse.wgsl");
         let module = naga::front::wgsl::parse_str(source).expect("ellipse.wgsl parses cleanly");
@@ -401,7 +423,7 @@ mod tests {
     fn extract_ellipse_instance_success() {
         let mut wire = crate::scene::WireModel::default();
         wire.tangent_geoms.push(
-            crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+            crate::display::wire_model::TangentGeom::PlanarEllipse {
                 center: [100.0, 200.0, 300.0],
                 major_axis: [50.0, 0.0, 0.0],
                 normal: [0.0, 0.0, 1.0],
@@ -428,7 +450,7 @@ mod tests {
     fn extract_elliptical_arc_instance_success() {
         let mut wire = crate::scene::WireModel::default();
         wire.tangent_geoms.push(
-            crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+            crate::display::wire_model::TangentGeom::PlanarEllipse {
                 center: [0.0, 0.0, 0.0],
                 major_axis: [10.0, 0.0, 0.0],
                 normal: [0.0, 0.0, 1.0],

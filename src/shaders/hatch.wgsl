@@ -168,6 +168,7 @@ fn check_family(
     let pz = xz.y - oz;
 
     let perp_step = fam.perp_step * scale;
+    if abs(perp_step) <= 1e-12 { return false; }
 
     let perp   = -px * sin_a + pz * cos_a;
     let k      = round(perp / perp_step);
@@ -195,6 +196,7 @@ fn check_family(
 
     let along_step = fam.along_step * scale;
     let period     = fam.period * scale;
+    if abs(period) <= 1e-12 { return d <= half_line; }
     let along      = px * cos_a + pz * sin_a;
     let t          = along - k * along_step;
     let t_mod      = ((t % period) + period) % period;
@@ -216,7 +218,7 @@ fn check_family(
             let owx = -dtv * cos_a + dperp * sin_a;
             let owy = -dtv * sin_a - dperp * cos_a;
             let dot_half = width_px * 0.5;
-            if abs(owx / wpx) <= dot_half && abs(owy / wpy) <= dot_half { return true; }
+            if abs(owx) <= dot_half * wpx && abs(owy) <= dot_half * wpy { return true; }
         }
     }
     return false;
@@ -242,6 +244,9 @@ fn dither_threshold(frag: vec2<f32>) -> f32 {
 // line spacing, times the share of each period the dashes draw (a dot
 // draws one line width). Used once the lines are closer than 2 px.
 fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
+    if u.world_per_pixel <= 1e-12 {
+        return 0.0;
+    }
     let spacing_px = abs(fam.perp_step) * scale / u.world_per_pixel;
     let width_px = select(1.0, display_lineweight(fam.line_width), u.lwdisplay_enable > 0.5);
     var along = 1.0;
@@ -258,7 +263,7 @@ fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
         }
         along = clamp(lit / period, 0.0, 1.0);
     }
-    return clamp(width_px / spacing_px, 0.0, 1.0) * along;
+    return select(1.0, clamp(width_px / spacing_px, 0.0, 1.0), spacing_px > 1e-12) * along;
 }
 
 
@@ -279,7 +284,8 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
         return shown(inst.color);
     } else if inst.mode == 2u {
         let proj = v.xz.x * inst.grad_cos + v.xz.y * inst.grad_sin;
-        var t = clamp((proj - inst.grad_min) / inst.grad_range, 0.0, 1.0);
+        let grad_range = select(inst.grad_range, 1.0, abs(inst.grad_range) <= 1e-12);
+        var t = clamp((proj - inst.grad_min) / grad_range, 0.0, 1.0);
         // Shape profile: cylinder mirrors around the middle, curved eases in.
         let k = inst.grad_kind & 15u;
         if k == 1u {
@@ -294,7 +300,8 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
     } else if inst.mode == 3u {
         // Radial gradient: centre is (grad_cos, grad_sin), radius is grad_range.
         let d = length(v.xz - vec2<f32>(inst.grad_cos, inst.grad_sin));
-        var t = clamp(d / inst.grad_range, 0.0, 1.0);
+        let grad_range = select(inst.grad_range, 1.0, abs(inst.grad_range) <= 1e-12);
+        var t = clamp(d / grad_range, 0.0, 1.0);
         // Hemispherical shades faster near the centre (dome profile).
         if (inst.grad_kind & 15u) == 3u {
             t = sqrt(t);

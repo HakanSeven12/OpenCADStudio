@@ -2571,7 +2571,8 @@ impl Snapper {
                     let b = b as *const WireModel as usize;
                     (a.min(b), a.max(b))
                 };
-                for (idx, &wire_i) in local_wires.iter().enumerate() {
+                let mut curve_work = 0usize;
+                'exact_curves: for (idx, &wire_i) in local_wires.iter().enumerate() {
                     if !has_exact_curve(wire_i) {
                         continue;
                     }
@@ -2584,6 +2585,10 @@ impl Snapper {
                             || !aabbs_overlap(wire_i, wire_j)
                         {
                             continue;
+                        }
+                        curve_work += 1;
+                        if curve_work > MAX_INDEXED_PAIRWISE_WORK {
+                            break 'exact_curves;
                         }
                         if let Some(points) = exact_curve_intersections(wire_i, wire_j) {
                             // Two wires meet here; attribute the feature to the

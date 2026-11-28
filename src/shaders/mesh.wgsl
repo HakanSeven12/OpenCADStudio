@@ -188,6 +188,11 @@ fn mesh_instance(input: InstanceIn) -> MeshInstance {
     );
 }
 
+fn safe_normalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
+    let len_sq = dot(v, v);
+    return select(fallback, v * inverseSqrt(len_sq), len_sq > 1e-12);
+}
+
 @vertex
 fn vs_main(
     v: VertexIn,
@@ -197,11 +202,14 @@ fn vs_main(
     let instance = mesh_instance(i);
     let rel = relative_position(v.position, v.position_low, instance);
     out.clip_pos  = u.view_rot * vec4<f32>(rel, 1.0);
-    out.normal    = normalize(vec3<f32>(
-        dot(instance.normal_row_0.xyz, v.normal),
-        dot(instance.normal_row_1.xyz, v.normal),
-        dot(instance.normal_row_2.xyz, v.normal),
-    ));
+    out.normal    = safe_normalize(
+        vec3<f32>(
+            dot(instance.normal_row_0.xyz, v.normal),
+            dot(instance.normal_row_1.xyz, v.normal),
+            dot(instance.normal_row_2.xyz, v.normal),
+        ),
+        vec3<f32>(0.0, 0.0, 1.0),
+    );
     out.world_pos = rel;
     out.uv_diffuse = v.uv_diffuse;
     out.uv_specular = v.uv_specular_reflection.xy;
@@ -222,11 +230,14 @@ fn vs_main_plain(
     let instance = mesh_instance(i);
     let rel = relative_position(v.position, v.position_low, instance);
     out.clip_pos  = u.view_rot * vec4<f32>(rel, 1.0);
-    out.normal    = normalize(vec3<f32>(
-        dot(instance.normal_row_0.xyz, v.normal),
-        dot(instance.normal_row_1.xyz, v.normal),
-        dot(instance.normal_row_2.xyz, v.normal),
-    ));
+    out.normal    = safe_normalize(
+        vec3<f32>(
+            dot(instance.normal_row_0.xyz, v.normal),
+            dot(instance.normal_row_1.xyz, v.normal),
+            dot(instance.normal_row_2.xyz, v.normal),
+        ),
+        vec3<f32>(0.0, 0.0, 1.0),
+    );
     out.world_pos = rel;
     out.uv_diffuse = vec2<f32>(0.0);
     out.uv_specular = vec2<f32>(0.0);
@@ -287,7 +298,7 @@ fn map_weight(uv: vec2<f32>, tiling: u32) -> f32 {
 }
 
 fn environment_uv(direction: vec3<f32>) -> vec2<f32> {
-    let d = normalize(direction);
+    let d = safe_normalize(direction, vec3<f32>(0.0, 0.0, 1.0));
     let longitude = atan2(d.x, -d.z) + u.environment_params.y;
     let latitude = asin(clamp(d.y, -1.0, 1.0));
     return vec2<f32>(
@@ -351,9 +362,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // Per-triangle face normal: derivatives of the interpolated
         // world position are constant across the primitive, so every
         // fragment in the same triangle sees the same normal.
-        n = normalize(cross(dpdx(in.world_pos), dpdy(in.world_pos)));
+        n = safe_normalize(
+            cross(dpdx(in.world_pos), dpdy(in.world_pos)),
+            vec3<f32>(0.0, 0.0, 1.0),
+        );
     } else {
-        n = normalize(in.normal);
+        n = safe_normalize(in.normal, vec3<f32>(0.0, 0.0, 1.0));
     }
     // Build a derivative tangent frame from the generated material UVs. This
     // works for planar/box/cylindrical/spherical AcDbMaterial projections and
@@ -364,32 +378,40 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let duv1 = dpdx(tangent_uv);
     let duv2 = dpdy(tangent_uv);
     let det = duv1.x * duv2.y - duv1.y * duv2.x;
-    var tangent = normalize(dp1);
-    var bitangent = normalize(cross(n, tangent));
+    var tangent = safe_normalize(dp1, vec3<f32>(1.0, 0.0, 0.0));
+    var bitangent = safe_normalize(cross(n, tangent), vec3<f32>(0.0, 1.0, 0.0));
     if (abs(det) > 1e-8) {
-        tangent = normalize((dp1 * duv2.y - dp2 * duv1.y) / det);
-        bitangent = normalize((-dp1 * duv2.x + dp2 * duv1.x) / det);
+        tangent = safe_normalize(
+            (dp1 * duv2.y - dp2 * duv1.y) / det,
+            vec3<f32>(1.0, 0.0, 0.0),
+        );
+        bitangent = safe_normalize(
+            (-dp1 * duv2.x + dp2 * duv1.x) / det,
+            vec3<f32>(0.0, 1.0, 0.0),
+        );
     }
     if (maps.present1.z != 0u) {
         let sampled = textureSample(normal_map, normal_sampler, in.uv_normal).xyz * 2.0 - 1.0;
-        let mapped = normalize(
-            tangent * sampled.x + bitangent * sampled.y + n * sampled.z
+        let mapped = safe_normalize(
+            tangent * sampled.x + bitangent * sampled.y + n * sampled.z,
+            n,
         );
         let strength = maps.blends1.z
             * map_weight(in.uv_normal, maps.tiling1.z)
             * max(surface.advanced.x, 0.0);
-        n = normalize(mix(n, mapped, clamp(strength, 0.0, 1.0)));
+        n = safe_normalize(mix(n, mapped, clamp(strength, 0.0, 1.0)), n);
     } else if (maps.present1.x != 0u) {
         let height = dot(
             textureSample(bump_map, bump_sampler, in.uv_bump).rgb,
             vec3<f32>(0.2126, 0.7152, 0.0722),
         );
         let slope = tangent * dpdx(height) + bitangent * dpdy(height);
-        n = normalize(
+        n = safe_normalize(
             n - slope
                 * maps.blends1.x
                 * map_weight(in.uv_bump, maps.tiling1.x)
-                * 4.0
+                * 4.0,
+            n,
         );
     }
 
@@ -430,7 +452,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         );
         specular_color = mix(specular_color, texel, blend);
     }
-    let view = normalize(-in.world_pos);
+    let view = safe_normalize(-in.world_pos, vec3<f32>(0.0, 0.0, 1.0));
     let gloss_exp = mix(2.0, 128.0, clamp(surface.material.x, 0.0, 1.0));
     let fresnel0 = pow(
         (max(surface.specular.w, 1.0) - 1.0) / (max(surface.specular.w, 1.0) + 1.0),
@@ -459,7 +481,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         let direction_intensity = u.light_direction_intensity[index];
         let color_hotspot = u.light_color_hotspot[index];
         let attenuation_data = u.light_attenuation[index];
-        var light_vector = -normalize(direction_intensity.xyz);
+        let light_dir = safe_normalize(direction_intensity.xyz, vec3<f32>(0.0, 0.0, -1.0));
+        var light_vector = -light_dir;
         var attenuation = 1.0;
         if (position_type.w > 1.5) {
             let delta = position_type.xyz - in.world_pos;
@@ -479,10 +502,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             }
             if (position_type.w > 2.5) {
                 let source_to_fragment = -light_vector;
-                let cone = dot(
-                    source_to_fragment,
-                    normalize(direction_intensity.xyz),
-                );
+                let cone = dot(source_to_fragment, light_dir);
                 attenuation *= smoothstep(
                     attenuation_data.w,
                     color_hotspot.w,
@@ -491,7 +511,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             }
             attenuation *= photometric_web(
                 index,
-                dot(-light_vector, normalize(direction_intensity.xyz)),
+                dot(-light_vector, light_dir),
             );
         }
         let visibility = select(1.0, shadow, index == shadow_light_index);
@@ -502,7 +522,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             two_sided,
         );
         direct_light += color_hotspot.rgb * response * strength;
-        let half_vec = normalize(light_vector + view);
+        let half_vec = safe_normalize(light_vector + view, n);
         let half_response = select(
             max(dot(n, half_vec), 0.0),
             abs(dot(n, half_vec)),
@@ -646,7 +666,7 @@ fn fs_edge_black(_in: EdgeVertexOut) -> @location(0) vec4<f32> {
 // such a line draws solid; clip it in the vertex shader if that shows.
 @fragment
 fn fs_edge_occluded(in: OccludedEdgeOut) -> @location(0) vec4<f32> {
-    if (in.start.w > 0.0) {
+    if (in.start.w > 0.0 && in.here.w > 0.0) {
         let half_size = u.viewport_size * 0.5;
         let here = in.here.xy / in.here.w * half_size;
         let start = in.start.xy / in.start.w * half_size;

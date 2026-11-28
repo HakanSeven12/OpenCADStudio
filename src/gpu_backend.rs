@@ -1547,19 +1547,33 @@ mod tests {
 
     #[test]
     fn force_hooks_drive_probes_without_spawning() {
-        // SAFETY: single-threaded test mutating process-local test hooks.
+        struct ClearForceHooks;
+        impl Drop for ClearForceHooks {
+            fn drop(&mut self) {
+                // SAFETY: serialized by SENTINEL_TESTS; process-local test hook cleanup.
+                unsafe {
+                    std::env::remove_var(FORCE_FAIL_ENV);
+                    std::env::remove_var(FORCE_OK_ENV);
+                    std::env::remove_var(FORCE_CAPS_ENV);
+                }
+            }
+        }
+        let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let _cleanup = ClearForceHooks;
+        // SAFETY: serialized by SENTINEL_TESTS; process-local test hooks.
         unsafe { std::env::set_var(FORCE_FAIL_ENV, "1") };
         assert!(run_probe_for("vulkan").is_none());
+        // SAFETY: serialized by SENTINEL_TESTS.
         unsafe { std::env::remove_var(FORCE_FAIL_ENV) };
+        // SAFETY: serialized by SENTINEL_TESTS.
         unsafe { std::env::set_var(FORCE_OK_ENV, "1") };
         let caps = run_probe_for("vulkan").expect("forced success");
         assert_eq!(caps.backend, "vulkan");
         assert!(!needs_compat_renderer(&caps));
+        // SAFETY: serialized by SENTINEL_TESTS.
         unsafe { std::env::set_var(FORCE_CAPS_ENV, "0") };
         let bare = run_probe_for("gl").expect("forced success");
         assert!(needs_compat_renderer(&bare));
-        unsafe { std::env::remove_var(FORCE_OK_ENV) };
-        unsafe { std::env::remove_var(FORCE_CAPS_ENV) };
     }
 
     #[test]

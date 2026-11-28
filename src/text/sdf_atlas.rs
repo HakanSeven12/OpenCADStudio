@@ -31,6 +31,12 @@ use std::sync::{Mutex, OnceLock};
 use crate::text::font_face::Face;
 use crate::text::lff::Glyph;
 
+static NEXT_ATLAS_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_revision() -> u64 {
+    NEXT_ATLAS_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Process-wide glyph atlas, shared by the text collector (which bakes glyphs
 /// while building draw data) and the GPU upload (which reads the texels).
 /// Mirrors the existing global font-glyph caches (see `ttf_glyph`).
@@ -208,8 +214,10 @@ pub struct GlyphAtlas {
     /// the SDF shader fills it solid — used to draw decoration lines
     /// (underline / overline / strikethrough) through the glyph pipeline.
     solid_uv: [f32; 2],
-    /// Set when `data` changed since the last upload; the GPU side clears it.
-    dirty: bool,
+    /// Monotonically increasing revision bumped whenever `data` changes or the
+    /// atlas resets; pipelines compare against their own uploaded revision so
+    /// multiple viewports and offscreen workers stay synchronized.
+    revision: u64,
 }
 
 /// A freshly baked, not-yet-packed glyph tile.
@@ -250,7 +258,7 @@ impl GlyphAtlas {
                 (solid as f32 * 0.5) / width as f32,
                 (solid as f32 * 0.5) / MAX_ATLAS_PX as f32,
             ],
-            dirty: true,
+            revision: next_revision(),
         }
     }
 
@@ -270,11 +278,8 @@ impl GlyphAtlas {
     pub fn data(&self) -> &[u8] {
         &self.data
     }
-    pub fn is_dirty(&self) -> bool {
-        self.dirty
-    }
-    pub fn clear_dirty(&mut self) {
-        self.dirty = false;
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Drop every cached glyph and re-init the texture, so glyphs re-bake on
@@ -377,7 +382,7 @@ impl GlyphAtlas {
         let new_h = (self.height * 2).min(MAX_ATLAS_PX);
         self.data.resize((self.width * new_h) as usize, 0);
         self.height = new_h;
-        self.dirty = true;
+        self.revision = next_revision();
         // V is baked against `MAX_ATLAS_PX` and the text shaders scale it by
         // the texture's height, so quads already laid out stay valid: no
         // generation bump, and no second layout of every text (#2761).
@@ -411,7 +416,7 @@ impl GlyphAtlas {
         }
         self.cursor_x += tile.w;
         self.shelf_h = self.shelf_h.max(tile.h);
-        self.dirty = true;
+        self.revision = next_revision();
 
         // V against the largest height, so growing never moves a tile.
         let (fw, fh) = (self.width as f32, MAX_ATLAS_PX as f32);
@@ -645,13 +650,14 @@ mod tests {
     #[test]
     fn packing_places_tiles_without_overlap() {
         let mut atlas = GlyphAtlas::new(256, 256);
+        let initial_rev = atlas.revision();
         let a = atlas
             .pack(bake_glyph(&filled_square(), PEN_HALF_UNITS).unwrap())
             .unwrap();
         let b = atlas
             .pack(bake_glyph(&diagonal_stroke(), PEN_HALF_UNITS).unwrap())
             .unwrap();
-        assert!(atlas.is_dirty());
+        assert!(atlas.revision() > initial_rev);
         // UVs are within the atlas.
         for e in [&a, &b] {
             assert!(e.uv_min[0] >= 0.0 && e.uv_max[0] <= 1.0);
@@ -719,10 +725,20 @@ mod tests {
     #[test]
     fn real_lff_glyph_bakes_and_packs() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let e = atlas
+        let initial_rev = atlas.revision();
+        let _ = atlas
             .get_or_insert("txt", 'A', false)
             .expect("LFF 'A' bakes");
-        assert!(atlas.is_dirty());
+        let after_pack = atlas.revision();
+        assert!(after_pack > initial_rev);
+        atlas.reset();
+        assert!(
+            atlas.revision() > after_pack,
+            "reset must advance revision monotonically across pipelines"
+        );
+        let e = atlas
+            .get_or_insert("txt", 'A', false)
+            .expect("LFF 'A' bakes after reset");
         assert!(
             e.plane_max[0] > e.plane_min[0] && e.plane_max[1] > e.plane_min[1],
             "tile covers a positive-area glyph rect"

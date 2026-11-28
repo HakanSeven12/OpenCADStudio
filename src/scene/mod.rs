@@ -64,15 +64,21 @@ mod block_solid_fill_tests;
 mod boundary;
 mod camera_ops;
 #[cfg(test)]
+mod centermark_tests;
+#[cfg(test)]
 mod draw_guard_key_tests;
 #[cfg(test)]
 mod dwg_edit_after_open_tests;
+#[cfg(test)]
+mod insert_attribute_tests;
 #[cfg(test)]
 mod layer_visibility_block_cache_tests;
 #[cfg(test)]
 mod layout_plot_settings_cache_tests;
 #[cfg(test)]
 mod ole_resolution_tests;
+#[cfg(test)]
+mod open_worker_font_tests;
 #[cfg(test)]
 mod reference_only_tests;
 #[cfg(test)]
@@ -85,6 +91,8 @@ mod solid_box_select_tests;
 mod solid_highlight_outline_tests;
 #[cfg(test)]
 mod solid_outline_detail_tests;
+#[cfg(test)]
+mod table_text_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;

@@ -713,7 +713,7 @@ mod tests {
         // The file prompts of PDFATTACH and PDFIMPORT read every file so.
         let path = "pdf-password-stray-delimiter.pdf";
         let file = with_encrypt("<< /Filter /Standard /O [>] >>");
-        crate::scene::model::pdf_raster::register_source(path, Arc::new(file));
+        crate::media::pdf_source::register_source(path, Arc::new(file));
         assert_eq!(within_ten_seconds(move || gate(path, true)), Gate::Open);
         assert_eq!(within_ten_seconds(move || reopened_notice(path)), None);
     }

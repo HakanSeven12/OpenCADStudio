@@ -362,15 +362,15 @@ impl OpenCADStudio {
             .as_ref()
             .and_then(|cmd| cmd.window_first_corner());
         if let Some(first) = window_first {
-            if let Some(marquee) = self.tabs[i]
-                .scene
-                .selection
-                .borrow_mut()
-                .gesture
-                .preview_box
-                .as_mut()
-            {
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            let cursor = sel.input.last_move_pos;
+            if let Some(marquee) = sel.gesture.preview_box.as_mut() {
                 marquee.0 = proj(first);
+                // The far corner is the cursor, which a pan or zoom leaves
+                // where it was on screen.
+                if let Some(cursor) = cursor {
+                    marquee.1 = cursor;
+                }
             }
         }
     }

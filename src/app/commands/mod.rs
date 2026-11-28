@@ -2293,13 +2293,26 @@ mod stretch_preselection_tests {
         let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(first);
         let _ = app.apply_cmd_result(res);
         assert_eq!(
-            app.tabs[i].active_cmd.as_ref().and_then(|cmd| cmd.window_first_corner()),
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|cmd| cmd.window_first_corner()),
             Some(first),
             "STRETCH waits for the second corner"
         );
-        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
         let on_screen = |app: &OpenCADStudio| {
-            let p = app.tabs[i].scene.camera.borrow().project(first, bounds).unwrap();
+            let p = app.tabs[i]
+                .scene
+                .camera
+                .borrow()
+                .project(first, bounds)
+                .unwrap();
             iced::Point::new(p.x, p.y)
         };
         let before = on_screen(&app);
@@ -2310,11 +2323,55 @@ mod stretch_preselection_tests {
         app.pan_active_view(i, 120.0, -80.0, std::time::Instant::now());
 
         let after = on_screen(&app);
-        assert!((after.x - before.x).abs() > 50.0, "the pan moved the drawing: {before:?} {after:?}");
-        let (anchor, _, _) = app.tabs[i].scene.selection.borrow().gesture.preview_box.unwrap();
+        assert!(
+            (after.x - before.x).abs() > 50.0,
+            "the pan moved the drawing: {before:?} {after:?}"
+        );
+        let (anchor, _, _) = app.tabs[i]
+            .scene
+            .selection
+            .borrow()
+            .gesture
+            .preview_box
+            .unwrap();
         assert!(
             (anchor.x - after.x).abs() < 0.5 && (anchor.y - after.y).abs() < 0.5,
             "marquee corner {anchor:?}, first corner now at {after:?}"
+        );
+    }
+
+    /// The window's far corner is the cursor: a pan or zoom before the next
+    /// cursor move leaves it at the cursor's place, not where the last
+    /// move drew it.
+    #[test]
+    fn the_crossing_window_far_corner_stays_at_the_cursor_on_pan() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.dispatch_command("STRETCH");
+        let first = DVec3::new(3.0, 4.0, 0.0);
+        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(first);
+        let _ = app.apply_cmd_result(res);
+        let cursor = iced::Point::new(300.0, 200.0);
+        app.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(cursor);
+        app.tabs[i].scene.selection.borrow_mut().gesture.preview_box = Some((
+            iced::Point::new(10.0, 10.0),
+            iced::Point::new(700.0, 500.0),
+            true,
+        ));
+
+        app.pan_active_view(i, 120.0, -80.0, std::time::Instant::now());
+
+        let (_, far, _) = app.tabs[i]
+            .scene
+            .selection
+            .borrow()
+            .gesture
+            .preview_box
+            .unwrap();
+        assert!(
+            (far.x - cursor.x).abs() < 0.5 && (far.y - cursor.y).abs() < 0.5,
+            "far corner {far:?}, cursor {cursor:?}"
         );
     }
 

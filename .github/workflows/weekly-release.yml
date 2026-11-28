@@ -11,11 +11,7 @@ on:
         default: false
 
 permissions:
-  contents: write
-  actions: read
-  discussions: read
-  pages: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: weekly-release
@@ -25,6 +21,8 @@ jobs:
   prepare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     outputs:
       ready: ${{ steps.release.outputs.ready }}
       tag: ${{ steps.release.outputs.tag }}
@@ -52,17 +50,36 @@ jobs:
   web:
     needs: prepare
     if: needs.prepare.outputs.ready == 'true'
+    permissions:
+      contents: write
+      discussions: read
+      pages: write
+      id-token: write
     uses: ./.github/workflows/pages.yml
     with:
       tag: ${{ needs.prepare.outputs.tag }}
       commit: ${{ needs.prepare.outputs.commit }}
-    secrets: inherit
+    secrets:
+      OCS_PATREON_TOKEN: ${{ secrets.OCS_PATREON_TOKEN }}
+      OCS_GITHUB_TOKEN: ${{ secrets.OCS_GITHUB_TOKEN }}
 
   native:
     needs: prepare
     if: needs.prepare.outputs.ready == 'true'
+    permissions:
+      contents: write
+      actions: read
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.prepare.outputs.tag }}
       commit: ${{ needs.prepare.outputs.commit }}
-    secrets: inherit
+    secrets:
+      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
+      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}

@@ -1,0 +1,5 @@
+# ocs_plugin_api uses rkyv 0.7 with features = ["validation", "std"] only
+# (the `rc` feature is disabled and no Rc/Arc pointers are archived).
+# Upgrading to rkyv 0.8 requires a coordinated breaking plugin API bump.
+[advisories]
+ignore = ["RUSTSEC-2026-0235"]

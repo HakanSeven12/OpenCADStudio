@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: wiki
@@ -138,6 +138,8 @@ jobs:
     needs: [source, health]
     if: always() && needs.source.result == 'success' && needs.source.outputs.build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       LABEL: ${{ needs.source.outputs.label }}
     steps:
@@ -145,8 +147,14 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.ref }}
       - name: Check out the wiki
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+      - name: Configure wiki git author
         run: |
-          git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
           git -C wiki config user.name "github-actions[bot]"
           git -C wiki config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 

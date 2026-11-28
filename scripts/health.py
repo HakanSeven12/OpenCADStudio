@@ -20,10 +20,11 @@ to read the results.
       lines that made a measure worse. FILE is the list of untested files the
       Code Health wiki page publishes; edited files on it get a note.
 
-  python3 scripts/health.py lint CLIPPY_JSON FMT_LIST CHANGED_FILES [--markdown]
+  python3 scripts/health.py lint CLIPPY_JSON FMT_LIST CHANGED_FILES [--markdown] [--check]
       Report the clippy warnings (from `cargo clippy --message-format=json`)
       and the files rustfmt would change (from `cargo fmt -- --check -l`) that
-      are in the files a pull request touches (one path per line).
+      are in the files a pull request touches (one path per line). With
+      --check, exit 1 if any touched file has warnings or rustfmt diffs.
 
   python3 scripts/health.py credits FROM TO [--repo DIR]
       Replay each first-parent commit in FROM..TO with the source measures
@@ -680,7 +681,7 @@ def diff(base_dir: str, markdown: bool, untested_file=None) -> int:
     return 0
 
 
-def lint(clippy_json: str, fmt_list: str, changed: str, markdown: bool) -> int:
+def lint(clippy_json: str, fmt_list: str, changed: str, markdown: bool, check: bool = False) -> int:
     touched = {l.strip() for l in Path(changed).read_text().splitlines() if l.strip()}
     clippy, rustc = parse_clippy(Path(clippy_json).read_text().splitlines())
     mine = [w for w in clippy + rustc if w["file"] in touched]
@@ -703,6 +704,16 @@ def lint(clippy_json: str, fmt_list: str, changed: str, markdown: bool) -> int:
     else:
         for w in mine:
             print(f"  {w['file']}:{w['line']} {w['code'] or 'rustc'} {w['message']}")
+        if check:
+            for f in fmt_mine:
+                print(f"  rustfmt: {f}")
+    if check and (mine or fmt_mine):
+        if markdown:
+            for w in mine:
+                print(f"  {w['file']}:{w['line']} {w['code'] or 'rustc'} {w['message']}", file=sys.stderr)
+            for f in fmt_mine:
+                print(f"  rustfmt: {f}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -833,7 +844,7 @@ def main(argv) -> int:
     if args[:1] == ["diff"] and len(args) == 2:
         return diff(args[1], "--markdown" in flags, options.get("--untested"))
     if args[:1] == ["lint"] and len(args) == 4:
-        return lint(args[1], args[2], args[3], "--markdown" in flags)
+        return lint(args[1], args[2], args[3], "--markdown" in flags, "--check" in flags)
     if args[:1] == ["credits"] and len(args) == 3:
         repo = Path(options.get("--repo", "."))
         json.dump(credits(args[1], args[2], repo), sys.stdout, indent=1)

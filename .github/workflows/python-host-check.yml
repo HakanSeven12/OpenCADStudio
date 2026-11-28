@@ -11,7 +11,7 @@ on:
     paths:
       - 'crates/ocs_plugin_api/**'
       - 'plugins/opencad-python/**'
-      - 'src/app/plugin_host.rs'
+      - 'src/app/plugin_host/**'
       - 'src/app/control/**'
       - 'src/app/commands/**'
       - 'src/app/settings.rs'
@@ -21,6 +21,9 @@ on:
   push:
     tags: ['pr-check-*']
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always

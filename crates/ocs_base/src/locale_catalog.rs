@@ -4068,6 +4068,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Overshoot" => Some(("manage", "geometry-cleanup-overshoot")),
         "Remaining Errors: {}" => Some(("manage", "geometry-cleanup-remaining")),
         "Rescan" => Some(("manage", "geometry-cleanup-rescan")),
+        "Scanning {} objects…" => Some(("manage", "geometry-cleanup-scanning")),
         "Lengthen the end along its own line or arc to the object it stops short of." => Some(("manage", "geometry-cleanup-tip-extend")),
         "Lengthen both ends along their own lines to the corner where they meet." => Some(("manage", "geometry-cleanup-tip-extend-both")),
         "Move the whole object so that its end meets the other end." => Some(("manage", "geometry-cleanup-tip-move")),

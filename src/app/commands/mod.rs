@@ -47,6 +47,7 @@ mod named_selections;
 #[cfg(test)]
 mod named_selections_tests;
 pub(in crate::app) use dgn_import::read_reference_drawings;
+pub(in crate::app) use geometry_cleanup::SCAN_TASK as GEOMETRY_CLEANUP_SCAN_TASK;
 pub(in crate::app) use named_selections::NamedSelectionSaveError;
 mod dim;
 mod dim_cmd;

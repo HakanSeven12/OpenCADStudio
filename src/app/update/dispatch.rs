@@ -14271,6 +14271,9 @@ impl OpenCADStudio {
             Message::BackgroundTaskFailed { context, detail } => {
                 self.command_line
                     .push_error(crate::tf!("{context} failed: {detail}").as_ref());
+                if context == crate::app::commands::GEOMETRY_CLEANUP_SCAN_TASK {
+                    self.geometry_cleanup_stop_scan();
+                }
                 Task::none()
             }
             Message::UnderlayRastersDrawn(tab_id, generation, done) => {

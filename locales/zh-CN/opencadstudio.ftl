@@ -6816,6 +6816,7 @@ manage =
     .geometry-cleanup-rotate-longer = 旋转较长的一侧
     .geometry-cleanup-rotate-shorter = 旋转较短的一侧
     .geometry-cleanup-scan = 扫描
+    .geometry-cleanup-scanning = Scanning __ocs_fmt_0__ objects…
     .geometry-cleanup-select-types = 选择错误类型和容差
     .geometry-cleanup-settings = 几何图形清理设置
     .geometry-cleanup-settings-unreadable = 无法读取设置文件：__ocs_fmt_0__

@@ -8,15 +8,19 @@ use crate::modules::manage::geometry_cleanup_settings::{
 };
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{
-    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, KeptError, Scan, MARKER_REACH,
+    rows, AngleFinding, Finding, Fix, GeometryCleanupMsg, KeptError, Scan, ScanInput, ScanJob,
+    ScanOutput, ScanTolerances, MARKER_REACH,
 };
 use crate::ui::window::geometry_cleanup_settings::SettingsDialog;
 use document::{EntityType, Handle};
 use iced::Task;
 use ocs_geom::geom2d::cleanup::{
-    angle_errors, end_errors, proposed_tolerance, AngleTolerances, Tolerances,
+    angle_errors_until, end_errors_until, proposed_tolerance, AngleTolerances, Tolerances,
 };
 use ocs_geom::geom2d::{Curve, Tolerance};
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Ends nearer than this meet: they are not an error.
 const WELD: f64 = 1e-6;
@@ -26,6 +30,19 @@ const SYSVARS: &[&str] = &["GEOMETRYCLEANUPSTATE", "GEOMETRYCLEANUPZOOMPAN"];
 
 /// The colour index of the picked error's objects in review mode (red).
 const REVIEW_COLOR: i16 = 1;
+
+/// A scan of this many curves or more runs off the UI thread, and the
+/// palette can be closed while it runs. A scan of fewer is done at once.
+const BACKGROUND_FROM: usize = 10_000;
+
+/// The name of the scan's background task, in its failure message.
+pub(in crate::app) const SCAN_TASK: &str = "Geometry Cleanup scan";
+
+#[cfg(test)]
+thread_local! {
+    /// The scans of the drawing on this thread, for the tests.
+    pub(super) static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 impl OpenCADStudio {
     pub(super) fn dispatch_geometry_cleanup(
@@ -144,9 +161,7 @@ impl OpenCADStudio {
         }
         self.geometry_cleanup.review_shown = display.is_some();
         // The colours change, not the geometry: the scan is still true.
-        let fresh = self
-            .geometry_cleanup_scan_here(i)
-            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        let fresh = self.geometry_cleanup_scan_current(i);
         self.tabs[i].scene.set_count_display(display);
         let epoch = self.tabs[i].scene.geometry_epoch;
         if let Some(scan) = self.geometry_cleanup.scan.as_mut().filter(|_| fresh) {
@@ -160,6 +175,7 @@ impl OpenCADStudio {
         if !open {
             self.geometry_cleanup_close_menu(self.active_tab);
             self.geometry_cleanup.review = false;
+            self.geometry_cleanup_stop_scan();
         }
         self.geometry_cleanup.show = open;
         if open {
@@ -206,46 +222,47 @@ impl OpenCADStudio {
         tolerances: Tolerances,
         angles: &AngleTolerances,
     ) -> Vec<Finding> {
-        let kept = self.geometry_cleanup_curves(i, objects);
-        let curves: Vec<Curve> = kept.iter().map(|(_, curve)| curve.clone()).collect();
-        let ends = end_errors(&curves, tolerances, Tolerance::new(WELD))
-            .into_iter()
-            .map(|error| Finding {
-                kind: error.kind.into(),
-                handle: kept[error.end.curve].0,
-                at_start: error.end.at_start,
-                location: error.location,
-                target: error.target,
-                other: error
-                    .other
-                    .map(|other| (kept[other.curve].0, other.at_start)),
-                corner: error.corner,
-                deviation: error.deviation,
-                angle: None,
-                stretch: !matches!(kept[error.end.curve].1, Curve::Ellipse(_)),
-            });
+        let tolerances = ScanTolerances::Given(tolerances, angles.clone());
+        let input = self.geometry_cleanup_scan_input(i, objects, tolerances);
+        scan_of(&input, &AtomicBool::new(false))
+            .map(|output| output.found)
+            .unwrap_or_default()
+    }
+
+    /// What a scan of `objects` in tab `i` reads. To propose the tolerances
+    /// it copies the curves of the whole drawing once, and takes those of
+    /// `objects` from them.
+    fn geometry_cleanup_scan_input(
+        &self,
+        i: usize,
+        objects: &[Handle],
+        tolerances: ScanTolerances,
+    ) -> ScanInput {
         let x_axis = self.geometry_cleanup_x_axis(i);
-        let lines = angle_errors(&curves, angles, x_axis, Tolerance::new(WELD))
-            .into_iter()
-            .map(|error| Finding {
-                kind: error.kind.into(),
-                handle: kept[error.curve].0,
-                at_start: false,
-                location: error.location,
-                target: error.location,
-                other: error.other.map(|other| (kept[other].0, false)),
-                corner: None,
-                deviation: error.deviation,
-                angle: Some(AngleFinding {
-                    angle: error.angle,
-                    turn: error.turn,
-                    meets: error.meets,
-                    segment: error.segment,
-                    other_segment: error.other_segment,
-                }),
-                stretch: false,
-            });
-        ends.chain(lines).collect()
+        let ScanTolerances::Proposed(_) = tolerances else {
+            return ScanInput {
+                curves: self.geometry_cleanup_curves(i, objects),
+                tolerances,
+                x_axis,
+            };
+        };
+        let drawing = self.geometry_cleanup_curves(i, &self.geometry_cleanup_model_space(i));
+        let at: std::collections::HashMap<Handle, usize> = drawing
+            .iter()
+            .enumerate()
+            .map(|(n, (handle, _))| (*handle, n))
+            .collect();
+        let curves = objects
+            .iter()
+            .filter_map(|handle| at.get(handle).map(|&n| drawing[n].clone()))
+            .collect();
+        ScanInput {
+            curves,
+            tolerances: ScanTolerances::Proposed(
+                drawing.into_iter().map(|(_, curve)| curve).collect(),
+            ),
+            x_axis,
+        }
     }
 
     /// The objects in model space that Geometry Cleanup may read.
@@ -266,9 +283,7 @@ impl OpenCADStudio {
             .into_iter()
             .map(|(_, curve)| curve)
             .collect();
-        // As the settings keep it, so that the palette and the dialog show
-        // the same value.
-        clean_tolerance(proposed_tolerance(&drawing)).unwrap_or(MIN_TOLERANCE)
+        proposed(&drawing)
     }
 
     /// Scan `objects` and show what was found. A new scan (`tolerances` is
@@ -285,64 +300,195 @@ impl OpenCADStudio {
         let rescan = tolerances.is_some();
         // The rows change: a menu or a preview of the old list is wrong.
         self.geometry_cleanup_close_menu(i);
-        let (tolerances, angles) = tolerances.unwrap_or_else(|| {
-            let settings = match &self.geometry_cleanup.settings {
-                Some(settings) => settings.clone(),
-                None => CleanupSettings::proposed(self.geometry_cleanup_proposed(i)),
-            };
-            (settings.tolerances(), settings.angle_tolerances())
-        });
-        let found = self.geometry_cleanup_findings(i, &objects, tolerances, &angles);
-        let marks = self.geometry_cleanup_kept_marks(i);
-        let (kept, findings): (Vec<Finding>, Vec<Finding>) = found
-            .into_iter()
-            .partition(|f| marks.contains(&f.identity()));
-        if report {
-            self.command_line.push_output(&crate::tf!(
-                "Geometry Cleanup: {} error(s) found.",
-                findings.len()
-            ));
-        }
-        let picked = self
-            .geometry_cleanup_scan_here(i)
-            .zip(self.geometry_cleanup.picked)
-            .and_then(|(scan, index)| scan.findings.get(index).copied())
-            .filter(|_| rescan)
-            .and_then(|old| findings.iter().position(|f| f.same_error(&old)));
+        // A newer scan replaces one that runs.
+        self.geometry_cleanup_cancel_job();
+        let tolerances = match (tolerances, &self.geometry_cleanup.settings) {
+            (Some((tolerances, angles)), _) => ScanTolerances::Given(tolerances, angles),
+            (None, Some(settings)) => {
+                ScanTolerances::Given(settings.tolerances(), settings.angle_tolerances())
+            }
+            (None, None) => ScanTolerances::Proposed(Vec::new()),
+        };
         if !rescan {
             // A new selection ends review mode.
             self.geometry_cleanup.review = false;
         }
-        self.geometry_cleanup.scan = Some(Scan {
+        let input = self.geometry_cleanup_scan_input(i, &objects, tolerances);
+        self.geometry_cleanup.jobs += 1;
+        let job = ScanJob {
+            id: self.geometry_cleanup.jobs,
             tab: self.tabs[i].id,
             epoch: self.tabs[i].scene.geometry_epoch,
             objects,
-            tolerances,
-            angles,
-            findings,
-            kept,
-        });
+            input: Arc::new(input),
+            stop: Arc::new(AtomicBool::new(false)),
+            rescan,
+            report,
+            started: false,
+            after: None,
+        };
+        if self.geometry_cleanup_in_background(job.input.curves.len()) {
+            // It starts when this message has been handled.
+            self.geometry_cleanup.job = Some(job);
+            self.geometry_cleanup_review_display(i);
+            return;
+        }
+        let Some(output) = scan_of(&job.input, &job.stop) else {
+            return;
+        };
+        self.geometry_cleanup_finish(i, job, output);
+    }
+
+    /// Whether a scan of `curves` curves runs off the UI thread.
+    fn geometry_cleanup_in_background(&self, curves: usize) -> bool {
+        #[cfg(test)]
+        if self.geometry_cleanup.background_always {
+            return true;
+        }
+        curves >= BACKGROUND_FROM
+    }
+
+    /// Start the scan job, off the UI thread, once the message that made it
+    /// has been handled.
+    pub(in crate::app) fn geometry_cleanup_start_job(&mut self) -> Task<Message> {
+        let Some(job) = self
+            .geometry_cleanup
+            .job
+            .as_mut()
+            .filter(|job| !job.started)
+        else {
+            return Task::none();
+        };
+        job.started = true;
+        let (id, input, stop) = (job.id, Arc::clone(&job.input), Arc::clone(&job.stop));
+        crate::app::update::background_task(
+            SCAN_TASK,
+            move || scan_of(&input, &stop),
+            move |found| Message::GeometryCleanup(GeometryCleanupMsg::Scanned(id, Arc::new(found))),
+        )
+    }
+
+    /// Stop the running scan job and forget it: its result is not used.
+    /// Whether there was one.
+    fn geometry_cleanup_cancel_job(&mut self) -> bool {
+        let Some(job) = self.geometry_cleanup.job.take() else {
+            return false;
+        };
+        job.stop.store(true, Ordering::Relaxed);
+        true
+    }
+
+    /// Stop the running scan and clear the list: closing the palette, its
+    /// Cancel, or a failed scan. The drawing does not change.
+    pub(in crate::app) fn geometry_cleanup_stop_scan(&mut self) {
+        if !self.geometry_cleanup_cancel_job() {
+            return;
+        }
+        self.geometry_cleanup.scan = None;
+        self.geometry_cleanup.picked = None;
+        self.geometry_cleanup.review = false;
+        self.geometry_cleanup_review_display(self.active_tab);
+    }
+
+    /// The scan job `id` ended with `found`. The result of a job that was
+    /// stopped or replaced, or of a drawing that is closed, is dropped.
+    fn geometry_cleanup_scanned(&mut self, id: u64, found: &Option<ScanOutput>) {
+        let Some(job) = self.geometry_cleanup.job.take_if(|job| job.id == id) else {
+            return;
+        };
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == job.tab) else {
+            return;
+        };
+        let Some(output) = found.clone() else {
+            return;
+        };
+        // The scan is of the drawing at the job's epoch: when objects of it
+        // changed meanwhile, the palette scans again.
+        self.geometry_cleanup_finish(i, job, output);
+    }
+
+    /// Show what `job` found in tab `i`.
+    fn geometry_cleanup_finish(&mut self, i: usize, job: ScanJob, output: ScanOutput) {
+        let rescan = job.rescan;
+        let marks = self.geometry_cleanup_kept_marks(i);
+        let mut scan = Scan {
+            tab: job.tab,
+            epoch: job.epoch,
+            object_set: job.objects.iter().copied().collect(),
+            objects: job.objects,
+            tolerances: output.tolerances,
+            angles: output.angles,
+            found: output.found,
+            findings: Vec::new(),
+            kept: Vec::new(),
+        };
+        scan.split(&marks);
+        if job.report {
+            self.command_line.push_output(&crate::tf!(
+                "Geometry Cleanup: {} error(s) found.",
+                scan.findings.len()
+            ));
+        }
+        let picked = self
+            .geometry_cleanup_picked()
+            .filter(|_| rescan)
+            .and_then(|old| scan.findings.iter().position(|f| f.same_error(&old)));
+        self.geometry_cleanup.scan = Some(scan);
         self.geometry_cleanup.picked = picked;
         self.geometry_cleanup_review_display(i);
+        if let Some(after) = job.after {
+            self.geometry_cleanup_pick_next(i, &after);
+        }
+    }
+
+    /// After a repair or a Keep: pick the next of `after` now, or when the
+    /// scan that runs ends.
+    fn geometry_cleanup_then_pick(&mut self, i: usize, after: Vec<Finding>) {
+        match self.geometry_cleanup.job.as_mut() {
+            Some(job) => job.after = Some(after),
+            None => self.geometry_cleanup_pick_next(i, &after),
+        }
+    }
+
+    /// The picked error of the palette's scan.
+    fn geometry_cleanup_picked(&self) -> Option<Finding> {
+        let scan = self.geometry_cleanup.scan.as_ref()?;
+        scan.findings.get(self.geometry_cleanup.picked?).copied()
+    }
+
+    /// Whether the palette's scan of tab `i` is still true: no object that
+    /// it read has changed since. A change that the scene cannot name (an
+    /// undo, a file open) counts as a change.
+    fn geometry_cleanup_scan_current(&self, i: usize) -> bool {
+        let Some(scan) = self.geometry_cleanup_scan_here(i) else {
+            return false;
+        };
+        let scene = &self.tabs[i].scene;
+        scan.epoch == scene.geometry_epoch
+            || scene.replay_since(scan.epoch).is_some_and(|changes| {
+                changes
+                    .iter()
+                    .all(|(handle, _)| !scan.object_set.contains(handle))
+            })
     }
 
     /// The errors kept as designed in the drawing of tab `i`. Marks of
     /// objects that are no longer in the drawing are dropped first.
-    fn geometry_cleanup_kept_marks(&mut self, i: usize) -> Vec<KeptError> {
+    fn geometry_cleanup_kept_marks(&mut self, i: usize) -> HashSet<KeptError> {
         let document = &self.tabs[i].scene.document;
         let id = &document.header.fingerprint_guid;
         if id.is_empty() {
-            return Vec::new();
+            return HashSet::new();
         }
         let Some(marks) = self.geometry_cleanup.kept.get_mut(id) else {
-            return Vec::new();
+            return HashSet::new();
         };
         marks.retain(|mark| document.get_entity(Handle::new(mark.handle)).is_some());
         if marks.is_empty() {
             self.geometry_cleanup.kept.remove(id);
-            return Vec::new();
+            return HashSet::new();
         }
-        marks.clone()
+        marks.iter().copied().collect()
     }
 
     /// The FINGERPRINTGUID of the drawing of tab `i`, which names its kept
@@ -366,6 +512,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn geometry_cleanup_markers(&self, i: usize) -> Vec<(usize, iced::Point)> {
         let tab = &self.tabs[i];
         if !self.geometry_cleanup.show
+            || self.geometry_cleanup.job.is_some()
             || tab.is_start
             || tab.active_cmd.is_some()
             || tab.scene.current_layout != "Model"
@@ -463,9 +610,7 @@ impl OpenCADStudio {
                 .contains(&fix)
                 .then(|| self.geometry_cleanup_edits(i, &finding, fix))?
         });
-        let fresh = self
-            .geometry_cleanup_scan_here(i)
-            .is_some_and(|scan| scan.epoch == self.tabs[i].scene.geometry_epoch);
+        let fresh = self.geometry_cleanup_scan_current(i);
         let scene = &mut self.tabs[i].scene;
         match edits.filter(|edits| !edits.is_empty()) {
             Some(edits) => {
@@ -486,12 +631,30 @@ impl OpenCADStudio {
         }
     }
 
-    /// Scan the objects of the palette's scan again, with its tolerances.
-    fn geometry_cleanup_rescan(&mut self, i: usize) {
-        if let Some(scan) = self.geometry_cleanup_scan_here(i) {
-            let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
-            self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
+    /// List the errors again after a Keep or a Restore: the kept errors
+    /// changed, not the drawing. A scan that is still true is split again
+    /// with no scan; one that is not is scanned again.
+    fn geometry_cleanup_relist(&mut self, i: usize) {
+        // The rows change: a menu or a preview of the old list is wrong.
+        self.geometry_cleanup_close_menu(i);
+        if !self.geometry_cleanup_scan_current(i) {
+            if let Some(scan) = self.geometry_cleanup_scan_here(i) {
+                let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
+                self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
+            }
+            return;
         }
+        let marks = self.geometry_cleanup_kept_marks(i);
+        let old = self.geometry_cleanup_picked();
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        let Some(scan) = self.geometry_cleanup.scan.as_mut() else {
+            return;
+        };
+        scan.epoch = epoch;
+        scan.split(&marks);
+        self.geometry_cleanup.picked =
+            old.and_then(|old| scan.findings.iter().position(|f| f.same_error(&old)));
+        self.geometry_cleanup_review_display(i);
     }
 
     /// After the drawing changes, the open palette scans its objects again:
@@ -501,13 +664,25 @@ impl OpenCADStudio {
     pub(in crate::app) fn refresh_geometry_cleanup_if_stale(&mut self) {
         let i = self.active_tab;
         let tab = &self.tabs[i];
-        if !self.geometry_cleanup.show || tab.active_cmd.is_some() || tab.active_grip.is_some() {
+        if !self.geometry_cleanup.show
+            || tab.active_cmd.is_some()
+            || tab.active_grip.is_some()
+            || self.geometry_cleanup.job.is_some()
+        {
             return;
         }
         let Some(scan) = self.geometry_cleanup_scan_here(i) else {
             return;
         };
-        if scan.epoch == self.tabs[i].scene.geometry_epoch {
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if scan.epoch == epoch {
+            return;
+        }
+        if self.geometry_cleanup_scan_current(i) {
+            // Only objects that the scan did not read changed.
+            if let Some(scan) = self.geometry_cleanup.scan.as_mut() {
+                scan.epoch = epoch;
+            }
             return;
         }
         let (objects, tolerances) = (scan.objects.clone(), scan_tolerances(scan));
@@ -524,6 +699,20 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn on_geometry_cleanup(&mut self, m: GeometryCleanupMsg) -> Task<Message> {
         let i = self.active_tab;
+        // While a scan runs, the list of the last one may be wrong.
+        if self.geometry_cleanup.job.is_some()
+            && matches!(
+                m,
+                GeometryCleanupMsg::Pick(_)
+                    | GeometryCleanupMsg::Fix(..)
+                    | GeometryCleanupMsg::Keep(_)
+                    | GeometryCleanupMsg::Restore(_)
+                    | GeometryCleanupMsg::RestoreAll
+                    | GeometryCleanupMsg::Preview(Some(_))
+            )
+        {
+            return Task::none();
+        }
         if matches!(
             m,
             GeometryCleanupMsg::Pick(_) | GeometryCleanupMsg::Fix(..) | GeometryCleanupMsg::Keep(_)
@@ -562,8 +751,8 @@ impl OpenCADStudio {
                 if !marks.contains(&picked.identity()) {
                     marks.push(picked.identity());
                 }
-                self.geometry_cleanup_rescan(i);
-                self.geometry_cleanup_pick_next(i, &after);
+                self.geometry_cleanup_relist(i);
+                self.geometry_cleanup_then_pick(i, after);
             }
             GeometryCleanupMsg::Restore(index) => {
                 let Some(restored) = self
@@ -580,13 +769,15 @@ impl OpenCADStudio {
                         self.geometry_cleanup.kept.remove(id);
                     }
                 }
-                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_relist(i);
             }
             GeometryCleanupMsg::RestoreAll => {
                 let id = &self.tabs[i].scene.document.header.fingerprint_guid;
                 self.geometry_cleanup.kept.remove(id);
-                self.geometry_cleanup_rescan(i);
+                self.geometry_cleanup_relist(i);
             }
+            GeometryCleanupMsg::Scanned(id, found) => self.geometry_cleanup_scanned(id, &found),
+            GeometryCleanupMsg::CancelScan => self.geometry_cleanup_stop_scan(),
             GeometryCleanupMsg::FoldKept => {
                 self.geometry_cleanup.kept_open = !self.geometry_cleanup.kept_open;
             }
@@ -624,7 +815,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
-                self.geometry_cleanup_pick_next(i, &after);
+                self.geometry_cleanup_then_pick(i, after);
             }
             GeometryCleanupMsg::Fold(kind) => {
                 let folded = &mut self.geometry_cleanup.folded;
@@ -897,8 +1088,8 @@ impl OpenCADStudio {
 
     /// Repair one error as one undo step; `false` when nothing changed. The
     /// drawing can have changed since the scan (an undo, an edit), so the
-    /// error is looked up again first; an error that is gone changes
-    /// nothing.
+    /// error is looked up again first when an object of the scan changed;
+    /// an error that is gone changes nothing.
     fn geometry_cleanup_fix(
         &mut self,
         i: usize,
@@ -907,11 +1098,14 @@ impl OpenCADStudio {
         objects: &[Handle],
         (tolerances, angles): &(Tolerances, AngleTolerances),
     ) -> bool {
-        let Some(finding) = self
-            .geometry_cleanup_findings(i, objects, *tolerances, angles)
-            .into_iter()
-            .find(|f| f.same_error(&picked))
-        else {
+        let finding = if self.geometry_cleanup_scan_current(i) {
+            Some(picked)
+        } else {
+            self.geometry_cleanup_findings(i, objects, *tolerances, angles)
+                .into_iter()
+                .find(|f| f.same_error(&picked))
+        };
+        let Some(finding) = finding else {
             self.command_line
                 .push_error(&crate::t!("The error is no longer in the drawing."));
             return false;
@@ -1038,4 +1232,70 @@ fn rows_after(
 /// The tolerances of a scan, for a rescan.
 fn scan_tolerances(scan: &Scan) -> (Tolerances, AngleTolerances) {
     (scan.tolerances, scan.angles.clone())
+}
+
+/// The tolerance proposed for a drawing of `drawing` curves, as the
+/// settings keep it, so that the palette and the dialog show the same value.
+fn proposed(drawing: &[Curve]) -> f64 {
+    clean_tolerance(proposed_tolerance(drawing)).unwrap_or(MIN_TOLERANCE)
+}
+
+/// What a scan finds: the errors, each within the tolerance of its type,
+/// and the tolerances used; `None` when `stop` was set before the scan
+/// ended. It reads only `input`, so it can run off the UI thread.
+pub(super) fn scan_of(input: &ScanInput, stop: &AtomicBool) -> Option<ScanOutput> {
+    #[cfg(test)]
+    SCANS.with(|scans| scans.set(scans.get() + 1));
+    let (tolerances, angles) = match &input.tolerances {
+        ScanTolerances::Given(tolerances, angles) => (*tolerances, angles.clone()),
+        ScanTolerances::Proposed(drawing) => {
+            let settings = CleanupSettings::proposed(proposed(drawing));
+            (settings.tolerances(), settings.angle_tolerances())
+        }
+    };
+    let kept = &input.curves;
+    let curves: Vec<Curve> = kept.iter().map(|(_, curve)| curve.clone()).collect();
+    let ends = end_errors_until(&curves, tolerances, Tolerance::new(WELD), stop)?
+        .into_iter()
+        .map(|error| Finding {
+            kind: error.kind.into(),
+            handle: kept[error.end.curve].0,
+            at_start: error.end.at_start,
+            location: error.location,
+            target: error.target,
+            other: error
+                .other
+                .map(|other| (kept[other.curve].0, other.at_start)),
+            corner: error.corner,
+            deviation: error.deviation,
+            angle: None,
+            stretch: !matches!(kept[error.end.curve].1, Curve::Ellipse(_)),
+        });
+    let weld = Tolerance::new(WELD);
+    let lines = angle_errors_until(&curves, &angles, input.x_axis, weld, stop)?
+        .into_iter()
+        .map(|error| Finding {
+            kind: error.kind.into(),
+            handle: kept[error.curve].0,
+            at_start: false,
+            location: error.location,
+            target: error.location,
+            other: error.other.map(|other| (kept[other].0, false)),
+            corner: None,
+            deviation: error.deviation,
+            angle: Some(AngleFinding {
+                angle: error.angle,
+                turn: error.turn,
+                meets: error.meets,
+                segment: error.segment,
+                other_segment: error.other_segment,
+            }),
+            stretch: false,
+        });
+    let found = ends.chain(lines).collect();
+    Some(ScanOutput {
+        tolerances,
+        angles,
+        found,
+    })
 }

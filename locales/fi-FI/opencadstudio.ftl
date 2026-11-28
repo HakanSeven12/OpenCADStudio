@@ -6839,6 +6839,7 @@ manage =
     .geometry-cleanup-rotate-longer = Rotate Longer
     .geometry-cleanup-rotate-shorter = Rotate Shorter
     .geometry-cleanup-scan = Scan
+    .geometry-cleanup-scanning = Scanning __ocs_fmt_0__ objects…
     .geometry-cleanup-select-types = Select error types and tolerances
     .geometry-cleanup-settings = Geometry Cleanup Settings
     .geometry-cleanup-settings-unreadable = The settings file cannot be read: __ocs_fmt_0__

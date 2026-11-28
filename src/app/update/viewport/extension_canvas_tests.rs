@@ -9,6 +9,7 @@ fn translates_extension_anchors_with_the_snap_marker() {
         screen: Point::new(150.0, 75.0),
         snap_type: crate::snap::SnapType::Extension,
         tangent_obj: None,
+        deferred: None,
         extension_base: Some(Point::new(100.0, 150.0)),
         extension_base2: Some(Point::new(75.0, 200.0)),
         extension_origin: None,

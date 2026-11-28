@@ -400,7 +400,19 @@ impl OpenCADStudio {
         }
         self.push_ucs_to_cmd(i);
 
-        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt))?;
+        let dir = distance_ray.map(|(_, dir)| dir);
+        let dist = Some(dist);
+        let handled = self
+            .tabs[i]
+            .active_cmd
+            .as_mut()
+            .and_then(|c| c.on_typed_point(pt, dir, dist));
+        let result = handled.or_else(|| {
+            self.tabs[i]
+                .active_cmd
+                .as_mut()
+                .map(|c| c.on_point(pt))
+        })?;
         let task = self.apply_cmd_result(result);
         self.refresh_active_cmd_preview(i);
         Some(task)

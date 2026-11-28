@@ -43,6 +43,7 @@ fn hit(frame: ViewportFrame, source: Handle, model: DVec3) -> SnapResult {
         screen: iced::Point::ORIGIN,
         snap_type: SnapType::Endpoint,
         tangent_obj: None,
+        deferred: None,
         extension_base: None,
         extension_base2: None,
         extension_origin: None,

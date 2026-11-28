@@ -6,7 +6,7 @@
 // the host what to do next.
 
 pub use crate::entities::transform::{EntityTransform, WorkingPlane};
-pub use crate::snap::{DimensionAssociationSource, TangentObject};
+pub use crate::snap::{DeferredPick, DimensionAssociationSource, TangentObject};
 
 pub mod aliases;
 pub mod prompt;
@@ -3750,6 +3750,21 @@ pub trait CadCommand: Send {
         self.on_preview_wires(pt)
     }
 
+    /// Live preview with a deferred TAN/PER pick. Defaults to the tangent
+    /// preview when the deferred mode is Tangent; PER-aware commands override.
+    fn on_preview_wires_with_deferred(
+        &mut self,
+        pt: DVec3,
+        tangent: Option<TangentObject>,
+        deferred: Option<DeferredPick>,
+    ) -> Vec<WireModel> {
+        if matches!(deferred, Some(d) if d.mode == crate::snap::DeferredMode::Tangent) {
+            self.on_preview_wires_with_tangent(pt, tangent)
+        } else {
+            self.on_preview_wires(pt)
+        }
+    }
+
     /// Entities the host draws as the live preview, tessellated like the
     /// drawing's own (arcs, text, linetypes and all). Commands whose preview
     /// changes an entity's shape return edited copies of it here.
@@ -4180,6 +4195,38 @@ pub trait CadCommand: Send {
         &mut self,
         _pt: DVec3,
         _tangent: Option<TangentObject>,
+    ) -> Option<CmdResult> {
+        None
+    }
+
+    /// Commit a picked point that may carry a deferred TAN/PER snap. The
+    /// default forwards Tangent mode to `on_point_with_tangent`, so commands
+    /// that only understand tangent picks keep working unchanged.
+    fn on_point_with_deferred(
+        &mut self,
+        pt: DVec3,
+        tangent: Option<TangentObject>,
+        deferred: Option<DeferredPick>,
+    ) -> Option<CmdResult> {
+        if let Some(d) = deferred {
+            if d.mode == crate::snap::DeferredMode::Tangent {
+                return self.on_point_with_tangent(pt, tangent.or_else(|| {
+                    crate::snap::deferred::tangent_object_from_curve(&d.curve, d.at)
+                }));
+            }
+        }
+        None
+    }
+
+    /// A point supplied by typed coordinate / direct-distance entry. `dir` is
+    /// the typed polar direction and `dist` its length, when known. Commands
+    /// with a deferred pick override this so `@d<a` is resolved from the
+    /// direction rather than silently projected. `None` falls back to `on_point`.
+    fn on_typed_point(
+        &mut self,
+        _pt: DVec3,
+        _dir: Option<DVec3>,
+        _dist: Option<f64>,
     ) -> Option<CmdResult> {
         None
     }

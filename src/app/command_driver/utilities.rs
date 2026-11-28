@@ -2496,8 +2496,29 @@ impl OpenCADStudio {
             if !self.command_point_allowed(i, wcs) {
                 return Task::none();
             }
+            let typed_base = self.relative_input_base(i);
             self.last_point = Some(wcs);
             self.push_ucs_to_cmd(i);
+            // A relative `@d<a` carries a direction: commands with a deferred
+            // TAN/PER pick resolve it from that direction, not from the
+            // provisional point the host computed.
+            if kind.is_relative() {
+                let offset = wcs - typed_base.unwrap_or(glam::DVec3::ZERO);
+                let distance = offset.length();
+                let dir = offset.normalize_or_zero();
+                if dir.length_squared() > 0.5 {
+                    if let Some(result) = self.tabs[i]
+                        .active_cmd
+                        .as_mut()
+                        .and_then(|c| c.on_typed_point(wcs, Some(dir), Some(distance)))
+                    {
+                        if !self.record_accepted_snap(i, None, None, wcs) {
+                            return Task::none();
+                        }
+                        return self.apply_cmd_result(result);
+                    }
+                }
+            }
             self.feed_command(StepInput::Point(wcs))
         } else {
             // The step reads the token first: at a great many point prompts a

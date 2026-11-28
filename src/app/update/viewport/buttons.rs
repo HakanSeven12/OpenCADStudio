@@ -1003,6 +1003,7 @@ impl OpenCADStudio {
             self.tabs[i].snap_result = None;
             let snapped;
             let tangent_obj_at_click;
+            let deferred_at_click;
 
             let world_pt = {
                 // Cursor → model point (viewport camera inside a viewport,
@@ -1195,6 +1196,7 @@ impl OpenCADStudio {
                 self.pending_click_snap = snap_hit.map(|hit| (hit, click_frame));
                 snapped = snap_hit.is_some();
                 tangent_obj_at_click = snap_hit.and_then(|hit| hit.tangent_obj);
+                deferred_at_click = snap_hit.and_then(|hit| hit.deferred);
                 // Snap runs in model space; the result is already model.
                 let mut pt = snap_hit.map(|s| s.world).unwrap_or(raw);
                 // When no UCS is active clamp to world XY; with a UCS the point is
@@ -1812,10 +1814,13 @@ impl OpenCADStudio {
                 // it does, sync last_point to the command's resolved
                 // anchor since it replaced the picked coordinate.
                 self.refresh_command_point_pick_context(i);
-                let handled = self.tabs[i]
-                    .active_cmd
-                    .as_mut()
-                    .and_then(|c| c.on_point_with_tangent(world_pt, tangent_obj_at_click));
+                let handled = self.tabs[i].active_cmd.as_mut().and_then(|c| {
+                    c.on_point_with_deferred(
+                        world_pt,
+                        tangent_obj_at_click,
+                        deferred_at_click,
+                    )
+                });
                 if handled.is_some() {
                     if let Some(a) = self.tabs[i]
                         .active_cmd

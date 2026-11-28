@@ -2292,6 +2292,7 @@ impl OpenCADStudio {
                         screen,
                         snap_type: SnapType::ObjectPick,
                         tangent_obj: None,
+                        deferred: None,
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
@@ -2354,10 +2355,15 @@ impl OpenCADStudio {
                         None
                     }
                 });
+                let live_deferred = self.tabs[i].snap_result.and_then(|s| s.deferred);
                 self.refresh_command_point_pick_context(i);
                 let tab = &mut self.tabs[i];
                 if let Some(cmd) = tab.active_cmd.as_mut() {
-                    p.extend(cmd.on_preview_wires_with_tangent(effective, live_tangent));
+                    p.extend(cmd.on_preview_wires_with_deferred(
+                        effective,
+                        live_tangent,
+                        live_deferred,
+                    ));
                     if !cmd.preview_wires_replace_entities() {
                         let entities = cmd.preview_entities(&tab.scene.document, effective);
                         p.extend(tab.scene.wires_for_entities(&entities));
@@ -2591,10 +2597,15 @@ impl OpenCADStudio {
                         None
                     }
                 });
+                let live_deferred = self.tabs[i].snap_result.and_then(|s| s.deferred);
                 self.refresh_command_point_pick_context(i);
                 let tab = &mut self.tabs[i];
                 if let Some(cmd) = tab.active_cmd.as_mut() {
-                    let mut wires = cmd.on_preview_wires_with_tangent(effective, live_tangent);
+                    let mut wires = cmd.on_preview_wires_with_deferred(
+                        effective,
+                        live_tangent,
+                        live_deferred,
+                    );
                     // STRETCH replaces its source entities while the pointer moves.
                     // Without the edited-entity overlay, its source hide-set makes
                     // the selected lines disappear until the final click.

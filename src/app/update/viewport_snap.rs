@@ -667,6 +667,7 @@ fn project_hit_to_paper(
         // Tangent geometry is model-space and would be consumed as paper-space
         // by TTR/TTT; drop it rather than hand over a wrong circle.
         tangent_obj: None,
+        deferred: None,
         extension_base: hit.extension_base.map(to_canvas),
         extension_base2: hit.extension_base2.map(to_canvas),
         extension_origin: hit.extension_origin.map(|p| frame.model_to_paper(p)),

@@ -10,9 +10,12 @@ use crate::t;
 use document::types::Vector3;
 use document::{EntityType, Line};
 
-use crate::command::{CadCommand, CmdResult, TangentObject};
+use crate::command::{CadCommand, CmdResult, DeferredPick, TangentObject};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
+use crate::snap::deferred::{
+    point_in_direction, resolve_deferred_line, DeferredCurve, DeferredMode, LineEnd,
+};
 use glam::{DVec2, DVec3};
 
 // ── Ribbon definition ─────────────────────────────────────────────────────
@@ -34,12 +37,10 @@ pub struct LineCommand {
     /// first commits one Line entity, so the count of committed segments is
     /// `points.len() - 1`.
     points: Vec<DVec3>,
-    /// A tangent reference recorded on the FIRST point (the circle + the
-    /// approximate cursor hit used to pick among solutions). A tangent picked
-    /// first is deferred — the tangent point isn't fixed until the next point
-    /// gives a direction — and resolved on that next pick as either a common
-    /// tangent of two circles or a tangent from a point to the circle. (#274)
-    deferred_tangent: Option<(TangentObject, DVec3)>,
+    /// A deferred TAN/PER reference recorded on the FIRST point. The real
+    /// contact point is not fixed until the next point gives a direction;
+    /// the stored `at` chooses among solutions. (#274)
+    deferred: Option<DeferredPick>,
 }
 
 impl Default for LineCommand {
@@ -52,8 +53,39 @@ impl LineCommand {
     pub fn new() -> Self {
         Self {
             points: Vec::new(),
-            deferred_tangent: None,
+            deferred: None,
         }
+    }
+
+    /// Compatibility conversion for the older tangent-only hook.
+    fn deferred_from_tangent(target: TangentObject, at: DVec3) -> Option<DeferredPick> {
+        let curve = match target {
+            TangentObject::Circle { center, radius } => DeferredCurve::Circle {
+                center,
+                axis_x: DVec3::X,
+                axis_y: DVec3::Y,
+                radius,
+            },
+            TangentObject::Ellipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+            } => DeferredCurve::Ellipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start: 0.0,
+                end: 0.0,
+            },
+            TangentObject::Line { .. } => return None,
+        };
+        Some(DeferredPick {
+            mode: DeferredMode::Tangent,
+            curve,
+            at,
+        })
     }
 
     fn line_between(a: DVec3, b: DVec3) -> EntityType {
@@ -61,6 +93,36 @@ impl LineCommand {
             Vector3::new(a.x, a.y, a.z),
             Vector3::new(b.x, b.y, b.z),
         ))
+    }
+    /// Resolve the two ends and commit the line. Picked coordinates are
+    /// replaced by the solver's exact contact points; a zero-length result
+    /// is refused.
+    fn commit_pair(&mut self, first: LineEnd, other: LineEnd) -> CmdResult {
+        let fallback = |end: LineEnd| match end {
+            LineEnd::Point(p) => p,
+            LineEnd::Deferred(d) => d.at,
+        };
+        let (a, b) = resolve_deferred_line(first, other)
+            .unwrap_or((fallback(first), fallback(other)));
+        if !a.is_finite() || !b.is_finite() || (a - b).length_squared() <= 1e-18 {
+            return CmdResult::NeedPoint;
+        }
+        self.deferred = None;
+        self.points = vec![a, b];
+        CmdResult::CommitEntity(Self::line_between(a, b))
+    }
+
+    /// Resolve the stored deferred end against `other`.
+    fn commit_deferred(&mut self, other: LineEnd) -> CmdResult {
+        let Some(first) = self.deferred.take() else {
+            return CmdResult::NeedPoint;
+        };
+        let result = self.commit_pair(LineEnd::Deferred(first), other);
+        if matches!(result, CmdResult::NeedPoint) {
+            self.points = vec![first.at];
+            self.deferred = Some(first);
+        }
+        result
     }
 }
 
@@ -93,7 +155,13 @@ impl CadCommand for LineCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.deferred.is_some() {
+            return self.commit_deferred(LineEnd::Point(pt));
+        }
         if let Some(&last) = self.points.last() {
+            if (last - pt).length_squared() <= 1e-18 {
+                return CmdResult::NeedPoint;
+            }
             let line = Self::line_between(last, pt);
             self.points.push(pt);
             CmdResult::CommitEntity(line)
@@ -108,77 +176,82 @@ impl CadCommand for LineCommand {
         pt: DVec3,
         tangent: Option<TangentObject>,
     ) -> Option<CmdResult> {
-        match (self.points.last().copied(), self.deferred_tangent, tangent) {
-            // (A) The FIRST point is tangent to a circle or ellipse: defer it.
-            // The tangent point depends on the line's direction, which the next pick gives.
-            // Store a provisional point so the rubber band has an origin.
-            (
-                None,
-                _,
-                Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
-            ) => {
-                self.points.push(pt);
-                self.deferred_tangent = Some((target, pt));
-                Some(CmdResult::NeedPoint)
-            }
-            // (B) A deferred first tangent AND this point is also tangent to a curve (circle or ellipse):
-            // The line is the common tangent of the two curves.
-            (
-                Some(_),
-                Some((target1, hit1)),
-                Some(target2 @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
-            ) => {
-                self.deferred_tangent = None;
-                let (t1, t2) = common_curve_tangents(target1, target2)
-                    .into_iter()
-                    .min_by(|a, b| {
-                        let da = (a.0 - hit1).length_squared() + (a.1 - pt).length_squared();
-                        let db = (b.0 - hit1).length_squared() + (b.1 - pt).length_squared();
-                        da.total_cmp(&db)
-                    })
-                    .unwrap_or((self.points[0], pt));
-                self.points = vec![t1, t2];
-                Some(CmdResult::CommitEntity(Self::line_between(t1, t2)))
-            }
-            // (C) A deferred first tangent, but this point is NOT a curve tangent pick:
-            // The line runs from the tangent point on the deferred curve to this point.
-            (Some(_), Some((target1, hit1)), _) => {
-                self.deferred_tangent = None;
-                let start = point_target_tangents(pt, target1)
-                    .map(|(t0, t1)| {
-                        if (t0 - hit1).length_squared() <= (t1 - hit1).length_squared() {
-                            t0
-                        } else {
-                            t1
-                        }
-                    })
-                    .unwrap_or(self.points[0]);
-                self.points = vec![start, pt];
-                Some(CmdResult::CommitEntity(Self::line_between(start, pt)))
-            }
-            // (D) First point was already placed (ordinary point or previous segment end),
-            // and this pick IS tangent to a circle or ellipse:
-            (
-                Some(last),
-                None,
-                Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
-            ) => {
-                let end = point_target_tangents(last, target)
-                    .map(|(t0, t1)| {
-                        if (t0 - pt).length_squared() <= (t1 - pt).length_squared() {
-                            t0
-                        } else {
-                            t1
-                        }
-                    })
-                    .unwrap_or(pt);
-                let line = Self::line_between(last, end);
-                self.points.push(end);
-                Some(CmdResult::CommitEntity(line))
-            }
-            // No deferred tangent (or a Line tangent): fall back to the plain point path.
-            _ => None,
+        let deferred = tangent.and_then(|target| Self::deferred_from_tangent(target, pt));
+        self.on_point_with_deferred(pt, tangent, deferred)
+    }
+
+    fn on_point_with_deferred(
+        &mut self,
+        pt: DVec3,
+        tangent: Option<TangentObject>,
+        deferred: Option<DeferredPick>,
+    ) -> Option<CmdResult> {
+        let pick = deferred.or_else(|| tangent.and_then(|t| Self::deferred_from_tangent(t, pt)))?;
+        if self.deferred.is_none() && self.points.is_empty() {
+            // Provisional origin for the rubber band; the real contact point
+            // is computed once the next point is known.
+            self.points.push(pick.at);
+            self.deferred = Some(pick);
+            return Some(CmdResult::NeedPoint);
         }
+        if self.deferred.is_some() {
+            return Some(self.commit_deferred(LineEnd::Deferred(pick)));
+        }
+        // A tangent pick with an ordinary base point (the classic T from a
+        // placed point): resolve only the picked end.
+        let last = self.points.last().copied().unwrap_or(pick.at);
+        Some(self.commit_pair(LineEnd::Point(last), LineEnd::Deferred(pick)))
+    }
+
+    /// Typed `@d<a` / direct distance while a deferred pick is pending. The
+    /// direction is authoritative: resolve the contact point from it rather
+    /// than silently projecting the provisional point.
+    fn on_typed_point(
+        &mut self,
+        pt: DVec3,
+        dir: Option<DVec3>,
+        dist: Option<f64>,
+    ) -> Option<CmdResult> {
+        let Some(pick) = self.deferred else {
+            return None;
+        };
+        let Some(dir) = dir else {
+            return None;
+        };
+        let dir = dir.normalize_or_zero();
+        if dir.length_squared() < 0.5 {
+            return None;
+        }
+        let distance = dist.filter(|d| d.is_finite() && *d > 0.0)?;
+        let start = match pick.mode {
+            DeferredMode::Tangent => point_in_direction(&pick.curve, pick.mode, dir, pick.at),
+            DeferredMode::Perpendicular => match pick.curve {
+                DeferredCurve::Line { p1, p2 } => {
+                    let along = p2 - p1;
+                    let along = along.normalize_or_zero();
+                    if along.length_squared() < 0.5 || along.dot(dir).abs() > 1e-6 {
+                        // A line typed in a non-perpendicular direction has no
+                        // perpendicular solution; refuse instead of shortening it.
+                        return Some(CmdResult::NeedPoint);
+                    }
+                    Some(p1 + along * (pick.at - p1).dot(along))
+                }
+                _ => point_in_direction(&pick.curve, pick.mode, dir, pick.at),
+            },
+        };
+        let Some(start) = start else {
+            return Some(CmdResult::NeedPoint);
+        };
+        let end = start + dir * distance;
+        if !start.is_finite() || !end.is_finite() || (end - start).length_squared() <= 1e-18 {
+            return Some(CmdResult::NeedPoint);
+        }
+        self.deferred = None;
+        self.points = vec![start, end];
+        // Keep the typed endpoint authoritative for the next segment while
+        // leaving the chosen contact point as the committed start.
+        let _ = pt;
+        Some(CmdResult::CommitEntity(Self::line_between(start, end)))
     }
 
     fn resolved_anchor(&self) -> Option<DVec3> {
@@ -194,7 +267,7 @@ impl CadCommand for LineCommand {
     }
 
     fn on_escape(&mut self) -> CmdResult {
-        self.deferred_tangent = None;
+        self.deferred = None;
         CmdResult::Cancel
     }
 
@@ -233,7 +306,7 @@ impl CadCommand for LineCommand {
                     // Only the start is placed (nothing committed yet) — clear
                     // it so the next pick restarts the line.
                     self.points.clear();
-                    self.deferred_tangent = None;
+                    self.deferred = None;
                     Some(CmdResult::NeedPoint)
                 } else {
                     Some(CmdResult::NeedPoint)
@@ -264,52 +337,31 @@ impl CadCommand for LineCommand {
         pt: DVec3,
         tangent: Option<TangentObject>,
     ) -> Vec<WireModel> {
+        let deferred = tangent.and_then(|target| Self::deferred_from_tangent(target, pt));
+        self.on_preview_wires_with_deferred(pt, tangent, deferred)
+    }
+
+    fn on_preview_wires_with_deferred(
+        &mut self,
+        pt: DVec3,
+        tangent: Option<TangentObject>,
+        deferred: Option<DeferredPick>,
+    ) -> Vec<WireModel> {
         let last = match self.points.last() {
             Some(&p) => p,
             None => return Vec::new(),
         };
-
-        let (start, end) = match (self.deferred_tangent, tangent) {
-            (
-                Some((target1, hit1)),
-                Some(target2 @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
-            ) => common_curve_tangents(target1, target2)
-                .into_iter()
-                .min_by(|a, b| {
-                    let da = (a.0 - hit1).length_squared() + (a.1 - pt).length_squared();
-                    let db = (b.0 - hit1).length_squared() + (b.1 - pt).length_squared();
-                    da.total_cmp(&db)
-                })
-                .unwrap_or((last, pt)),
-            (Some((target1, hit1)), _) => {
-                let start = point_target_tangents(pt, target1)
-                    .map(|(t0, t1)| {
-                        if (t0 - hit1).length_squared() <= (t1 - hit1).length_squared() {
-                            t0
-                        } else {
-                            t1
-                        }
-                    })
-                    .unwrap_or(last);
-                (start, pt)
-            }
-            (
-                None,
-                Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
-            ) => {
-                let end = point_target_tangents(last, target)
-                    .map(|(t0, t1)| {
-                        if (t0 - pt).length_squared() <= (t1 - pt).length_squared() {
-                            t0
-                        } else {
-                            t1
-                        }
-                    })
-                    .unwrap_or(pt);
-                (last, end)
-            }
-            _ => (last, pt),
+        let pick = deferred.or_else(|| tangent.and_then(|t| Self::deferred_from_tangent(t, pt)));
+        let solution = match (self.deferred, pick) {
+            (Some(first), Some(second)) => resolve_deferred_line(
+                LineEnd::Deferred(first),
+                LineEnd::Deferred(second),
+            ),
+            (Some(first), None) => resolve_deferred_line(LineEnd::Deferred(first), LineEnd::Point(pt)),
+            (None, Some(second)) => resolve_deferred_line(LineEnd::Point(last), LineEnd::Deferred(second)),
+            (None, None) => None,
         };
+        let (start, end) = solution.unwrap_or((last, pt));
 
         vec![WireModel::solid_f64(
             "rubber_band".to_string(),
@@ -323,12 +375,14 @@ impl CadCommand for LineCommand {
 // ── Tangent geometry (f64) ────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug)]
+#[cfg(test)]
 struct Curve3D {
     center: DVec3,
     axis_a: DVec3,
     axis_b: DVec3,
 }
 
+#[cfg(test)]
 impl Curve3D {
     fn from_tangent_object(obj: TangentObject) -> Option<Self> {
         match obj {
@@ -372,6 +426,7 @@ impl Curve3D {
 
 /// The two points on a curve (Circle or Ellipse) where a line from external point `p`
 /// touches tangentially, or `None` when `p` is inside or on the curve.
+#[cfg(test)]
 fn point_target_tangents(p: DVec3, target: TangentObject) -> Option<(DVec3, DVec3)> {
     let curve = Curve3D::from_tangent_object(target)?;
     let d = p - curve.center;
@@ -409,6 +464,7 @@ fn point_circle_tangents(p: DVec3, center: DVec3, radius: f64) -> Option<(DVec3,
 
 /// Common tangent lines between any two curves (Circle-Circle, Circle-Ellipse, Ellipse-Ellipse).
 /// Each tangent is returned as (tangent point on curve 1, tangent point on curve 2).
+#[cfg(test)]
 fn common_curve_tangents(target1: TangentObject, target2: TangentObject) -> Vec<(DVec3, DVec3)> {
     let c1 = match Curve3D::from_tangent_object(target1) {
         Some(c) => c,
@@ -698,6 +754,107 @@ mod tangent_tests {
                 "line not tangent to ellipse 2"
             );
         }
+    }
+
+    fn deferred_per(curve: DeferredCurve, at: DVec3) -> DeferredPick {
+        DeferredPick {
+            mode: DeferredMode::Perpendicular,
+            curve,
+            at,
+        }
+    }
+
+    fn committed_line(result: CmdResult) -> (DVec3, DVec3) {
+        match result {
+            CmdResult::CommitEntity(EntityType::Line(line)) => (
+                DVec3::new(line.start.x, line.start.y, line.start.z),
+                DVec3::new(line.end.x, line.end.y, line.end.z),
+            ),
+            _ => panic!("expected a committed line"),
+        }
+    }
+
+    #[test]
+    fn deferred_perpendicular_first_point_commits_a_perpendicular_line() {
+        let mut cmd = LineCommand::new();
+        let target = DeferredCurve::Line {
+            p1: DVec3::new(0.0, 0.0, 0.0),
+            p2: DVec3::new(10.0, 0.0, 0.0),
+        };
+        let pick = deferred_per(target, DVec3::new(5.0, 0.0, 0.0));
+        let first = cmd.on_point_with_deferred(pick.at, None, Some(pick));
+        assert!(matches!(first, Some(CmdResult::NeedPoint)));
+
+        let preview = cmd.on_preview_wires_with_deferred(DVec3::new(5.0, 8.0, 0.0), None, None);
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0].points.len(), 2);
+        let (a, b) = (preview[0].points[0], preview[0].points[1]);
+        assert!((a[0] - 5.0).abs() < 1e-9 && (b[1] - 8.0).abs() < 1e-9);
+
+        let result = cmd.on_point(DVec3::new(5.0, 8.0, 0.0));
+        let (a, b) = committed_line(result);
+        assert!((a - DVec3::new(5.0, 0.0, 0.0)).length() < 1e-9, "{a:?}");
+        assert!((b - DVec3::new(5.0, 8.0, 0.0)).length() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn typed_polar_after_deferred_tangent_uses_the_typed_direction() {
+        let mut cmd = LineCommand::new();
+        let circle = TangentObject::Circle {
+            center: DVec3::ZERO,
+            radius: 5.0,
+        };
+        let pick = LineCommand::deferred_from_tangent(circle, DVec3::new(0.0, 5.0, 0.0)).unwrap();
+        let first = cmd.on_point_with_deferred(pick.at, None, Some(pick));
+        assert!(matches!(first, Some(CmdResult::NeedPoint)));
+
+        // `@10<0` from the provisional point: the true tangent point is the
+        // top of the circle and the line runs from there to (10, 5).
+        let typed = cmd.on_typed_point(
+            DVec3::new(10.0, 5.0, 0.0),
+            Some(DVec3::X),
+            Some(10.0),
+        );
+        let (a, b) = committed_line(typed.expect("typed pick commits"));
+        assert!((a - DVec3::new(0.0, 5.0, 0.0)).length() < 1e-9, "{a:?}");
+        assert!((b - DVec3::new(10.0, 5.0, 0.0)).length() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn typed_polar_after_deferred_per_refuses_a_non_perpendicular_direction() {
+        let mut cmd = LineCommand::new();
+        let pick = deferred_per(
+            DeferredCurve::Line {
+                p1: DVec3::new(0.0, 0.0, 0.0),
+                p2: DVec3::new(10.0, 0.0, 0.0),
+            },
+            DVec3::new(5.0, 0.0, 0.0),
+        );
+        cmd.on_point_with_deferred(pick.at, None, Some(pick));
+        let refused = cmd.on_typed_point(
+            DVec3::new(15.0, 0.0, 0.0),
+            Some(DVec3::X),
+            Some(10.0),
+        );
+        assert!(matches!(refused, Some(CmdResult::NeedPoint)));
+        assert!(cmd.deferred.is_some(), "the deferred pick survives a refusal");
+    }
+
+    #[test]
+    fn zero_length_deferred_result_is_not_committed() {
+        let mut cmd = LineCommand::new();
+        let pick = deferred_per(
+            DeferredCurve::Line {
+                p1: DVec3::new(0.0, 0.0, 0.0),
+                p2: DVec3::new(10.0, 0.0, 0.0),
+            },
+            DVec3::new(5.0, 0.0, 0.0),
+        );
+        cmd.on_point_with_deferred(pick.at, None, Some(pick));
+        // A point already on the target line has a degenerate perpendicular.
+        let result = cmd.on_point(DVec3::new(5.0, 0.0, 0.0));
+        assert!(matches!(result, CmdResult::NeedPoint));
+        assert!(cmd.deferred.is_some(), "pick is retained for a fresh attempt");
     }
 
     #[test]

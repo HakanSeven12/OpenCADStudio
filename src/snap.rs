@@ -14,6 +14,11 @@ use ocs_geom::geom2d::Curve;
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 use crate::scene::pick::interaction_index::WireSource;
 
+pub mod deferred;
+pub use deferred::{
+    DeferredCurve, DeferredMode, DeferredPick, LineEnd as DeferredLineEnd,
+};
+
 /// Association source with an optional sub-entity marker.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DimensionAssociationSource {
@@ -277,6 +282,10 @@ pub struct SnapResult {
     pub snap_type: SnapType,
     /// Set when `snap_type == Tangent`; provides entity geometry for TTR/TTT.
     pub tangent_obj: Option<TangentObject>,
+    /// Set when a TAN/PER snap was picked with no base point: the real point
+    /// depends on the line's other end and is resolved by the pure solver in
+    /// [`deferred::resolve_deferred_line`].
+    pub deferred: Option<DeferredPick>,
     /// Screen position of the endpoint an Extension snap extends from, so the
     /// overlay can draw the dashed extension guide line back to it. `None` for
     /// every other snap type. (#238)
@@ -1477,6 +1486,7 @@ impl Snapper {
             screen: sl,
             snap_type: SnapType::Parallel,
             tangent_obj: None,
+            deferred: None,
             extension_base: None,
             extension_base2: None,
             extension_origin: None,
@@ -1607,6 +1617,7 @@ impl Snapper {
                             screen,
                             snap_type,
                             tangent_obj: None,
+                            deferred: None,
                             extension_base: None,
                             extension_base2: None,
                             extension_origin: None,
@@ -1628,6 +1639,7 @@ impl Snapper {
                         screen,
                         snap_type,
                         tangent_obj: None,
+                        deferred: None,
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
@@ -1868,6 +1880,9 @@ impl Snapper {
         if let Some((origin, normal)) = self.osnap_z_plane {
             if hit.snap_type != SnapType::Grid {
                 hit.world -= normal * (hit.world - origin).dot(normal);
+                if let Some(deferred) = hit.deferred.as_mut() {
+                    deferred.at -= normal * (deferred.at - origin).dot(normal);
+                }
             }
         }
         hit
@@ -1997,6 +2012,7 @@ impl Snapper {
                         screen,
                         snap_type: SnapType::Grid,
                         tangent_obj: None,
+                        deferred: None,
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
@@ -2165,6 +2181,7 @@ impl Snapper {
                         screen,
                         snap_type,
                         tangent_obj: None,
+                        deferred: None,
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
@@ -2197,6 +2214,7 @@ impl Snapper {
                     screen,
                     snap_type,
                     tangent_obj: None,
+                    deferred: None,
                     extension_base: None,
                     extension_base2: None,
                     extension_origin: None,
@@ -3167,6 +3185,7 @@ impl Snapper {
                             screen: screen_pt,
                             snap_type: SnapType::Tangent,
                             tangent_obj: Some(tangent_obj),
+                            deferred: None,
                             extension_base: None,
                             extension_base2: None,
                             extension_origin: None,
@@ -3269,6 +3288,7 @@ impl Snapper {
                         screen,
                         snap_type: SnapType::Center,
                         tangent_obj: None,
+                        deferred: None,
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,
@@ -3381,6 +3401,7 @@ impl Snapper {
                                     screen,
                                     snap_type,
                                     tangent_obj: None,
+                                    deferred: None,
                                     extension_base: None,
                                     extension_base2: None,
                                     extension_origin: None,
@@ -3397,6 +3418,81 @@ impl Snapper {
             }
             if let Some((_, found)) = nearest {
                 best = Some(found);
+            }
+        }
+
+        // ── Deferred TAN/PER — only with no drawing base yet ──────────────
+        // The point under the cursor is provisional: LINE resolves the real
+        // contact point once the other end is known. Ranked as unspecific as
+        // Nearest, so every discrete snap still wins over it.
+        if self.snap_enabled
+            && self.from_point.is_none()
+            && (self.is_on(SnapType::Tangent) || self.is_on(SnapType::Perpendicular))
+        {
+            let deferred_wires: Box<dyn Iterator<Item = &WireModel>> = if unindexed {
+                Box::new(in_range_wires.iter())
+            } else {
+                Box::new(wires.iter().filter(|w| wire_in_range(w)))
+            };
+            for wire in deferred_wires {
+                for tg in &wire.tangent_geoms {
+                    let Some((curve, at)) = deferred_curve_at(
+                        tg,
+                        wire,
+                        cursor_world,
+                        cursor_screen,
+                        view_rot,
+                        eye,
+                        bounds,
+                    ) else {
+                        continue;
+                    };
+                    for (mode, kind) in [
+                        (DeferredMode::Tangent, SnapType::Tangent),
+                        (DeferredMode::Perpendicular, SnapType::Perpendicular),
+                    ] {
+                        if !self.is_on(kind)
+                            || (mode == DeferredMode::Tangent
+                                && matches!(curve, DeferredCurve::Line { .. }))
+                        {
+                            continue;
+                        }
+                        let screen = world_to_screen(at, view_rot, eye, bounds);
+                        let d2 = dist2(screen, cursor_screen);
+                        let (tier, sub) = (
+                            snap_tier(SnapType::Nearest),
+                            snap_priority(SnapType::Parallel),
+                        );
+                        if d2 < radius2
+                            && in_bounds(screen)
+                            && !self.skipped_in_cycle(at, kind)
+                            && snap_better(tier, d2, sub, (best_rank, best_d2, best_sub))
+                        {
+                            best_rank = tier;
+                            best_sub = sub;
+                            best_d2 = d2;
+                            best = Some(SnapResult {
+                                world: at,
+                                screen,
+                                snap_type: kind,
+                                tangent_obj: if mode == DeferredMode::Tangent {
+                                    deferred::tangent_object_from_curve(&curve, at)
+                                } else {
+                                    None
+                                },
+                                deferred: Some(DeferredPick { mode, curve, at }),
+                                extension_base: None,
+                                extension_base2: None,
+                                extension_origin: None,
+                                extension_dir: None,
+                                viewport: None,
+                                source: wire_source(wire),
+                                secondary_source: None,
+                                model_point: None,
+                            });
+                        }
+                    }
+                }
             }
         }
 
@@ -4210,6 +4306,95 @@ fn exact_nearest(wire: &WireModel, to: DVec3) -> Option<DVec3> {
     Some(frame.to_3d(best))
 }
 
+/// Exact curve description plus the point under the cursor, for a deferred
+/// TAN/PER pick. `at` is only a hint for choosing among solver solutions.
+fn deferred_curve_at(
+    tg: &TangentGeom,
+    wire: &WireModel,
+    cursor_world: DVec3,
+    cursor_screen: Point,
+    view_rot: Mat4,
+    eye: DVec3,
+    bounds: Rectangle,
+) -> Option<(DeferredCurve, DVec3)> {
+    let curve = match *tg {
+        TangentGeom::Line { p1, p2 } => {
+            let mut cursor = 0usize;
+            let (a, b) = tangent_line_endpoints(wire, p1, p2, &mut cursor);
+            DeferredCurve::Line { p1: a, p2: b }
+        }
+        TangentGeom::Circle { center, radius } => DeferredCurve::Circle {
+            center: DVec3::from_array(center.map(f64::from)),
+            axis_x: DVec3::X,
+            axis_y: DVec3::Y,
+            radius: radius as f64,
+        },
+        TangentGeom::PlanarCircle {
+            center,
+            axis_x,
+            axis_y,
+            radius,
+        } => DeferredCurve::Circle {
+            center: DVec3::from_array(center),
+            axis_x: DVec3::from_array(axis_x),
+            axis_y: DVec3::from_array(axis_y),
+            radius,
+        },
+        TangentGeom::Arc {
+            center,
+            axis_x,
+            axis_y,
+            radius,
+            start_angle,
+            end_angle,
+        } => DeferredCurve::Arc {
+            center: DVec3::from_array(center),
+            axis_x: DVec3::from_array(axis_x),
+            axis_y: DVec3::from_array(axis_y),
+            radius,
+            start: start_angle,
+            end: end_angle,
+        },
+        TangentGeom::PlanarEllipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+            start_param,
+            end_param,
+        } => DeferredCurve::Ellipse {
+            center: DVec3::from_array(center),
+            major_axis: DVec3::from_array(major_axis),
+            normal: DVec3::from_array(normal),
+            minor_axis_ratio,
+            start: start_param,
+            end: end_param,
+        },
+    };
+    let at = if let TangentGeom::Line { p1, p2 } = *tg {
+        let mut cursor = 0usize;
+        let (a, b) = tangent_line_endpoints(wire, p1, p2, &mut cursor);
+        nearest_on_segment(cursor_world, a, b)
+    } else {
+        wire.points
+            .iter()
+            .map(|_| ())
+            .enumerate()
+            .filter_map(|(i, _)| {
+                let p = wp_f64(wire, i);
+                p.is_finite().then_some(p)
+            })
+            .min_by(|a, b| {
+                let sa = world_to_screen(*a, view_rot, eye, bounds);
+                let sb = world_to_screen(*b, view_rot, eye, bounds);
+                dist2(sa, cursor_screen)
+                    .total_cmp(&dist2(sb, cursor_screen))
+            })
+            .unwrap_or_else(|| cursor_world)
+    };
+    at.is_finite().then_some((curve, at))
+}
+
 fn exact_perpendicular_feet(wire: &WireModel, from: DVec3) -> Option<Vec<DVec3>> {
     let frame = wire_plane(wire)?;
     let curves = curves_in_frame(wire, &frame, 1e-7)?;
@@ -4921,6 +5106,7 @@ mod ext_tests {
             screen: Point::new(x as f32, 0.0),
             snap_type: kind,
             tangent_obj: None,
+            deferred: None,
             extension_base: None,
             extension_base2: None,
             extension_origin: None,
@@ -5018,6 +5204,7 @@ mod ext_tests {
             screen: world_to_screen(DVec3::new(x, 0.0, 0.0), view, DVec3::ZERO, bounds),
             snap_type: SnapType::Endpoint,
             tangent_obj: None,
+            deferred: None,
             extension_base: None,
             extension_base2: None,
             extension_origin: None,
@@ -6935,6 +7122,7 @@ mod ext_tests {
             screen: Point::new(300.0, 200.0),
             snap_type: SnapType::Endpoint,
             tangent_obj: None,
+            deferred: None,
             extension_base: None,
             extension_base2: None,
             extension_origin: None,

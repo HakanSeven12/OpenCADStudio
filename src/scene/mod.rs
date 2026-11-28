@@ -495,6 +495,7 @@ impl Scene {
                         screen: iced::Point::new(screen[0], screen[1]),
                         snap_type,
                         tangent_obj: None,
+                        deferred: None,
                         extension_base: None,
                         extension_base2: None,
                         extension_origin: None,

@@ -687,6 +687,34 @@ pub fn match_properties_kernel(
     // `&mut Document`; the handler applies them under the same bits.
 }
 
+/// MATCHPROP's text justification (finding 197): a TEXT takes the source
+/// TEXT's alignment (72/73), an MTEXT the source MTEXT's attachment point
+/// (71), re-anchored the way JUSTIFYTEXT does so the glyphs stay where they
+/// are. Needs the document to measure the text, so it runs after
+/// [`match_properties_kernel`]; `None` when nothing changes.
+pub fn match_text_justification(
+    src: &document::EntityType,
+    dst: &document::EntityType,
+    doc: &document::Document,
+    opts: &MatchOpts,
+) -> Option<document::EntityType> {
+    use crate::modules::annotate::text_edit::{current_justification, justified};
+    use document::EntityType as E;
+    if !opts.has(MatchOpts::TEXT)
+        || !matches!(
+            (src, dst),
+            (E::Text(_), E::Text(_)) | (E::MText(_), E::MText(_))
+        )
+    {
+        return None;
+    }
+    let j = current_justification(src)?;
+    if current_justification(dst) == Some(j) {
+        return None;
+    }
+    justified(dst, doc, j)
+}
+
 #[cfg(test)]
 mod match_layer_kernel_tests {
     use super::{match_layer_kernel, MatchLayerError};

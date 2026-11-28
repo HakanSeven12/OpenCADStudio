@@ -6729,6 +6729,108 @@ DEAD
     }
 
     #[test]
+    fn matchprop_matches_text_justification_without_moving_the_text() {
+        // Finding 197: MATCHPROP carries a TEXT's alignment (72/73) and an
+        // MTEXT's attachment point (71) to the targets, re-anchored so the
+        // drawn glyphs stay where they were.
+        use crate::command::StepInput;
+        use document::entities::{
+            AttachmentPoint, TextHorizontalAlignment as HA, TextVerticalAlignment as VA,
+        };
+        use document::types::Vector3;
+        use document::{EntityType, MText, Text};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let mut src_text = Text::new();
+        src_text.value = "SRC".into();
+        src_text.height = 2.5;
+        src_text.horizontal_alignment = HA::Center;
+        src_text.vertical_alignment = VA::Middle;
+        src_text.alignment_point = Some(Vector3::new(0.0, 0.0, 0.0));
+        let src_text_h = app.tabs[i].scene.add_entity(EntityType::Text(src_text));
+        let mut dst_text = Text::new();
+        dst_text.value = "Target".into();
+        dst_text.height = 2.5;
+        dst_text.insertion_point = Vector3::new(10.0, 20.0, 0.0);
+        let dst_text_h = app.tabs[i].scene.add_entity(EntityType::Text(dst_text));
+
+        let mut src_mtext = MText::new();
+        src_mtext.value = "SRC".into();
+        src_mtext.height = 2.5;
+        src_mtext.attachment_point = AttachmentPoint::MiddleCenter;
+        let src_mtext_h = app.tabs[i]
+            .scene
+            .add_entity(EntityType::MText(Box::new(src_mtext)));
+        let mut dst_mtext = MText::new();
+        dst_mtext.value = "Two\\Plines".into();
+        dst_mtext.height = 2.5;
+        dst_mtext.attachment_point = AttachmentPoint::TopLeft;
+        dst_mtext.insertion_point = Vector3::new(30.0, 40.0, 0.0);
+        let dst_mtext_h = app.tabs[i]
+            .scene
+            .add_entity(EntityType::MText(Box::new(dst_mtext)));
+
+        // The box the glyphs occupy (JUSTIFYTEXT's own measure): its top
+        // left and bottom right corners in the drawing.
+        let drawn = |app: &mut OpenCADStudio, h| {
+            use crate::modules::annotate::text_edit::{Justify, TextFrame};
+            let doc = &app.tabs[i].scene.document;
+            let frame = TextFrame::of(doc.get_entity(h).expect("text"), doc).expect("frame");
+            (frame.anchor(Justify::TL), frame.anchor(Justify::BR))
+        };
+        let close = |a: ([f64; 2], [f64; 2]), b: ([f64; 2], [f64; 2])| {
+            [
+                a.0[0] - b.0[0],
+                a.0[1] - b.0[1],
+                a.1[0] - b.1[0],
+                a.1[1] - b.1[1],
+            ]
+            .iter()
+            .all(|d| d.abs() < 1e-6)
+        };
+        let text_before = drawn(&mut app, dst_text_h);
+        let mtext_before = drawn(&mut app, dst_mtext_h);
+
+        for (src_h, dst_h) in [(src_text_h, dst_text_h), (src_mtext_h, dst_mtext_h)] {
+            let _ = app.run_command_line("MATCHPROP");
+            assert!(app.tabs[i].active_cmd.is_some(), "MATCHPROP must start");
+            let _ = app.feed_command(StepInput::EntityPick(src_h, glam::DVec3::ZERO));
+            let _ = app.feed_command(StepInput::SelectionComplete(vec![dst_h]));
+            app.tabs[i].active_cmd = None;
+        }
+
+        match app.tabs[i].scene.document.get_entity(dst_text_h) {
+            Some(EntityType::Text(t)) => assert_eq!(
+                (t.horizontal_alignment, t.vertical_alignment),
+                (HA::Center, VA::Middle),
+                "TEXT target must take the source's middle-centre alignment"
+            ),
+            other => panic!("dest TEXT missing: {other:?}"),
+        }
+        match app.tabs[i].scene.document.get_entity(dst_mtext_h) {
+            Some(EntityType::MText(m)) => assert_eq!(
+                m.attachment_point,
+                AttachmentPoint::MiddleCenter,
+                "MTEXT target must take the source's attachment point"
+            ),
+            other => panic!("dest MTEXT missing: {other:?}"),
+        }
+        let text_after = drawn(&mut app, dst_text_h);
+        assert!(
+            close(text_before, text_after),
+            "TEXT must not move: {text_before:?} -> {text_after:?}"
+        );
+        let mtext_after = drawn(&mut app, dst_mtext_h);
+        assert!(
+            close(mtext_before, mtext_after),
+            "MTEXT must not move: {mtext_before:?} -> {mtext_after:?}"
+        );
+    }
+
+    #[test]
     fn matchprop_source_glow_survives_preview_refresh_and_destination_apply() {
         use crate::command::StepInput;
         use document::{EntityType, entities::Line, types::Vector3};

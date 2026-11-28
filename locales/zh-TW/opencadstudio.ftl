@@ -6835,6 +6835,7 @@ manage =
     .geometry-cleanup-rotate-longer = 旋轉較長段
     .geometry-cleanup-rotate-shorter = 旋轉較短段
     .geometry-cleanup-scan = 掃描
+    .geometry-cleanup-scanning = Scanning __ocs_fmt_0__ objects…
     .geometry-cleanup-select-types = 選取錯誤類型與公差
     .geometry-cleanup-settings = 幾何清理設定
     .geometry-cleanup-settings-unreadable = 無法讀取設定檔：__ocs_fmt_0__

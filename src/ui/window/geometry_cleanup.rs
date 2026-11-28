@@ -286,6 +286,57 @@ impl Scan {
     }
 }
 
+/// What a scan reads: copies of the objects' curves, so that a scan of
+/// many objects can run off the UI thread while the drawing stays free.
+#[derive(Debug)]
+pub struct ScanInput {
+    pub curves: Vec<(Handle, ocs_geom::geom2d::Curve)>,
+    pub tolerances: ScanTolerances,
+    /// The UCS X axis, in radians from the WCS X axis.
+    pub x_axis: f64,
+}
+
+/// The tolerances of a scan.
+#[derive(Debug)]
+pub enum ScanTolerances {
+    /// The saved settings, or the tolerances of the scan made again.
+    Given(Tolerances, AngleTolerances),
+    /// No settings are saved: the scan proposes them from the curves of
+    /// the whole drawing.
+    Proposed(Vec<ocs_geom::geom2d::Curve>),
+}
+
+/// What a scan found, and the tolerances that it used.
+#[derive(Debug, Clone)]
+pub struct ScanOutput {
+    pub tolerances: Tolerances,
+    pub angles: AngleTolerances,
+    pub found: Vec<Finding>,
+}
+
+/// A scan that runs off the UI thread. Its result is used only while it is
+/// the palette's job; closing the palette, Cancel or a newer scan sets
+/// `stop` and drops it, and the drawing is never changed by it.
+#[derive(Debug)]
+pub struct ScanJob {
+    pub id: u64,
+    /// The drawing tab, and its geometry epoch when the curves were read.
+    pub tab: u64,
+    pub epoch: u64,
+    pub objects: Vec<Handle>,
+    pub input: std::sync::Arc<ScanInput>,
+    pub stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Whether it scans the palette's objects again (it keeps the pick).
+    pub rescan: bool,
+    /// Whether it reports the number of errors on the command line.
+    pub report: bool,
+    /// Whether its thread runs: it starts when the message that made it
+    /// has been handled.
+    pub started: bool,
+    /// The rows to pick from when it ends, after a repair or a Keep.
+    pub after: Option<Vec<Finding>>,
+}
+
 #[derive(Debug, Default)]
 pub struct GeometryCleanupPalette {
     pub show: bool,
@@ -322,6 +373,13 @@ pub struct GeometryCleanupPalette {
     /// GEOMETRYCLEANUPZOOMPAN 0: a pick zooms only when the error is not in
     /// view. Kept in the user profile.
     pub auto_zoom_off: bool,
+    /// The scan that runs off the UI thread.
+    pub job: Option<ScanJob>,
+    /// The number of scan jobs made, for their ids.
+    pub jobs: u64,
+    /// Every scan runs off the UI thread, however few its objects.
+    #[cfg(test)]
+    pub background_always: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -367,6 +425,10 @@ pub enum GeometryCleanupMsg {
     SettingsCancel,
     /// Save the settings, close the dialog and scan.
     SettingsScan,
+    /// A scan job ended: its id and what it found (`None` when it stopped).
+    Scanned(u64, std::sync::Arc<Option<ScanOutput>>),
+    /// Stop the running scan and clear the list.
+    CancelScan,
 }
 
 /// The errors of a scan by type, in the order of the tree: each type with
@@ -415,17 +477,26 @@ pub fn view<'a>(
         chrome,
     );
     let scan = palette.scan.as_ref().filter(|scan| scan.tab == tab);
-    let tools = row![
-        kit::text_button(
-            crate::t!("Select Objects").into_owned(),
-            Some(msg(GeometryCleanupMsg::SelectObjects)),
-            scan.is_none(),
+    let job = palette.job.as_ref().filter(|job| job.tab == tab);
+    let rescan = match job {
+        Some(_) => kit::text_button(
+            crate::t!("Cancel").into_owned(),
+            Some(msg(GeometryCleanupMsg::CancelScan)),
+            false,
         ),
-        kit::text_button(
+        None => kit::text_button(
             crate::t!("Rescan").into_owned(),
             scan.map(|_| msg(GeometryCleanupMsg::Rescan)),
             false,
         ),
+    };
+    let tools = row![
+        kit::text_button(
+            crate::t!("Select Objects").into_owned(),
+            Some(msg(GeometryCleanupMsg::SelectObjects)),
+            scan.is_none() && job.is_none(),
+        ),
+        rescan,
         kit::tool_button(
             kit::tool_icon(crate::ui::icons::GEAR),
             crate::t!("Geometry Cleanup Settings").into_owned(),
@@ -437,6 +508,18 @@ pub fn view<'a>(
     .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
+    // While a scan runs, the list of the last one may be wrong: it is not
+    // shown, and nothing in it can be pressed.
+    if let Some(job) = job {
+        return kit::palette(
+            title_bar,
+            column![
+                kit::band(tools),
+                kit::empty_state(crate::tf!("Scanning {} objects…", job.objects.len())),
+            ],
+            width,
+        );
+    }
     let Some(scan) = scan else {
         return kit::palette(
             title_bar,

@@ -1328,8 +1328,10 @@ impl OpenCADStudio {
         self.refresh_xref_manager_if_stale();
         // Count mode recolours its references after the drawing changes.
         self.refresh_count_if_stale();
-        // The Geometry Cleanup palette scans its objects again.
+        // The Geometry Cleanup palette scans its objects again; a large scan
+        // starts off the UI thread.
         self.refresh_geometry_cleanup_if_stale();
+        let task = Task::batch([task, self.geometry_cleanup_start_job()]);
         // Let V4 plugins observe selection changes that happened while handling
         // this message (picking, window select, QSELECT, SELECTALL, grip edits,
         // and plugin request draining).

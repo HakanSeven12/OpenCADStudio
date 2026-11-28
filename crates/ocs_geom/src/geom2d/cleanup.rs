@@ -18,6 +18,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::angle::normalize_angle;
 use super::cross::intersect;
@@ -567,15 +568,26 @@ impl Tolerances {
 /// can meet. The
 /// errors come in the order of their ends.
 pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> Vec<EndError> {
+    end_errors_until(curves, tolerances, weld, &AtomicBool::new(false)).unwrap_or_default()
+}
+
+/// [`end_errors`], which stops when `stop` is set: `None` then. A scan of
+/// many curves runs off the UI thread, and the user can end it.
+pub fn end_errors_until(
+    curves: &[Curve],
+    tolerances: Tolerances,
+    weld: Tolerance,
+    stop: &AtomicBool,
+) -> Option<Vec<EndError>> {
     let weld = weld.linear();
     // The search reaches as far as the largest tolerance; each candidate
     // is then held to the tolerance of its own type, before the nearest
     // error of each end is picked.
     let Some(tolerance) = tolerances.largest() else {
-        return Vec::new();
+        return Some(Vec::new());
     };
     if !tolerance.is_finite() || tolerance <= weld {
-        return Vec::new();
+        return Some(Vec::new());
     }
     let within = |kind: EndErrorKind, d: f64| tolerances.get(kind).is_some_and(|t| d <= t);
     let pieces = pieces_of(curves);
@@ -593,15 +605,16 @@ pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> 
     let grid = Grid::new(&pieces, size, tolerance);
 
     // An end is loose when no other piece passes within the weld of it.
-    let loose: Vec<bool> = ends
-        .iter()
-        .map(|end| {
-            !grid.near(end.point).any(|k| {
-                k != end.piece
-                    && super::containment::distance_to(&pieces[k].shape.curve(), end.point) <= weld
-            })
-        })
-        .collect();
+    let mut loose = Vec::with_capacity(ends.len());
+    for end in &ends {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        loose.push(!grid.near(end.point).any(|k| {
+            k != end.piece
+                && super::containment::distance_to(&pieces[k].shape.curve(), end.point) <= weld
+        }));
+    }
 
     let mut candidates = Vec::new();
     let mut by_cell: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
@@ -620,6 +633,9 @@ pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> 
     for (e, end) in ends.iter().enumerate() {
         if !loose[e] {
             continue;
+        }
+        if stop.load(Ordering::Relaxed) {
+            return None;
         }
         // Gaps: another loose end close by, of another curve or the other
         // end of the same polyline. The corner of a gap is held to the gap
@@ -718,7 +734,7 @@ pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> 
         })
         .collect();
     errors.sort_by_key(|error| error.end);
-    errors
+    Some(errors)
 }
 
 /// What is wrong with the angle of a line.
@@ -805,6 +821,18 @@ pub fn angle_errors(
     x_axis: f64,
     weld: Tolerance,
 ) -> Vec<AngleError> {
+    angle_errors_until(curves, tolerances, x_axis, weld, &AtomicBool::new(false))
+        .unwrap_or_default()
+}
+
+/// [`angle_errors`], which stops when `stop` is set: `None` then.
+pub fn angle_errors_until(
+    curves: &[Curve],
+    tolerances: &AngleTolerances,
+    x_axis: f64,
+    weld: Tolerance,
+    stop: &AtomicBool,
+) -> Option<Vec<AngleError>> {
     let weld = weld.linear();
     let pieces = pieces_of(curves);
     // Each line or straight segment: its curve, its segment and the line.
@@ -816,7 +844,7 @@ pub fn angle_errors(
         })
         .collect();
     if lines.is_empty() || (tolerances.absolute.is_empty() && tolerances.relative.is_empty()) {
-        return Vec::new();
+        return Some(Vec::new());
     }
     let direction = |line: &Line| {
         (line.end[1] - line.start[1])
@@ -842,6 +870,9 @@ pub fn angle_errors(
 
     let mut errors = Vec::new();
     for (curve, segment, line) in &lines {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
         let angle = direction(line);
         let candidates = tolerances
             .absolute
@@ -870,7 +901,7 @@ pub fn angle_errors(
     }
 
     if tolerances.relative.is_empty() {
-        return errors;
+        return Some(errors);
     }
     // The pairs of lines that share a grid cell.
     let line_grid = Grid::new(
@@ -887,6 +918,9 @@ pub fn angle_errors(
     );
     let mut pairs = HashSet::new();
     for members in line_grid.cells.values() {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
         for (n, &a) in members.iter().enumerate() {
             for &b in members[n + 1..].iter().chain(&line_grid.everywhere) {
                 pairs.insert((a.min(b), a.max(b)));
@@ -901,6 +935,9 @@ pub fn angle_errors(
     let mut pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|(a, b)| a != b).collect();
     pairs.sort_unstable();
     for (a, b) in pairs {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
         let ((first, first_segment, one), (second, second_segment, two)) = (lines[a], lines[b]);
         let crossings = intersect(&Curve::Line(one), &Curve::Line(two), Tolerance::new(weld));
         let Some(meet) = crossings.first().map(|crossing| crossing.point) else {
@@ -935,7 +972,7 @@ pub fn angle_errors(
             ],
         });
     }
-    errors
+    Some(errors)
 }
 
 #[cfg(test)]

@@ -1597,6 +1597,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     vec![crate::ui::overlay::UcsIconParams {
                         view_proj: vp_cam.view_proj_rte(full),
                         bounds: full,
+                        canvas: (vw, vh),
                         axes: (ux.as_vec3(), uy.as_vec3(), uz.as_vec3()),
                         origin_screen,
                         hover: self.ucs_icon_hover,
@@ -1637,6 +1638,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             crate::ui::overlay::UcsIconParams {
                                 view_proj: cam.view_proj_rte(b),
                                 bounds: b,
+                                canvas: (vw, vh),
                                 axes: (ux.as_vec3(), uy.as_vec3(), uz.as_vec3()),
                                 origin_screen,
                                 hover: i == active && self.ucs_icon_hover,
@@ -2816,13 +2818,26 @@ bg={bg_ms:.1}ms n={view_count}"
                 // test in update.rs already maps clicks through the active tile.
                 let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                 let rect = tab.scene.active_model_tile_bounds(vw, vh);
+                // A single tile is the whole canvas: the corner widgets are then
+                // aligned by the layout, not pinned at a pixel position taken from
+                // `vp_size`, which is measured after this view is built and can be
+                // a transient value for the frame a dialog closes.
+                let whole_canvas = viewcube::tile_is_whole_canvas(rect, (vw, vh));
+                let (controls_pad, picker_pad) = viewcube::corner_paddings();
                 let cube_x = (rect.x + rect.width - VIEWCUBE_HIT_SIZE - VIEWCUBE_PAD).max(0.0);
                 let cube_y = (rect.y + VIEWCUBE_PAD).max(0.0);
 
                 // Cube hit area + nav controls (home / roll / nudge) as one layer.
-                let controls = iced::widget::pin(viewcube_nav_controls(None))
-                    .position(iced::Point::new(cube_x, cube_y));
-                viewport_stack = viewport_stack.push(controls);
+                if whole_canvas {
+                    viewport_stack = viewport_stack.push(viewcube::top_right_layer(
+                        viewcube_nav_controls(None),
+                        controls_pad,
+                    ));
+                } else {
+                    let controls = iced::widget::pin(viewcube_nav_controls(None))
+                        .position(iced::Point::new(cube_x, cube_y));
+                    viewport_stack = viewport_stack.push(controls);
+                }
 
                 // WCS / named-UCS selector under the cube.
                 let ucs_current = tab
@@ -2833,15 +2848,17 @@ bg={bg_ms:.1}ms n={view_count}"
                 // Epoch-memoised (#34): Arc clone per frame, rebuilt only
                 // after a UCS-table bump.
                 let ucs_names = tab.scene.cached_ucs_names();
-                let picker = iced::widget::pin(iced::widget::opaque(viewcube_ucs_picker(
-                    ucs_current,
-                    ucs_names,
-                )))
-                .position(iced::Point::new(
-                    cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5,
-                    cube_y + VIEWCUBE_HIT_SIZE + 10.0,
-                ));
-                viewport_stack = viewport_stack.push(picker);
+                let picker = iced::widget::opaque(viewcube_ucs_picker(ucs_current, ucs_names));
+                if whole_canvas {
+                    viewport_stack =
+                        viewport_stack.push(viewcube::top_right_layer(picker, picker_pad));
+                } else {
+                    viewport_stack =
+                        viewport_stack.push(iced::widget::pin(picker).position(iced::Point::new(
+                            cube_x + VIEWCUBE_HIT_SIZE * 0.5 - UCS_PICKER_W * 0.5,
+                            cube_y + VIEWCUBE_HIT_SIZE + 10.0,
+                        )));
+                }
             }
 
             if let Some(dyn_ol) = dyn_input_overlay {

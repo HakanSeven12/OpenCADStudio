@@ -288,6 +288,11 @@ impl OpenCADStudio {
     /// The update iced runs: one message, then open tools parked again.
     pub fn update_root(&mut self, msg: Message) -> Task<Message> {
         let msg = self.route_tool_keyboard(msg);
+        let windows_before = (
+            self.tool_windows.len(),
+            self.os_windows.len(),
+            self.active_modal.is_some(),
+        );
         // A wasm build aborts on a panic, so there is nothing to catch.
         #[cfg(not(target_arch = "wasm32"))]
         let task = self.update_guarded(msg);
@@ -306,6 +311,17 @@ impl OpenCADStudio {
         // The Quick Access User Interface menu shows these as switches.
         self.ribbon.command_line_hidden = self.command_line_hidden;
         self.ribbon.status_bar_hidden = self.status_bar_hidden;
+        let windows_after = (
+            self.tool_windows.len(),
+            self.os_windows.len(),
+            self.active_modal.is_some(),
+        );
+        if windows_after.0 < windows_before.0
+            || windows_after.1 < windows_before.1
+            || (windows_before.2 && !windows_after.2)
+        {
+            crate::ui::overlay::note_window_close();
+        }
         Task::batch([task, settled])
     }
 

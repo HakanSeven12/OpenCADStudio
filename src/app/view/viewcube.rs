@@ -192,3 +192,90 @@ pub(super) fn viewcube_ucs_picker<'a>(
         })
         .into()
 }
+
+/// True when the active Model tile is the whole canvas (a single tile), as
+/// laid out by the tile rectangles themselves. That holds whatever size the
+/// canvas was measured at, so the corner widgets can then follow the layout
+/// (aligned to the top-right) instead of a pixel position computed from a
+/// viewport size that is only measured after the view is built.
+pub(super) fn tile_is_whole_canvas(rect: iced::Rectangle, canvas: (f32, f32)) -> bool {
+    rect.x.abs() <= 0.5
+        && rect.y.abs() <= 0.5
+        && (rect.width - canvas.0).abs() <= 0.5
+        && (rect.height - canvas.1).abs() <= 0.5
+}
+
+/// Padding from the canvas top-right corner, as `(top, right)`, to the nav
+/// controls and to the UCS picker centred under them.
+pub(super) fn corner_paddings() -> ((f32, f32), (f32, f32)) {
+    let pad = crate::scene::VIEWCUBE_PAD;
+    let controls = (pad, pad);
+    let picker = (
+        pad + VIEWCUBE_REGION_PX + 10.0,
+        (pad + VIEWCUBE_REGION_PX * 0.5 - UCS_PICKER_W * 0.5).max(0.0),
+    );
+    (controls, picker)
+}
+
+/// `el` in a layer that fills the canvas, `top` / `right` px from its
+/// top-right corner. The layout places it, so it needs no measured size.
+pub(super) fn top_right_layer<'a>(
+    el: Element<'a, Message>,
+    (top, right): (f32, f32),
+) -> Element<'a, Message> {
+    container(el)
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .align_x(iced::alignment::Horizontal::Right)
+        .align_y(iced::alignment::Vertical::Top)
+        .padding(iced::Padding {
+            top,
+            right,
+            bottom: 0.0,
+            left: 0.0,
+        })
+        .into()
+}
+
+#[cfg(test)]
+mod corner_tests {
+    use super::*;
+
+    /// The tile rectangles are fractions of the canvas, so a single tile is the
+    /// whole canvas at any measured size, including a transient one from the
+    /// frame a dialog closes; a half tile is not.
+    #[test]
+    fn a_single_tile_is_the_whole_canvas_at_any_measured_size() {
+        for canvas in [(1600.0, 860.0), (1590.0, 90.0), (300.0, 40.0)] {
+            let whole = iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: canvas.0,
+                height: canvas.1,
+            };
+            assert!(tile_is_whole_canvas(whole, canvas));
+        }
+        let half = iced::Rectangle {
+            x: 800.0,
+            y: 0.0,
+            width: 800.0,
+            height: 860.0,
+        };
+        assert!(!tile_is_whole_canvas(half, (1600.0, 860.0)));
+    }
+
+    /// The picker's centre sits under the cube centre, measured from the
+    /// top-right corner, so no viewport size is involved.
+    #[test]
+    fn the_picker_is_centred_under_the_cube_from_the_top_right_corner() {
+        let ((c_top, c_right), (p_top, p_right)) = corner_paddings();
+        assert_eq!(
+            (c_top, c_right),
+            (crate::scene::VIEWCUBE_PAD, crate::scene::VIEWCUBE_PAD)
+        );
+        let cube_centre = c_right + VIEWCUBE_REGION_PX * 0.5;
+        let picker_centre = p_right + UCS_PICKER_W * 0.5;
+        assert!((cube_centre - picker_centre).abs() < 1e-3);
+        assert!(p_top > c_top + VIEWCUBE_REGION_PX);
+    }
+}

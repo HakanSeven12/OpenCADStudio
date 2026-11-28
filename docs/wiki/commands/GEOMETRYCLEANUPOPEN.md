@@ -22,6 +22,7 @@ ribbon: Manage tab › Cleanup panel
 - Lines, arcs, elliptical arcs, lightweight polylines and 2D polylines on the world XY plane in model space are scanned. Whole ellipses, curve- or spline-fit 2D polylines and splines are not. Objects on locked or frozen layers are left out.
 - The tolerance is proposed from the drawing: 1% of the mean length of its lines and polyline segments.
 - While the palette is open, it scans again after each change of the drawing, so the list stays current. **Rescan** does it by hand.
+- A scan of 10,000 or more objects that it can read runs while you work. The palette shows **Scanning N objects…** in place of the list, and a **Cancel** button. **Cancel**, or closing the palette, stops the scan and clears the list. The drawing does not change.
 - Each repair is one undo step.
 - Each error in view has a red X in the drawing. Put the pointer on it for a menu of its repairs and **Keep as Designed**; put the pointer on a repair to see its result.
 - The kept errors are kept in the user settings for each drawing. **Kept as Designed** at the end of the list shows them: **Restore** lists one again, **Restore All** lists all of them again. A drawing that has no FINGERPRINTGUID gets one at the first Keep, and is saved with it.

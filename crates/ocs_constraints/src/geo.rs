@@ -561,8 +561,12 @@ impl Hyperbola {
     pub fn rad_maj(center: &DeriVector2, f1: &DeriVector2, b: f64, db: f64) -> (f64, f64) {
         let cf = f1.subtr(center);
         let (cf_len, dcf) = cf.length_deriv();
-        let a = (cf_len * cf_len - b * b).sqrt();
-        let da = (dcf * cf_len - db * b) / a;
+        let a = (cf_len * cf_len - b * b).max(0.0).sqrt();
+        let da = if a.is_finite() && a > f64::EPSILON {
+            (dcf * cf_len - db * b) / a
+        } else {
+            0.0
+        };
         (a, da)
     }
 

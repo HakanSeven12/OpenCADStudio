@@ -42,16 +42,26 @@ const PROXIMITY_EPSILON: f64 = 1e-9;
 /// has to range-check them itself. That is the point: extending a line to
 /// meet another one needs the intersection that lies *past* the end.
 pub fn line_line(p: [f64; 2], d: [f64; 2], q: [f64; 2], e: [f64; 2]) -> Option<(f64, f64)> {
+    if !p[0].is_finite()
+        || !p[1].is_finite()
+        || !d[0].is_finite()
+        || !d[1].is_finite()
+        || !q[0].is_finite()
+        || !q[1].is_finite()
+        || !e[0].is_finite()
+        || !e[1].is_finite()
+    {
+        return None;
+    }
     let determinant = d[0] * e[1] - d[1] * e[0];
-    if determinant.abs() < DETERMINANT_EPSILON {
+    if !determinant.is_finite() || determinant.abs() < DETERMINANT_EPSILON {
         return None;
     }
     let dx = q[0] - p[0];
     let dy = q[1] - p[1];
-    Some((
-        (dx * e[1] - dy * e[0]) / determinant,
-        (dx * d[1] - dy * d[0]) / determinant,
-    ))
+    let t = (dx * e[1] - dy * e[0]) / determinant;
+    let u = (dx * d[1] - dy * d[0]) / determinant;
+    (t.is_finite() && u.is_finite()).then_some((t, u))
 }
 
 /// Where the line `p + t·d` meets the circle at `centre` with `radius`.
@@ -59,13 +69,21 @@ pub fn line_line(p: [f64; 2], d: [f64; 2], q: [f64; 2], e: [f64; 2]) -> Option<(
 /// Returns the line parameters: empty when they miss, one value where the
 /// line is tangent, two otherwise, ordered by increasing `t`.
 pub fn line_circle(p: [f64; 2], d: [f64; 2], centre: [f64; 2], radius: f64) -> Vec<f64> {
-    if radius <= 0.0 {
+    if !p[0].is_finite()
+        || !p[1].is_finite()
+        || !d[0].is_finite()
+        || !d[1].is_finite()
+        || !centre[0].is_finite()
+        || !centre[1].is_finite()
+        || !radius.is_finite()
+        || radius <= 0.0
+    {
         return Vec::new();
     }
     let fx = p[0] - centre[0];
     let fy = p[1] - centre[1];
     let a = d[0] * d[0] + d[1] * d[1];
-    if a < DEGENERATE_DIRECTION {
+    if !a.is_finite() || a < DEGENERATE_DIRECTION {
         return Vec::new();
     }
     let b = 2.0 * (fx * d[0] + fy * d[1]);
@@ -74,6 +92,9 @@ pub fn line_circle(p: [f64; 2], d: [f64; 2], centre: [f64; 2], radius: f64) -> V
     let px = fx + t_perp * d[0];
     let py = fy + t_perp * d[1];
     let h = (px * px + py * py).sqrt();
+    if !h.is_finite() {
+        return Vec::new();
+    }
 
     let max_radius = radius.max(1.0);
     let tol = PROXIMITY_EPSILON.max(1e-7 * max_radius);
@@ -82,11 +103,14 @@ pub fn line_circle(p: [f64; 2], d: [f64; 2], centre: [f64; 2], radius: f64) -> V
         return Vec::new();
     }
     if (h - radius).abs() <= tol {
-        return vec![t_perp];
+        return t_perp.is_finite().then_some(t_perp).into_iter().collect();
     }
     let half_chord = (radius * radius - h * h).max(0.0).sqrt();
     let delta_t = half_chord / a.sqrt();
-    vec![t_perp - delta_t, t_perp + delta_t]
+    [t_perp - delta_t, t_perp + delta_t]
+        .into_iter()
+        .filter(|t| t.is_finite())
+        .collect()
 }
 
 /// Where two circles meet, as angles measured on the **first** circle.
@@ -101,12 +125,23 @@ pub fn circle_circle_angles(
     centre2: [f64; 2],
     radius2: f64,
 ) -> Vec<f64> {
-    if radius1 <= 0.0 || radius2 <= 0.0 {
+    if !centre1[0].is_finite()
+        || !centre1[1].is_finite()
+        || !centre2[0].is_finite()
+        || !centre2[1].is_finite()
+        || !radius1.is_finite()
+        || !radius2.is_finite()
+        || radius1 <= 0.0
+        || radius2 <= 0.0
+    {
         return Vec::new();
     }
     let span_x = centre2[0] - centre1[0];
     let span_y = centre2[1] - centre1[1];
     let distance = (span_x * span_x + span_y * span_y).sqrt();
+    if !distance.is_finite() {
+        return Vec::new();
+    }
 
     // Scale proximity tolerance for large dimensions while preserving PROXIMITY_EPSILON for small ones.
     let max_radius = radius1.max(radius2).max(1.0);
@@ -174,7 +209,18 @@ pub fn circle_circle_angles(
 /// centre, which only equals the parameter on a circle: for a 5:2 ellipse the
 /// two differ by more than twenty degrees near the diagonals.
 pub fn line_ellipse(p: [f64; 2], d: [f64; 2], ellipse: &Ellipse) -> Vec<(f64, f64)> {
-    if ellipse.is_degenerate() {
+    if ellipse.is_degenerate()
+        || !p[0].is_finite()
+        || !p[1].is_finite()
+        || !d[0].is_finite()
+        || !d[1].is_finite()
+        || !ellipse.centre[0].is_finite()
+        || !ellipse.centre[1].is_finite()
+        || !ellipse.major_radius.is_finite()
+        || !ellipse.minor_radius.is_finite()
+        || !ellipse.major_axis[0].is_finite()
+        || !ellipse.major_axis[1].is_finite()
+    {
         return Vec::new();
     }
     let Ellipse {
@@ -200,7 +246,7 @@ pub fn line_ellipse(p: [f64; 2], d: [f64; 2], ellipse: &Ellipse) -> Vec<(f64, f6
     let unit_dy = dir_y / minor_radius;
 
     let a = unit_dx * unit_dx + unit_dy * unit_dy;
-    if a < DEGENERATE_DIRECTION {
+    if !a.is_finite() || a < DEGENERATE_DIRECTION {
         return Vec::new();
     }
     let b = 2.0 * (unit_x * unit_dx + unit_y * unit_dy);
@@ -209,6 +255,9 @@ pub fn line_ellipse(p: [f64; 2], d: [f64; 2], ellipse: &Ellipse) -> Vec<(f64, f6
     let px = unit_x + t_perp * unit_dx;
     let py = unit_y + t_perp * unit_dy;
     let h = (px * px + py * py).sqrt();
+    if !h.is_finite() {
+        return Vec::new();
+    }
 
     let tol = PROXIMITY_EPSILON.max(1e-7);
 
@@ -224,10 +273,11 @@ pub fn line_ellipse(p: [f64; 2], d: [f64; 2], ellipse: &Ellipse) -> Vec<(f64, f6
 
     line_params
         .into_iter()
-        .map(|s| {
+        .filter_map(|s| {
             let cos_t = unit_x + s * unit_dx;
             let sin_t = unit_y + s * unit_dy;
-            (s, sin_t.atan2(cos_t))
+            let t = sin_t.atan2(cos_t);
+            (s.is_finite() && t.is_finite()).then_some((s, t))
         })
         .collect()
 }
@@ -263,7 +313,18 @@ pub fn ellipse_circle(
     centre: [f64; 2],
     radius: f64,
 ) -> Vec<(f64, f64)> {
-    if ellipse.is_degenerate() || radius < DEGENERATE_DIRECTION {
+    if ellipse.is_degenerate()
+        || !radius.is_finite()
+        || radius < DEGENERATE_DIRECTION
+        || !centre[0].is_finite()
+        || !centre[1].is_finite()
+        || !ellipse.centre[0].is_finite()
+        || !ellipse.centre[1].is_finite()
+        || !ellipse.major_radius.is_finite()
+        || !ellipse.minor_radius.is_finite()
+        || !ellipse.major_axis[0].is_finite()
+        || !ellipse.major_axis[1].is_finite()
+    {
         return Vec::new();
     }
     let Ellipse {
@@ -300,8 +361,11 @@ pub fn ellipse_circle(
     // neighbouring root.
     let mut roots: Vec<f64> = Vec::new();
     let mut push = |t: f64| {
+        if !t.is_finite() {
+            return;
+        }
         let t = t.rem_euclid(TAU);
-        if !roots.iter().any(|&r| (r - t).abs() < 1e-9 || (r - t).abs() > TAU - 1e-9) {
+        if t.is_finite() && !roots.iter().any(|&r| (r - t).abs() < 1e-9 || (r - t).abs() > TAU - 1e-9) {
             roots.push(t);
         }
     };
@@ -642,5 +706,20 @@ mod tests {
             let d = (pt[0] * pt[0] + pt[1] * pt[1]).sqrt();
             assert!((d - 95.0).abs() < 1e-3, "point must lie on circle of radius 95");
         }
+    }
+
+    #[test]
+    fn non_finite_inputs_return_empty_intersections() {
+        assert!(line_line([f64::NAN, 0.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0]).is_none());
+        assert!(line_circle([0.0, 0.0], [f64::INFINITY, 0.0], [0.0, 0.0], 5.0).is_empty());
+        assert!(circle_circle_angles([0.0, 0.0], f64::NAN, [1.0, 0.0], 1.0).is_empty());
+        let ell = Ellipse {
+            centre: [0.0, 0.0],
+            major_radius: 3.0,
+            minor_radius: 2.0,
+            major_axis: [1.0, 0.0],
+        };
+        assert!(line_ellipse([0.0, f64::NAN], [1.0, 0.0], &ell).is_empty());
+        assert!(ellipse_circle(&ell, [0.0, 0.0], f64::INFINITY).is_empty());
     }
 }

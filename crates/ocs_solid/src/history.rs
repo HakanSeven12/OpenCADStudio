@@ -592,14 +592,19 @@ fn embedded_sweep_path(
         if place.scale().is_none() {
             return Err(HistoryRebuildError::InvalidTransform);
         }
-        if spans.iter().all(|span| matches!(span.curve, r::Curve::Line { .. })) {
+        if !spans.is_empty() && spans.iter().all(|span| matches!(span.curve, r::Curve::Line { .. })) {
             let mut points = std::iter::once(spans[0].start)
                 .chain(spans.iter().map(|span| span.end))
                 .map(|point| place.point(point))
                 .collect::<Vec<_>>();
             let closed = points.len() > 2
-                && Vec3::from(points[0]).distance(Vec3::from(*points.last().unwrap()))
-                    <= coplanarity_tolerance(&points).max(1e-9);
+                && points
+                    .last()
+                    .copied()
+                    .is_some_and(|last| {
+                        Vec3::from(points[0]).distance(Vec3::from(last))
+                            <= coplanarity_tolerance(&points).max(1e-9)
+                    });
             if closed {
                 points.pop();
             }
@@ -1052,8 +1057,11 @@ pub fn extrude_region(plane: &Plane, wires: &[Vec<Curve>], direction: [f64; 3], 
     let length = Vec3::from(direction).length();
     let unit = Vec3::from(direction).normalize().ok_or(model::Error::Argument)?.to_array();
     let loops = sweep::profile_loops(plane, wires).ok_or(model::Error::Argument)?;
+    let Some((outer, _)) = loops.first() else {
+        return Err(model::Error::Argument);
+    };
     let cap = !surface && loops.iter().all(|(_, closed)| *closed);
-    let mut body = model::extrude(&loops[0].0, unit, length, draft, cap)?;
+    let mut body = model::extrude(outer, unit, length, draft, cap)?;
     if cap {
         for (hole, _) in &loops[1..] {
             let cut = model::extrude(hole, unit, length, draft, true)?;
@@ -1087,6 +1095,9 @@ pub fn rebuild_extrusion_with_mode(value: &SolidHistorySweep, surface: bool) -> 
             return Err(HistoryRebuildError::Unsupported);
         }
         let pieces = &wires[0];
+        if pieces.is_empty() {
+            return Err(HistoryRebuildError::InvalidParameters);
+        }
         let path = placed_curve(embedded_curve(path)?, path_transform)?;
         // The profile swept from where it stands, the path moved to its centre.
         let profile_center = pieces.iter().map(|piece| Vec3::from(plane.point_at(piece.point_at(0.0)))).fold(Vec3::ZERO, |sum, point| sum + point) / pieces.len() as f64;
@@ -1139,8 +1150,11 @@ fn rebuild_revolve(value: &SolidHistoryRevolve) -> Result<Brep, HistoryRebuildEr
 /// a solid when `cap`.
 pub fn revolve(plane: &Plane, pieces: &[Curve], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool) -> Result<Brep, model::Error> {
     let loops = sweep::profile_loops(plane, &[pieces.to_vec()]).ok_or(model::Error::Argument)?;
+    let Some((outer, closed)) = loops.first() else {
+        return Err(model::Error::Argument);
+    };
     let (angle, axis) = if angle < 0.0 { (-angle, axis.map(|a| -a)) } else { (angle, axis) };
-    model::record(&sc::revolve(&loops[0].0, origin, axis, angle, cap && loops[0].1)?)
+    model::record(&sc::revolve(outer, origin, axis, angle, cap && *closed)?)
 }
 
 /// A loft's section: a profile in its plane, or a point.
@@ -1211,9 +1225,14 @@ pub fn loft_section_geometry(entities: &[EmbeddedEntity]) -> Result<LoftSection,
     let scale = curves.iter().map(|curve| curve.control_points().iter().map(|point| point[0].hypot(point[1]))
         .fold(1.0_f64, f64::max)).fold(1.0_f64, f64::max);
     let tolerance = scale * 1e-8;
+    if curves.is_empty() {
+        return Err("Empty joined section.".into());
+    }
     let mut chain = vec![curves.remove(0)];
     while !curves.is_empty() {
-        let end = chain.last().unwrap().point_at(1.0);
+        let Some(end) = chain.last().map(|c| c.point_at(1.0)) else {
+            return Err("Empty joined section.".into());
+        };
         if let Some((at, reverse)) = curves.iter().enumerate().find_map(|(at, curve)| {
             if distance(end, curve.point_at(0.0)) <= tolerance { Some((at, false)) }
             else if distance(end, curve.point_at(1.0)) <= tolerance { Some((at, true)) }
@@ -1223,7 +1242,9 @@ pub fn loft_section_geometry(entities: &[EmbeddedEntity]) -> Result<LoftSection,
             chain.push(if reverse { curve.reversed() } else { curve });
             continue;
         }
-        let start = chain.first().unwrap().point_at(0.0);
+        let Some(start) = chain.first().map(|c| c.point_at(0.0)) else {
+            return Err("Empty joined section.".into());
+        };
         if let Some((at, reverse)) = curves.iter().enumerate().find_map(|(at, curve)| {
             if distance(start, curve.point_at(1.0)) <= tolerance { Some((at, false)) }
             else if distance(start, curve.point_at(0.0)) <= tolerance { Some((at, true)) }
@@ -1233,7 +1254,10 @@ pub fn loft_section_geometry(entities: &[EmbeddedEntity]) -> Result<LoftSection,
             chain.insert(0, if reverse { curve.reversed() } else { curve });
         } else { return Err("Joined section edges must form one connected chain.".into()); }
     }
-    let closed = distance(chain[0].point_at(0.0), chain.last().unwrap().point_at(1.0)) <= tolerance;
+    let (Some(first), Some(last)) = (chain.first(), chain.last()) else {
+        return Err("Empty joined section.".into());
+    };
+    let closed = distance(first.point_at(0.0), last.point_at(1.0)) <= tolerance;
     Ok(LoftSection::Profile { plane, wires: vec![chain.into_iter().map(Curve::Nurbs).collect()], closed })
 }
 
@@ -1246,6 +1270,9 @@ pub fn loft_path_geometry(entity: &EmbeddedEntity) -> Result<Vec<sc::Curve>, Str
             Ok(profile.into_iter().next().map(|(curves, _)| curves).unwrap_or_default())
         }
         HistorySweepPath::Polyline3d { points, closed } => {
+            if points.is_empty() {
+                return Err("Empty loft guide or path.".into());
+            }
             let mut points = points;
             if closed && points.first() != points.last() {
                 points.push(points[0]);
@@ -1303,12 +1330,23 @@ pub fn loft_sections(sections: &[LoftSection], guides: &[Vec<sc::Curve>], surfac
         (Some(_), Some(_), _) => return Err("A loft between two points has no section to skin.".into()),
         _ => {}
     }
+    if profiles.is_empty() {
+        return Err("Loft requires at least two cross-sections.".into());
+    }
     let mut curves: Vec<Vec<sc::Curve>> = profiles.iter().map(|(c, ..)| c.clone()).collect();
     if closed {
-        curves.push(curves[0].clone());
+        if let Some(first) = curves.first().cloned() {
+            curves.push(first);
+        }
+    }
+    if curves.len() < 2 {
+        return Err("Loft requires at least two cross-sections.".into());
     }
     if !guides.is_empty() {
         let rails: Vec<sc::Curve> = guides.iter().filter_map(|g| g.first().cloned()).collect();
+        if rails.is_empty() {
+            return Err("Loft guides cannot be empty.".into());
+        }
         let rail_sections = profiles
             .iter()
             .map(|(curves, _, plane)| sc::railed::RailSection {
@@ -1320,7 +1358,7 @@ pub fn loft_sections(sections: &[LoftSection], guides: &[Vec<sc::Curve>], surfac
         let how = sc::railed::RailLoft { cap, ..sc::railed::RailLoft::new(1e-6) };
         return model::record(&sc::railed::loft_rails(&rail_sections, &rails, &how).map_err(err)?).map_err(err);
     }
-    let degree = if ruled { 1 } else { (curves.len() as u32 - 1).clamp(1, 3) };
+    let degree = if ruled { 1 } else { (curves.len().saturating_sub(1) as u32).clamp(1, 3) };
     model::loft(&curves, degree, cap).map_err(err)
 }
 
@@ -1479,5 +1517,13 @@ mod tests {
         tool.length = 1.0;
         let body = rebuild_history_tree(&tree).expect("a box with a narrower hole");
         assert!((model::volume(&body).unwrap() - 56.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn empty_and_single_section_builders_return_errors_without_panicking() {
+        assert!(loft_sections(&[], &[], false, false, false).is_err());
+        assert!(loft_sections(&[LoftSection::Point([0.0; 3])], &[], false, false, false).is_err());
+        assert!(loft_sections(&[], &[vec![]], false, false, false).is_err());
+        assert!(extrude_region(&Plane::XY, &[], [0.0, 0.0, 1.0], 0.0, false).is_err());
     }
 }

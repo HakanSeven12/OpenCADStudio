@@ -1182,6 +1182,9 @@ pub enum Message {
     ViewportLeftPressAt(Point),
     ViewportLeftPress,
     ViewportLeftRelease,
+    /// A left release that a widget or popup captured before the viewport
+    /// saw it. Ends a viewport press it left armed.
+    ViewportLeftReleaseCaptured,
     ViewportRightPress,
     ViewportRightRelease,
     ViewportMiddlePress,

@@ -461,6 +461,8 @@ mod table_grip_picture_tests;
 
 #[cfg(test)]
 mod selection_click_wobble_tests;
+#[cfg(test)]
+mod tab_menu_release_tests;
 
 #[cfg(test)]
 mod hatch_double_click_tests;

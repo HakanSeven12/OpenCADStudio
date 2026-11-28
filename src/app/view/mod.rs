@@ -429,6 +429,14 @@ pub(crate) fn window_event_with_context(
             crate::ui::ribbon::keytip_pointer_pressed();
             Some(Message::PropPointerPressed)
         }
+        // A popup (a tab's right-click menu) that the press closed still
+        // takes the release of that press, so the viewport never hears it.
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))
+            if status == Status::Captured && is_main =>
+        {
+            crate::ui::ribbon::keytip_pointer_pressed();
+            Some(Message::ViewportLeftReleaseCaptured)
+        }
         iced::Event::Mouse(
             iced::mouse::Event::ButtonPressed(_)
             | iced::mouse::Event::ButtonReleased(_)

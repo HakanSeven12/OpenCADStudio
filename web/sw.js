@@ -36,7 +36,7 @@
 //   visit after that. Nothing is shown to the user — the browser chrome
 //   already handles the "update available" UX.
 
-const CACHE_VERSION = "v1"; // stamped by the Pages workflow (bundle hash)
+const CACHE_VERSION = "v2"; // stamped by the Pages workflow (bundle hash)
 const CACHE_NAME = `ocs-app-${CACHE_VERSION}`;
 const SHELL_URL = new URL("./", self.registration.scope);
 
@@ -81,7 +81,16 @@ self.addEventListener("fetch", (event) => {
 
   // Only same-origin GETs are ours to serve.
   if (request.method !== "GET") return;
-  if (new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  // Never intercept embed=1 requests so embedded sessions stay directly
+  // bound to the live origin without stale offline cache interference.
+  if (url.searchParams.get("embed") === "1") return;
+  if (request.referrer) {
+    try {
+      if (new URL(request.referrer).searchParams.get("embed") === "1") return;
+    } catch {}
+  }
   // Range requests (media seeking) cannot be served from a full-body cache.
   if (request.headers.has("range")) return;
 
@@ -92,7 +101,7 @@ self.addEventListener("fetch", (event) => {
         // Only the scope root is the app shell: caching any other in-scope
         // navigation here would store e.g. a font or JSON body under the
         // shell key and serve it for every offline navigation.
-        const isShell = new URL(request.url).pathname === SHELL_URL.pathname;
+        const isShell = url.pathname === SHELL_URL.pathname;
         try {
           const fresh = await fetch(request);
           if (isShell) await put(cache, SHELL_URL, fresh);
@@ -110,13 +119,30 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Cache-first with background revalidate. On a hit the cached copy is
-  // returned immediately and a fresh one is fetched (and cached) in the
-  // background; on a miss the network response is cached before being
-  // returned, making the next visit offline-capable.
+  // Content-hashed Trunk outputs and bundled fonts use cache-first with
+  // background revalidate; unhashed mutable JS/JSON assets use network-first
+  // with cache fallback so updates land cleanly.
+  const isImmutableAsset =
+    /-[0-9a-f]{8,}\.(?:wasm|js)$/i.test(url.pathname) ||
+    url.pathname.includes("/fonts/");
+
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
+      if (!isImmutableAsset) {
+        try {
+          const fresh = await fetch(request);
+          await put(cache, request, fresh);
+          return fresh;
+        } catch {
+          const cached = await cache.match(request);
+          if (cached) return cached;
+          return new Response("Open CAD Studio is offline.", {
+            status: 503,
+            headers: {"Content-Type": "text/plain; charset=utf-8"},
+          });
+        }
+      }
       const cached = await cache.match(request);
       const network = fetch(request)
         .then(async (fresh) => {

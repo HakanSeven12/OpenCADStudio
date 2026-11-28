@@ -9,6 +9,7 @@ function visit(language, pathname = '/', saved, blocked = false) {
   const handlers = {};
   const picker = { removeAttribute: () => { menuOpen = false; }, querySelector: () => ({ focus: () => { focused = true; } }) };
   const context = {
+    URL,
     navigator: { language },
     location: { pathname, search: '?ref=test', hash: '#formats', replace: url => { redirected = url; } },
     document: { addEventListener: (type, listener) => { handlers[type] = listener; }, querySelector: () => menuOpen ? picker : null },
@@ -56,4 +57,22 @@ const keyboard = visit('en-US');
 keyboard.escape();
 assert.equal(keyboard.menuOpen(), false);
 assert.equal(keyboard.focused(), true);
+
+assert.equal(context.isSafeGitHubUrl('https://github.com/HakanSeven12/OpenCADStudio/releases/tag/v1'), true);
+assert.equal(context.isSafeGitHubUrl('https://objects.githubusercontent.com/github-production-release-asset/1'), true);
+assert.equal(context.isSafeGitHubUrl('https://release-assets.githubusercontent.com/github-production-release-asset/1'), true);
+assert.equal(context.isSafeGitHubUrl('javascript:alert(1)'), false);
+assert.equal(context.isSafeGitHubUrl('http://github.com/HakanSeven12/OpenCADStudio'), false);
+assert.equal(context.isSafeGitHubUrl('https://evil.example/payload.msi'), false);
+const poisoned = context.sanitizeRelease({
+  tag: 'v1',
+  url: 'https://github.com/HakanSeven12/OpenCADStudio/releases/tag/v1',
+  published: '2026-11-27T00:00:00Z',
+  assets: [
+    { name: 'bad.msi', url: 'javascript:alert(1)', size: 10 },
+    { name: 'good.msi', url: 'https://objects.githubusercontent.com/ok/good.msi', size: 10 },
+  ],
+});
+assert.deepEqual(poisoned.assets.map(a => a.name), ['good.msi']);
+assert.equal(context.sanitizeRelease({ tag: 'v1', url: 'https://evil.example/r', assets: [] }), null);
 console.log('Website language matching, redirects, manual choices and blocked storage passed');

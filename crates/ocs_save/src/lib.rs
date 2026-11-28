@@ -324,13 +324,21 @@ pub fn encode_request(doc: &Document, ext: &str) -> Result<Vec<u8>, String> {
 
 /// Decode a `serialize` request on the worker: returns the document (with
 /// runtime fields restored) and the target extension.
+const MAX_WORKER_PAYLOAD_BYTES: u64 = 512 * 1024 * 1024;
+
 pub fn decode_request(bytes: &[u8]) -> Result<(Document, String), String> {
+    use bincode::Options as _;
     let (version, ext, mut document, runtime_fields): (
         u16,
         String,
         Document,
         Vec<EntityRuntimeFields>,
-    ) = bincode::deserialize(bytes).map_err(|error| format!("decode save document: {error}"))?;
+    ) = bincode::options()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .with_limit(MAX_WORKER_PAYLOAD_BYTES)
+        .deserialize(bytes)
+        .map_err(|error| format!("decode save document: {error}"))?;
     if version != PROTOCOL_VERSION {
         return Err(format!(
             "serializer worker protocol mismatch: expected {PROTOCOL_VERSION}, received {version}"
@@ -349,8 +357,13 @@ pub fn encode_response(result: Result<Vec<u8>, String>) -> Result<Vec<u8>, Strin
 /// Decode the worker's reply on the main thread, rejecting stale-protocol
 /// payloads.
 pub fn decode_response(bytes: &[u8]) -> Result<Result<Vec<u8>, String>, String> {
-    let (version, result): (u16, Result<Vec<u8>, String>) =
-        bincode::deserialize(bytes).map_err(|error| format!("decode save response: {error}"))?;
+    use bincode::Options as _;
+    let (version, result): (u16, Result<Vec<u8>, String>) = bincode::options()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .with_limit(MAX_WORKER_PAYLOAD_BYTES)
+        .deserialize(bytes)
+        .map_err(|error| format!("decode save response: {error}"))?;
     if version != PROTOCOL_VERSION {
         return Err(format!(
             "serializer worker protocol mismatch: expected {PROTOCOL_VERSION}, received {version}"
@@ -580,6 +593,16 @@ mod tests {
         let a = serialize_document(&doc, "dxf").expect("bytes a");
         let b = serialize_document(&doc, "dxf").expect("bytes b");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn crafted_huge_length_bincode_payload_is_rejected_without_oom() {
+        let mut crafted = Vec::new();
+        crafted.extend_from_slice(&PROTOCOL_VERSION.to_le_bytes());
+        crafted.extend_from_slice(&0u32.to_le_bytes()); // Ok variant
+        crafted.extend_from_slice(&(u64::MAX / 2).to_le_bytes()); // forged Vec<u8> len
+        assert!(decode_response(&crafted).is_err());
+        assert!(decode_request(&crafted).is_err());
     }
 }
 

@@ -6,8 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, follow" />
     <meta name="theme-color" content="#1e1e1e" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self';"
+    />
     <title>Open CAD Studio Web App</title>
-    <script id="openaec-analytics-loader" src="https://open-aec.com/shared/analytics.js?v=20261026" defer></script>
+    <script id="openaec-analytics-loader" src="analytics.js" defer></script>
     <link data-trunk rel="icon" href="assets/logo.svg" />
     <style>
       html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; }
@@ -47,6 +51,8 @@
     <link data-trunk rel="copy-file" href="web/videos.json" />
     <link data-trunk rel="copy-file" href="web/locale-labels.json" />
     <link data-trunk rel="copy-file" href="web/ocs-control.js" />
+    <link data-trunk rel="copy-file" href="web/analytics.js" />
+    <link data-trunk rel="copy-file" href="web/app-boot.js" />
     <link data-trunk rel="copy-file" href="web/sw.js" />
     <link data-trunk rel="copy-file" href="web/app.webmanifest" />
     <link data-trunk rel="copy-file" href="assets/logo.svg" />
@@ -58,69 +64,6 @@
       <div class="sub">Loading…</div>
     </div>
     <script src="ocs-control.js" defer></script>
-    <script>
-      // Offline support: register the service worker. It is copied next to
-      // this page by Trunk (see the copy-file link in <head>), so the
-      // relative URL resolves to /app/sw.js and the registration scope is
-      // /app/ — the whole app. Registered immediately (not on load) so the
-      // worker starts capturing this visit's asset requests as early as
-      // possible. sw.js never reloads the page on update: a new worker
-      // waits until every tab on the old version has closed.
-      // A sandboxed iframe without allow-same-origin has an opaque origin:
-      // there even reading navigator.serviceWorker throws (#2257).
-      (() => {
-        if (self.origin === "null" || !("serviceWorker" in navigator) || new URLSearchParams(location.search).get("embed") === "1") return;
-        try {
-          navigator.serviceWorker.register("sw.js").catch(error => {
-            console.warn("service worker registration failed; offline support disabled:", error);
-          });
-        } catch (error) {
-          console.warn("service worker unavailable; offline support disabled:", error);
-        }
-      })();
-    </script>
-    <script>
-      (() => {
-        const splash = document.getElementById("loading");
-        fetch("locale-labels.json").then(response => response.json()).then(labels => {
-          let saved;
-          try {
-            saved = JSON.parse(localStorage.getItem("opencadstudio.settings"))?.settings?.language;
-          } catch {}
-          const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
-          const requested = typeof saved === "string" && saved !== "system" ? [saved, ...preferred] : preferred;
-          const available = Object.keys(labels);
-          let locale = "en-US";
-          for (const candidate of requested) {
-            try {
-              const language = new Intl.Locale(candidate);
-              const match = available.find(value => value.toLowerCase() === language.baseName.toLowerCase())
-                || (language.language === "zh"
-                  ? (language.maximize().script === "Hant" ? "zh-TW" : "zh-CN")
-                  : available.find(value => value.startsWith(language.language + "-")));
-              if (match) { locale = match; break; }
-            } catch {}
-          }
-          document.title = labels[locale].title;
-          document.documentElement.lang = locale;
-          document.documentElement.dir = locale === "ar-SA" ? "rtl" : "ltr";
-          const caption = splash?.querySelector(".sub");
-          if (caption) caption.textContent = labels[locale].loading;
-        }).catch(() => {});
-        const done = () => {
-          if (!splash) return;
-          splash.classList.add("hide");
-          setTimeout(() => splash.remove(), 450);
-        };
-        if (document.querySelector("canvas")) return done();
-        const observer = new MutationObserver(() => {
-          if (document.querySelector("canvas")) {
-            observer.disconnect();
-            done();
-          }
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-      })();
-    </script>
+    <script src="app-boot.js" defer></script>
   </body>
 </html>

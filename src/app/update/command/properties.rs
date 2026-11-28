@@ -101,6 +101,17 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    pub(in crate::app) fn ensure_tab_catalog_linetype(&mut self, i: usize, name: &str) -> bool {
+        if crate::catalog::linetypes::ensure_catalog_linetype(&mut self.tabs[i].scene.document, name) {
+            self.tabs[i]
+                .scene
+                .invalidate_linetype_dependencies(&[name.to_string()]);
+            true
+        } else {
+            false
+        }
+    }
+
     pub(in crate::app) fn on_ribbon_linetype_changed(&mut self, lt: String) -> Task<Message> {
         let i = self.active_tab;
         self.ribbon.close_dropdown();
@@ -110,6 +121,7 @@ impl OpenCADStudio {
                 return Task::none();
             }
             self.push_undo_snapshot(i, "CELTYPE");
+            let _ = self.ensure_tab_catalog_linetype(i, &lt);
             // Persist into the tab's header (CELTYPE). Resolve to a
             // handle when the name matches a line_types entry so the
             // handle-based lookup stays in sync. #21.
@@ -129,7 +141,12 @@ impl OpenCADStudio {
             // Linetype is baked into the cached wire geometry —
             // re-tessellate so the dashed/solid look updates immediately
             // (issue #231 class).
+            let mut catalog_checked = false;
             self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                if !catalog_checked {
+                    catalog_checked = true;
+                    let _ = app.ensure_tab_catalog_linetype(i, &lt);
+                }
                 if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
                     crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
                 }
@@ -140,6 +157,64 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_ribbon_style_changed(
+        &mut self,
+        key: crate::modules::StyleKey,
+        name: String,
+    ) -> Task<Message> {
+        use crate::modules::StyleKey;
+        let i = self.active_tab;
+        match key {
+            StyleKey::TextStyle => {
+                let found = self.tabs[i]
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .find(|s| s.name == name)
+                    .map(|ts| ts.handle);
+                if let Some(h) = found {
+                    let header = &self.tabs[i].scene.document.header;
+                    if header.current_text_style_handle != h
+                        || header.current_text_style_name != name
+                    {
+                        self.push_undo_snapshot(i, "STYLE");
+                    }
+                }
+            }
+            StyleKey::DimStyle => {
+                let found = self.tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .get(&name)
+                    .map(|ds| ds.handle);
+                if let Some(h) = found {
+                    let header = &self.tabs[i].scene.document.header;
+                    if header.current_dimstyle_handle != h
+                        || header.current_dimstyle_name != name
+                    {
+                        self.push_undo_snapshot(i, "DIMSTYLE");
+                    }
+                }
+            }
+            StyleKey::MLeaderStyle => {
+                if self.tabs[i].scene.document.header.current_mleader_style_name != name {
+                    self.push_undo_snapshot(i, "MLEADERSTYLE");
+                }
+            }
+            StyleKey::TableStyle => {
+                let found = self.tabs[i].scene.document.objects.values().any(
+                    |o| matches!(o, document::objects::ObjectType::TableStyle(ts) if ts.name == name),
+                );
+                if found && self.tabs[i].scene.document.header.current_table_style_name != name {
+                    self.push_undo_snapshot(i, "TABLESTYLE");
+                }
+            }
+        }
+        self.apply_ribbon_style_changed(key, name)
+    }
+
+    pub(in crate::app) fn apply_ribbon_style_changed(
         &mut self,
         key: crate::modules::StyleKey,
         name: String,
@@ -158,8 +233,14 @@ impl OpenCADStudio {
                     .find(|s| s.name == name)
                     .map(|ts| ts.handle);
                 if let Some(h) = found {
-                    self.tabs[i].scene.document.header.current_text_style_handle = h;
-                    self.tabs[i].scene.document.header.current_text_style_name = name;
+                    let header = &mut self.tabs[i].scene.document.header;
+                    if header.current_text_style_handle != h
+                        || header.current_text_style_name != name
+                    {
+                        header.current_text_style_handle = h;
+                        header.current_text_style_name = name;
+                        self.tabs[i].dirty = true;
+                    }
                 }
             }
             StyleKey::DimStyle => {
@@ -172,11 +253,17 @@ impl OpenCADStudio {
                     .get(&name)
                     .map(|ds| ds.handle);
                 if let Some(h) = found {
-                    self.tabs[i].scene.document.header.current_dimstyle_handle = h;
-                    self.tabs[i].scene.document.header.current_dimstyle_name = name;
+                    let header = &mut self.tabs[i].scene.document.header;
+                    let changed = header.current_dimstyle_handle != h
+                        || header.current_dimstyle_name != name;
+                    header.current_dimstyle_handle = h;
+                    header.current_dimstyle_name = name;
                     crate::scene::creation_style::sync_header_dim_vars(
                         &mut self.tabs[i].scene.document,
                     );
+                    if changed {
+                        self.tabs[i].dirty = true;
+                    }
                 }
             }
             StyleKey::MLeaderStyle => {

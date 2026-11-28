@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the static website using the application's supported locales."""
 
+import base64
 import hashlib
 import json
 import re
@@ -70,6 +71,9 @@ def build(output):
     script = "const SITE_LOCALES = " + json.dumps(list(catalogs)) + ";\n" + (ROOT / "site/site.js").read_text()
     (output / "site.js").write_text(script, encoding="utf-8")
     js_version = hashlib.sha256(script.encode()).hexdigest()[:12]
+    analytics_bytes = (ROOT / "site/analytics.js").read_bytes()
+    (output / "analytics.js").write_bytes(analytics_bytes)
+    analytics_version = hashlib.sha256(analytics_bytes).hexdigest()[:12]
     def alternates_for(page=""):
         links = '\n'.join(f'<link rel="alternate" hreflang="{lang}" href="{BASE}{public_path(lang)}{page}" />' for lang in catalogs)
         return links + f'\n<link rel="alternate" hreflang="x-default" href="{BASE}/{page}" />'
@@ -102,7 +106,7 @@ def build(output):
         values.update(locale=locale, direction="rtl" if locale == "ar-SA" else "ltr",
                       path=path, url=BASE + path, og_locale=locale.replace("-", "_"),
                       logo=logo, workspace=workspace, modeling=modeling, icons=icons,
-                      css_version=css_version, js_version=js_version, alternates=alternates,
+                      css_version=css_version, js_version=js_version, analytics_version=analytics_version, alternates=alternates,
                       languages=escape(messages["languages"].format(count=len(catalogs))),
                       language_links=language_links,
                       website_schema=(f'<script type="application/ld+json">{json.dumps(website_schema)}</script>'
@@ -138,8 +142,41 @@ def build(output):
     app = output / "app/index.html"
     if app.exists():
         html = re.sub(r'<link\b(?=[^>]*\brel=["\'](?:(?:shortcut )?icon|apple-touch-icon)["\'])[^>]*>', '', app.read_text())
-        app.write_text(html.replace('</head>', icons + '\n</head>'), encoding="utf-8")
+        html = html.replace('</head>', icons + '\n</head>')
+        app.write_text(stamp_csp_inline_script_hashes(html), encoding="utf-8")
     print(f"Built {len(catalogs)} website languages and current application icons")
+
+
+def stamp_csp_inline_script_hashes(html):
+    hashes = []
+    for match in re.finditer(r'<script\b([^>]*)>(.*?)</script>', html, flags=re.IGNORECASE | re.DOTALL):
+        attrs, body = match.group(1), match.group(2)
+        if re.search(r'\bsrc\s*=', attrs, flags=re.IGNORECASE):
+            continue
+        type_match = re.search(r'\btype\s*=\s*["\']([^"\']*)["\']', attrs, flags=re.IGNORECASE)
+        if type_match and type_match.group(1).lower() not in ('', 'text/javascript', 'module'):
+            continue
+        if body:
+            digest = base64.b64encode(hashlib.sha256(body.encode('utf-8')).digest()).decode('ascii')
+            token = f"'sha256-{digest}'"
+            if token not in hashes:
+                hashes.append(token)
+    if not hashes:
+        return html
+
+    def patch_csp(meta_match):
+        tag = meta_match.group(0)
+        content_match = re.search(r'\bcontent=(["\'])(.*?)\1', tag, flags=re.IGNORECASE | re.DOTALL)
+        if not content_match:
+            return tag
+        quote, policy = content_match.group(1), content_match.group(2)
+        extra = ' '.join(h for h in hashes if h not in policy)
+        if not extra:
+            return tag
+        patched = re.sub(r'(script-src\b[^;]*)', lambda m: f"{m.group(1)} {extra}", policy, count=1)
+        return tag.replace(f'content={quote}{policy}{quote}', f'content={quote}{patched}{quote}', 1)
+
+    return re.sub(r'<meta\b[^>]*http-equiv=["\']Content-Security-Policy["\'][^>]*>', patch_csp, html, flags=re.IGNORECASE)
 
 
 if __name__ == "__main__":

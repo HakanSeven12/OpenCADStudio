@@ -5,7 +5,9 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'web-app.html'), 'utf8');
-const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]).join('\n');
+assert.equal([...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].length, 0);
+assert.ok(page.includes('<script src="app-boot.js"'));
+const script = fs.readFileSync(path.join(root, 'web/app-boot.js'), 'utf8');
 const labels = JSON.parse(fs.readFileSync(path.join(root, 'web/locale-labels.json'), 'utf8'));
 
 async function visit(languages, saved, blocked = false) {

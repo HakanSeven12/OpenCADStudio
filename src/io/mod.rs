@@ -70,6 +70,8 @@ pub(crate) mod web_drop;
 pub(crate) mod host_bridge;
 #[cfg(target_arch = "wasm32")]
 mod web_worker;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web_worker::cancel_active_parse_workers;
 // Same split as web_autosave: the ?file= deep-link parser (and its tests) are
 // pure and compile everywhere; the fetch/open half is wasm-only.
 pub(crate) mod web_link;

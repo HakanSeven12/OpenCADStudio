@@ -415,6 +415,23 @@ impl OpenCADStudio {
         let Some(i) = self.attr_editor_session.as_ref().map(|s| s.tab) else {
             return true;
         };
+        let linetypes: Vec<String> = self
+            .attr_editor_rows
+            .iter()
+            .filter(|r| !r.linetype.is_empty())
+            .map(|r| r.linetype.clone())
+            .collect();
+        let mut loaded_any = false;
+        for lt in &linetypes {
+            if self.ensure_tab_catalog_linetype(i, lt) {
+                loaded_any = true;
+            }
+        }
+        if loaded_any {
+            self.tabs[i]
+                .scene
+                .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+        }
         // Fields picked in the Field dialog go onto their attributes.
         let fielded: Vec<(usize, Option<(String, Vec<Handle>)>, String)> = self
             .attr_editor_rows

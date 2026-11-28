@@ -48,18 +48,22 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install pinned MCP Inspector
+        working-directory: .github/mcp-inspector
+        run: npm ci --ignore-scripts
+
       - name: Release build
         run: cargo build --release --locked
 
       - name: Inspector config
         run: |
           printf '{"mcpServers":{"ocs":{"command":"%s/target/release/OpenCADStudio","args":["--mcp"]}}}' \
-            "${{ github.workspace }}" > "${{ runner.temp }}/mcp-inspector.json"
+            "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/mcp-inspector.json"
 
       - name: initialize (pure serverInfo, experimental build)
         run: |
-          npx -y @modelcontextprotocol/inspector --cli \
-            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+          "$GITHUB_WORKSPACE/.github/mcp-inspector/node_modules/.bin/mcp-inspector" --cli \
+            --config "$RUNNER_TEMP/mcp-inspector.json" --server ocs \
             --method initialize --format json 2>/dev/null | jq -e '
             .result.serverInfo.name == "OpenCADStudio"
             and ((.result.serverInfo | keys_unsorted | sort) == ["name","title","version"])
@@ -67,23 +71,23 @@ jobs:
 
       - name: tools/list (core tools present, every tool titled)
         run: |
-          npx -y @modelcontextprotocol/inspector --cli \
-            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+          "$GITHUB_WORKSPACE/.github/mcp-inspector/node_modules/.bin/mcp-inspector" --cli \
+            --config "$RUNNER_TEMP/mcp-inspector.json" --server ocs \
             --method tools/list --format json 2>/dev/null | jq -e '
             ([.result.tools[].name] | contains(["ocs_capture","ocs_execute","ocs_read","ocs_sessions"]))
             and all(.result.tools[]; (.title | type == "string") and (.title | length > 0))'
 
       - name: resources/list (reachable headless)
         run: |
-          npx -y @modelcontextprotocol/inspector --cli \
-            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+          "$GITHUB_WORKSPACE/.github/mcp-inspector/node_modules/.bin/mcp-inspector" --cli \
+            --config "$RUNNER_TEMP/mcp-inspector.json" --server ocs \
             --method resources/list --format json 2>/dev/null | jq -e '
             (.result.resources | type == "array")'
 
       - name: resources/templates/list (tile, layout tile and snapshot templates)
         run: |
-          npx -y @modelcontextprotocol/inspector --cli \
-            --config "${{ runner.temp }}/mcp-inspector.json" --server ocs \
+          "$GITHUB_WORKSPACE/.github/mcp-inspector/node_modules/.bin/mcp-inspector" --cli \
+            --config "$RUNNER_TEMP/mcp-inspector.json" --server ocs \
             --method resources/templates/list --format json 2>/dev/null | jq -e '
             ([.result.resourceTemplates[].uriTemplate] | sort) == [
               "cad://session/{session_id}/layout/{layout}/tile/{level}/{x}/{y}.png",

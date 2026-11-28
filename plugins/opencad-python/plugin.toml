@@ -8,7 +8,7 @@ license = "GPL-3.0-only"
 repository = "HakanSeven12/OpenCADStudio"
 
 [opencad]
-api_version = 7
+api_version = 17
 # Both filled by release.yml at build time from the actual compiler and
 # Cargo.lock's resolved document source. Declare acadrust_source even though
 # it's optional: the host's compatibility check only runs at all if this

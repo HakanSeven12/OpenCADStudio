@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the in-tree API v7 Python plugin and stage a complete plugin package.
+# Build the in-tree API v17 Python plugin and stage a complete plugin package.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -66,12 +66,12 @@ def acadrust_source(path):
     return sources[0]
 
 manifest = Path("plugin.toml").read_text()
-if "api_version = 7" not in manifest:
-    raise SystemExit("bundled plugin.toml must target API v7")
+if "api_version = 17" not in manifest:
+    raise SystemExit("bundled plugin.toml must target API v17")
 manifest = manifest.replace("__RUSTC_VERSION__", sys.argv[2])
 manifest = manifest.replace("__ACADRUST_SOURCE__", acadrust_source(sys.argv[3]))
 if "__" in manifest:
     raise SystemExit("unresolved manifest placeholder")
 Path(sys.argv[1]).write_text(manifest)
 PY
-echo "Staged bundled API v7 plugin in $stage_dir"
+echo "Staged bundled API v17 plugin in $stage_dir"

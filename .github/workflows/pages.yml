@@ -12,6 +12,11 @@ on:
       commit:
         required: true
         type: string
+    secrets:
+      OCS_PATREON_TOKEN:
+        required: false
+      OCS_GITHUB_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       build_main:
@@ -20,10 +25,7 @@ on:
         default: false
 
 permissions:
-  contents: write
-  discussions: read
-  pages: write
-  id-token: write
+  contents: read
 
 # Allow only one Pages deployment at a time.
 concurrency:
@@ -33,6 +35,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      discussions: read
     outputs:
       tag: ${{ steps.source.outputs.tag }}
       commit: ${{ steps.source.outputs.commit }}
@@ -322,7 +327,7 @@ jobs:
           try:
               page = fetch(playlist).decode("utf-8", errors="replace")
               ids = []
-              for video_id in re.findall(r'"videoId":"([^"]+)"', page):
+              for video_id in re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', page):
                   if len(video_id) == 11 and video_id not in ids:
                       ids.append(video_id)
                   if len(ids) >= 50:
@@ -415,6 +420,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

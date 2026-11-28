@@ -98,6 +98,7 @@ parts:
   graphics-core22:
     after: [open-cad-studio]
     source: https://github.com/canonical/gpu-snap.git
+    source-commit: 7c4091ddcea8f969b98a752c48841af9b0a659d8
     plugin: dump
     override-prime: |
       craftctl default

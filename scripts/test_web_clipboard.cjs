@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 (async () => {
-    const source = fs.readFileSync(path.join(__dirname, '../web/clipboard.js'), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, '../crates/ocs_base/web/clipboard.js'), 'utf8');
     const { copyHistory } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
     const text = 'LINE\n0,0\n10,10\n<unchanged & literal>\n';
     let copied;

@@ -222,6 +222,21 @@ fn with_gap<'a>(bar: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
 /// would take room of its own and push the grid left when it appears). A
 /// `SCROLLBAR_W` rail with a `SCROLL_THUMB_W` thumb centred.
 pub fn scroll_area<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    grid_scrollable(content).into()
+}
+
+/// A [`scroll_area`] that sends `on_scroll` with its viewport when it
+/// scrolls, for a list that builds only the rows in view.
+pub fn scroll_area_reporting<'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_scroll: impl Fn(scrollable::Viewport) -> Message + 'a,
+) -> Element<'a, Message> {
+    grid_scrollable(content).on_scroll(on_scroll).into()
+}
+
+fn grid_scrollable<'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
     let content = container(content).padding(Padding {
         left: km::GRID_INSET_L,
         right: km::GRID_INSET_R,
@@ -237,7 +252,6 @@ pub fn scroll_area<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, 
         .width(Length::Fill)
         .height(Length::Fill)
         .style(scroll_style)
-        .into()
 }
 
 /// The overlaid scrollbar: no rail, a muted thumb.

@@ -587,6 +587,9 @@ impl OpenCADStudio {
                 self.geometry_cleanup.kept.remove(id);
                 self.geometry_cleanup_rescan(i);
             }
+            GeometryCleanupMsg::Scrolled { offset, height } => {
+                self.geometry_cleanup.scroll = (offset, height);
+            }
             GeometryCleanupMsg::FoldKept => {
                 self.geometry_cleanup.kept_open = !self.geometry_cleanup.kept_open;
             }

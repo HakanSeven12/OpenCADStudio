@@ -241,12 +241,19 @@ pub(crate) fn style_for_property<'a>(
         .get(column)
         .and_then(|column| column.style.as_ref());
     // A column's style wins over its row's (measured with named cell styles
-    // on both: the column's applies where they cross).
-    [column_style, row.style.as_ref(), table.base_style.as_ref()]
+    // on both: the column's applies where they cross). Like the cell's, a
+    // row's or column's overrides count in either layout: a scaled binary
+    // table states each row's text height in the override word alone.
+    [column_style, row.style.as_ref()]
         .into_iter()
         .flatten()
-        .find(|&style| style.property_flags.contains(property))
-        .map(|v| v as _)
+        .find(|style| style.sets(property))
+        .or_else(|| {
+            table
+                .base_style
+                .as_ref()
+                .filter(|style| style.property_flags.contains(property))
+        })
 }
 
 /// A cell's text height: the content's own format when it overrides it,

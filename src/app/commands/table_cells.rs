@@ -2073,6 +2073,126 @@ mod tests {
         );
     }
 
+    /// A binary table whose every row style overrides the text height
+    /// through its override word alone (bit 0x80, property flags 0), whose
+    /// contents carry that height without their own bit and whose cells
+    /// override the margins. The text is measured at the row's 2.146, not
+    /// the table style's 4.572: settling keeps every row at 4.29, and so
+    /// does inserting a row anywhere, the new row included. Every row grew
+    /// to 6.00 (= 4.572 + 2 x 0.7154).
+    #[test]
+    fn row_style_text_height_override_holds_on_settle_and_insert() {
+        use document::entities::table::{CellStyle, CellStylePropertyFlags as P, CellStyleType};
+        const TEXT: f64 = 2.1461415940147366;
+        const MARGIN: f64 = 0.7153805313382455;
+        const ROW: f64 = 4.292283188029473;
+        let mut cases = Vec::new();
+        for r in 0..5 {
+            cases.push(("", (r, 0)));
+            cases.push(("_TCELLROWABOVE", (r, 0)));
+            cases.push(("_TCELLROWBELOW", (r, 0)));
+        }
+        for (cmd, pick) in cases {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let mut style = document::objects::TableStyle::standard();
+            for role in [
+                &mut style.title_row_style,
+                &mut style.header_row_style,
+                &mut style.data_row_style,
+            ] {
+                role.text_height = 4.572;
+            }
+            style.horizontal_margin = 1.524;
+            style.vertical_margin = 1.524;
+            let document = &mut app.tabs[i].scene.document;
+            let style_handle = document.allocate_handle();
+            document.objects.insert(
+                style_handle,
+                document::objects::ObjectType::TableStyle(style),
+            );
+            let mut t = Table::new(Vector3::ZERO, 5, 5);
+            t.table_style_handle = Some(style_handle);
+            for column in &mut t.columns {
+                column.width = 12.0;
+            }
+            for r in 0..5 {
+                for c in 0..5 {
+                    t.set_cell_text(r, c, &format!("{r}{c}"));
+                }
+            }
+            let mut row_style = CellStyle::new();
+            row_style.style_type = CellStyleType::Row;
+            row_style.override_flags = P::TEXT_HEIGHT.bits() as i32;
+            row_style.text_height = TEXT;
+            let mut cell_style = CellStyle::new();
+            cell_style.override_flags =
+                (P::MARGIN_LEFT | P::MARGIN_TOP | P::MARGIN_RIGHT | P::MARGIN_BOTTOM).bits() as i32;
+            cell_style.margin_override_flags = 1;
+            cell_style.margin_left = MARGIN;
+            cell_style.margin_top = MARGIN;
+            cell_style.margin_right = MARGIN;
+            cell_style.margin_bottom = MARGIN;
+            for row in &mut t.rows {
+                row.height = ROW;
+                row.style = Some(row_style.clone());
+                for cell in &mut row.cells {
+                    cell.style = Some(cell_style.clone());
+                    let content = &mut cell.contents[0];
+                    content.text_height = TEXT;
+                    content.format_override_flags = 3;
+                    content.format_property_flags = 0;
+                }
+            }
+            let heights = |t: &Table| t.rows.iter().map(|r| r.height).collect::<Vec<_>>();
+            let mut settled = t.clone();
+            crate::entities::table::settle_table(&mut settled, &app.tabs[i].scene.document);
+            let before = heights(&settled);
+            assert!(
+                before.iter().all(|h| (h - ROW).abs() < 1e-9),
+                "settle: row heights {before:?}"
+            );
+            // what the Properties panel shows as the cell's text height
+            let shown = crate::entities::table::style_for_property(
+                &t,
+                &t.rows[pick.0],
+                0,
+                &t.rows[pick.0].cells[0],
+                P::TEXT_HEIGHT,
+            )
+            .map(|s| s.text_height);
+            assert_eq!(shown, Some(TEXT), "text height source");
+            if cmd.is_empty() {
+                continue;
+            }
+            let handle = app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Table(Box::new(t)));
+            app.tabs[i]
+                .scene
+                .select_table_cells(crate::scene::TableCellSelection {
+                    table: handle,
+                    anchor: pick,
+                    end: pick,
+                });
+            let _ = app.dispatch_table_cells(cmd, i);
+            let Some(document::EntityType::Table(t)) =
+                app.tabs[i].scene.document.get_entity(handle)
+            else {
+                panic!("{cmd}: the table must stay");
+            };
+            let mut t = (**t).clone();
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let after = heights(&t);
+            assert_eq!(after.len(), 6, "{cmd} at {pick:?}: rows");
+            assert!(
+                after.iter().all(|h| (h - ROW).abs() < 1e-9),
+                "{cmd} at {pick:?}: row heights {after:?}"
+            );
+        }
+    }
+
     #[test]
     fn insert_right_of_b_to_d_adds_three_columns_after_d() {
         // picked B1:D2 (columns 1..=3): insert right

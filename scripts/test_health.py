@@ -334,6 +334,54 @@ class TestFunctions(unittest.TestCase):
         self.assertIn("`tests/t.rs`: 2 → 1", out)
 
 
+class PlannedCrates(unittest.TestCase):
+    """Code that moves from src/ into a crate of TARGET.md is still measured."""
+    moved = {
+        "i18n.rs": "fn g() { a.unwrap(); }\nfn h() { unsafe { x() } }\n" + body(200) + "\n" * 3000,
+        "io/a.rs": "fn f() { b.expect(\"x\"); }\n",
+    }
+
+    def test_a_move_into_a_planned_crate_keeps_the_values(self):
+        before = full_tree({f"src/{k}": v for k, v in self.moved.items()})
+        after = full_tree({"src/io/a.rs": self.moved["io/a.rs"], "crates/ocs_base/src/i18n.rs": self.moved["i18n.rs"]})
+        (v0, d0), (v1, d1) = health.measure_source(before), health.measure_source(after)
+        for key in ("large_files", "long_functions", "panic_sites", "panic_sites_file_load", "unsafe_undocumented"):
+            self.assertEqual(v1[key], v0[key], key)
+        self.assertEqual((v1["panic_sites"], v1["unsafe_undocumented"]), (2, 1))
+        self.assertEqual([x["file"] for x in d1["panic_sites"]], ["src/io/a.rs", "crates/ocs_base/src/i18n.rs"])
+        self.assertEqual(list(d1["large_files"]), ["crates/ocs_base/src/i18n.rs"])
+
+    def test_other_workspace_crates_are_not_measured(self):
+        root = full_tree({"src/io/a.rs": "fn f() {}\n", "crates/ocs_solid/src/lib.rs": "fn g() { a.unwrap(); }\n"})
+        self.assertEqual(health.measure_source(root)[0]["panic_sites"], 0)
+
+    def test_coverage_counts_a_planned_crate_by_the_layer_of_its_module(self):
+        root = full_tree({"src/io/a.rs": "fn i() {}\n", "crates/ocs_base/src/i18n.rs": "fn t() {}\nfn u() {}\n",
+                          "crates/ocs_solid/src/lib.rs": "fn s() {}\n"})
+        text = lcov({str(root / "src/io/a.rs"): {1: 1}, str(root / "crates/ocs_base/src/i18n.rs"): {1: 1, 2: 0},
+                     str(root / "crates/ocs_solid/src/lib.rs"): {1: 0}})
+        v, d = health.coverage_from_lcov(root, text, {"layers": {0, 1, 2, 3, 4}, "exclude": []})
+        self.assertEqual(d["coverage_files"]["crates/ocs_base/src/i18n.rs"],
+                         {"layer": 0, "lines": 2, "covered": 1, "uncovered_lines": [2]})
+        self.assertEqual(set(d["coverage_files"]), {"src/io/a.rs", "crates/ocs_base/src/i18n.rs"})
+        self.assertEqual((v["coverage_layer_0"], v["coverage_core"], v["coverage_all"]), (50.0, 66.7, 66.7))
+
+    def test_churn_and_edited_files_include_a_planned_crate(self):
+        root = git_repo()
+        for n in (1, 2):
+            path = root / "crates/ocs_base/src/i18n.rs"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fn t() {{ {n}; }}\n")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=M", "-c", "user.email=m@example.com", "commit", "-q", "-m", f"i18n {n}"],
+                           cwd=root, check=True, capture_output=True)
+        self.assertEqual(health.churn(root)["crates/ocs_base/src/i18n.rs"], 2)
+        base = full_tree({"src/io/a.rs": "fn f() {}\n", "crates/ocs_base/src/i18n.rs": "fn t() {}\n"})
+        head = full_tree({"src/io/a.rs": "fn f() {}\n", "crates/ocs_base/src/i18n.rs": "fn t() { }\n",
+                          "crates/ocs_solid/src/lib.rs": "fn s() {}\n"})
+        self.assertEqual(health.edited_files(base, head), ["crates/ocs_base/src/i18n.rs"])
+
+
 def lcov(records):
     """lcov text from {path: {line: hits}}."""
     out = []

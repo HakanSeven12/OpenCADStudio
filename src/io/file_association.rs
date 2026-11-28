@@ -486,6 +486,95 @@ mod linux_impl {
     use super::APP_ID;
     use std::path::{Path, PathBuf};
 
+    fn validate_exec_path(exec: &str) -> Result<(), String> {
+        if exec.is_empty() || exec.chars().any(|c| matches!(c, '\n' | '\r' | '\0')) {
+            return Err("executable path contains invalid control characters".to_string());
+        }
+        Ok(())
+    }
+
+    /// Escape a Freedesktop Desktop Entry string value (`TryExec=`).
+    fn escape_desktop_string(value: &str) -> String {
+        let mut out = String::with_capacity(value.len());
+        for (idx, ch) in value.chars().enumerate() {
+            match ch {
+                '\n' | '\r' | '\0' => {}
+                '\\' => out.push_str(r"\\"),
+                '\t' => out.push_str(r"\t"),
+                ' ' if idx == 0 => out.push_str(r"\s"),
+                _ => out.push(ch),
+            }
+        }
+        out
+    }
+
+    /// Escape an executable argument inside a Freedesktop `Exec=` line,
+    /// leaving simple POSIX paths unquoted while quoting/escaping spaces,
+    /// shell metacharacters, and `%` field-code markers.
+    fn escape_desktop_exec_arg(arg: &str) -> String {
+        let clean: String = arg
+            .chars()
+            .filter(|c| !matches!(c, '\n' | '\r' | '\0'))
+            .collect();
+        let needs_quote = clean.is_empty()
+            || clean.chars().any(|c| {
+                matches!(
+                    c,
+                    ' ' | '\t'
+                        | '"'
+                        | '\''
+                        | '\\'
+                        | '>'
+                        | '<'
+                        | '~'
+                        | '|'
+                        | '&'
+                        | ';'
+                        | '$'
+                        | '*'
+                        | '?'
+                        | '#'
+                        | '('
+                        | ')'
+                        | '`'
+                        | '='
+                )
+            });
+        if !needs_quote {
+            return clean.replace('%', "%%");
+        }
+        let mut out = String::with_capacity(clean.len() + 2);
+        out.push('"');
+        for ch in clean.chars() {
+            match ch {
+                // Inside double quotes in Exec=, Desktop Entry string unescaping
+                // runs before Exec= argument parsing, so literal \, ", $, and `
+                // require two-level escaping (`\\\\`, `\\"`, `\\$`, `` \\` ``),
+                // plus `%%` for literal percent signs.
+                '\\' => out.push_str(r"\\\\"),
+                '"' => out.push_str(r#"\\""#),
+                '$' => out.push_str(r"\\$"),
+                '`' => out.push_str(r"\\`"),
+                '%' => out.push_str("%%"),
+                _ => out.push(ch),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    fn thumbnailer_entry(exec: &str) -> Result<String, String> {
+        validate_exec_path(exec)?;
+        let try_exec = escape_desktop_string(exec);
+        let exec_arg = escape_desktop_exec_arg(exec);
+        Ok(format!(
+            "[Thumbnailer Entry]\n\
+             TryExec={try_exec}\n\
+             Exec={exec_arg} --dwg-thumbnail %i %o %s\n\
+             MimeType=image/vnd.dwg;image/x-dwg;application/x-dwg;application/acad;application/x-autocad;\n"
+        ))
+    }
+
     /// Write (idempotently) a `.thumbnailer` that points this binary's
     /// `--dwg-thumbnail` mode at DWG MIME types, so file managers render the
     /// embedded preview. `~/.local/bin` need not be on PATH — the entry uses the
@@ -496,14 +585,10 @@ mod linux_impl {
             .or_else(|| std::env::current_exe().ok())
             .ok_or("could not determine the executable path")?;
         let exec = exec.to_string_lossy();
+        validate_exec_path(&exec)?;
         let dir = data_home()?.join("thumbnailers");
         let path = dir.join(format!("{APP_ID}-dwg.thumbnailer"));
-        let contents = format!(
-            "[Thumbnailer Entry]\n\
-             TryExec={exec}\n\
-             Exec={exec} --dwg-thumbnail %i %o %s\n\
-             MimeType=image/vnd.dwg;image/x-dwg;application/x-dwg;application/acad;application/x-autocad;\n"
-        );
+        let contents = thumbnailer_entry(&exec)?;
         // Unchanged since last launch → skip the write.
         if std::fs::read_to_string(&path).ok().as_deref() == Some(contents.as_str()) {
             return Ok(());
@@ -524,10 +609,11 @@ mod linux_impl {
     /// packaged `Exec=OpenCADStudio` relies on PATH, which a portable binary
     /// or an AppImage is not on.
     fn desktop_entry(exec: &str) -> String {
-        let mut entry = String::with_capacity(PACKAGED_DESKTOP_ENTRY.len() + exec.len());
+        let escaped_exec = escape_desktop_exec_arg(exec);
+        let mut entry = String::with_capacity(PACKAGED_DESKTOP_ENTRY.len() + escaped_exec.len());
         for line in PACKAGED_DESKTOP_ENTRY.lines() {
             if line.starts_with("Exec=") {
-                entry.push_str(&format!("Exec={exec} %F"));
+                entry.push_str(&format!("Exec={escaped_exec} %F"));
             } else {
                 entry.push_str(line);
             }
@@ -566,6 +652,7 @@ mod linux_impl {
             .or_else(|| std::env::current_exe().ok())
             .ok_or("could not determine the executable path")?;
         let exec = exec.to_string_lossy();
+        validate_exec_path(&exec)?;
 
         let apps = data_home()?.join("applications");
         let desktop_path = apps.join(format!("{APP_ID}.desktop"));
@@ -786,7 +873,7 @@ mod linux_impl {
 
     #[cfg(test)]
     mod tests {
-        use super::{desktop_entry, PACKAGED_DESKTOP_ENTRY};
+        use super::{desktop_entry, thumbnailer_entry, validate_exec_path, PACKAGED_DESKTOP_ENTRY};
         use crate::io::file_association::APP_ID;
 
         #[test]
@@ -812,6 +899,36 @@ mod linux_impl {
                 }
             }
             assert!(lines.iter().any(|l| l.starts_with("Comment[")));
+        }
+
+        #[test]
+        fn desktop_and_thumbnailer_escape_spaces_metachars_and_reject_newlines() {
+            let tricky = r#"/home/my user/100% $bad`cmd"dir\OpenCADStudio"#;
+            let desktop = desktop_entry(tricky);
+            let exec_line = desktop
+                .lines()
+                .find(|l| l.starts_with("Exec="))
+                .expect("Exec line present");
+            assert_eq!(
+                exec_line,
+                r#"Exec="/home/my user/100%% \\$bad\\`cmd\\"dir\\\\OpenCADStudio" %F"#
+            );
+
+            let thumb = thumbnailer_entry(tricky).expect("valid path");
+            let thumb_lines: Vec<&str> = thumb.lines().collect();
+            assert_eq!(
+                thumb_lines[1],
+                r#"TryExec=/home/my user/100% $bad`cmd"dir\\OpenCADStudio"#
+            );
+            assert_eq!(
+                thumb_lines[2],
+                r#"Exec="/home/my user/100%% \\$bad\\`cmd\\"dir\\\\OpenCADStudio" --dwg-thumbnail %i %o %s"#
+            );
+
+            for bad in ["/tmp/a\nExec=evil", "/tmp/a\revil", "/tmp/a\0evil", ""] {
+                assert!(validate_exec_path(bad).is_err());
+                assert!(thumbnailer_entry(bad).is_err());
+            }
         }
     }
 }

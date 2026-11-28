@@ -382,6 +382,64 @@ class PlannedCrates(unittest.TestCase):
         self.assertEqual(health.edited_files(base, head), ["crates/ocs_base/src/i18n.rs"])
 
 
+class ProcessState(unittest.TestCase):
+    def test_mutable_statics_and_thread_local_blocks(self):
+        v, d = health.measure_source(tree({
+            "app/a.rs": textwrap.dedent("""\
+                static NAMES: &[&str] = &["a"];
+                static ON: AtomicBool = AtomicBool::new(false);
+                pub(crate) static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+                static mut COUNT: u32 = 0;
+                static CONFIG: OnceLock<String> = OnceLock::new();
+                static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("x").unwrap());
+                fn f() -> &'static str { "static X: Mutex<u8> = 0" }
+                // static Y: AtomicU8 = AtomicU8::new(0);
+                thread_local! {
+                    static A: RefCell<u8> = RefCell::new(0);
+                    static B: Cell<u8> = Cell::new(0);
+                }
+                #[cfg(test)]
+                mod tests {
+                    static T: AtomicU8 = AtomicU8::new(0);
+                    thread_local!(static U: Cell<u8> = Cell::new(0));
+                }
+                """),
+            "scene/b.rs": "fn g() {\n    thread_local!(static DUE: Cell<f64> = const { Cell::new(0.0) });\n}\n"
+                          "thread_local!(\n    static C: Cell<u8> = Cell::new(0)\n);\n"
+                          "static AFTER: AtomicU8 = AtomicU8::new(0);\n",
+        }))
+        self.assertEqual((v["process_statics"], v["thread_local_blocks"]), (5, 3))
+        self.assertEqual([x["name"] for x in d["process_statics"]], ["ON", "LOG", "COUNT", "CONFIG", "AFTER"])
+        self.assertEqual([(x["file"], x["line"]) for x in d["thread_local_blocks"]], [("src/app/a.rs", 9), ("src/scene/b.rs", 2), ("src/scene/b.rs", 4)])
+        self.assertEqual(d["process_state"], {"app": {"statics": 4, "thread_local_blocks": 1},
+                                              "scene": {"statics": 1, "thread_local_blocks": 2}})
+
+    def test_a_new_static_is_listed_and_a_removed_one_thanked(self):
+        base = tree({"app/a.rs": "static ON: AtomicBool = AtomicBool::new(false);\n"})
+        head = tree({"app/a.rs": "fn f() {}\nstatic LOG: Mutex<u8> = Mutex::new(0);\nthread_local! { static A: Cell<u8> = Cell::new(0); }\n"})
+        _, out = run_in(head, ["diff", str(base), "--markdown"])
+        self.assertIn("thread_local! blocks: 0 → 1", out)
+        self.assertIn("New process-wide mutable statics (1)", out)
+        self.assertIn("- `src/app/a.rs:2` `LOG`", out)
+        self.assertIn("New thread_local! blocks (1)", out)
+        _, out = run_in(base, ["diff", str(head), "--markdown"])
+        self.assertIn("Thank you: this pull request improves", out)
+        self.assertIn("thread_local! blocks: 1 → 0", out)
+
+    def test_page_lists_the_state_by_module(self):
+        root = tree({"app/a.rs": "fn f() {}\nstatic ON: AtomicBool = AtomicBool::new(false);\n",
+                     "ui/b.rs": "thread_local! { static A: Cell<u8> = Cell::new(0); }\nstatic L: Mutex<u8> = Mutex::new(0);\n"
+                                "static M: Mutex<u8> = Mutex::new(0);\n"})
+        cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(root)))}
+        goals = json.loads(code_health.GOALS.read_text())
+        page = code_health.render(cur, goals, [], [], "v1")
+        self.assertLess(page.index("## Process-wide state"), page.index("## Thanks"))
+        self.assertIn(f"| `ui` | 2 | 1 | [`src/ui/b.rs:2`]({code_health.BLOB}/{'a' * 40}/src/ui/b.rs#L2) |", page)
+        self.assertIn("| `app` | 1 | 0 |", page)
+        self.assertLess(page.index("| `ui` |"), page.index("| `app` |"))
+        cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(tree({"io/a.rs": "fn f() {}\n"}))))}
+        self.assertNotIn("## Process-wide state", code_health.render(cur, goals, [], [], "v1"))
+
 def lcov(records):
     """lcov text from {path: {line: hits}}."""
     out = []

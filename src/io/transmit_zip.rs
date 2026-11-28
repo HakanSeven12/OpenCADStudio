@@ -100,15 +100,8 @@ pub(crate) fn build_zip(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String
         .map_err(|error| format!("cannot finish ZIP: {error}"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn temporary_path(path: &Path) -> PathBuf {
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(".tmp");
-    PathBuf::from(temporary)
-}
-
-/// Write a ZIP through a sibling temporary file, leaving an existing output
-/// intact if building, writing, or renaming fails.
+/// Write a ZIP through a unique sibling temporary file, leaving an existing
+/// output intact if building, writing, or replacing fails.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn write_zip_atomic(path: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
     let bytes = build_zip(entries)?;
@@ -119,14 +112,8 @@ pub(crate) fn write_zip_atomic(path: &Path, entries: &[(String, Vec<u8>)]) -> Re
         ));
     }
 
-    let temporary = temporary_path(path);
-    let result = std::fs::write(&temporary, bytes)
-        .and_then(|()| std::fs::rename(&temporary, path))
-        .map_err(|error| format!("cannot write ZIP '{}': {error}", path.display()));
-    if result.is_err() && temporary.is_file() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
+    crate::io::write_file_atomic(path, &bytes)
+        .map_err(|error| format!("cannot write ZIP '{}': {error}", path.display()))
 }
 
 #[cfg(test)]
@@ -363,7 +350,12 @@ mod tests {
         assert_eq!(actual[0].1, [0, 1, 255]);
         assert_eq!(actual[1].0, "notes.txt");
         assert_eq!(actual[1].1, b"new notes");
-        assert!(!temporary_path(&path).exists());
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(files, vec!["transmit.zip".to_string()]);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -371,17 +363,21 @@ mod tests {
     fn atomic_io_failure_preserves_existing_output() {
         let dir = temp_dir("io-failure");
         let path = dir.join("transmit.zip");
-        let old = b"existing archive remains intact";
-        std::fs::write(&path, old).unwrap();
-        // Occupying the temporary name with a directory makes the write fail
-        // after the archive has been built but before the rename.
-        let temporary = temporary_path(&path);
-        std::fs::create_dir(&temporary).unwrap();
+        // Occupy `path` as a directory containing existing state so replace fails
+        // even when running as root; neither `keep.txt` nor temp residue remains.
+        std::fs::create_dir(&path).unwrap();
+        let old = b"existing directory contents remain intact";
+        std::fs::write(path.join("keep.txt"), old).unwrap();
 
         assert!(write_zip_atomic(&path, &[("drawing.dwg".to_owned(), vec![1, 2, 3])]).is_err());
 
-        assert_eq!(std::fs::read(&path).unwrap(), old);
-        assert!(temporary.is_dir(), "the blocking directory is untouched");
+        assert_eq!(std::fs::read(path.join("keep.txt")).unwrap(), old);
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(files, vec!["transmit.zip".to_string()]);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -399,7 +395,12 @@ mod tests {
         assert!(write_zip_atomic(&path, &entries).is_err());
 
         assert_eq!(std::fs::read(&path).unwrap(), old);
-        assert!(!temporary_path(&path).exists());
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(files, vec!["transmit.zip".to_string()]);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -20,8 +20,19 @@ pub struct VideoEntry {
     pub thumb: Option<Vec<u8>>,
 }
 
+/// Whether `id` matches YouTube's canonical 11-character URL-safe base64 id format.
+pub(crate) fn is_valid_video_id(id: &str) -> bool {
+    id.len() == 11
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// Watch URL for one of the playlist's videos, keeping the playlist context.
 pub fn watch_url(id: &str) -> String {
+    if !is_valid_video_id(id) {
+        return PLAYLIST_URL.to_string();
+    }
     format!("https://www.youtube.com/watch?v={id}&list={PLAYLIST_ID}")
 }
 
@@ -48,7 +59,7 @@ pub fn load_cached() -> Vec<VideoEntry> {
         .lines()
         .filter_map(|line| {
             let (id, title) = line.split_once('\t')?;
-            if id.len() != 11 || title.is_empty() {
+            if !is_valid_video_id(id) || title.is_empty() {
                 return None;
             }
             Some(VideoEntry {
@@ -88,7 +99,7 @@ pub fn fetch_playlist() -> Result<Vec<VideoEntry>, String> {
             break;
         };
         let id = &rest[start..start + end];
-        if id.len() == 11 && !ids.iter().any(|k| k == id) {
+        if is_valid_video_id(id) && !ids.iter().any(|k| k == id) {
             ids.push(id.to_string());
         }
         rest = &rest[start + end..];
@@ -105,50 +116,82 @@ pub fn fetch_playlist() -> Result<Vec<VideoEntry>, String> {
         let _ = std::fs::create_dir_all(d);
     }
 
-    let mut out: Vec<VideoEntry> = Vec::with_capacity(ids.len());
-    for id in ids {
-        // Title via oEmbed — stable and key-less. A video without a title
-        // (deleted / private) is skipped.
-        let title = agent
-            .get(&format!(
-                "https://www.youtube.com/oembed?url=https://youtu.be/{id}&format=json"
-            ))
-            .header("User-Agent", UA)
-            .call()
-            .ok()
-            .and_then(|mut r| r.body_mut().read_to_string().ok())
-            .and_then(|body| {
-                serde_json::from_str::<serde_json::Value>(&body)
-                    .ok()?
-                    .get("title")?
-                    .as_str()
-                    .map(str::to_string)
-            });
-        let Some(title) = title else { continue };
+    let next_index = std::sync::atomic::AtomicUsize::new(0);
+    let slots: Vec<std::sync::Mutex<Option<VideoEntry>>> =
+        (0..ids.len()).map(|_| std::sync::Mutex::new(None)).collect();
+    let workers = ids.len().min(4);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(id) = ids.get(idx) else {
+                    break;
+                };
+                // Title via oEmbed — stable and key-less. A video without a title
+                // (deleted / private) is skipped.
+                let title = agent
+                    .get(&format!(
+                        "https://www.youtube.com/oembed?url=https://youtu.be/{id}&format=json"
+                    ))
+                    .header("User-Agent", UA)
+                    .call()
+                    .ok()
+                    .and_then(|mut r| {
+                        r.body_mut()
+                            .with_config()
+                            .limit(256 * 1024)
+                            .read_to_string()
+                            .ok()
+                    })
+                    .and_then(|body| {
+                        serde_json::from_str::<serde_json::Value>(&body)
+                            .ok()?
+                            .get("title")?
+                            .as_str()
+                            .map(str::to_string)
+                    });
+                let Some(title) = title else {
+                    continue;
+                };
 
-        // Thumbnail: cache first, else download once and store it.
-        let cache_path = dir.as_ref().map(|d| d.join(format!("{id}.jpg")));
-        let mut thumb = cache_path.as_ref().and_then(|p| std::fs::read(p).ok());
-        if thumb.is_none() {
-            let fetched = agent
-                .get(&format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
-                .header("User-Agent", UA)
-                .call()
-                .ok()
-                .and_then(|mut r| {
-                    r.body_mut()
-                        .with_config()
-                        .limit(2 * 1024 * 1024)
-                        .read_to_vec()
+                // Thumbnail: cache first, else download once and store atomically.
+                let cache_path = dir.as_ref().map(|d| d.join(format!("{id}.jpg")));
+                let mut thumb = cache_path.as_ref().and_then(|p| std::fs::read(p).ok());
+                if thumb.is_none() {
+                    let fetched = agent
+                        .get(&format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
+                        .header("User-Agent", UA)
+                        .call()
                         .ok()
-                });
-            if let (Some(bytes), Some(p)) = (&fetched, &cache_path) {
-                let _ = std::fs::write(p, bytes);
-            }
-            thumb = fetched;
+                        .and_then(|mut r| {
+                            r.body_mut()
+                                .with_config()
+                                .limit(2 * 1024 * 1024)
+                                .read_to_vec()
+                                .ok()
+                        });
+                    if let (Some(bytes), Some(p)) = (&fetched, &cache_path) {
+                        if let Some(parent) = p.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = crate::io::write_file_atomic(p, bytes);
+                    }
+                    thumb = fetched;
+                }
+                if let Ok(mut guard) = slots[idx].lock() {
+                    *guard = Some(VideoEntry {
+                        id: id.clone(),
+                        title,
+                        thumb,
+                    });
+                }
+            });
         }
-        out.push(VideoEntry { id, title, thumb });
-    }
+    });
+    let mut out: Vec<VideoEntry> = slots
+        .into_iter()
+        .filter_map(|slot| slot.into_inner().ok().flatten())
+        .collect();
     if out.is_empty() {
         return Err("no video titles resolved".into());
     }
@@ -158,13 +201,14 @@ pub fn fetch_playlist() -> Result<Vec<VideoEntry>, String> {
     // (and every later offline launch) shares the same order.
     out.reverse();
 
-    // Persist the listing so the next launch starts from it.
+    // Persist the listing atomically so the next launch starts from it.
     if let Some(d) = &dir {
+        let _ = std::fs::create_dir_all(d);
         let listing: String = out
             .iter()
             .map(|v| format!("{}\t{}\n", v.id, v.title.replace(['\t', '\n'], " ")))
             .collect();
-        let _ = std::fs::write(d.join("playlist.txt"), listing);
+        let _ = crate::io::write_file_atomic(&d.join("playlist.txt"), listing.as_bytes());
     }
     Ok(out)
 }
@@ -193,7 +237,7 @@ pub async fn fetch_playlist_web() -> Result<Vec<VideoEntry>, String> {
     let body = text.as_string().ok_or("videos.json body is not a string")?;
     let mut entries: Vec<VideoEntry> =
         serde_json::from_str(&body).map_err(|error| error.to_string())?;
-    entries.retain(|entry| entry.id.len() == 11 && !entry.title.trim().is_empty());
+    entries.retain(|entry| is_valid_video_id(&entry.id) && !entry.title.trim().is_empty());
     if entries.is_empty() {
         return Err("videos.json contains no videos".into());
     }
@@ -246,4 +290,24 @@ async fn fetch_thumbnail_url(url: &str) -> Result<Vec<u8>, String> {
     .await
     .map_err(|_| "thumbnail body read failed")?;
     Ok(js_sys::Uint8Array::new(&buffer).to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_id_validation_rejects_injection_and_traversal() {
+        assert!(is_valid_video_id("dQw4w9WgXcQ"));
+        assert!(is_valid_video_id("A_b-1234567"));
+        assert!(!is_valid_video_id("../evil/jpg"));
+        assert!(!is_valid_video_id("abc&x=12345"));
+        assert!(!is_valid_video_id("short"));
+        assert!(!is_valid_video_id("waytoolong12"));
+        assert_eq!(watch_url("../evil/jpg"), PLAYLIST_URL);
+        assert_eq!(
+            watch_url("dQw4w9WgXcQ"),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLZq_TEkIFh9bAnoOX1HiCAunm3anZDBOl"
+        );
+    }
 }

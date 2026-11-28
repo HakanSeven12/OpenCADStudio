@@ -326,22 +326,28 @@ pub fn packaged_file(ole: &Ole2Frame) -> Option<PackagedFile> {
     if body.get(..2)? != [2, 0] {
         return None;
     }
-    let mut at = 2;
+    let mut at = 2usize;
     let z_string = |at: &mut usize| -> Option<Vec<u8>> {
-        let end = *at + body.get(*at..)?.iter().position(|b| *b == 0)?;
-        let text = body[*at..end].to_vec();
-        *at = end + 1;
+        let rel_end = body.get(*at..)?.iter().position(|b| *b == 0)?;
+        let end = at.checked_add(rel_end)?;
+        let text = body.get(*at..end)?.to_vec();
+        *at = end.checked_add(1)?;
         Some(text)
     };
     let label = z_string(&mut at)?;
     z_string(&mut at)?;
-    at += 4;
+    at = at.checked_add(4)?;
     let u32_at = |at: usize| -> Option<usize> {
-        Some(u32::from_le_bytes(body.get(at..at + 4)?.try_into().ok()?) as usize)
+        let end = at.checked_add(4)?;
+        let raw = u32::from_le_bytes(body.get(at..end)?.try_into().ok()?);
+        usize::try_from(raw).ok()
     };
-    at += 4 + u32_at(at)?;
+    let path_len = u32_at(at)?;
+    at = at.checked_add(4)?.checked_add(path_len)?;
     let size = u32_at(at)?;
-    let bytes = body.get(at + 4..at + 4 + size)?.to_vec();
+    let data_start = at.checked_add(4)?;
+    let data_end = data_start.checked_add(size)?;
+    let bytes = body.get(data_start..data_end)?.to_vec();
     let name = String::from_utf8_lossy(&label).into_owned();
     Some(PackagedFile { name, bytes })
 }
@@ -401,18 +407,44 @@ fn office_program() -> Option<std::path::PathBuf> {
         .find(|path| path.is_file())
 }
 
+struct TempRenderDir(std::path::PathBuf);
+
+impl Drop for TempRenderDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn create_render_dir() -> Result<TempRenderDir, String> {
+    let base = std::env::temp_dir();
+    for _ in 0..32 {
+        let mut rand_bytes = [0u8; 8];
+        getrandom::fill(&mut rand_bytes).map_err(|e| e.to_string())?;
+        let hex: String = rand_bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let dir = base.join(format!("ocs-ole-render-{}-{hex}", std::process::id()));
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(&dir) {
+            Ok(()) => return Ok(TempRenderDir(dir)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("could not allocate temporary render directory".to_string())
+}
+
 /// A PNG of the document's first page, drawn by LibreOffice. It runs with a
 /// profile of its own, so a LibreOffice the user has open does not take the
 /// job.
 fn render_first_page(path: &Path) -> Result<Vec<u8>, String> {
     let program = office_program().ok_or_else(|| crate::tr!("ole-props", "needs-office"))?;
-    static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let work =
-        std::env::temp_dir().join(format!("ocs-ole-render-{}-{run}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    let profile = work.join("profile");
+    let work = create_render_dir()?;
+    let profile = work.0.join("profile");
     let profile_url = format!(
         "file:///{}",
         profile.to_string_lossy().replace('\\', "/").trim_start_matches('/')
@@ -420,15 +452,14 @@ fn render_first_page(path: &Path) -> Result<Vec<u8>, String> {
     let status = std::process::Command::new(program)
         .arg(format!("-env:UserInstallation={profile_url}"))
         .args(["--headless", "--convert-to", "png", "--outdir"])
-        .arg(&work)
+        .arg(&work.0)
         .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .map_err(|e| e.to_string())?;
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let png = std::fs::read(work.join(format!("{stem}.png")));
-    let _ = std::fs::remove_dir_all(&work);
+    let png = std::fs::read(work.0.join(format!("{stem}.png")));
     match png {
         Ok(png) if status.success() => Ok(png),
         _ => Err(crate::tr!("ole-props", "render-failed")),
@@ -536,6 +567,39 @@ mod tests {
             Some(document::entities::OlePresentation::Raster(bytes)) => assert_eq!(bytes, png),
             other => panic!("expected the embedded raster back, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn packaged_file_rejects_overflow_lengths() {
+        let mut body = vec![2, 0];
+        body.extend_from_slice(b"a\0b\0");
+        body.extend_from_slice(&[0, 0, 3, 0]);
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&[0u8; 8]);
+        let mut native = (body.len() as u32).to_le_bytes().to_vec();
+        native.extend(body);
+        let mut ole = Ole2Frame::new();
+        ole.storage.compound_file = Some(CompoundFile {
+            minor_version: 0x003E,
+            major_version: 3,
+            transaction_signature: 0,
+            root: CompoundStorage {
+                name: "Root Entry".to_string(),
+                class_id: CLSID_PACKAGE,
+                state_bits: 0,
+                creation_time: 0,
+                modified_time: 0,
+                entries: vec![CompoundEntry::Stream(CompoundStream {
+                    name: OLE10NATIVE.to_string(),
+                    class_id: [0; 16],
+                    state_bits: 0,
+                    creation_time: 0,
+                    modified_time: 0,
+                    content: CompoundStreamContent::Binary(BinaryRecord::split(&native, 4096)),
+                })],
+            },
+        });
+        assert!(packaged_file(&ole).is_none());
     }
 }
 

@@ -268,10 +268,7 @@ fn a_fix_after_the_drawing_changed_changes_nothing() {
     let objects = errors_drawing(&mut app);
     scan(&mut app, &objects);
     // The overshooting line is moved away after the scan.
-    if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(objects[1]) {
-        line.start.x -= 50.0;
-        line.end.x -= 50.0;
-    }
+    shift(&mut app, objects[1], -50.0);
     let before = ends(&app, objects[1]);
     let undo = app.tabs[i].history.undo_stack.len();
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
@@ -456,6 +453,9 @@ fn a_repair_that_fails_keeps_the_pick() {
     if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(objects[1]) {
         line.end.x = 10.0;
     }
+    app.tabs[i]
+        .scene
+        .bump_entities(&[(objects[1], crate::scene::ChangeKind::Modified)]);
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
     assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
 }
@@ -2524,4 +2524,147 @@ fn review_mode_leaves_the_display_of_count_mode_alone() {
     cleanup_msg(&mut app, GeometryCleanupMsg::Pick(index));
     assert!(!app.geometry_cleanup.review_shown);
     assert!(app.tabs[i].scene.count_display.is_none());
+}
+
+/// The scans of the drawing that `run` makes.
+fn scans_in(app: &mut OpenCADStudio, run: impl FnOnce(&mut OpenCADStudio)) -> usize {
+    let before = super::geometry_cleanup::SCANS.with(std::cell::Cell::get);
+    run(app);
+    super::geometry_cleanup::SCANS.with(std::cell::Cell::get) - before
+}
+
+#[test]
+fn keep_and_restore_list_the_errors_again_with_no_scan() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    open_and_scan(&mut app, &objects);
+    let order: Vec<ErrorType> = findings(&app).iter().map(|f| f.kind).collect();
+    let gap = index_of(&app, ErrorType::Gap);
+    let n = scans_in(&mut app, |app| {
+        cleanup_msg(app, GeometryCleanupMsg::Keep(gap));
+    });
+    assert_eq!(n, 0, "Keep");
+    assert_eq!(kept(&app).len(), 1);
+    assert!(findings(&app).iter().all(|f| f.kind != ErrorType::Gap));
+    let n = scans_in(&mut app, |app| {
+        cleanup_msg(app, GeometryCleanupMsg::Restore(0));
+    });
+    assert_eq!(n, 0, "Restore");
+    let now: Vec<ErrorType> = findings(&app).iter().map(|f| f.kind).collect();
+    assert_eq!(now, order, "a restored error is in its place again");
+    let over = index_of(&app, ErrorType::Overshoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(over));
+    let n = scans_in(&mut app, |app| {
+        cleanup_msg(app, GeometryCleanupMsg::RestoreAll);
+    });
+    assert_eq!(n, 0, "Restore All");
+    assert!(kept(&app).is_empty());
+}
+
+#[test]
+fn restore_keeps_the_picked_error() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    open_and_scan(&mut app, &objects);
+    let gap = index_of(&app, ErrorType::Gap);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Keep(gap));
+    let under = index_of(&app, ErrorType::Undershoot);
+    cleanup_msg(&mut app, GeometryCleanupMsg::Pick(under));
+    let picked_before = picked(&app).expect("picked");
+    cleanup_msg(&mut app, GeometryCleanupMsg::Restore(0));
+    let picked_after = picked(&app).expect("still picked");
+    assert!(picked_after.same_error(&picked_before));
+}
+
+#[test]
+fn keep_scans_again_when_a_scanned_object_changed() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    // The palette is closed, so the edit does not scan again by itself.
+    scan(&mut app, &objects);
+    shift(&mut app, objects[1], -50.0);
+    let gap = index_of(&app, ErrorType::Gap);
+    let n = scans_in(&mut app, |app| {
+        cleanup_msg(app, GeometryCleanupMsg::Keep(gap));
+    });
+    assert_eq!(n, 1);
+    assert!(
+        findings(&app)
+            .iter()
+            .all(|f| f.kind != ErrorType::Overshoot),
+        "the moved line is off the wall"
+    );
+}
+
+#[test]
+fn a_repair_on_a_current_scan_scans_once() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    open_and_scan(&mut app, &objects);
+    let n = scans_in(&mut app, |app| {
+        fix(app, EndErrorKind::Overshoot, Fix::Trim);
+    });
+    assert_eq!(n, 1);
+    assert!(findings(&app)
+        .iter()
+        .all(|f| f.kind != ErrorType::Overshoot));
+}
+
+#[test]
+fn a_repair_after_a_scanned_object_changed_looks_the_error_up_again() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    // The wall moves 0.1 to the right: the line still overshoots it, by
+    // 0.3, and is trimmed to where the wall is now.
+    shift(&mut app, objects[0], 0.1);
+    let undo = app.tabs[i].history.undo_stack.len();
+    fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
+    assert!(
+        near(ends(&app, objects[1])[1], [10.1, 50.0]),
+        "{:?}",
+        ends(&app, objects[1])
+    );
+    assert_eq!(app.tabs[i].history.undo_stack.len(), undo + 1);
+}
+
+#[test]
+fn an_edit_of_an_object_that_was_not_scanned_does_not_scan_again() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    open_and_scan(&mut app, &objects);
+    let before = findings(&app);
+    let n = scans_in(&mut app, |app| {
+        // A new line near the gap, outside the scan.
+        line(app, [-39.9, 3.0], [-39.9, -3.0]);
+        app.refresh_geometry_cleanup_if_stale();
+    });
+    assert_eq!(n, 0);
+    assert_eq!(findings(&app), before);
+    let scan = app.geometry_cleanup.scan.as_ref().unwrap();
+    assert_eq!(scan.epoch, app.tabs[i].scene.geometry_epoch);
+}
+
+#[test]
+fn an_edit_of_a_scanned_object_scans_again() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    open_and_scan(&mut app, &objects);
+    let n = scans_in(&mut app, |app| {
+        shift(app, objects[1], -50.0);
+        app.refresh_geometry_cleanup_if_stale();
+    });
+    assert_eq!(n, 1);
+}
+
+#[test]
+fn a_change_the_scene_cannot_name_scans_again() {
+    let (mut app, i) = app();
+    let objects = errors_drawing(&mut app);
+    open_and_scan(&mut app, &objects);
+    let n = scans_in(&mut app, |app| {
+        app.tabs[i].scene.bump_geometry_no_blocks();
+        app.refresh_geometry_cleanup_if_stale();
+    });
+    assert_eq!(n, 1);
 }

@@ -10,27 +10,54 @@ use document::entities::Table;
 use iced::Task;
 
 /// A blank cell carrying `cell`'s own style and state, not its content.
-/// A text cell's format stays (its text height among it): without it the
-/// blank cell is measured at the table style's height and its row grows.
+/// A text or field cell's format stays (its text height among it), as
+/// empty text: without it the blank cell is measured at the table style's
+/// height and its row grows. A field (a formula column's sum) is not copied.
 fn blank_like(cell: &TableCell) -> TableCell {
+    use document::entities::table::TableCellContentType as Kind;
     let mut blank = TableCell::new();
     blank.style = cell.style.clone();
     blank.state = cell.state;
     if let Some(content) = cell.contents.first().filter(|content| {
-        content.block_handle.is_none()
-            && content.content_type == document::entities::table::TableCellContentType::Value
+        content.block_handle.is_none() && matches!(content.content_type, Kind::Value | Kind::Field)
     }) {
-        blank.contents = vec![content.clone()];
+        let mut content = content.clone();
+        content.content_type = Kind::Value;
+        content.field_handle = None;
+        blank.contents = vec![content];
         blank.set_text("");
     }
     blank
 }
 
-/// A row like `source` (height, style, cell styles) without its content.
-fn row_like(source: &TableRow) -> TableRow {
-    let mut row = source.clone();
-    for cell in &mut row.cells {
-        *cell = blank_like(cell);
+/// The blank cell for a new row or column beside cell (`row`, `column`).
+/// A cell hidden under a merge holds no content: its blank takes the format
+/// of the merge's first cell, which shows there. Without one the new cell,
+/// no longer under the merge, was measured at the table style's height
+/// and its row grew several times over.
+fn blank_at(t: &Table, row: usize, column: usize) -> TableCell {
+    let Some(cell) = t.cell(row, column) else {
+        return TableCell::default();
+    };
+    let mut blank = blank_like(cell);
+    if blank.contents.is_empty() {
+        if let Some(owner) = t
+            .canonical_merged_ranges()
+            .into_iter()
+            .find(|range| range.contains(row, column))
+            .and_then(|range| t.cell(range.top_row, range.left_col))
+        {
+            blank.contents = blank_like(owner).contents;
+        }
+    }
+    blank
+}
+
+/// A row like row `source` (height, style, cell styles) without its content.
+fn row_like(t: &Table, source: usize) -> TableRow {
+    let mut row = t.rows[source].clone();
+    for (column, cell) in row.cells.iter_mut().enumerate() {
+        *cell = blank_at(t, source, column);
     }
     row
 }
@@ -38,7 +65,7 @@ fn row_like(source: &TableRow) -> TableRow {
 /// `n` rows like row `source` (no content) inserted at `at`: as many rows
 /// as the picked cells span.
 fn insert_rows_like(t: &mut Table, source: usize, at: usize, n: usize) {
-    let row = row_like(&t.rows[source]);
+    let row = row_like(t, source);
     for _ in 0..n {
         t.insert_row(at);
         t.rows[at] = row.clone();
@@ -51,10 +78,8 @@ fn insert_columns_like(t: &mut Table, source: usize, at: usize, n: usize) {
     let mut column = t.columns[source].clone();
     column.name.clear();
     // Rows read from a file can be short of cells.
-    let cells: Vec<TableCell> = t
-        .rows
-        .iter()
-        .map(|row| row.cells.get(source).map(blank_like).unwrap_or_default())
+    let cells: Vec<TableCell> = (0..t.rows.len())
+        .map(|row| blank_at(t, row, source))
         .collect();
     for _ in 0..n {
         t.insert_column(at, column.width);
@@ -466,7 +491,7 @@ impl OpenCADStudio {
                 // Past the last cell: a new row like the last one.
                 let mut table = (**table).clone();
                 let last = table.rows.len() - 1;
-                let source = row_like(&table.rows[last]);
+                let source = row_like(&table, last);
                 table.rows.push(source);
                 table.block_record_handle = None;
                 self.push_undo_snapshot(i, "TABLE INSERT ROW");
@@ -2071,6 +2096,204 @@ mod tests {
             after.iter().all(|h| (h - before[0]).abs() < 1e-9),
             "rows {before:?} became {after:?}"
         );
+    }
+
+    /// A column inserted beside another changes nothing but the width it
+    /// adds: its own width is its neighbour's, the other columns, the row
+    /// heights and the text heights stay. Its cells next to a field (a
+    /// formula row's sum, as tables read from files hold them) keep the
+    /// field's format as empty text: dropped, they were measured at the
+    /// table style's taller text and that row grew.
+    #[test]
+    fn an_inserted_column_only_adds_its_neighbours_width() {
+        use document::entities::table::{CellStylePropertyFlags as P, TableCellContentType};
+        for (cmd, pick, source, at) in [("_TCELLCOLLEFT", 2, 2, 2), ("_TCELLCOLRIGHT", 1, 1, 2)] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let mut style = document::objects::TableStyle::standard();
+            for role in [
+                &mut style.title_row_style,
+                &mut style.header_row_style,
+                &mut style.data_row_style,
+            ] {
+                role.text_height = 2.5;
+            }
+            let document = &mut app.tabs[i].scene.document;
+            let style_handle = document.allocate_handle();
+            let field = document.allocate_handle();
+            document.objects.insert(
+                style_handle,
+                document::objects::ObjectType::TableStyle(style),
+            );
+            // a title, a header and data in columns 1, 2 and 3 wide; the last
+            // row's cells hold fields
+            let mut t = Table::new(Vector3::ZERO, 4, 3);
+            t.table_style_handle = Some(style_handle);
+            for (c, column) in t.columns.iter_mut().enumerate() {
+                column.width = (c + 1) as f64;
+            }
+            for r in 0..4 {
+                for c in 0..3 {
+                    t.set_cell_text(r, c, &format!("{r}{c}"));
+                }
+            }
+            for (r, row) in t.rows.iter_mut().enumerate() {
+                row.height = 1.0;
+                for cell in &mut row.cells {
+                    let content = &mut cell.contents[0];
+                    content.text_height = 0.5;
+                    content.format_property_flags |= P::TEXT_HEIGHT.bits() as i32;
+                    if r == 3 {
+                        content.content_type = TableCellContentType::Field;
+                        content.field_handle = Some(field);
+                    }
+                }
+            }
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let widths = |t: &Table| t.columns.iter().map(|c| c.width).collect::<Vec<_>>();
+            let heights = |t: &Table| t.rows.iter().map(|r| r.height).collect::<Vec<_>>();
+            let (widths_before, heights_before) = (widths(&t), heights(&t));
+            let handle = app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Table(Box::new(t)));
+            app.tabs[i]
+                .scene
+                .select_table_cells(crate::scene::TableCellSelection {
+                    table: handle,
+                    anchor: (2, pick),
+                    end: (2, pick),
+                });
+            let _ = app.dispatch_table_cells(cmd, i);
+            let Some(document::EntityType::Table(t)) =
+                app.tabs[i].scene.document.get_entity(handle)
+            else {
+                panic!("{cmd}: the table must stay");
+            };
+            let mut t = (**t).clone();
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let mut expected = widths_before.clone();
+            expected.insert(at, widths_before[source]);
+            assert_eq!(widths(&t), expected, "{cmd} at {pick}: column widths");
+            let total = |w: &[f64]| w.iter().sum::<f64>();
+            assert_eq!(
+                total(&widths(&t)),
+                total(&widths_before) + widths_before[source],
+                "{cmd} at {pick}: table width"
+            );
+            assert_eq!(heights(&t), heights_before, "{cmd} at {pick}: row heights");
+            for r in 0..4 {
+                let new_cell = t.cell(r, at).unwrap();
+                assert_eq!(new_cell.text_value(), "");
+                assert_eq!(
+                    new_cell
+                        .contents
+                        .first()
+                        .map(|c| (c.text_height, c.field_handle)),
+                    Some((0.5, None)),
+                    "{cmd} at {pick}: text height of the new cell in row {r}"
+                );
+            }
+        }
+    }
+
+    /// Rows and columns inserted anywhere in a table with a title, a header,
+    /// a field row and a last column merged down the first three rows leave
+    /// every row as high as it was, the new rows as high as their source.
+    /// The cells hidden under the merge hold no content: a new row or
+    /// column beside them got blank cells with no format, measured at the
+    /// table style's text height, five times the table's, and grew.
+    #[test]
+    fn inserted_rows_and_columns_beside_a_merge_keep_the_row_heights() {
+        use document::entities::table::{
+            CellRange, CellStylePropertyFlags as P, TableCellContentType,
+        };
+        let mut cases = Vec::new();
+        for r in 0..5 {
+            cases.push(("_TCELLROWABOVE", (r, 0)));
+            cases.push(("_TCELLROWBELOW", (r, 0)));
+        }
+        for c in 0..3 {
+            cases.push(("_TCELLCOLLEFT", (4, c)));
+            cases.push(("_TCELLCOLRIGHT", (4, c)));
+        }
+        for (cmd, pick) in cases {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let mut style = document::objects::TableStyle::standard();
+            for role in [
+                &mut style.title_row_style,
+                &mut style.header_row_style,
+                &mut style.data_row_style,
+            ] {
+                role.text_height = 2.5;
+            }
+            let document = &mut app.tabs[i].scene.document;
+            let style_handle = document.allocate_handle();
+            let field = document.allocate_handle();
+            document.objects.insert(
+                style_handle,
+                document::objects::ObjectType::TableStyle(style),
+            );
+            // title, header, data, fields, data; the last column is merged
+            // over the first three rows and its hidden cells are empty
+            let mut t = Table::new(Vector3::ZERO, 5, 3);
+            t.table_style_handle = Some(style_handle);
+            for column in &mut t.columns {
+                column.width = 3.0;
+            }
+            for r in 0..5 {
+                for c in 0..3 {
+                    t.set_cell_text(r, c, &format!("{r}{c}"));
+                }
+            }
+            for (r, row) in t.rows.iter_mut().enumerate() {
+                row.height = 1.0;
+                for cell in &mut row.cells {
+                    let content = &mut cell.contents[0];
+                    content.text_height = 0.5;
+                    content.format_property_flags |= P::TEXT_HEIGHT.bits() as i32;
+                    if r == 3 {
+                        content.content_type = TableCellContentType::Field;
+                        content.field_handle = Some(field);
+                    }
+                }
+            }
+            t.merge_cells(CellRange::new(0, 2, 2, 2));
+            for r in 1..3 {
+                t.rows[r].cells[2].contents.clear();
+            }
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let heights = |t: &Table| t.rows.iter().map(|r| r.height).collect::<Vec<_>>();
+            let before = heights(&t);
+            assert!(before.iter().all(|h| (h - 1.0).abs() < 1e-9), "{before:?}");
+            let rows = before.len() + usize::from(cmd.starts_with("_TCELLROW"));
+            let handle = app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Table(Box::new(t)));
+            app.tabs[i]
+                .scene
+                .select_table_cells(crate::scene::TableCellSelection {
+                    table: handle,
+                    anchor: pick,
+                    end: pick,
+                });
+            let _ = app.dispatch_table_cells(cmd, i);
+            let Some(document::EntityType::Table(t)) =
+                app.tabs[i].scene.document.get_entity(handle)
+            else {
+                panic!("{cmd}: the table must stay");
+            };
+            let mut t = (**t).clone();
+            crate::entities::table::settle_table(&mut t, &app.tabs[i].scene.document);
+            let after = heights(&t);
+            assert_eq!(after.len(), rows, "{cmd} at {pick:?}: rows");
+            assert!(
+                after.iter().all(|h| (h - 1.0).abs() < 1e-9),
+                "{cmd} at {pick:?}: row heights {after:?}"
+            );
+        }
     }
 
     #[test]

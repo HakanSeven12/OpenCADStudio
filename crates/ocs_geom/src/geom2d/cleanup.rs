@@ -1896,4 +1896,29 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn a_scan_that_is_told_to_stop_returns_nothing() {
+        // A corner gap, and two lines 2° off 0° and off a right angle.
+        let curves = [
+            line([0.0, 0.0], [10.0, 0.349]),
+            line([10.2, 0.1], [10.5, 10.0]),
+        ];
+        let tolerances = Tolerances::all(0.5);
+        let angles = AngleTolerances {
+            absolute: standards(&[0.0]),
+            relative: standards(&[90.0]),
+        };
+        let weld = Tolerance::new(1e-9);
+        let go = AtomicBool::new(false);
+        let ends = end_errors_until(&curves, tolerances, weld, &go).expect("not stopped");
+        assert_eq!(ends, end_errors(&curves, tolerances, weld));
+        assert!(!ends.is_empty());
+        let lines = angle_errors_until(&curves, &angles, 0.0, weld, &go).expect("not stopped");
+        assert_eq!(lines, angle_errors(&curves, &angles, 0.0, weld));
+        assert!(lines.iter().any(|e| e.kind == AngleErrorKind::Absolute));
+        let stop = AtomicBool::new(true);
+        assert_eq!(end_errors_until(&curves, tolerances, weld, &stop), None);
+        assert_eq!(angle_errors_until(&curves, &angles, 0.0, weld, &stop), None);
+    }
 }
